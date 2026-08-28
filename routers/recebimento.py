@@ -156,6 +156,48 @@ def receipt_scan(body: ScanIn, req: Request):
         }
 
 
+def _check_local_duplicate(s, etiqueta: str, numero_serie: str) -> dict | None:
+    """Check if an asset with the same tag_number or serial_number already
+    exists in the local database. Returns a summary dict or None."""
+    ors = []
+    if etiqueta.strip():
+        ors.append(func.upper(Asset.tag_number) == etiqueta.strip().upper())
+    if numero_serie.strip():
+        ors.append(func.upper(Asset.serial_number) == numero_serie.strip().upper())
+    if not ors:
+        return None
+    existing = s.scalar(select(Asset).where(or_(*ors)).limit(1))
+    if not existing:
+        return None
+    last_cycle = s.scalar(
+        select(ReceiptCycle)
+        .where(ReceiptCycle.asset_id == existing.id)
+        .order_by(ReceiptCycle.id.desc())
+    )
+    return {
+        "asset_db_id": existing.id,
+        "empresa": existing.company,
+        "etiqueta": existing.tag_number,
+        "numero_serie": existing.serial_number,
+        "categoria": existing.category,
+        "modelo": existing.model,
+        "imobilizado": existing.asset_id or existing.asset_number,
+        "ultimo_status": last_cycle.status if last_cycle else None,
+        "data_recebimento": str(last_cycle.received_date) if last_cycle else None,
+        "ciclo_aberto": last_cycle.open if last_cycle else False,
+    }
+
+
+@router.post("/recebimento/check-duplicate")
+def check_duplicate(body: ScanIn, req: Request):
+    """Check if an asset already exists in the local database by tag or serial."""
+    require_permission(req, "recebimento", "create")
+    ident = body.identificador.strip()
+    with SessionLocal() as s:
+        dup = _check_local_duplicate(s, ident, ident)
+        return {"duplicado": dup is not None, "existente": dup}
+
+
 @router.post("/recebimento/preview")
 def receipt_preview(body: ScanIn, req: Request):
     """Query EBS for an asset WITHOUT saving. Returns all matches including
@@ -185,6 +227,7 @@ def receipt_preview(body: ScanIn, req: Request):
         result = {"resultados": []}
 
     matches: list[dict[str, Any]] = []
+    local_dup: dict | None = None
     with SessionLocal() as s:
         for r in result.get("resultados", []):
             if not r.get("encontrado"):
@@ -203,6 +246,14 @@ def receipt_preview(body: ScanIn, req: Request):
                 lr["situacao"] = "PRONTO PARA ENVIO" if cat != "NÃO CLASSIFICADA" else "EDITADO"
                 matches.append(lr)
 
+        if matches:
+            m0 = matches[0]
+            local_dup = _check_local_duplicate(
+                s,
+                m0.get("etiqueta", ""),
+                m0.get("numero_serie", ""),
+            )
+
     has_duplicates = len(matches) > 1
     if has_duplicates:
         for m in matches:
@@ -213,6 +264,7 @@ def receipt_preview(body: ScanIn, req: Request):
         "encontrado": len(matches) > 0,
         "duplicatas": has_duplicates,
         "resultados": matches,
+        "duplicado_local": local_dup,
     }
 
 

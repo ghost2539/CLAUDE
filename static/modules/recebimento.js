@@ -89,7 +89,13 @@ function renderNovo(c, S) {
                 return S.esc(v);
             }},
             { key: 'modelo',      label: 'Modelo' },
-            { key: 'situacao',    label: 'Situação', html: true, render: function (v) { return situacaoBadge(v); } },
+            { key: 'situacao',    label: 'Situação', html: true, render: function (v, row) {
+                var out = situacaoBadge(v);
+                if (row._duplicadoLocal) {
+                    out += ' <span class="badge badge-danger" title="Já existe na base local">DUPLICADO</span>';
+                }
+                return out;
+            }},
             { key: '_actions',    label: 'Ações', render: function (_, r, i) {
                 var w = S.el('div', { className: 'btn-row' });
                 var editBtn = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
@@ -220,13 +226,27 @@ function renderNovo(c, S) {
                 item.hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                 item.pesquisado = d.pesquisado;
                 item._hasDuplicates = false;
+                item._duplicadoLocal = d.duplicado_local || null;
                 sessionItems.unshift(item);
                 drawSession();
+                var dupMsg = '';
+                if (d.duplicado_local) {
+                    var dl = d.duplicado_local;
+                    dupMsg = '<div class="alert alert-danger mt-2" style="border-left:4px solid #e53e3e">' +
+                        '<strong>Ativo já existe na base local!</strong><br>' +
+                        'Etiqueta: <strong>' + S.esc(dl.etiqueta || '—') + '</strong> | ' +
+                        'Serial: <strong>' + S.esc(dl.numero_serie || '—') + '</strong> | ' +
+                        'Empresa: <strong>' + S.esc(dl.empresa || '—') + '</strong><br>' +
+                        'Último status: <strong>' + S.esc(dl.ultimo_status || '—') + '</strong>' +
+                        (dl.data_recebimento ? ' (' + S.esc(dl.data_recebimento) + ')' : '') +
+                        (dl.ciclo_aberto ? ' <span class="badge badge-warning">Ciclo aberto</span>' : '') +
+                        '</div>';
+                }
                 fb.innerHTML = '<div class="alert ' +
                     (item.situacao === 'PRONTO PARA ENVIO' ? 'alert-success' : 'alert-warning') + '">' +
                     S.esc(item.situacao === 'PRONTO PARA ENVIO'
                         ? 'Ativo localizado e classificado.'
-                        : 'Ativo localizado, mas requer edição manual.') + '</div>';
+                        : 'Ativo localizado, mas requer edição manual.') + '</div>' + dupMsg;
             }
         } catch (x) {
             fb.innerHTML = '<div class="alert alert-danger">' + S.esc(x.message) + '</div>';
