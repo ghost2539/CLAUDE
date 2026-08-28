@@ -145,7 +145,9 @@ def _follow_form_redirects(session, response, BS, hop=0):
 
 def _login_sso(session, usuario, senha, _req, BS):
     sn_url = f"{SERVICENOW_BASE}/now/nav/ui/classic/params/target/home.do"
+    print(f"[SSO] Step 1: GET {sn_url}")
     r1 = session.get(sn_url, allow_redirects=True, timeout=30)
+    print(f"[SSO] Step 1 result: status={r1.status_code} url={r1.url}")
     soup = BS(r1.text, "html.parser")
     form = soup.find("form")
     if form:
@@ -159,9 +161,11 @@ def _login_sso(session, usuario, senha, _req, BS):
             name = inp.get("name")
             if name:
                 form_fields[name] = inp.get("value", "")
+        print(f"[SSO] Form found: action={login_action} fields={list(form_fields.keys())}")
     else:
         login_action = "https://loginsso.lojasrenner.com.br/oam/server/auth_cred_submit"
         form_fields = {}
+        print(f"[SSO] No form found, using default action: {login_action}")
 
     for uf in ["username", "userid", "user", "login", "j_username"]:
         if uf in form_fields:
@@ -177,9 +181,14 @@ def _login_sso(session, usuario, senha, _req, BS):
     else:
         form_fields["password"] = senha
 
+    print(f"[SSO] Step 2: POST {login_action}")
     r2 = session.post(login_action, data=form_fields, allow_redirects=True, timeout=30)
+    print(f"[SSO] Step 2 result: status={r2.status_code} url={r2.url}")
     r3 = _follow_form_redirects(session, r2, BS)
-    return "service-now.com" in r3.url
+    print(f"[SSO] Step 3 (redirects): final url={r3.url}")
+    ok = "service-now.com" in r3.url
+    print(f"[SSO] Result: {'OK' if ok else 'FAILED'}")
+    return ok
 
 
 def _lookup_reference(session, field, display_value, cache, BS):
