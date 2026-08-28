@@ -129,10 +129,12 @@ def _sn_login(username: str, password: str):
     except ImportError:
         raise ValueError("Pacote 'beautifulsoup4' não instalado no servidor.")
 
-    from routers.servicenow import SERVICENOW_BASE, _login_sso, _follow_form_redirects
+    from routers.servicenow import SERVICENOW_BASE, SN_PROXY, _login_sso, _follow_form_redirects
 
     http_session = _req.Session()
     http_session.verify = False
+    if SN_PROXY:
+        http_session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
     http_session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
@@ -289,13 +291,15 @@ def sn_session_status(req: Request):
         import requests as _req
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        from routers.servicenow import SERVICENOW_BASE
+        from routers.servicenow import SERVICENOW_BASE, SN_PROXY
+        proxies = {"https": SN_PROXY, "http": SN_PROXY} if SN_PROXY else None
         r = _req.get(
             f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
             cookies=sn_cookies,
             timeout=15,
             verify=False,
             allow_redirects=False,
+            proxies=proxies,
         )
         if r.status_code == 200:
             return {"active": True}

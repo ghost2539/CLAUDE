@@ -1,6 +1,7 @@
 """ServiceNow router — upload de ativos do recebimento para alm_hardware via SSO + JSONv2."""
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
 # ── ServiceNow constants ─────────────────────────────────────────
 SERVICENOW_BASE = "https://renner.service-now.com"
+SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 HARDWARE_TABLE = "alm_hardware"
 MAX_RELAY_HOPS = 5
 
@@ -324,6 +326,8 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     # Create HTTP session
     session = _req.Session()
     session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
@@ -518,6 +522,8 @@ def test_login(body: TestLoginIn, req: Request):
     _req, BS = _get_http()
     session = _req.Session()
     session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
