@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Consulta de Ativos</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script defer src="/static/app.js"></script>
+</head>
+<body>
+
+<div class="app-wrapper">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand-icon">SP</div>
+            <div class="sidebar-brand-text">SPARE</div>
+        </div>
+        <nav class="sidebar-menu">
+            <a class="sidebar-item active" data-route="consulta" href="#">
+                <span class="sidebar-icon">&#x2315;</span>
+                <span class="sidebar-label">Consulta de Ativos</span>
+            </a>
+            <a class="sidebar-item disabled" data-route="servicenow" href="#" style="opacity:.4;pointer-events:none">
+                <span class="sidebar-icon">&#x2601;</span>
+                <span class="sidebar-label">ServiceNow</span>
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Top bar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <span class="topbar-app-title">Consulta de Ativos</span>
+        </div>
+        <div class="topbar-center"></div>
+        <div class="topbar-right">
+            <span class="badge badge-info">Acesso público interno</span>
+        </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <section id="page-content" class="page-content"></section>
+        <footer class="login-footer">SPARE - Portal de Operações</footer>
+    </main>
+
+</div>
+
+<!-- Toast container -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Loading overlay -->
+<div id="loading-overlay" class="loading-overlay" hidden>
+    <div class="loading-spinner">
+        <span class="spinner spinner-lg"></span>
+        <span class="loading-text">Processando...</span>
+    </div>
+</div>
+
+<!-- Modal overlay -->
+<div id="modal-overlay" class="modal-overlay" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="modal-title" class="modal-title"></h3>
+            <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div id="modal-footer" class="modal-footer"></div>
+    </div>
+</div>
+
+</body>
+</html>

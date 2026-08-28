@@ -375,6 +375,7 @@ def list_receipts(
         stmt = (
             select(ReceiptCycle)
             .join(Asset)
+            .where(ReceiptCycle.status != "REMOVIDO")
             .order_by(ReceiptCycle.id.desc())
             .limit(min(limit, 5000))
         )
