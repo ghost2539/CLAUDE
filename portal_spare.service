@@ -13,7 +13,9 @@ EnvironmentFile=/etc/portal_operacoes_spare/environment
 ExecStart=/opt/portal-spare-v2/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
 Restart=on-failure
 RestartSec=5
-# Credenciais EBS via environment file (EBS_PUBLIC_USERNAME / EBS_PUBLIC_PASSWORD)
+# Credenciais protegidas via systemd
+LoadCredentialEncrypted=ebs_public_username:/etc/portal_operacoes_spare/credentials/ebs_public_username
+LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credentials/ebs_public_password
 # Seguranca de processo
 NoNewPrivileges=yes
 ProtectSystem=strict
