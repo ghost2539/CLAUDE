@@ -3,14 +3,23 @@
 Mirrors the Consulta module from the main portal, using the same EBS
 backend and classification rules. Runs independently so other teams
 can query assets without full portal access.
+
+Run from the project root:
+    uvicorn consulta_times.app:app --host 0.0.0.0 --port 8502
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-# Add parent directory to path so we can import shared modules
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_this_dir = Path(__file__).resolve().parent
+_project_root = _this_dir.parent
+
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+os.chdir(_project_root)
 
 from contextlib import asynccontextmanager
 
@@ -24,7 +33,7 @@ from database import SessionLocal, init_db
 from routers.helpers import apply_class, local_search_one, xlsx_response
 
 _cfg = get_settings()
-_static = Path(__file__).resolve().parent / "static"
+_static = _this_dir / "static"
 
 
 class QueryIn(BaseModel):
