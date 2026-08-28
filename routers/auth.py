@@ -130,6 +130,9 @@ def _sn_login(username: str, password: str):
 
     http_session = _req.Session()
     http_session.verify = False
+    http_session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    })
     ok = _login_sso(http_session, username, password, _req, _BS)
     if not ok:
         raise ValueError("Credenciais ServiceNow inválidas ou SSO indisponível.")
