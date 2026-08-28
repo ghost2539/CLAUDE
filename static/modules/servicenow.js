@@ -42,26 +42,19 @@ window.SPARE_MODULES.servicenow = {
                 '<div class="card-body">' +
                     '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
                         'Campos do ativo (serial_number, model, asset_tag, model_category, company, cost, purchased, depreciation_effective_date) ' +
-                        'são preenchidos automaticamente pelo EBS. Os campos abaixo são fixos para todos os ativos.</p>' +
-                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1rem">' +
-                        '<div><label>State</label>' +
-                            '<input id="sn-state" class="form-control" value="In stock"></div>' +
-                        '<div><label>Substate</label>' +
-                            '<input id="sn-substate" class="form-control" value="available"></div>' +
-                        '<div><label>Currency</label>' +
-                            '<input id="sn-currency" class="form-control" value="R$"></div>' +
-                        '<div><label>Acquisition Method</label>' +
-                            '<input id="sn-acq" class="form-control" value="Purchase"></div>' +
-                    '</div>' +
-                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1rem;margin-top:1rem">' +
-                        '<div><label>Expenditure Type</label>' +
-                            '<input id="sn-exp" class="form-control" value="Capex"></div>' +
-                        '<div><label>Depreciation</label>' +
-                            '<input id="sn-dep" class="form-control" value="SL 5 Years"></div>' +
+                        'são preenchidos automaticamente pelo EBS. Os campos abaixo podem ser ajustados conforme necessário.</p>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem">' +
                         '<div><label>Stockroom</label>' +
                             '<input id="sn-stockroom" class="form-control" value="SPARE - CD324"></div>' +
                         '<div><label>Aisle and Space</label>' +
                             '<input id="sn-aisle" class="form-control" placeholder="Opcional"></div>' +
+                        '<div><label>Currency</label>' +
+                            '<select id="sn-currency" class="form-control">' +
+                                '<option value="BRL" selected>BRL - R$</option>' +
+                                '<option value="USD">USD - $</option>' +
+                                '<option value="ARS">ARS - $</option>' +
+                                '<option value="UYU">UYU - $U</option>' +
+                            '</select></div>' +
                     '</div>' +
                     '<div style="margin-top:1rem">' +
                         '<label style="cursor:pointer">' +
@@ -243,15 +236,9 @@ function _snStartUpload(S) {
         cycle_ids: ids,
         usuario: user,
         senha: pass,
-        // Campos fixos
-        state: document.getElementById('sn-state').value,
-        substate: document.getElementById('sn-substate').value,
-        cost_currency: document.getElementById('sn-currency').value,
-        acquisition_method: document.getElementById('sn-acq').value,
-        expenditure_type: document.getElementById('sn-exp').value,
-        depreciation: document.getElementById('sn-dep').value,
         stockroom: document.getElementById('sn-stockroom').value,
         aisle_space: document.getElementById('sn-aisle').value,
+        cost_currency: document.getElementById('sn-currency').value,
         calc_depreciation: document.getElementById('sn-calc-dep').checked,
     };
 

@@ -63,9 +63,9 @@ REFERENCE_NAME_FIELD = {
 }
 
 CURRENCY_MAP = {
-    "R$": "BRL", "BRL": "BRL",
-    "$": "USD", "USD": "USD",
-    "$U": "UYU", "UYU": "UYU",
+    "BRL": "BRL", "R$": "BRL",
+    "USD": "USD", "$": "USD",
+    "UYU": "UYU", "$U": "UYU",
     "ARS": "ARS",
 }
 
@@ -86,15 +86,9 @@ class UploadIn(BaseModel):
     cycle_ids: list[int]
     usuario: str
     senha: str
-    # Campos fixos (não mudam entre ativos)
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
-    state: str = "In stock"
-    substate: str = "available"
-    cost_currency: str = "R$"
-    acquisition_method: str = "Purchase"
-    expenditure_type: str = "Capex"
-    depreciation: str = "SL 5 Years"
+    cost_currency: str = "BRL"
     calc_depreciation: bool = True
 
 
@@ -588,13 +582,13 @@ def start_upload(body: UploadIn, req: Request):
         "usuario": body.usuario,
         "senha": body.senha,
         "stockroom": body.stockroom,
-        "state": body.state,
-        "substate": body.substate,
-        "acquisition_method": body.acquisition_method,
-        "expenditure_type": body.expenditure_type,
-        "depreciation": body.depreciation,
-        "currency": body.currency,
         "aisle_space": body.aisle_space,
+        "cost_currency": body.cost_currency,
+        "state": "In stock",
+        "substate": "available",
+        "acquisition_method": "Purchase",
+        "expenditure_type": "Capex",
+        "depreciation": "SL 5 Years",
         "calc_depreciation": body.calc_depreciation,
     }
 
