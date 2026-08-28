@@ -1,14 +1,24 @@
 [Unit]
 Description=Consulta de Ativos - Times (porta 8502)
-After=network.target
+After=network-online.target postgresql.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=portalspare
+Group=portalspare
 WorkingDirectory=/opt/portal-spare-v2
+EnvironmentFile=/etc/portal_operacoes_spare/environment
 ExecStart=/opt/portal-spare-v2/venv/bin/uvicorn consulta_times.app:app --host 0.0.0.0 --port 8502 --workers 2
-Restart=always
+Restart=on-failure
 RestartSec=5
+LoadCredentialEncrypted=ebs_public_username:/etc/portal_operacoes_spare/credentials/ebs_consulta_times_username
+LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credentials/ebs_consulta_times_password
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/portal-spare-v2/data
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
