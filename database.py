@@ -11,7 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
-from passlib.context import CryptContext
+import bcrypt
 
 from config import get_settings
 
@@ -23,7 +23,6 @@ engine = create_engine(
     max_overflow=20,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def utcnow() -> datetime:
@@ -31,11 +30,16 @@ def utcnow() -> datetime:
 
 
 def hash_password(plain: str) -> str:
-    return _pwd.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str | None) -> bool:
-    return bool(hashed and _pwd.verify(plain, hashed))
+    if not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
 
 
 # ── ORM Models ──────────────────────────────────────────────────
