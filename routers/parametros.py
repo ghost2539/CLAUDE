@@ -97,8 +97,8 @@ class UserCreateIn(BaseModel):
     @classmethod
     def validate_source(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD"):
-            raise ValueError("auth_source deve ser LOCAL ou AD.")
+        if v not in ("LOCAL", "AD", "SN"):
+            raise ValueError("auth_source deve ser LOCAL, AD ou SN.")
         return v
 
 
@@ -335,6 +335,7 @@ def permissions_list(req: Request):
                 "auth_source": u.auth_source,
                 "active": u.active,
                 "is_admin": u.is_admin,
+                "allowed": u.allowed,
                 "last_access": u.last_access.isoformat() if u.last_access else None,
                 "permissions": (
                     ["admin"] if u.is_admin
@@ -342,7 +343,9 @@ def permissions_list(req: Request):
                 ),
                 "permission_map": pmap,
             })
-        return {"usuarios": out, "modules": MODULES}
+        ac_row = s.get(Setting, "access_control")
+        block_external = (ac_row.value if ac_row else {}).get("block_external", False)
+        return {"usuarios": out, "modules": MODULES, "block_external": block_external}
 
 
 @router.put("/permissoes/{login}")
@@ -358,6 +361,8 @@ def permissions_set(login: str, payload: dict, req: Request):
 
         u.active = bool(payload.get("active", u.active))
         u.is_admin = bool(payload.get("is_admin", False))
+        if "allowed" in payload:
+            u.allowed = bool(payload["allowed"])
 
         requested = payload.get("permission_map") or {}
         legacy = payload.get("permissions") or []
@@ -400,6 +405,29 @@ def permissions_set(login: str, payload: dict, req: Request):
             detail=f"Permissões atualizadas para {u.login}"[:500],
         ))
 
+    return {"ok": True}
+
+
+# ── Access control ────────────────────────────────────────────────
+
+@router.get("/controle-acesso")
+def access_control_get(req: Request):
+    require_permission(req, "parametros", "admin")
+    with SessionLocal() as s:
+        row = s.get(Setting, "access_control")
+        return row.value if row else {"block_external": False}
+
+
+@router.put("/controle-acesso")
+def access_control_set(payload: dict, req: Request):
+    sd = require_permission(req, "parametros", "admin")
+    with SessionLocal.begin() as s:
+        row = s.get(Setting, "access_control")
+        if not row:
+            row = Setting(key="access_control")
+            s.add(row)
+        row.value = {"block_external": bool(payload.get("block_external", False))}
+        row.updated_by = sd["username"]
     return {"ok": True}
 
 

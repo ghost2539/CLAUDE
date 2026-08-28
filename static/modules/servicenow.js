@@ -64,21 +64,18 @@ window.SPARE_MODULES.servicenow = {
                 '</div>' +
             '</div>' +
 
-            /* ── Card 3: Credenciais SSO ── */
+            /* ── Card 3: Sessão ServiceNow ── */
             '<div class="card mb-3">' +
-                '<div class="card-header">Credenciais SSO</div>' +
+                '<div class="card-header">Sessão ServiceNow</div>' +
                 '<div class="card-body">' +
-                    '<div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:1rem;align-items:end">' +
-                        '<div><label>Usuário corporativo</label>' +
-                            '<input id="sn-user" class="form-control" placeholder="usuario.corporativo" autocomplete="off"></div>' +
-                        '<div><label>Senha</label>' +
-                            '<input id="sn-pass" class="form-control" type="password" autocomplete="off"></div>' +
-                        '<button class="btn" id="sn-test-login">Testar conexão</button>' +
+                    '<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">' +
+                        '<span id="sn-session-status" style="font-weight:600">Verificando...</span>' +
+                        '<button class="btn btn-sm" id="sn-test-login">Verificar sessão</button>' +
                         '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
                             'Enviar para ServiceNow</button>' +
                     '</div>' +
                     '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
-                        'As credenciais são usadas apenas para esta sessão e não são armazenadas.</p>' +
+                        'A sessão ServiceNow é vinculada ao login. Se expirar, será solicitada reconexão.</p>' +
                 '</div>' +
             '</div>' +
 
@@ -122,8 +119,10 @@ window.SPARE_MODULES.servicenow = {
             cbs.forEach(function (cb) { cb.checked = checked; });
             _snUpdateCount();
         });
-        document.getElementById('sn-test-login').addEventListener('click', function () { _snTestLogin(S); });
+        document.getElementById('sn-test-login').addEventListener('click', function () { _snCheckSession(S); });
         document.getElementById('sn-upload').addEventListener('click', function () { _snStartUpload(S); });
+
+        _snCheckSession(S);
     }
 };
 
@@ -208,34 +207,39 @@ function _snGetSelectedIds() {
     return ids;
 }
 
-function _snTestLogin(S) {
-    var user = document.getElementById('sn-user').value.trim();
-    var pass = document.getElementById('sn-pass').value;
-    if (!user || !pass) { S.toast('Informe usuário e senha', 'warning'); return; }
-    S.toast('Testando conexão SSO...', 'info');
-    S.api('/servicenow/test-login', {
-        method: 'POST',
-        body: { usuario: user, senha: pass }
-    }).then(function (d) {
-        S.toast(d.message, 'success');
-    }).catch(function (e) {
-        S.toast(e.message, 'error');
+function _snCheckSession(S) {
+    var statusEl = document.getElementById('sn-session-status');
+    statusEl.textContent = 'Verificando...';
+    statusEl.style.color = '';
+    S.checkSnSession().then(function (active) {
+        if (active) {
+            statusEl.textContent = 'Sessão ativa';
+            statusEl.style.color = '#16a34a';
+        } else {
+            statusEl.textContent = 'Sessão expirada';
+            statusEl.style.color = '#dc2626';
+        }
     });
 }
 
-function _snStartUpload(S) {
+async function _snEnsureSession(S) {
+    var active = await S.checkSnSession();
+    if (active) return true;
+    S.toast('Sessão ServiceNow expirada. Reconectando...', 'warning');
+    return await S.snReloginModal();
+}
+
+async function _snStartUpload(S) {
     var ids = _snGetSelectedIds();
     if (!ids.length) { S.toast('Selecione ao menos um ativo', 'warning'); return; }
-    var user = document.getElementById('sn-user').value.trim();
-    var pass = document.getElementById('sn-pass').value;
-    if (!user || !pass) { S.toast('Informe usuário e senha SSO', 'warning'); return; }
+
+    var ok = await _snEnsureSession(S);
+    if (!ok) { S.toast('Upload cancelado — sessão ServiceNow não reconectada.', 'error'); return; }
 
     if (!confirm('Enviar ' + ids.length + ' ativo(s) para o ServiceNow?')) return;
 
     var body = {
         cycle_ids: ids,
-        usuario: user,
-        senha: pass,
         stockroom: document.getElementById('sn-stockroom').value,
         aisle_space: document.getElementById('sn-aisle').value,
         cost_currency: document.getElementById('sn-currency').value,

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
 from database import SessionLocal, Asset, ReceiptCycle
-from security import require_permission
+from security import require_permission, get_session
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -84,8 +84,8 @@ def _cleanup_old_jobs():
 
 class UploadIn(BaseModel):
     cycle_ids: list[int]
-    usuario: str
-    senha: str
+    usuario: str = ""
+    senha: str = ""
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
     cost_currency: str = "BRL"
@@ -319,19 +319,45 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
 
-    # SSO login
+    # SSO login — use existing session cookies if available
     job["phase"] = "login"
-    try:
-        ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
-    except Exception as e:
-        job["status"] = "error"
-        job["error"] = f"Falha no login SSO: {e}"
-        return
-
-    if not ok:
-        job["status"] = "error"
-        job["error"] = "Login SSO falhou — verifique usuário e senha."
-        return
+    sn_cookies = params.get("sn_cookies")
+    if sn_cookies:
+        for name, value in sn_cookies.items():
+            session.cookies.set(name, value)
+        # Quick validation
+        try:
+            check = session.get(
+                f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
+                timeout=15, allow_redirects=False,
+            )
+            if check.status_code != 200:
+                raise ValueError("expired")
+        except Exception:
+            if params.get("senha"):
+                try:
+                    ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
+                    if not ok:
+                        raise ValueError("SSO failed")
+                except Exception as e:
+                    job["status"] = "error"
+                    job["error"] = f"Sessão SN expirada e re-login falhou: {e}"
+                    return
+            else:
+                job["status"] = "error"
+                job["error"] = "Sessão ServiceNow expirada. Faça login novamente."
+                return
+    else:
+        try:
+            ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
+        except Exception as e:
+            job["status"] = "error"
+            job["error"] = f"Falha no login SSO: {e}"
+            return
+        if not ok:
+            job["status"] = "error"
+            job["error"] = "Login SSO falhou — verifique usuário e senha."
+            return
 
     job["phase"] = "lookup"
     cache = {}
@@ -522,6 +548,29 @@ def test_login(body: TestLoginIn, req: Request):
     return {"ok": True, "message": "Conexão SSO com ServiceNow estabelecida."}
 
 
+@router.get("/session-status")
+def sn_session_status(req: Request):
+    """Check if the ServiceNow session is still valid (uses portal session cookies)."""
+    sd = get_session(req)
+    sn_cookies = sd.get("sn_cookies")
+    if not sn_cookies:
+        return {"active": False, "reason": "no_session"}
+    try:
+        import requests as _req
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        r = _req.get(
+            f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
+            cookies=sn_cookies,
+            timeout=15,
+            verify=False,
+            allow_redirects=False,
+        )
+        return {"active": r.status_code == 200}
+    except Exception:
+        return {"active": False, "reason": "error"}
+
+
 @router.post("/upload")
 def start_upload(body: UploadIn, req: Request):
     """Inicia upload de ativos para o ServiceNow em background."""
@@ -529,8 +578,10 @@ def start_upload(body: UploadIn, req: Request):
 
     if not body.cycle_ids:
         raise HTTPException(400, "Selecione ao menos um ativo.")
-    if not body.usuario or not body.senha:
-        raise HTTPException(400, "Informe usuário e senha SSO.")
+
+    sn_cookies = sd.get("sn_cookies")
+    if not body.usuario and not sn_cookies:
+        raise HTTPException(400, "Sessão ServiceNow não encontrada. Faça login novamente.")
 
     # Verify dependencies
     _get_http()
@@ -579,8 +630,9 @@ def start_upload(body: UploadIn, req: Request):
     }
 
     params = {
-        "usuario": body.usuario,
+        "usuario": body.usuario or sd["username"],
         "senha": body.senha,
+        "sn_cookies": sn_cookies,
         "stockroom": body.stockroom,
         "aisle_space": body.aisle_space,
         "cost_currency": body.cost_currency,

@@ -258,8 +258,17 @@ async function renderHourly(c, S) {
 async function renderPermissions(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Usuários e Permissões</h1>' +
-        '<p class="text-muted">Usuários AD são registrados automaticamente no primeiro login. ' +
+        '<p class="text-muted">Usuários ServiceNow são registrados automaticamente no primeiro login. ' +
             'Selecione Editar para definir acesso por módulo.</p>' +
+        '<div class="card mb-3"><div class="card-header">Controle de Acesso Externo</div>' +
+            '<div class="card-body">' +
+                '<label class="checkbox-label">' +
+                    '<input id="pm-block-external" type="checkbox"> ' +
+                    'Bloquear acesso externo (somente usuários na lista de permitidos podem logar via ServiceNow)' +
+                '</label>' +
+                '<button id="pm-save-ac" class="btn btn-sm btn-primary mt-2">Salvar</button>' +
+            '</div>' +
+        '</div>' +
         '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário local</button>' +
         '<div id="pm-users"></div>';
 
@@ -269,13 +278,24 @@ async function renderPermissions(c, S) {
 
     async function load() {
         var d = await S.api('/parametros/permissoes');
+        document.getElementById('pm-block-external').checked = !!d.block_external;
         var cols = [
             { key: 'username',      label: 'Login' },
             { key: 'display_name',  label: 'Nome' },
             { key: 'auth_source',   label: 'Origem' },
-            { key: 'active',        label: 'Ativo' },
-            { key: 'is_admin',      label: 'Admin' },
-            { key: 'last_access',   label: 'Último acesso' },
+            { key: 'active',        label: 'Ativo', html: true, render: function (v) {
+                return v ? '<span class="badge badge-success">Sim</span>' : '<span class="badge badge-danger">Não</span>';
+            }},
+            { key: 'allowed',       label: 'Permitido', html: true, render: function (v) {
+                return v ? '<span class="badge badge-success">Sim</span>' : '<span class="badge badge-danger">Não</span>';
+            }},
+            { key: 'is_admin',      label: 'Admin', html: true, render: function (v) {
+                return v ? '<span class="badge badge-info">Sim</span>' : '—';
+            }},
+            { key: 'last_access',   label: 'Último acesso', render: function (v) {
+                if (!v) return '—';
+                try { return new Date(v).toLocaleString('pt-BR'); } catch (_) { return v; }
+            }},
             {
                 key: 'a', label: '',
                 render: function (_, u) {
@@ -290,6 +310,15 @@ async function renderPermissions(c, S) {
         el.appendChild(S.table(cols, d.usuarios));
     }
 
+    document.getElementById('pm-save-ac').onclick = async function () {
+        var blocked = document.getElementById('pm-block-external').checked;
+        await S.api('/parametros/controle-acesso', {
+            method: 'PUT',
+            body: { block_external: blocked }
+        });
+        S.toast(blocked ? 'Bloqueio de acesso externo ativado.' : 'Bloqueio de acesso externo desativado.', 'success');
+    };
+
     function editUser(u) {
         var box = S.el('div');
 
@@ -301,6 +330,9 @@ async function renderPermissions(c, S) {
                 '<div>' +
                     '<label class="checkbox-label">' +
                         '<input id="perm-active" type="checkbox" ' + (u.active ? 'checked' : '') + '> Usuário ativo' +
+                    '</label>' +
+                    '<label class="checkbox-label">' +
+                        '<input id="perm-allowed" type="checkbox" ' + (u.allowed ? 'checked' : '') + '> Acesso permitido' +
                     '</label>' +
                     '<label class="checkbox-label">' +
                         '<input id="perm-admin" type="checkbox" ' + (u.is_admin ? 'checked' : '') + '> Administrador total' +
@@ -344,6 +376,7 @@ async function renderPermissions(c, S) {
                 method: 'PUT',
                 body: {
                     active:         box.querySelector('#perm-active').checked,
+                    allowed:        box.querySelector('#perm-allowed').checked,
                     is_admin:       box.querySelector('#perm-admin').checked,
                     permission_map: map
                 }

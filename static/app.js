@@ -354,6 +354,49 @@
     }
 
     // ── Expose global SPARE object ─────────────────────────────────
+    async function checkSnSession() {
+        try {
+            var r = await api('/auth/sn-session');
+            return r.active;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function snReloginModal() {
+        return new Promise(function (resolve) {
+            var body = el('div', {}, [
+                el('p', { textContent: 'Sua sessão ServiceNow expirou. Informe sua senha para reconectar.' }),
+                el('div', { className: 'form-group mt-2' }, [
+                    el('label', { textContent: 'Senha ServiceNow' }),
+                    el('input', { id: 'sn-relogin-pw', type: 'password', className: 'form-control' })
+                ])
+            ]);
+            openModal('Reconectar ServiceNow', body, [
+                el('button', { className: 'btn btn-primary', textContent: 'Reconectar', onClick: async function () {
+                    var pw = document.getElementById('sn-relogin-pw').value;
+                    if (!pw) { toast('Informe a senha.', 'warning'); return; }
+                    try {
+                        loading(true);
+                        await api('/auth/sn-relogin', { method: 'POST', body: { password: pw } });
+                        closeModal();
+                        toast('ServiceNow reconectado.', 'success');
+                        resolve(true);
+                    } catch (x) {
+                        toast(x.message, 'error');
+                        resolve(false);
+                    } finally {
+                        loading(false);
+                    }
+                }}),
+                el('button', { className: 'btn btn-secondary', textContent: 'Cancelar', onClick: function () {
+                    closeModal();
+                    resolve(false);
+                }})
+            ]);
+        });
+    }
+
     window.SPARE = {
         api: api,
         el: el,
@@ -367,7 +410,9 @@
         badge: badge,
         loading: loading,
         formatDate: formatDate,
-        user: function () { return state.user; }
+        user: function () { return state.user; },
+        checkSnSession: checkSnSession,
+        snReloginModal: snReloginModal
     };
 
     // ── Init ───────────────────────────────────────────────────────

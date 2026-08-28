@@ -45,8 +45,8 @@ class LoginIn(BaseModel):
     @classmethod
     def normalize_auth_type(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD"):
-            raise ValueError("auth_type deve ser LOCAL ou AD.")
+        if v not in ("LOCAL", "AD", "SN"):
+            raise ValueError("auth_type deve ser LOCAL, AD ou SN.")
         return v
 
 
@@ -112,6 +112,31 @@ def _user_payload(u: User, perms: dict) -> dict:
 
 # ── Endpoints ─────────────────────────────────────────────────────
 
+def _sn_login(username: str, password: str):
+    """Authenticate via ServiceNow SSO. Returns a requests.Session with
+    authenticated cookies, or raises ValueError on failure."""
+    try:
+        import requests as _req
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        raise ValueError("Pacote 'requests' não instalado no servidor.")
+    try:
+        from bs4 import BeautifulSoup as _BS
+    except ImportError:
+        raise ValueError("Pacote 'beautifulsoup4' não instalado no servidor.")
+
+    from routers.servicenow import SERVICENOW_BASE, _login_sso, _follow_form_redirects
+
+    http_session = _req.Session()
+    http_session.verify = False
+    ok = _login_sso(http_session, username, password, _req, _BS)
+    if not ok:
+        raise ValueError("Credenciais ServiceNow inválidas ou SSO indisponível.")
+    cookies = {c.name: c.value for c in http_session.cookies}
+    return cookies
+
+
 @router.post("/login")
 def auth_login(body: LoginIn, req: Request):
     check_rate_limit(req, "login")
@@ -123,8 +148,12 @@ def auth_login(body: LoginIn, req: Request):
     with SessionLocal.begin() as s:
         u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
         try:
-            if source == "AD":
+            if source == "SN":
+                sn_cookies = _sn_login(login, body.password)
+                ebs_auth = None
+            elif source == "AD":
                 ebs_auth = ebs_service.login(login, body.password)
+                sn_cookies = None
             else:
                 # Local authentication
                 if not u or not u.active:
@@ -138,8 +167,9 @@ def auth_login(body: LoginIn, req: Request):
                         u.failed_attempts = 0
                     raise ValueError("Usuário ou senha inválidos.")
                 ebs_auth = None
+                sn_cookies = None
 
-            # Auto-create user on first AD login
+            # Auto-create user on first SN/AD login
             if not u:
                 u = User(
                     login=login,
@@ -154,6 +184,13 @@ def auth_login(body: LoginIn, req: Request):
             if not u.active:
                 raise ValueError("Usuário inativo.")
 
+            # Check external access control (SN/AD users)
+            if source in ("SN", "AD"):
+                ac_row = s.get(Setting, "access_control")
+                block_external = (ac_row.value if ac_row else {}).get("block_external", False)
+                if block_external and not u.allowed:
+                    raise ValueError("Acesso negado. Usuário não autorizado.")
+
             # Ensure initial admin keeps admin flag
             if login == _cfg.INITIAL_ADMIN_LOGIN:
                 u.is_admin = True
@@ -166,11 +203,15 @@ def auth_login(body: LoginIn, req: Request):
             perms = _get_perms(s, u)
             data = _user_payload(u, perms)
 
-            sid, cookie_value = create_session({
+            session_data = {
                 **data,
                 "user_id": u.id,
                 "ebs_auth": ebs_auth,
-            })
+            }
+            if sn_cookies:
+                session_data["sn_cookies"] = sn_cookies
+
+            sid, cookie_value = create_session(session_data)
 
             s.add(AccessLog(
                 login=login,
@@ -205,9 +246,10 @@ def auth_me(req: Request):
         visual_row = s.get(Setting, "visual")
         visual = visual_row.value if visual_row else {}
     return {
-        **{k: v for k, v in sd.items() if k not in ("ebs_auth", "permission_map")},
+        **{k: v for k, v in sd.items() if k not in ("ebs_auth", "permission_map", "sn_cookies")},
         "permission_map": sd.get("permission_map", {}),
         "visual_config": visual,
+        "sn_active": bool(sd.get("sn_cookies")),
     }
 
 
@@ -218,6 +260,51 @@ def logout(req: Request):
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("spare_session")
     return resp
+
+
+class SNReloginIn(BaseModel):
+    password: str
+
+
+@router.get("/sn-session")
+def sn_session_status(req: Request):
+    """Check if the ServiceNow session is still valid."""
+    sd = get_session(req)
+    sn_cookies = sd.get("sn_cookies")
+    if not sn_cookies:
+        return {"active": False, "reason": "no_session"}
+    try:
+        import requests as _req
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        from routers.servicenow import SERVICENOW_BASE
+        r = _req.get(
+            f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
+            cookies=sn_cookies,
+            timeout=15,
+            verify=False,
+            allow_redirects=False,
+        )
+        if r.status_code == 200:
+            return {"active": True}
+        return {"active": False, "reason": "expired"}
+    except Exception:
+        return {"active": False, "reason": "error"}
+
+
+@router.post("/sn-relogin")
+def sn_relogin(body: SNReloginIn, req: Request):
+    """Re-authenticate ServiceNow without full portal re-login.
+    Uses the username from the current session."""
+    sd = get_session(req)
+    check_rate_limit(req, "login")
+    username = sd["username"]
+    try:
+        sn_cookies = _sn_login(username, body.password)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+    sd["sn_cookies"] = sn_cookies
+    return {"ok": True, "sn_active": True}
 
 
 @router.post("/change-password")

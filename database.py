@@ -53,6 +53,7 @@ class User(Base):
     auth_source: Mapped[str] = mapped_column(String(12), default="LOCAL")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(
@@ -289,6 +290,17 @@ class LoadHistory(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+
+    from sqlalchemy import inspect as sa_inspect, text as sa_text
+    insp = sa_inspect(engine)
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        if "allowed" not in cols:
+            with engine.begin() as conn:
+                conn.execute(sa_text(
+                    "ALTER TABLE users ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT TRUE"
+                ))
+
     with SessionLocal.begin() as s:
         defaults = {
             "visual": {
@@ -312,6 +324,7 @@ def init_db() -> None:
                 "last_rows": 8,
             },
             "hourly_rate": {"value": _cfg.DEFAULT_HOURLY_RATE},
+            "access_control": {"block_external": False},
         }
         for k, v in defaults.items():
             if not s.get(Setting, k):

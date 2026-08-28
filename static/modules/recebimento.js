@@ -55,7 +55,20 @@ function renderNovo(c, S) {
             '<div id="session-list" class="card-body"></div>' +
         '</div>';
 
-    var sessionItems = [];
+    var CACHE_KEY = 'spare_recebimento_session';
+
+    function saveCache() {
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify(sessionItems)); } catch (_) {}
+    }
+
+    function loadCache() {
+        try {
+            var raw = localStorage.getItem(CACHE_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch (_) { return []; }
+    }
+
+    var sessionItems = loadCache();
 
     function situacaoBadge(text) {
         var map = {
@@ -121,6 +134,7 @@ function renderNovo(c, S) {
         var cnt = document.getElementById('session-count');
         var ready = sessionItems.filter(function (x) { return x.situacao === 'PRONTO PARA ENVIO'; }).length;
         cnt.textContent = sessionItems.length + ' ativo(s) na sessão | ' + ready + ' pronto(s) para envio';
+        saveCache();
     }
 
     function openEditModal(item, idx) {
@@ -270,6 +284,7 @@ function renderNovo(c, S) {
         S.openModal('Descartar Sessão', '<p>Tem certeza que deseja descartar todos os ativos da sessão temporária?</p>', [
             S.el('button', { className: 'btn btn-danger', textContent: 'Sim, descartar', onClick: function () {
                 sessionItems = [];
+                try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
                 drawSession();
                 S.closeModal();
                 S.toast('Sessão descartada.', 'info');
@@ -326,6 +341,10 @@ function renderNovo(c, S) {
     };
 
     drawSession();
+
+    if (sessionItems.length) {
+        S.toast(sessionItems.length + ' ativo(s) restaurado(s) da sessão anterior.', 'info');
+    }
 }
 
 /* ── Base de Recebimentos ───────────────────────────────────────── */
