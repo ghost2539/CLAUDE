@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Painel de Operações — TV</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/app.css">
+    <style>
+        /* ── TV-specific styles ─────────────────────────────────── */
+        .tv-body { overflow: hidden; }
+        .tv-shell {
+            padding: 40px 48px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .tv-head {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 36px;
+            align-items: center;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .tv-brand { display: flex; align-items: center; gap: 20px; }
+        .tv-logo {
+            width: 60px;
+            height: 60px;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, #AB4807, #C79105);
+            font-size: 26px;
+            font-weight: 700;
+        }
+        .tv-head h1 { font-size: 36px; margin: 0; }
+        .tv-connection {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+        #tv-clock { font-size: 34px; }
+        #tv-date { font-size: 18px; color: var(--text-secondary); }
+
+        .tv-grid {
+            display: grid;
+            grid-template-columns: 38% 62%;
+            gap: 28px;
+            padding-top: 28px;
+            min-height: 0;
+        }
+        .tv-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 22px;
+        }
+        .tv-card {
+            padding: 38px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+        }
+        .tv-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 5px;
+        }
+        .tv-card.teal::before   { background: var(--color-teal); }
+        .tv-card.orange::before { background: var(--color-primary); }
+        .tv-card.gold::before   { background: var(--color-gold); }
+        .tv-card.green::before  { background: var(--color-success); }
+        .tv-card strong { font-size: 64px; }
+        .tv-card span {
+            font-size: 20px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .tv-panels { display: grid; gap: 22px; }
+        .tv-panel {
+            padding: 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+        }
+        .tv-panel h2 { margin: 0 0 24px; }
+
+        .bar-row {
+            display: grid;
+            grid-template-columns: 140px 1fr 60px;
+            gap: 12px;
+            align-items: center;
+            margin: 12px 0;
+        }
+        .bar-track { height: 12px; background: #222; }
+        .bar-value { height: 100%; background: var(--color-teal); }
+
+        .status-stack {
+            display: flex;
+            height: 58px;
+            overflow: hidden;
+        }
+        .status-stack span {
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+            min-width: 50px;
+        }
+
+        .tv-table-panel {
+            margin-top: 22px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            position: relative;
+            overflow: hidden;
+        }
+        .tv-update {
+            position: absolute;
+            right: 16px;
+            top: 14px;
+            color: #ff4050;
+        }
+        .tv-table-panel table { width: 100%; border-collapse: collapse; }
+        .tv-table-panel th,
+        .tv-table-panel td {
+            padding: 14px 24px;
+            text-align: left;
+            border-top: 1px solid var(--border-subtle);
+            font-size: 18px;
+        }
+        .tv-table-panel th {
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 1200px) {
+            .tv-shell { padding: 20px; }
+            .tv-grid { grid-template-columns: 1fr; }
+            .tv-stats { grid-template-columns: repeat(4, 1fr); }
+            .tv-card { padding: 20px; }
+            .tv-card strong { font-size: 40px; }
+        }
+    </style>
+</head>
+<body class="tv-body">
+    <main class="tv-shell">
+        <header class="tv-head">
+            <div class="tv-brand">
+                <span class="tv-logo">OP</span>
+                <h1 id="tv-title">Painel de Operações</h1>
+            </div>
+            <div class="tv-connection">
+                <span id="tv-dot" class="dot dot-red"></span>
+                <span id="tv-state">Sem conexão</span>
+            </div>
+            <div>
+                <strong id="tv-clock"></strong>
+                <div id="tv-date"></div>
+            </div>
+        </header>
+
+        <section class="tv-grid">
+            <div class="tv-stats">
+                <div class="tv-card teal">
+                    <strong id="tv-today">0</strong>
+                    <span>Recebidos hoje</span>
+                </div>
+                <div class="tv-card orange">
+                    <strong id="tv-month">0</strong>
+                    <span>Recebidos no mês</span>
+                </div>
+                <div class="tv-card gold">
+                    <strong id="tv-year">0</strong>
+                    <span>Recebidos no ano</span>
+                </div>
+                <div class="tv-card green">
+                    <strong id="tv-unique">0</strong>
+                    <span>Ativos únicos</span>
+                </div>
+            </div>
+            <div class="tv-panels">
+                <div class="tv-panel">
+                    <h2>Recebimentos por Categoria</h2>
+                    <div id="tv-categories"></div>
+                </div>
+                <div class="tv-panel">
+                    <h2>Distribuição por Status</h2>
+                    <div id="tv-status"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="tv-table-panel">
+            <div class="tv-update" id="tv-update">Última atualização: --:--</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Hora</th>
+                        <th>Imobilizado</th>
+                        <th>Descrição</th>
+                        <th>Categoria</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tv-rows"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+    (function () {
+        var timer;
+        var $ = function (s) { return document.querySelector(s); };
+        var esc = function (s) {
+            return String(s == null ? '' : s).replace(/[&<>'"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c];
+            });
+        };
+
+        var COLORS = ['#246F68', '#AB4807', '#C79105', '#198754', '#0D6EFD', '#9333EA'];
+
+        function clock() {
+            var d = new Date();
+            $('#tv-clock').textContent = d.toLocaleTimeString('pt-BR');
+            $('#tv-date').textContent = d.toLocaleDateString('pt-BR', {
+                weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+            });
+        }
+
+        async function load() {
+            try {
+                var r = await fetch('/api/tv/dashboard');
+                var d = await r.json();
+
+                $('#tv-dot').className = 'dot dot-green';
+                $('#tv-state').textContent = 'Conectado';
+                $('#tv-title').textContent = d.config.title || 'Painel de Operações';
+
+                $('#tv-today').textContent = d.recebidos_hoje;
+                $('#tv-month').textContent = d.recebidos_mes;
+                $('#tv-year').textContent = d.recebidos_ano;
+                $('#tv-unique').textContent = d.ativos_unicos;
+
+                // Categories bar chart
+                var max = Math.max(1, Math.max.apply(null, d.por_categoria.map(function (x) { return x.total; })));
+                $('#tv-categories').innerHTML = d.por_categoria.map(function (x, i) {
+                    return '<div class="bar-row">' +
+                        '<span>' + esc(x.categoria) + '</span>' +
+                        '<div class="bar-track">' +
+                            '<div class="bar-value" style="width:' + (x.total / max * 100) +
+                                '%;background:' + COLORS[i % COLORS.length] + '"></div>' +
+                        '</div>' +
+                        '<strong>' + x.total + '</strong>' +
+                    '</div>';
+                }).join('');
+
+                // Status distribution
+                var total = d.por_status.reduce(function (a, x) { return a + x.total; }, 0) || 1;
+                $('#tv-status').innerHTML = '<div class="status-stack">' +
+                    d.por_status.map(function (x, i) {
+                        return '<span style="width:' + (x.total / total * 100) +
+                            '%;background:' + COLORS[i % COLORS.length] + '">' +
+                            Math.round(x.total / total * 100) + '%</span>';
+                    }).join('') + '</div>';
+
+                // Recent rows
+                $('#tv-rows').innerHTML = d.ultimos.map(function (x) {
+                    return '<tr>' +
+                        '<td>' + esc(x.hora) + '</td>' +
+                        '<td><strong>' + esc(x.imobilizado) + '</strong></td>' +
+                        '<td>' + esc(x.descricao) + '</td>' +
+                        '<td>' + esc(x.categoria) + '</td>' +
+                        '<td>' + esc(x.status) + '</td>' +
+                    '</tr>';
+                }).join('');
+
+                $('#tv-update').textContent = 'Última atualização: ' +
+                    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                clearTimeout(timer);
+                timer = setTimeout(load, (d.config.interval || 60) * 1000);
+            } catch (e) {
+                $('#tv-dot').className = 'dot dot-red';
+                $('#tv-state').textContent = 'Sem conexão';
+                timer = setTimeout(load, 15000);
+            }
+        }
+
+        setInterval(clock, 1000);
+        clock();
+        load();
+    })();
+    </script>
+</body>
+</html>
