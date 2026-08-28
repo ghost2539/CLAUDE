@@ -82,14 +82,14 @@
             body: body,
             headers: Object.assign(headers, opts.headers || {})
         }));
-        if (r.status === 401) {
-            showLogin();
-            throw new Error('Sessão expirada.');
-        }
         if (!r.ok) {
             var d;
             try { d = await r.json(); } catch (_) { d = { detail: r.statusText }; }
-            throw new Error(d.detail || 'Erro na requisição.');
+            var msg = d.detail || 'Erro na requisição.';
+            if (r.status === 401 && !url.match(/\/auth\/login/)) {
+                showLogin();
+            }
+            throw new Error(msg);
         }
         var ct = r.headers.get('content-type') || '';
         if (ct.indexOf('json') !== -1) return r.json();

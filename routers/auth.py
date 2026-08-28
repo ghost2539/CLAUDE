@@ -1,8 +1,11 @@
 """Authentication router — login, logout, session, password change."""
 from __future__ import annotations
 
+import logging
 import os
 from datetime import timedelta
+
+log = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -133,10 +136,16 @@ def _sn_login(username: str, password: str):
     http_session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
-    ok = _login_sso(http_session, username, password, _req, _BS)
+    try:
+        ok = _login_sso(http_session, username, password, _req, _BS)
+    except Exception as exc:
+        log.error("SSO login error for %s: %s", username, exc)
+        raise ValueError(f"Erro SSO: {exc}")
     if not ok:
+        log.warning("SSO login returned False for %s", username)
         raise ValueError("Credenciais ServiceNow inválidas ou SSO indisponível.")
     cookies = {c.name: c.value for c in http_session.cookies}
+    log.info("SSO login OK for %s, %d cookies", username, len(cookies))
     return cookies
 
 
