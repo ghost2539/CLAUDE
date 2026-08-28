@@ -14,8 +14,8 @@ ExecStart=/opt/portal-spare-v2/venv/bin/python -m uvicorn main:app --host 0.0.0.
 Restart=on-failure
 RestartSec=5
 # Credenciais protegidas via systemd
-LoadCredentialEncrypted=ebs_public_username:/etc/portal_operacoes_spare/credentials/ebs_public_username
-LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credentials/ebs_public_password
+LoadCredentialEncrypted=ebs_public_username:/etc/portal_operacoes_spare/credentials/ebs_consulta_times_username
+LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credentials/ebs_consulta_times_password
 # Seguranca de processo
 NoNewPrivileges=yes
 ProtectSystem=strict
