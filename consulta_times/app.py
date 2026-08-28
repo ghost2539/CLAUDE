@@ -60,7 +60,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_PREFIX = "/consulta-times"
+
+
 def create_app() -> FastAPI:
+    from fastapi.responses import RedirectResponse
+
     app = FastAPI(
         title="Consulta de Ativos — Times",
         docs_url=None,
@@ -69,13 +74,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.mount("/static", StaticFiles(directory=str(_static)), name="static")
+    app.mount(f"{_PREFIX}/static", StaticFiles(directory=str(_static)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.get("/")
+    def root_redirect():
+        return RedirectResponse(url=f"{_PREFIX}/")
+
+    @app.get(f"{_PREFIX}/", response_class=HTMLResponse)
+    @app.get(f"{_PREFIX}", response_class=HTMLResponse)
     def index():
         return (_static / "index.html").read_text(encoding="utf-8")
 
-    @app.post("/api/consulta")
+    @app.post(f"{_PREFIX}/api/consulta")
     def query_assets(body: QueryIn):
         qs = body.identificadores
         if not qs:
@@ -97,7 +107,7 @@ def create_app() -> FastAPI:
             "nao_encontrados": sum(not x.get("encontrado") for x in rows),
         }
 
-    @app.post("/api/consulta/export")
+    @app.post(f"{_PREFIX}/api/consulta/export")
     def export_query(body: QueryIn):
         result = query_assets(body)
         return xlsx_response(result["resultados"], "consulta_ativos.xlsx")
