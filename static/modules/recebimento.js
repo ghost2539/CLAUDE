@@ -81,7 +81,13 @@ function renderNovo(c, S) {
             { key: 'numero_serie',label: 'Nº Série' },
             { key: 'empresa',     label: 'Empresa' },
             { key: 'descricao',   label: 'Descrição' },
-            { key: 'categoria',   label: 'Categoria' },
+            { key: 'categoria',   label: 'Categoria', html: true, render: function (v) {
+                if (!v || v === 'NÃO CLASSIFICADA') {
+                    return S.esc(v || 'NÃO CLASSIFICADA') +
+                        ' <span class="badge badge-danger">Necessário ajuste</span>';
+                }
+                return S.esc(v);
+            }},
             { key: 'modelo',      label: 'Modelo' },
             { key: 'situacao',    label: 'Situação', html: true, render: function (v) { return situacaoBadge(v); } },
             { key: '_actions',    label: 'Ações', render: function (_, r, i) {
@@ -401,12 +407,22 @@ async function renderBase(c, S) {
                 ['local',             'Local'],
                 ['lote',              'Lote']
             ].map(function (x) {
-                return {
+                var col = {
                     key: x[0],
                     label: x[1],
-                    html: x[0] === 'status',
+                    html: x[0] === 'status' || x[0] === 'categoria',
                     render: x[0] === 'status' ? function (v) { return S.badge(v); } : undefined
                 };
+                if (x[0] === 'categoria') {
+                    col.render = function (v) {
+                        if (!v || v === 'NÃO CLASSIFICADA') {
+                            return S.esc(v || 'NÃO CLASSIFICADA') +
+                                ' <span class="badge badge-danger">Necessário ajuste</span>';
+                        }
+                        return S.esc(v);
+                    };
+                }
+                return col;
             });
             cols.push({
                 key: '_actions', label: 'Ações',
