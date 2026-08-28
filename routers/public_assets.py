@@ -49,13 +49,16 @@ class PublicQueryIn(BaseModel):
 def _credential(name: str) -> str:
     directory = _cfg.CREDENTIALS_DIRECTORY
     path = os.path.join(directory, name) if directory else ""
-    if not path or not os.path.isfile(path):
-        raise RuntimeError(f"Credencial protegida não carregada: {name}")
-    with open(path, "r", encoding="utf-8") as handle:
-        value = handle.read().strip()
-    if not value:
-        raise RuntimeError(f"Credencial protegida vazia: {name}")
-    return value
+    if path and os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+        if value:
+            return value
+    env_key = name.upper()
+    value = os.environ.get(env_key, "").strip()
+    if value:
+        return value
+    raise RuntimeError(f"Credencial '{name}' não encontrada (nem em CREDENTIALS_DIRECTORY nem em env {env_key})")
 
 
 def _auth(force: bool = False):
