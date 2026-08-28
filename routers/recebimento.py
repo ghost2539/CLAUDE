@@ -7,6 +7,7 @@ import unicodedata
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File
@@ -19,12 +20,14 @@ from database import (
 )
 from security import get_session, require_permission, check_rate_limit
 from routers.helpers import (
-    classify, find_asset, upsert_asset, asset_dict, cycle_dict,
+    classify, apply_class, find_asset, upsert_asset, asset_dict, cycle_dict,
+    local_search_one,
 )
-from routers.consulta import _query_single
+from routers.consulta import _query_single, _query_assets, QueryIn
 
 _cfg = get_settings()
 CLOSED = _cfg.CLOSED_STATUSES
+DUPLICATE_PREFIXES = ["CM", "YC"]
 router = APIRouter(prefix="/api", tags=["Recebimento"])
 
 
@@ -47,6 +50,32 @@ class ReceiptUpdateIn(BaseModel):
     local_id: int | None = None
     lote: str | None = None
     note: str | None = None
+
+
+class AssetUpdateIn(BaseModel):
+    categoria: str | None = None
+    modelo: str | None = None
+    empresa: str | None = None
+    numero_serie: str | None = None
+    imobilizado: str | None = None
+
+
+class BulkSubmitItem(BaseModel):
+    empresa: str = ""
+    asset_id: str = ""
+    ativo: str = ""
+    etiqueta: str = ""
+    numero_serie: str = ""
+    descricao: str = ""
+    categoria: str = "NÃO CLASSIFICADA"
+    modelo: str = ""
+    custo_asset: float | None = None
+    dpis: str | None = None
+    fonte: str = "EBS"
+
+
+class BulkSubmitIn(BaseModel):
+    items: list[BulkSubmitItem]
 
 
 class LotCreateIn(BaseModel):
@@ -125,6 +154,204 @@ def receipt_scan(body: ScanIn, req: Request):
             "hora": datetime.now().strftime("%H:%M"),
             **asset_dict(a),
         }
+
+
+@router.post("/recebimento/preview")
+def receipt_preview(body: ScanIn, req: Request):
+    """Query EBS for an asset WITHOUT saving. Returns all matches including
+    duplicates across companies (CM/YC prefix variants)."""
+    sd = require_permission(req, "recebimento", "create")
+    check_rate_limit(req)
+
+    ident = body.identificador.strip()
+    search_terms = [ident]
+    bare = ident
+    detected_prefix = ""
+    for pfx in DUPLICATE_PREFIXES:
+        if ident.upper().startswith(pfx) and len(ident) > len(pfx):
+            bare = ident[len(pfx):]
+            detected_prefix = pfx
+            break
+    if bare != ident:
+        search_terms.append(bare)
+    for pfx in DUPLICATE_PREFIXES:
+        variant = pfx + bare
+        if variant.upper() != ident.upper() and variant not in search_terms:
+            search_terms.append(variant)
+
+    try:
+        result = _query_assets(QueryIn(identificadores=search_terms), req)
+    except Exception:
+        result = {"resultados": []}
+
+    matches: list[dict[str, Any]] = []
+    with SessionLocal() as s:
+        for r in result.get("resultados", []):
+            if not r.get("encontrado"):
+                continue
+            r = apply_class(s, r)
+            cat = r.get("categoria", "NÃO CLASSIFICADA")
+            classified = cat != "NÃO CLASSIFICADA"
+            r["situacao"] = "PRONTO PARA ENVIO" if classified else "EDITADO"
+            matches.append(r)
+
+        if not matches:
+            lr = local_search_one(s, ident)
+            if lr.get("encontrado"):
+                lr = apply_class(s, lr)
+                cat = lr.get("categoria", "NÃO CLASSIFICADA")
+                lr["situacao"] = "PRONTO PARA ENVIO" if cat != "NÃO CLASSIFICADA" else "EDITADO"
+                matches.append(lr)
+
+    has_duplicates = len(matches) > 1
+    if has_duplicates:
+        for m in matches:
+            m["situacao"] = "REQUER ATUAÇÃO"
+
+    return {
+        "pesquisado": ident,
+        "encontrado": len(matches) > 0,
+        "duplicatas": has_duplicates,
+        "resultados": matches,
+    }
+
+
+@router.post("/recebimento/bulk-submit")
+def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
+    """Save validated assets from the temporary session to the database."""
+    sd = require_permission(req, "recebimento", "create")
+    check_rate_limit(req)
+
+    if not body.items:
+        raise HTTPException(400, "Nenhum ativo para enviar.")
+
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    with SessionLocal.begin() as s:
+        for item in body.items:
+            payload: dict[str, Any] = {
+                "empresa": item.empresa,
+                "asset_id": item.asset_id,
+                "ativo": item.ativo,
+                "etiqueta": item.etiqueta,
+                "numero_serie": item.numero_serie,
+                "descricao": item.descricao,
+                "categoria": item.categoria or "NÃO CLASSIFICADA",
+                "modelo": item.modelo,
+                "fonte": item.fonte or "EBS",
+            }
+            if item.custo_asset is not None:
+                payload["custo_asset"] = item.custo_asset
+            if item.dpis:
+                payload["dpis"] = item.dpis
+
+            try:
+                a = upsert_asset(s, payload)
+
+                current = s.scalar(
+                    select(ReceiptCycle)
+                    .where(
+                        ReceiptCycle.asset_id == a.id,
+                        ReceiptCycle.open == True,  # noqa: E712
+                    )
+                    .order_by(ReceiptCycle.id.desc())
+                )
+                if current:
+                    skipped += 1
+                    continue
+
+                n = (
+                    s.scalar(
+                        select(func.max(ReceiptCycle.cycle_number))
+                        .where(ReceiptCycle.asset_id == a.id)
+                    ) or 0
+                ) + 1
+
+                today = date.today()
+                iso = today.isocalendar()
+                c = ReceiptCycle(
+                    asset_id=a.id,
+                    cycle_number=n,
+                    received_date=today,
+                    iso_week=f"{iso.year}-S{iso.week:02d}",
+                    status="RECEBIDO",
+                    created_by=sd["username"],
+                    updated_by=sd["username"],
+                )
+                s.add(c)
+                s.flush()
+
+                s.add(Movement(
+                    asset_id=a.id,
+                    cycle_id=c.id,
+                    new_status="RECEBIDO",
+                    origin="RECEBIMENTO",
+                    username=sd["username"],
+                ))
+                created += 1
+            except Exception as e:
+                ident = item.etiqueta or item.ativo or item.numero_serie
+                errors.append(f"{ident}: {e}")
+
+    return {
+        "ok": True,
+        "criados": created,
+        "ignorados": skipped,
+        "erros": errors,
+    }
+
+
+@router.delete("/recebimentos/{cycle_id}")
+def delete_receipt(cycle_id: int, req: Request):
+    """Remove a receipt cycle from the base."""
+    sd = require_permission(req, "recebimento", "edit")
+    check_rate_limit(req)
+
+    with SessionLocal.begin() as s:
+        c = s.get(ReceiptCycle, cycle_id)
+        if not c:
+            raise HTTPException(404, "Recebimento não encontrado.")
+
+        s.add(Movement(
+            asset_id=c.asset_id,
+            cycle_id=c.id,
+            old_status=c.status,
+            new_status="REMOVIDO",
+            origin="EXCLUSÃO",
+            username=sd["username"],
+        ))
+        s.delete(c)
+
+    return {"ok": True}
+
+
+@router.put("/recebimentos/{cycle_id}/asset")
+def update_receipt_asset(cycle_id: int, body: AssetUpdateIn, req: Request):
+    """Update the underlying asset fields of a receipt."""
+    sd = require_permission(req, "recebimento", "edit")
+    check_rate_limit(req)
+
+    with SessionLocal.begin() as s:
+        c = s.get(ReceiptCycle, cycle_id)
+        if not c:
+            raise HTTPException(404, "Recebimento não encontrado.")
+        a = c.asset
+        if body.categoria is not None:
+            a.category = body.categoria
+        if body.modelo is not None:
+            a.model = body.modelo
+        if body.empresa is not None:
+            a.company = body.empresa
+        if body.numero_serie is not None:
+            a.serial_number = body.numero_serie
+        if body.imobilizado is not None:
+            a.asset_id = body.imobilizado
+            a.asset_number = body.imobilizado
+        c.updated_by = sd["username"]
+
+    return {"ok": True}
 
 
 @router.get("/recebimentos")

@@ -32,7 +32,7 @@ window.SPARE_MODULES.recebimento = {
 
 };
 
-/* ── Novo Recebimento ───────────────────────────────────────────── */
+/* ── Novo Recebimento (Sessão Temporária) ──────────────────────── */
 function renderNovo(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Novo Recebimento</h1>' +
@@ -44,49 +44,262 @@ function renderNovo(c, S) {
                 '<div id="scan-feedback" class="mt-2"></div>' +
             '</div>' +
         '</div>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="btn-select-ready" class="btn btn-secondary">Selecionar Prontos</button>' +
+            '<button id="btn-submit-base" class="btn btn-primary">Enviar para Base</button>' +
+            '<button id="btn-discard" class="btn btn-danger">Descartar Sessão</button>' +
+            '<span id="session-count" class="text-muted" style="margin-left:12px"></span>' +
+        '</div>' +
         '<div class="card">' +
-            '<div class="card-header">Últimos Recebidos</div>' +
-            '<div id="scan-list" class="card-body"></div>' +
+            '<div class="card-header">Sessão Temporária</div>' +
+            '<div id="session-list" class="card-body"></div>' +
         '</div>';
 
-    var rows = [];
-    var cols = [
-        { key: 'hora',        label: 'Hora' },
-        { key: 'imobilizado', label: 'Imobilizado' },
-        { key: 'descricao',   label: 'Descrição' },
-        { key: 'categoria',   label: 'Categoria' },
-        { key: 'status',      label: 'Status', html: true, render: function (v) { return S.badge(v); } }
-    ];
+    var sessionItems = [];
+
+    function situacaoBadge(text) {
+        var map = {
+            'PRONTO PARA ENVIO': 'success',
+            'EDITADO':           'gold',
+            'REQUER ATUAÇÃO':    'danger'
+        };
+        var cls = map[text] || 'default';
+        return '<span class="badge badge-' + cls + '">' + S.esc(text || '—') + '</span>';
+    }
+
+    function drawSession() {
+        var cols = [
+            { key: 'sel', label: '', render: function (_, r, i) {
+                var x = S.el('input', { type: 'checkbox' });
+                x.checked = !!r._selected;
+                x.onchange = function () { r._selected = x.checked; };
+                return x;
+            }},
+            { key: 'hora',        label: 'Hora' },
+            { key: 'imobilizado', label: 'Imobilizado' },
+            { key: 'etiqueta',    label: 'Etiqueta' },
+            { key: 'numero_serie',label: 'Nº Série' },
+            { key: 'empresa',     label: 'Empresa' },
+            { key: 'descricao',   label: 'Descrição' },
+            { key: 'categoria',   label: 'Categoria' },
+            { key: 'modelo',      label: 'Modelo' },
+            { key: 'situacao',    label: 'Situação', html: true, render: function (v) { return situacaoBadge(v); } },
+            { key: '_actions',    label: 'Ações', render: function (_, r, i) {
+                var w = S.el('div', { className: 'btn-row' });
+                var editBtn = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                editBtn.onclick = function () { openEditModal(r, i); };
+                var removeBtn = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Remover' });
+                removeBtn.onclick = function () {
+                    sessionItems.splice(i, 1);
+                    drawSession();
+                };
+                w.appendChild(editBtn);
+                if (r._hasDuplicates) {
+                    var selBtn = S.el('button', { className: 'btn btn-sm btn-secondary', textContent: 'Selecionar' });
+                    selBtn.onclick = function () { openDuplicateModal(r, i); };
+                    w.appendChild(selBtn);
+                }
+                w.appendChild(removeBtn);
+                return w;
+            }}
+        ];
+        var el = document.getElementById('session-list');
+        el.innerHTML = '';
+        el.appendChild(S.table(cols, sessionItems));
+        var cnt = document.getElementById('session-count');
+        var ready = sessionItems.filter(function (x) { return x.situacao === 'PRONTO PARA ENVIO'; }).length;
+        cnt.textContent = sessionItems.length + ' ativo(s) na sessão | ' + ready + ' pronto(s) para envio';
+    }
+
+    function openEditModal(item, idx) {
+        var f = S.el('div');
+        var fields = [
+            ['Categoria',   'edit-cat',    item.categoria],
+            ['Modelo',      'edit-model',  item.modelo],
+            ['Empresa',     'edit-company',item.empresa],
+            ['Nº Série',    'edit-serial', item.numero_serie],
+            ['Imobilizado', 'edit-asset',  item.imobilizado]
+        ];
+        fields.forEach(function (x) {
+            var g = S.el('div', { className: 'form-group' });
+            g.innerHTML = '<label>' + S.esc(x[0]) + '</label>' +
+                '<input id="' + x[1] + '" class="form-control" value="' + S.esc(x[2] || '') + '">';
+            f.appendChild(g);
+        });
+        var chkGroup = S.el('div', { className: 'form-group mt-2' });
+        chkGroup.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
+            '<input type="checkbox" id="edit-ready" ' + (item.situacao === 'PRONTO PARA ENVIO' ? 'checked' : '') + '>' +
+            ' Pronto para envio</label>';
+        f.appendChild(chkGroup);
+
+        var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        saveBtn.onclick = function () {
+            item.categoria    = document.getElementById('edit-cat').value.trim() || item.categoria;
+            item.modelo       = document.getElementById('edit-model').value.trim() || item.modelo;
+            item.empresa      = document.getElementById('edit-company').value.trim() || item.empresa;
+            item.numero_serie = document.getElementById('edit-serial').value.trim();
+            item.imobilizado  = document.getElementById('edit-asset').value.trim() || item.imobilizado;
+            item.ativo        = item.imobilizado;
+            item.asset_id     = item.imobilizado;
+            var ready = document.getElementById('edit-ready').checked;
+            item.situacao = ready ? 'PRONTO PARA ENVIO' : 'EDITADO';
+            S.closeModal();
+            drawSession();
+        };
+        S.openModal('Editar Ativo', f, [saveBtn]);
+    }
+
+    function openDuplicateModal(item, idx) {
+        var dups = item._duplicates || [];
+        if (!dups.length) return;
+        var f = S.el('div');
+        f.innerHTML = '<p class="text-muted">Foram encontrados múltiplos registros para "' +
+            S.esc(item.pesquisado) + '". Selecione o correto:</p>';
+        var list = S.el('div');
+        dups.forEach(function (dup, di) {
+            var card = S.el('div', {
+                className: 'card mb-2',
+                style: 'cursor:pointer;border:2px solid transparent;padding:12px'
+            });
+            card.innerHTML =
+                '<strong>' + S.esc(dup.empresa || 'N/D') + '</strong> — ' +
+                S.esc(dup.descricao || '') + '<br>' +
+                '<small>Imobilizado: ' + S.esc(dup.imobilizado || dup.ativo || '') +
+                ' | Etiqueta: ' + S.esc(dup.etiqueta || '') +
+                ' | Série: ' + S.esc(dup.numero_serie || '') + '</small>';
+            card.onclick = function () {
+                Object.keys(dup).forEach(function (k) {
+                    if (k[0] !== '_') item[k] = dup[k];
+                });
+                item.situacao = (item.categoria && item.categoria !== 'NÃO CLASSIFICADA')
+                    ? 'PRONTO PARA ENVIO' : 'EDITADO';
+                item._hasDuplicates = false;
+                S.closeModal();
+                drawSession();
+                S.toast('Ativo selecionado: ' + (dup.empresa || '') + ' — ' + (dup.imobilizado || ''), 'success');
+            };
+            list.appendChild(card);
+        });
+        f.appendChild(list);
+        S.openModal('Selecionar Ativo', f, []);
+    }
 
     document.getElementById('scan').onkeydown = async function (e) {
         if (e.key !== 'Enter') return;
         var v = e.target.value.trim();
         if (!v) return;
         e.target.disabled = true;
+        var fb = document.getElementById('scan-feedback');
+        fb.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando EBS...</div>';
         try {
-            var d = await S.api('/recebimento/scan', {
+            var d = await S.api('/recebimento/preview', {
                 method: 'POST',
                 body: { identificador: v }
             });
-            var fb = document.getElementById('scan-feedback');
-            fb.innerHTML = '<div class="alert ' +
-                (d.warning ? 'alert-warning' : 'alert-success') + '">' +
-                S.esc(d.warning || 'Recebimento registrado.') + '</div>';
-            if (!d.existing) {
-                rows.unshift(d);
-                var list = document.getElementById('scan-list');
-                list.innerHTML = '';
-                list.appendChild(S.table(cols, rows));
+            if (!d.encontrado) {
+                fb.innerHTML = '<div class="alert alert-danger">Ativo não encontrado no EBS para "' + S.esc(v) + '".</div>';
+            } else if (d.duplicatas) {
+                var first = d.resultados[0];
+                first.hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                first.pesquisado = d.pesquisado;
+                first._hasDuplicates = true;
+                first._duplicates = d.resultados;
+                first.situacao = 'REQUER ATUAÇÃO';
+                sessionItems.unshift(first);
+                drawSession();
+                fb.innerHTML = '<div class="alert alert-warning">Duplicatas encontradas para "' + S.esc(v) +
+                    '". Selecione o ativo correto.</div>';
+            } else {
+                var item = d.resultados[0];
+                item.hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                item.pesquisado = d.pesquisado;
+                item._hasDuplicates = false;
+                sessionItems.unshift(item);
+                drawSession();
+                fb.innerHTML = '<div class="alert ' +
+                    (item.situacao === 'PRONTO PARA ENVIO' ? 'alert-success' : 'alert-warning') + '">' +
+                    S.esc(item.situacao === 'PRONTO PARA ENVIO'
+                        ? 'Ativo localizado e classificado.'
+                        : 'Ativo localizado, mas requer edição manual.') + '</div>';
             }
         } catch (x) {
-            document.getElementById('scan-feedback').innerHTML =
-                '<div class="alert alert-danger">' + S.esc(x.message) + '</div>';
+            fb.innerHTML = '<div class="alert alert-danger">' + S.esc(x.message) + '</div>';
         } finally {
             e.target.value = '';
             e.target.disabled = false;
             e.target.focus();
         }
     };
+
+    document.getElementById('btn-select-ready').onclick = function () {
+        sessionItems.forEach(function (item) {
+            item._selected = item.situacao === 'PRONTO PARA ENVIO';
+        });
+        drawSession();
+        S.toast('Ativos prontos selecionados.', 'info');
+    };
+
+    document.getElementById('btn-discard').onclick = function () {
+        if (!sessionItems.length) return;
+        S.openModal('Descartar Sessão', '<p>Tem certeza que deseja descartar todos os ativos da sessão temporária?</p>', [
+            S.el('button', { className: 'btn btn-danger', textContent: 'Sim, descartar', onClick: function () {
+                sessionItems = [];
+                drawSession();
+                S.closeModal();
+                S.toast('Sessão descartada.', 'info');
+            }}),
+            S.el('button', { className: 'btn btn-secondary', textContent: 'Cancelar', onClick: function () {
+                S.closeModal();
+            }})
+        ]);
+    };
+
+    document.getElementById('btn-submit-base').onclick = async function () {
+        var selected = sessionItems.filter(function (x) { return x._selected; });
+        if (!selected.length) {
+            S.toast('Selecione ao menos um ativo para enviar.', 'warning');
+            return;
+        }
+        var notReady = selected.filter(function (x) { return x.situacao !== 'PRONTO PARA ENVIO'; });
+        if (notReady.length) {
+            S.toast(notReady.length + ' ativo(s) selecionado(s) não estão prontos para envio.', 'warning');
+            return;
+        }
+        try {
+            S.loading(true);
+            var payload = selected.map(function (x) {
+                return {
+                    empresa: x.empresa || '',
+                    asset_id: x.asset_id || x.imobilizado || '',
+                    ativo: x.ativo || x.imobilizado || '',
+                    etiqueta: x.etiqueta || '',
+                    numero_serie: x.numero_serie || '',
+                    descricao: x.descricao || '',
+                    categoria: x.categoria || 'NÃO CLASSIFICADA',
+                    modelo: x.modelo || '',
+                    custo_asset: x.custo_asset || null,
+                    dpis: x.dpis || null,
+                    fonte: x.fonte || 'EBS'
+                };
+            });
+            var d = await S.api('/recebimento/bulk-submit', {
+                method: 'POST',
+                body: { items: payload }
+            });
+            var msg = d.criados + ' ativo(s) enviado(s) para a base.';
+            if (d.ignorados) msg += ' ' + d.ignorados + ' já possuíam recebimento aberto.';
+            if (d.erros && d.erros.length) msg += ' ' + d.erros.length + ' erro(s).';
+            S.toast(msg, d.erros && d.erros.length ? 'warning' : 'success');
+            sessionItems = sessionItems.filter(function (x) { return !x._selected; });
+            drawSession();
+        } catch (x) {
+            S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
+
+    drawSession();
 }
 
 /* ── Base de Recebimentos ───────────────────────────────────────── */
@@ -106,6 +319,64 @@ async function renderBase(c, S) {
             '</div>' +
         '</div>' +
         '<div id="bf-out"></div>';
+
+    function openBaseEditModal(row) {
+        var f = S.el('div');
+        var fields = [
+            ['Categoria',   'be-cat',    row.categoria],
+            ['Modelo',      'be-model',  row.modelo],
+            ['Empresa',     'be-company',row.empresa],
+            ['Nº Série',    'be-serial', row.numero_serie],
+            ['Imobilizado', 'be-asset',  row.imobilizado]
+        ];
+        fields.forEach(function (x) {
+            var g = S.el('div', { className: 'form-group' });
+            g.innerHTML = '<label>' + S.esc(x[0]) + '</label>' +
+                '<input id="' + x[1] + '" class="form-control" value="' + S.esc(x[2] || '') + '">';
+            f.appendChild(g);
+        });
+        var statusGroup = S.el('div', { className: 'form-group' });
+        statusGroup.innerHTML = '<label>Status</label>' +
+            '<input id="be-status" class="form-control" value="' + S.esc(row.status || '') + '">';
+        f.appendChild(statusGroup);
+        var noteGroup = S.el('div', { className: 'form-group' });
+        noteGroup.innerHTML = '<label>Observação</label>' +
+            '<input id="be-note" class="form-control" value="' + S.esc(row.note || '') + '">';
+        f.appendChild(noteGroup);
+
+        var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        saveBtn.onclick = async function () {
+            try {
+                await S.api('/recebimentos/' + row.id + '/asset', {
+                    method: 'PUT',
+                    body: {
+                        categoria: document.getElementById('be-cat').value.trim() || null,
+                        modelo: document.getElementById('be-model').value.trim() || null,
+                        empresa: document.getElementById('be-company').value.trim() || null,
+                        numero_serie: document.getElementById('be-serial').value.trim() || null,
+                        imobilizado: document.getElementById('be-asset').value.trim() || null
+                    }
+                });
+                var newStatus = document.getElementById('be-status').value.trim();
+                var newNote = document.getElementById('be-note').value.trim();
+                if (newStatus !== row.status || newNote !== (row.note || '')) {
+                    await S.api('/recebimentos/' + row.id, {
+                        method: 'PUT',
+                        body: {
+                            status: newStatus || null,
+                            note: newNote
+                        }
+                    });
+                }
+                S.closeModal();
+                S.toast('Registro atualizado.', 'success');
+                load();
+            } catch (e) {
+                S.toast(e.message, 'error');
+            }
+        };
+        S.openModal('Editar Recebimento #' + row.id, f, [saveBtn]);
+    }
 
     async function load() {
         try {
@@ -136,6 +407,35 @@ async function renderBase(c, S) {
                     html: x[0] === 'status',
                     render: x[0] === 'status' ? function (v) { return S.badge(v); } : undefined
                 };
+            });
+            cols.push({
+                key: '_actions', label: 'Ações',
+                render: function (_, row) {
+                    var w = S.el('div', { className: 'btn-row' });
+                    var editBtn = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                    editBtn.onclick = function () { openBaseEditModal(row); };
+                    var removeBtn = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Remover' });
+                    removeBtn.onclick = function () {
+                        S.openModal('Remover Recebimento', '<p>Confirma a remoção do recebimento #' + row.id + '?</p>', [
+                            S.el('button', { className: 'btn btn-danger', textContent: 'Sim, remover', onClick: async function () {
+                                try {
+                                    await S.api('/recebimentos/' + row.id, { method: 'DELETE' });
+                                    S.closeModal();
+                                    S.toast('Recebimento removido.', 'success');
+                                    load();
+                                } catch (e) {
+                                    S.toast(e.message, 'error');
+                                }
+                            }}),
+                            S.el('button', { className: 'btn btn-secondary', textContent: 'Cancelar', onClick: function () {
+                                S.closeModal();
+                            }})
+                        ]);
+                    };
+                    w.appendChild(editBtn);
+                    w.appendChild(removeBtn);
+                    return w;
+                }
             });
             var out = document.getElementById('bf-out');
             out.innerHTML = '';
