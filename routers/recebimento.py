@@ -305,7 +305,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
 
 @router.delete("/recebimentos/{cycle_id}")
 def delete_receipt(cycle_id: int, req: Request):
-    """Remove a receipt cycle from the base."""
+    """Remove a receipt cycle from the base (soft delete)."""
     sd = require_permission(req, "recebimento", "edit")
     check_rate_limit(req)
 
@@ -314,15 +314,19 @@ def delete_receipt(cycle_id: int, req: Request):
         if not c:
             raise HTTPException(404, "Recebimento não encontrado.")
 
+        old_status = c.status
+        c.status = "REMOVIDO"
+        c.open = False
+        c.updated_by = sd["username"]
+
         s.add(Movement(
             asset_id=c.asset_id,
             cycle_id=c.id,
-            old_status=c.status,
+            old_status=old_status,
             new_status="REMOVIDO",
             origin="EXCLUSÃO",
             username=sd["username"],
         ))
-        s.delete(c)
 
     return {"ok": True}
 
