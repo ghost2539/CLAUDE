@@ -655,3 +655,180 @@ def get_job(job_id: str, req: Request):
         "results": job["results"],
         "error": job["error"],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# INCIDENTES — consulta a tabela de incidentes via Table API
+# ═══════════════════════════════════════════════════════════════════
+
+INCIDENT_TABLE = "incident"
+DEFAULT_QUEUE = "TI_N2_FLD_RNR_LOJAS_SPARE"
+
+
+def _sn_session_from_portal(req):
+    """Retorna requests.Session com cookies SN do portal (login SSO já feito)."""
+    sd = get_session(req)
+    sn_cookies = sd.get("sn_cookies")
+    if not sn_cookies:
+        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+    _req, _ = _get_http()
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
+    session.cookies.update(sn_cookies)
+    return session
+
+
+@router.get("/incidents")
+def list_incidents(
+    req: Request,
+    queue: str = DEFAULT_QUEUE,
+    state: str = "",
+    priority: str = "",
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Lista incidentes de uma fila (assignment_group) do ServiceNow."""
+    require_permission(req, "servicenow", "view")
+
+    _req, _ = _get_http()
+    sd = get_session(req)
+    sn_cookies = sd.get("sn_cookies")
+
+    if not sn_cookies:
+        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
+    session.cookies.update(sn_cookies)
+
+    query_parts = [f"assignment_group.name={queue}"]
+    if state:
+        query_parts.append(f"state={state}")
+    if priority:
+        query_parts.append(f"priority={priority}")
+    if q:
+        query_parts.append(f"short_descriptionLIKE{q}^ORnumberLIKE{q}^ORcaller_id.nameLIKE{q}")
+    query_parts.append("ORDERBYDESCsys_created_on")
+    sn_query = "^".join(query_parts)
+
+    fields = (
+        "sys_id,number,short_description,state,priority,urgency,"
+        "category,subcategory,assignment_group,assigned_to,"
+        "caller_id,opened_at,sys_created_on,sys_updated_on,"
+        "resolved_at,closed_at,close_code,close_notes"
+    )
+
+    url = (
+        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_fields={fields}"
+        f"&sysparm_limit={min(limit, 200)}"
+        f"&sysparm_offset={offset}"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+
+    if r.status_code != 200:
+        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+    data = r.json()
+    incidents = data.get("result", [])
+    total = int(r.headers.get("X-Total-Count", len(incidents)))
+
+    return {
+        "incidents": incidents,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "queue": queue,
+    }
+
+
+@router.get("/incidents/count")
+def count_incidents(
+    req: Request,
+    queue: str = DEFAULT_QUEUE,
+):
+    """Retorna contagem de incidentes por estado na fila."""
+    require_permission(req, "servicenow", "view")
+
+    _req, _ = _get_http()
+    sd = get_session(req)
+    sn_cookies = sd.get("sn_cookies")
+
+    if not sn_cookies:
+        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
+    session.cookies.update(sn_cookies)
+
+    sn_query = f"assignment_group.name={queue}"
+    url = (
+        f"{SERVICENOW_BASE}/api/now/stats/{INCIDENT_TABLE}"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_count=true"
+        f"&sysparm_group_by=state"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+
+    if r.status_code != 200:
+        # Fallback: aggregate API may not be available, use table API with count
+        url_fb = (
+            f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
+            f"?sysparm_query={sn_query}"
+            f"&sysparm_limit=1"
+            f"&sysparm_fields=sys_id"
+        )
+        try:
+            r_fb = session.get(url_fb, timeout=30)
+            total = int(r_fb.headers.get("X-Total-Count", 0))
+            return {"queue": queue, "total": total, "by_state": {}}
+        except Exception:
+            raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+    data = r.json()
+    results = data.get("result", [])
+    by_state = {}
+    total = 0
+    for item in results:
+        state_label = item.get("groupby_fields", [{}])[0].get("display_value", "Desconhecido")
+        count = int(item.get("stats", {}).get("count", 0))
+        by_state[state_label] = count
+        total += count
+
+    return {"queue": queue, "total": total, "by_state": by_state}
