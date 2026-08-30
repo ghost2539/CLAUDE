@@ -361,34 +361,17 @@ function _snPollJob(S, jobId) {
 
 
 /* ================================================================
-   SUB-TAB: Incidentes (chamadas direto do browser -> ServiceNow)
+   SUB-TAB: Incidentes (via backend -> proxy -> ServiceNow)
    ================================================================ */
 
 var _incPage = 0;
 var _incLimit = 50;
-var SN_BASE = 'https://renner.service-now.com';
-
-function _snApi(url) {
-    return fetch(url, {
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-    }).then(function (r) {
-        if (!r.ok) {
-            if (r.status === 401 || r.status === 403) {
-                throw new Error('Sessão ServiceNow não autenticada. Abra o ServiceNow no browser primeiro e faça login.');
-            }
-            throw new Error('ServiceNow retornou HTTP ' + r.status);
-        }
-        return r;
-    });
-}
 
 function _snRenderIncidentes(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Incidentes ServiceNow</h1>' +
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Consulta de incidentes direto do ServiceNow (via browser).<br>' +
-            '<strong>Pré-requisito:</strong> Estar logado no ServiceNow em outra aba do mesmo navegador.</p>' +
+            'Consulta de incidentes na fila de atendimento.</p>' +
 
         /* ── Card: Resumo por estado ── */
         '<div class="card mb-3">' +
@@ -398,11 +381,6 @@ function _snRenderIncidentes(container, S) {
                     '<div><label>Fila</label>' +
                         '<input id="inc-queue" class="form-control" value="TI_N2_FLD_RNR_LOJAS_SPARE" style="min-width:320px"></div>' +
                     '<button class="btn" id="inc-load" style="align-self:end">Carregar</button>' +
-                '</div>' +
-                '<div id="inc-cors-warn" style="display:none;padding:.8rem;margin-bottom:1rem;border-radius:6px;background:#fef3c7;color:#92400e;font-size:.85rem">' +
-                    '<strong>CORS bloqueado:</strong> O ServiceNow não permite chamadas cross-origin deste domínio. ' +
-                    'Alternativa: use a API JSONv2 (legada) ou abra o ServiceNow diretamente.<br>' +
-                    '<a id="inc-open-sn" href="#" style="color:#1e40af;text-decoration:underline">Abrir lista de incidentes no ServiceNow</a>' +
                 '</div>' +
                 '<div id="inc-summary" style="color:var(--text-secondary)">Clique em Carregar para consultar.</div>' +
             '</div>' +
@@ -444,15 +422,6 @@ function _snRenderIncidentes(container, S) {
             '</div>' +
         '</div>';
 
-    // Link para abrir direto no SN (fallback se CORS bloquear)
-    document.getElementById('inc-open-sn').addEventListener('click', function (e) {
-        e.preventDefault();
-        var queue = document.getElementById('inc-queue').value.trim() || 'TI_N2_FLD_RNR_LOJAS_SPARE';
-        var snUrl = SN_BASE + '/nav_to.do?uri=incident_list.do%3Fsysparm_query%3Dassignment_group.name%3D' +
-            encodeURIComponent(queue);
-        window.open(snUrl, '_blank');
-    });
-
     document.getElementById('inc-load').addEventListener('click', function () {
         _incLoadSummary(S);
         _incPage = 0;
@@ -474,140 +443,59 @@ function _snRenderIncidentes(container, S) {
     });
 }
 
-function _incHandleCors(S, err) {
-    var warnEl = document.getElementById('inc-cors-warn');
-    if (err && err.message && (err.message.indexOf('Failed to fetch') !== -1 ||
-        err.message.indexOf('NetworkError') !== -1 ||
-        err.message.indexOf('CORS') !== -1 ||
-        err.message.indexOf('Load failed') !== -1)) {
-        warnEl.style.display = '';
-        return true;
-    }
-    return false;
-}
-
 function _incLoadSummary(S) {
     var queue = document.getElementById('inc-queue').value.trim();
     if (!queue) { S.toast('Informe o nome da fila', 'warning'); return; }
     var el = document.getElementById('inc-summary');
-    el.innerHTML = '<span class="spinner spinner-sm"></span> Consultando ServiceNow...';
+    el.innerHTML = '<span class="spinner spinner-sm"></span> Consultando...';
 
-    var snQuery = 'assignment_group.name=' + queue;
-
-    // Tentar Stats API primeiro
-    var statsUrl = SN_BASE + '/api/now/stats/incident' +
-        '?sysparm_query=' + encodeURIComponent(snQuery) +
-        '&sysparm_count=true' +
-        '&sysparm_group_by=state' +
-        '&sysparm_display_value=true';
-
-    _snApi(statsUrl)
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            var results = data.result || [];
-            var by_state = {};
-            var total = 0;
-            for (var i = 0; i < results.length; i++) {
-                var item = results[i];
-                var fields = item.groupby_fields || [];
-                var stateLabel = fields.length ? (fields[0].display_value || 'Outro') : 'Outro';
-                var count = parseInt(item.stats && item.stats.count || 0);
-                by_state[stateLabel] = count;
-                total += count;
-            }
-            _incRenderSummary(S, el, total, by_state);
+    S.api('/servicenow/incidents/count?queue=' + encodeURIComponent(queue))
+        .then(function (d) {
+            var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1rem;text-align:center">';
+            html += '<div><div style="font-size:2rem;font-weight:700;color:var(--color-primary)">' + d.total + '</div>' +
+                    '<div style="color:var(--text-secondary);font-size:.85rem">Total</div></div>';
+            var stateColors = {
+                'New': '#3b82f6', 'Novo': '#3b82f6',
+                'In Progress': '#f59e0b', 'Em andamento': '#f59e0b',
+                'On Hold': '#8b5cf6', 'Em espera': '#8b5cf6',
+                'Resolved': '#16a34a', 'Resolvido': '#16a34a',
+                'Closed': '#6b7280', 'Fechado': '#6b7280'
+            };
+            Object.keys(d.by_state || {}).forEach(function (st) {
+                var color = stateColors[st] || 'var(--text-primary)';
+                html += '<div><div style="font-size:2rem;font-weight:700;color:' + color + '">' + d.by_state[st] + '</div>' +
+                        '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(st) + '</div></div>';
+            });
+            html += '</div>';
+            el.innerHTML = html;
         })
-        .catch(function (err) {
-            if (_incHandleCors(S, err)) {
-                el.innerHTML = '<span style="color:#92400e">CORS bloqueado — não foi possível consultar.</span>';
-                // Fallback: tentar Table API com limit=1 só para pegar count
-                _incFallbackCount(S, el, queue);
-                return;
-            }
-            // Pode ser 403/401 - tentar fallback Table API
-            _incFallbackCount(S, el, queue);
+        .catch(function (e) {
+            el.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
         });
-}
-
-function _incFallbackCount(S, el, queue) {
-    var snQuery = 'assignment_group.name=' + queue;
-    var tableUrl = SN_BASE + '/api/now/table/incident' +
-        '?sysparm_query=' + encodeURIComponent(snQuery) +
-        '&sysparm_limit=1&sysparm_fields=sys_id';
-
-    _snApi(tableUrl)
-        .then(function (r) {
-            var total = parseInt(r.headers.get('X-Total-Count') || '0');
-            _incRenderSummary(S, el, total, {});
-        })
-        .catch(function (err2) {
-            if (_incHandleCors(S, err2)) {
-                el.innerHTML = '<span style="color:#92400e">CORS bloqueado pelo ServiceNow. Use o link acima para abrir direto.</span>';
-            } else {
-                el.innerHTML = '<span style="color:#dc2626">' + S.esc(err2.message) + '</span>';
-            }
-        });
-}
-
-function _incRenderSummary(S, el, total, by_state) {
-    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1rem;text-align:center">';
-    html += '<div><div style="font-size:2rem;font-weight:700;color:var(--color-primary)">' + total + '</div>' +
-            '<div style="color:var(--text-secondary);font-size:.85rem">Total</div></div>';
-    var stateColors = {
-        'New': '#3b82f6', 'Novo': '#3b82f6',
-        'In Progress': '#f59e0b', 'Em andamento': '#f59e0b',
-        'On Hold': '#8b5cf6', 'Em espera': '#8b5cf6',
-        'Resolved': '#16a34a', 'Resolvido': '#16a34a',
-        'Closed': '#6b7280', 'Fechado': '#6b7280'
-    };
-    Object.keys(by_state).forEach(function (st) {
-        var color = stateColors[st] || 'var(--text-primary)';
-        html += '<div><div style="font-size:2rem;font-weight:700;color:' + color + '">' + by_state[st] + '</div>' +
-                '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(st) + '</div></div>';
-    });
-    html += '</div>';
-    el.innerHTML = html;
 }
 
 function _incSearch(S) {
     var queue = document.getElementById('inc-queue').value.trim();
     if (!queue) { S.toast('Informe o nome da fila', 'warning'); return; }
 
-    var queryParts = ['assignment_group.name=' + queue];
+    var params = new URLSearchParams();
+    params.set('queue', queue);
+    params.set('limit', _incLimit);
+    params.set('offset', _incPage * _incLimit);
     var st = document.getElementById('inc-state').value;
     var pr = document.getElementById('inc-priority').value;
     var q = document.getElementById('inc-q').value.trim();
-    if (st) queryParts.push('state=' + st);
-    if (pr) queryParts.push('priority=' + pr);
-    if (q) queryParts.push('short_descriptionLIKE' + q + '^ORnumberLIKE' + q + '^ORcaller_id.nameLIKE' + q);
-    queryParts.push('ORDERBYDESCsys_created_on');
-    var snQuery = queryParts.join('^');
-
-    var fields = 'sys_id,number,short_description,state,priority,urgency,' +
-        'category,subcategory,assignment_group,assigned_to,' +
-        'caller_id,opened_at,sys_created_on,sys_updated_on,' +
-        'resolved_at,closed_at';
-
-    var url = SN_BASE + '/api/now/table/incident' +
-        '?sysparm_query=' + encodeURIComponent(snQuery) +
-        '&sysparm_fields=' + encodeURIComponent(fields) +
-        '&sysparm_limit=' + _incLimit +
-        '&sysparm_offset=' + (_incPage * _incLimit) +
-        '&sysparm_display_value=true';
+    if (st) params.set('state', st);
+    if (pr) params.set('priority', pr);
+    if (q) params.set('q', q);
 
     var tableEl = document.getElementById('inc-table');
-    tableEl.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)"><span class="spinner spinner-sm"></span> Buscando incidentes no ServiceNow...</div>';
+    tableEl.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)"><span class="spinner spinner-sm"></span> Buscando incidentes...</div>';
 
-    _snApi(url)
-        .then(function (r) {
-            var total = parseInt(r.headers.get('X-Total-Count') || '0');
-            return r.json().then(function (data) {
-                return { incidents: data.result || [], total: total };
-            });
-        })
+    S.api('/servicenow/incidents?' + params.toString())
         .then(function (d) {
-            var incidents = d.incidents;
-            var total = d.total || incidents.length;
+            var incidents = d.incidents || [];
+            var total = d.total || 0;
 
             if (!incidents.length) {
                 tableEl.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)">Nenhum incidente encontrado.</div>';
@@ -691,13 +579,7 @@ function _incSearch(S) {
             document.getElementById('inc-next').disabled = to >= total;
         })
         .catch(function (e) {
-            if (_incHandleCors(S, e)) {
-                tableEl.innerHTML = '<div style="padding:1rem;color:#92400e">' +
-                    'CORS bloqueado pelo ServiceNow. O browser não permite chamadas cross-origin para renner.service-now.com.<br>' +
-                    'Use o link acima para abrir a lista direto no ServiceNow.</div>';
-            } else {
-                tableEl.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
-            }
+            tableEl.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
             document.getElementById('inc-pager').hidden = true;
         });
 }
