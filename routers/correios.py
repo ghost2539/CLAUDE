@@ -261,7 +261,7 @@ def correios_rastrear_lote(body: dict, req: Request):
 
 @router.post("/correios/test")
 def correios_test(req: Request):
-    """Testa conexão com Correios: autenticação + rastreio de teste."""
+    """Testa conexão com Correios mostrando detalhes completos de cada tentativa."""
     require_permission(req, "servicenow", "view")
     cfg = _get_correios_config()
     _correios_token_cache.clear()
@@ -279,43 +279,100 @@ def correios_test(req: Request):
         f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
     ).decode()
 
-    result = {"config": {"usuario": cfg["usuario"], "contrato": cfg.get("contrato", ""), "proxy": SN_PROXY or "(nenhum)"}}
+    contrato = cfg.get("contrato", "")
+    result = {
+        "config": {
+            "usuario": cfg["usuario"],
+            "contrato": contrato,
+            "proxy": SN_PROXY or "(nenhum)",
+        }
+    }
 
     try:
+        # 1) Autenticação básica
         r = sess.post(
             "https://api.correios.com.br/token/v1/autentica",
-            headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/json",
+            },
             timeout=30,
         )
+        auth_data = r.json() if r.status_code in (200, 201) else {}
         result["auth"] = {
             "status": r.status_code,
             "url": r.url,
-            "response": r.text[:500],
+            "response": r.text[:800],
         }
         if r.status_code not in (200, 201):
-            sess.close()
             return result
 
-        token = r.json().get("token", "")
-        _correios_token_cache["token"] = token
-        _correios_token_cache["obtained_at"] = time.time()
+        token = auth_data.get("token", "")
+        cartao_postagem = auth_data.get("cartaoPostagem", "")
+        result["auth"]["cartao_postagem_retornado"] = cartao_postagem or "(nenhum)"
+
+        # 2) Autenticação com cartão de postagem (se retornado)
+        token_cp = ""
+        if cartao_postagem:
+            r_cp = sess.post(
+                f"https://api.correios.com.br/token/v1/autentica/cartaopostagem",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"numero": cartao_postagem},
+                timeout=30,
+            )
+            result["auth_cartao_postagem"] = {
+                "status": r_cp.status_code,
+                "url": r_cp.url,
+                "response": r_cp.text[:500],
+            }
+            if r_cp.status_code in (200, 201):
+                cp_data = r_cp.json()
+                token_cp = cp_data.get("token", "")
+
+        # 3) Rastreio com token básico
+        rastro_url = "https://api.correios.com.br/srorastro/v1/objetos?codigosObjetos=AD852897611BR&resultado=T"
 
         r2 = sess.get(
-            "https://api.correios.com.br/srorastro/v1/objetos?codigosObjetos=AD852897611BR&resultado=T",
+            rastro_url,
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             timeout=30,
         )
-        result["rastreio_test"] = {
+        result["rastreio_token_basico"] = {
             "status": r2.status_code,
             "url": r2.url,
+            "headers_enviados": {"Authorization": "Bearer <token_basico>", "Accept": "application/json"},
             "response": r2.text[:500],
         }
+
+        # 4) Rastreio com token do cartão de postagem (se obtido)
+        if token_cp:
+            r3 = sess.get(
+                rastro_url,
+                headers={"Authorization": f"Bearer {token_cp}", "Accept": "application/json"},
+                timeout=30,
+            )
+            result["rastreio_token_cartao"] = {
+                "status": r3.status_code,
+                "url": r3.url,
+                "response": r3.text[:500],
+            }
+
+        ok_basico = result["rastreio_token_basico"]["status"] == 200
+        ok_cartao = result.get("rastreio_token_cartao", {}).get("status") == 200
+        result["ok"] = ok_basico or ok_cartao
+        if ok_cartao and not ok_basico:
+            result["message"] = "Rastreio funciona com token do cartão de postagem! Atualizando autenticação."
+        elif ok_basico:
+            result["message"] = "Rastreio funciona com token básico!"
+        else:
+            result["message"] = "Autenticação OK mas rastreio retornou erro em ambos os tokens."
+
     except Exception as e:
         result["erro"] = str(e)
     finally:
         sess.close()
 
-    result["ok"] = result.get("auth", {}).get("status") in (200, 201) and result.get("rastreio_test", {}).get("status") == 200
-    if result["ok"]:
-        result["message"] = "Autenticação e rastreio OK!"
     return result
