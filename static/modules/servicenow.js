@@ -722,7 +722,9 @@ function _snRenderCorreios(container, S) {
                 body.innerHTML = html;
             })
             .catch(function (e) {
-                body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+                _snShowError('co-track-body', e, S, function () {
+                    document.getElementById('co-debug').click();
+                });
             });
     });
 
@@ -877,9 +879,25 @@ function _snRenderCorreios(container, S) {
                 document.getElementById('co-next').disabled = to >= total;
             })
             .catch(function (e) {
-                document.getElementById('co-table').innerHTML =
-                    '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+                _snShowError('co-table', e, S, function () { loadCorreios(); });
             });
+    }
+}
+
+function _snShowError(targetId, err, S, retryFn) {
+    var el = document.getElementById(targetId);
+    var isSn = err.message && err.message.indexOf('ServiceNow') !== -1;
+    var html = '<div style="padding:1rem;color:#dc2626">' + S.esc(err.message) + '</div>';
+    if (isSn) {
+        html += '<div style="padding:0 1rem .5rem"><button class="btn btn-sm btn-primary" id="' + targetId + '-relogin">Reconectar ServiceNow</button></div>';
+    }
+    el.innerHTML = html;
+    if (isSn) {
+        document.getElementById(targetId + '-relogin').addEventListener('click', function () {
+            S.snReloginModal().then(function (ok) {
+                if (ok && retryFn) retryFn();
+            });
+        });
     }
 }
 
@@ -974,8 +992,7 @@ function _relLoad(S) {
         })
         .catch(function (e) {
             document.getElementById('rel-tickets').style.display = '';
-            document.getElementById('rel-tickets-content').innerHTML =
-                '<div style="color:#dc2626">' + S.esc(e.message) + '</div>';
+            _snShowError('rel-tickets-content', e, S, function () { _relLoad(S); });
             checkDone();
         });
 
@@ -1013,8 +1030,7 @@ function _relLoad(S) {
         })
         .catch(function (e) {
             document.getElementById('rel-sla').style.display = '';
-            document.getElementById('rel-sla-content').innerHTML =
-                '<div style="color:#dc2626">' + S.esc(e.message) + '</div>';
+            _snShowError('rel-sla-content', e, S, function () { _relLoad(S); });
             checkDone();
         });
 
@@ -1045,8 +1061,7 @@ function _relLoad(S) {
         })
         .catch(function (e) {
             document.getElementById('rel-tma').style.display = '';
-            document.getElementById('rel-tma-content').innerHTML =
-                '<div style="color:#dc2626">' + S.esc(e.message) + '</div>';
+            _snShowError('rel-tma-content', e, S, function () { _relLoad(S); });
             checkDone();
         });
 }

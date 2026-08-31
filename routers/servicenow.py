@@ -673,7 +673,7 @@ def _sn_session_from_portal(req):
     sd = get_session(req)
     sn_cookies = sd.get("sn_cookies")
     if not sn_cookies:
-        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+        raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
     _req, _ = _get_http()
     session = _req.Session()
     session.verify = False
@@ -705,7 +705,7 @@ def list_incidents(
     sn_cookies = sd.get("sn_cookies")
 
     if not sn_cookies:
-        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+        raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
     session = _req.Session()
     session.verify = False
@@ -749,7 +749,7 @@ def list_incidents(
         raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
 
     if r.status_code != 200:
         raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
@@ -780,7 +780,7 @@ def count_incidents(
     sn_cookies = sd.get("sn_cookies")
 
     if not sn_cookies:
-        raise HTTPException(401, "Sessão ServiceNow não ativa. Faça login primeiro.")
+        raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
     session = _req.Session()
     session.verify = False
@@ -807,7 +807,7 @@ def count_incidents(
         raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
 
     if r.status_code != 200:
         # Fallback: aggregate API may not be available, use table API with count
@@ -907,7 +907,7 @@ def saida_search(body: SaidaSearchIn, req: Request):
         raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
     if r.status_code != 200:
         raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
 
@@ -958,7 +958,7 @@ def saida_move(body: SaidaMovIn, req: Request):
         raise HTTPException(502, f"Erro de conexão: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
     if r.status_code not in (200, 204):
         raise HTTPException(502, f"ServiceNow retornou {r.status_code}: {r.text[:200]}")
 
@@ -1033,7 +1033,7 @@ def chamados_correios(
         raise HTTPException(502, f"Erro de conexão: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
     if r.status_code != 200:
         raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
 
@@ -1075,7 +1075,7 @@ def chamados_correios_debug(
         raise HTTPException(502, f"Erro de conexão: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
     if r.status_code != 200:
         raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
 
@@ -1162,7 +1162,7 @@ def relatorios_tickets(req: Request, queue: str = DEFAULT_QUEUE):
         raise HTTPException(502, f"Erro de conexão: {e}")
 
     if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
 
     # Fallback: just get the total count
     total_url = (
