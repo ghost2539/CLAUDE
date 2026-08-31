@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
     from routers.public_assets import router as public_assets_router
     from routers.identificacao import router as identificacao_router
     from routers.servicenow import router as servicenow_router
+    from routers.correios import router as correios_router
 
     app.include_router(auth_router)
     app.include_router(consulta_router)
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(public_assets_router)
     app.include_router(identificacao_router)
     app.include_router(servicenow_router)
+    app.include_router(correios_router)
 
     return app
 
