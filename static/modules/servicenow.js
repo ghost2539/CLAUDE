@@ -27,6 +27,98 @@ window.SPARE_MODULES.servicenow = {
 };
 
 /* ================================================================
+   SN Login Bar — componente reutilizável de login ServiceNow
+   ================================================================ */
+
+var _snKeepAliveTimer = null;
+
+function _snLoginBarHtml() {
+    return '<div class="card mb-3" id="sn-login-bar">' +
+        '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Acesso ServiceNow</span>' +
+            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 8px;border-radius:10px;background:#dc262620;color:#dc2626">Desconectado</span>' +
+        '</div>' +
+        '<div class="card-body">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.8rem;align-items:end">' +
+                '<div><label>Usuário</label>' +
+                    '<input id="sn-bar-user" class="form-control" placeholder="Usuário corporativo"></div>' +
+                '<div><label>Senha</label>' +
+                    '<input id="sn-bar-pass" type="password" class="form-control" placeholder="Senha"></div>' +
+                '<button class="btn btn-primary" id="sn-bar-login">Conectar</button>' +
+            '</div>' +
+            '<div id="sn-bar-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
+        '</div>' +
+    '</div>';
+}
+
+function _snLoginBarBind(S, onSuccess) {
+    var loginBtn = document.getElementById('sn-bar-login');
+    if (!loginBtn) return;
+
+    _snCheckSession(S);
+
+    loginBtn.addEventListener('click', function () {
+        var user = document.getElementById('sn-bar-user').value.trim();
+        var pass = document.getElementById('sn-bar-pass').value;
+        var st = document.getElementById('sn-bar-status');
+        if (!user || !pass) { S.toast('Informe usuário e senha', 'warning'); return; }
+        st.innerHTML = '<span style="color:var(--text-secondary)">Conectando...</span>';
+        loginBtn.disabled = true;
+        S.api('/servicenow/test-login', { method: 'POST', body: { usuario: user, senha: pass } })
+            .then(function () {
+                st.innerHTML = '<span style="color:#16a34a;font-weight:600">Conectado!</span>';
+                S.toast('ServiceNow conectado!', 'success');
+                _snSetBadge(true);
+                _snStartKeepAlive(S);
+                if (onSuccess) onSuccess();
+            })
+            .catch(function (e) {
+                st.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+                _snSetBadge(false);
+            })
+            .finally(function () { loginBtn.disabled = false; });
+    });
+
+    document.getElementById('sn-bar-pass').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); loginBtn.click(); }
+    });
+}
+
+function _snSetBadge(active) {
+    var badge = document.getElementById('sn-session-badge');
+    if (!badge) return;
+    if (active) {
+        badge.textContent = 'Conectado';
+        badge.style.background = '#16a34a20';
+        badge.style.color = '#16a34a';
+    } else {
+        badge.textContent = 'Desconectado';
+        badge.style.background = '#dc262620';
+        badge.style.color = '#dc2626';
+    }
+}
+
+function _snCheckSession(S) {
+    S.api('/servicenow/session-status')
+        .then(function (d) { _snSetBadge(d.active); if (d.active) _snStartKeepAlive(S); })
+        .catch(function () { _snSetBadge(false); });
+}
+
+function _snStartKeepAlive(S) {
+    if (_snKeepAliveTimer) return;
+    _snKeepAliveTimer = setInterval(function () {
+        S.api('/servicenow/session-status')
+            .then(function (d) { _snSetBadge(d.active); if (!d.active) _snStopKeepAlive(); })
+            .catch(function () {});
+    }, 10 * 60 * 1000);
+}
+
+function _snStopKeepAlive() {
+    if (_snKeepAliveTimer) { clearInterval(_snKeepAliveTimer); _snKeepAliveTimer = null; }
+}
+
+
+/* ================================================================
    SUB-TAB 1: Entrada de estoque (upload de ativos — conteúdo original)
    ================================================================ */
 
@@ -362,6 +454,8 @@ function _snRenderSaida(container, S) {
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
             'Busca global e movimentação de ativos no ServiceNow.</p>' +
 
+        _snLoginBarHtml() +
+
         '<div class="card mb-3">' +
             '<div class="card-header">Buscar Ativo</div>' +
             '<div class="card-body">' +
@@ -426,6 +520,8 @@ function _snRenderSaida(container, S) {
                 '</div>' +
             '</div>' +
         '</div>';
+
+    _snLoginBarBind(S);
 
     _saLocations = [];
     S.api('/servicenow/saida/locations').then(function (d) {
@@ -614,6 +710,8 @@ function _snRenderCorreios(container, S) {
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
             'Incidentes com códigos de rastreio (campo correlation_display).</p>' +
 
+        _snLoginBarHtml() +
+
         '<div class="card mb-3">' +
             '<div class="card-header">Filtros</div>' +
             '<div class="card-body">' +
@@ -646,6 +744,8 @@ function _snRenderCorreios(container, S) {
                 '<div class="card-body" id="co-track-body"></div>' +
             '</div>' +
         '</div>';
+
+    _snLoginBarBind(S);
 
     var coPage = 0;
     var coLimit = 50;
@@ -912,6 +1012,8 @@ function _snRenderRelatorios(container, S) {
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
             'Indicadores de desempenho da fila SPARE.</p>' +
 
+        _snLoginBarHtml() +
+
         '<div style="display:flex;gap:1rem;align-items:end;margin-bottom:1.5rem">' +
             '<div style="flex:1"><label>Fila</label>' +
                 '<input id="rel-queue" class="form-control" value="TI_N2_FLD_RNR_LOJAS_SPARE"></div>' +
@@ -945,6 +1047,8 @@ function _snRenderRelatorios(container, S) {
                 '<div id="rel-tma-content"></div>' +
             '</div>' +
         '</div>';
+
+    _snLoginBarBind(S);
 
     document.getElementById('rel-load').addEventListener('click', function () { _relLoad(S); });
     document.getElementById('rel-refresh-tv').addEventListener('click', function () { _relRefreshTV(S); });

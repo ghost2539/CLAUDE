@@ -541,23 +541,28 @@ def test_login(body: TestLoginIn, req: Request):
 
 @router.get("/session-status")
 def sn_session_status(req: Request):
-    """Check if the ServiceNow session is still valid (uses portal session cookies)."""
+    """Check if the ServiceNow session is still valid and keep it alive."""
     sd = get_session(req)
     sn_cookies = sd.get("sn_cookies")
     if not sn_cookies:
         return {"active": False, "reason": "no_session"}
     try:
-        import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        r = _req.get(
+        _req, _ = _get_http()
+        sess = _req.Session()
+        sess.verify = False
+        if SN_PROXY:
+            sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+        sess.cookies.update(sn_cookies)
+        r = sess.get(
             f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
-            cookies=sn_cookies,
+            headers={"Accept": "application/json"},
             timeout=15,
-            verify=False,
             allow_redirects=False,
         )
-        return {"active": r.status_code == 200}
+        if r.status_code == 200:
+            sd["sn_cookies"] = dict(sess.cookies)
+            return {"active": True}
+        return {"active": False, "reason": "expired"}
     except Exception:
         return {"active": False, "reason": "error"}
 
