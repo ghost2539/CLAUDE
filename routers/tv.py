@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api", tags=["TV"])
 def tv_dashboard():
     """Public endpoint — no authentication required.
 
-    Returns aggregated data for the TV display panel.
+    Returns aggregated data for the TV display panel (recebimento + indicators).
     """
     today = date.today()
     first = today.replace(day=1)
@@ -37,6 +37,9 @@ def tv_dashboard():
 
         cfg_row = s.get(Setting, "tv")
         cfg = cfg_row.value if cfg_row else {}
+
+        sn_cache_row = s.get(Setting, "sn_tv_cache")
+        sn_cache = sn_cache_row.value if sn_cache_row else None
 
         return {
             "config": cfg,
@@ -70,5 +73,6 @@ def tv_dashboard():
                 }
                 for c in recent
             ],
+            "indicadores": sn_cache,
             "updated_at": datetime.now().isoformat(),
         }

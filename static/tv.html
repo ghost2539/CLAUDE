@@ -17,7 +17,7 @@
         }
         .tv-head {
             display: grid;
-            grid-template-columns: 1fr auto auto;
+            grid-template-columns: 1fr auto auto auto;
             gap: 36px;
             align-items: center;
             padding-bottom: 24px;
@@ -34,6 +34,16 @@
             font-weight: 700;
         }
         .tv-head h1 { font-size: 36px; margin: 0; }
+        .tv-screen-label {
+            font-size: 16px;
+            padding: 6px 18px;
+            border-radius: 20px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        .tv-screen-label.receb { background: #246F68; color: #fff; }
+        .tv-screen-label.indic { background: #AB4807; color: #fff; }
         .tv-connection {
             display: flex;
             align-items: center;
@@ -44,6 +54,11 @@
         #tv-clock { font-size: 34px; }
         #tv-date { font-size: 18px; color: var(--text-secondary); }
 
+        /* ── Screen containers ── */
+        .tv-screen { flex: 1; display: none; flex-direction: column; min-height: 0; }
+        .tv-screen.active { display: flex; }
+
+        /* ── Recebimento screen ── */
         .tv-grid {
             display: grid;
             grid-template-columns: 38% 62%;
@@ -71,10 +86,12 @@
             top: 0; left: 0; right: 0;
             height: 5px;
         }
-        .tv-card.teal::before   { background: var(--color-teal); }
-        .tv-card.orange::before { background: var(--color-primary); }
-        .tv-card.gold::before   { background: var(--color-gold); }
-        .tv-card.green::before  { background: var(--color-success); }
+        .tv-card.teal::before   { background: #246F68; }
+        .tv-card.orange::before { background: #AB4807; }
+        .tv-card.gold::before   { background: #C79105; }
+        .tv-card.green::before  { background: #198754; }
+        .tv-card.blue::before   { background: #0D6EFD; }
+        .tv-card.red::before    { background: #dc2626; }
         .tv-card strong { font-size: 64px; }
         .tv-card span {
             font-size: 20px;
@@ -98,7 +115,7 @@
             margin: 12px 0;
         }
         .bar-track { height: 12px; background: #222; }
-        .bar-value { height: 100%; background: var(--color-teal); }
+        .bar-value { height: 100%; background: #246F68; }
 
         .status-stack {
             display: flex;
@@ -138,12 +155,90 @@
             text-transform: uppercase;
         }
 
+        /* ── Indicadores screen ── */
+        .ind-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+            padding-top: 28px;
+            flex: 1;
+            min-height: 0;
+        }
+        .ind-section {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+        }
+        .ind-section h2 {
+            margin: 0 0 20px;
+            font-size: 22px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        .ind-big {
+            font-size: 72px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .ind-label {
+            font-size: 18px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-top: 8px;
+        }
+        .ind-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 18px;
+        }
+        .ind-row:last-child { border-bottom: none; }
+        .ind-stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .ind-stat {
+            text-align: center;
+            padding: 16px;
+            background: var(--bg-base);
+            border-radius: 8px;
+        }
+        .ind-stat-val { font-size: 36px; font-weight: 700; }
+        .ind-stat-lbl { font-size: 14px; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
+        .ind-progress-bar {
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+        .ind-progress-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width .5s;
+        }
+
+        .ind-no-data {
+            color: var(--text-secondary);
+            font-size: 18px;
+            padding: 20px;
+            text-align: center;
+        }
+
         @media (max-width: 1200px) {
             .tv-shell { padding: 20px; }
             .tv-grid { grid-template-columns: 1fr; }
             .tv-stats { grid-template-columns: repeat(4, 1fr); }
             .tv-card { padding: 20px; }
             .tv-card strong { font-size: 40px; }
+            .ind-grid { grid-template-columns: 1fr; }
+            .ind-big { font-size: 48px; }
         }
     </style>
 </head>
@@ -154,6 +249,7 @@
                 <span class="tv-logo">OP</span>
                 <h1 id="tv-title">Painel de Operações</h1>
             </div>
+            <span class="tv-screen-label receb" id="tv-screen-label">Recebimento</span>
             <div class="tv-connection">
                 <span id="tv-dot" class="dot dot-red"></span>
                 <span id="tv-state">Sem conexão</span>
@@ -164,52 +260,88 @@
             </div>
         </header>
 
-        <section class="tv-grid">
-            <div class="tv-stats">
-                <div class="tv-card teal">
-                    <strong id="tv-today">0</strong>
-                    <span>Recebidos hoje</span>
+        <!-- Screen 1: Recebimento -->
+        <div class="tv-screen active" id="screen-receb">
+            <section class="tv-grid">
+                <div class="tv-stats">
+                    <div class="tv-card teal">
+                        <strong id="tv-today">0</strong>
+                        <span>Recebidos hoje</span>
+                    </div>
+                    <div class="tv-card orange">
+                        <strong id="tv-month">0</strong>
+                        <span>Recebidos no mês</span>
+                    </div>
+                    <div class="tv-card gold">
+                        <strong id="tv-year">0</strong>
+                        <span>Recebidos no ano</span>
+                    </div>
+                    <div class="tv-card green">
+                        <strong id="tv-unique">0</strong>
+                        <span>Ativos únicos</span>
+                    </div>
                 </div>
-                <div class="tv-card orange">
-                    <strong id="tv-month">0</strong>
-                    <span>Recebidos no mês</span>
+                <div class="tv-panels">
+                    <div class="tv-panel">
+                        <h2>Recebimentos por Categoria</h2>
+                        <div id="tv-categories"></div>
+                    </div>
+                    <div class="tv-panel">
+                        <h2>Distribuição por Status</h2>
+                        <div id="tv-status"></div>
+                    </div>
                 </div>
-                <div class="tv-card gold">
-                    <strong id="tv-year">0</strong>
-                    <span>Recebidos no ano</span>
-                </div>
-                <div class="tv-card green">
-                    <strong id="tv-unique">0</strong>
-                    <span>Ativos únicos</span>
-                </div>
-            </div>
-            <div class="tv-panels">
-                <div class="tv-panel">
-                    <h2>Recebimentos por Categoria</h2>
-                    <div id="tv-categories"></div>
-                </div>
-                <div class="tv-panel">
-                    <h2>Distribuição por Status</h2>
-                    <div id="tv-status"></div>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <section class="tv-table-panel">
-            <div class="tv-update" id="tv-update">Última atualização: --:--</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Hora</th>
-                        <th>Imobilizado</th>
-                        <th>Descrição</th>
-                        <th>Categoria</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="tv-rows"></tbody>
-            </table>
-        </section>
+            <section class="tv-table-panel">
+                <div class="tv-update" id="tv-update">Última atualização: --:--</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Imobilizado</th>
+                            <th>Descrição</th>
+                            <th>Categoria</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tv-rows"></tbody>
+                </table>
+            </section>
+        </div>
+
+        <!-- Screen 2: Indicadores (Cockpit Spare) -->
+        <div class="tv-screen" id="screen-indic">
+            <section class="ind-grid">
+                <div class="ind-section">
+                    <h2>Chamados Resolvidos</h2>
+                    <div id="ind-tickets">
+                        <div class="ind-no-data">Dados não disponíveis. Atualize pelo módulo ServiceNow > Relatórios.</div>
+                    </div>
+                </div>
+                <div class="ind-section">
+                    <h2>Conformidade SLA</h2>
+                    <div id="ind-sla">
+                        <div class="ind-no-data">Dados não disponíveis. Atualize pelo módulo ServiceNow > Relatórios.</div>
+                    </div>
+                </div>
+                <div class="ind-section">
+                    <h2>TMA — Coletores</h2>
+                    <div id="ind-tma-col">
+                        <div class="ind-no-data">Dados não disponíveis.</div>
+                    </div>
+                </div>
+                <div class="ind-section">
+                    <h2>TMA — SLEDs</h2>
+                    <div id="ind-tma-sled">
+                        <div class="ind-no-data">Dados não disponíveis.</div>
+                    </div>
+                </div>
+            </section>
+            <div style="text-align:center;padding:12px 0;color:var(--text-secondary);font-size:14px" id="ind-updated">
+                Cockpit Spare — Indicadores ServiceNow
+            </div>
+        </div>
     </main>
 
     <script>
@@ -224,12 +356,103 @@
 
         var COLORS = ['#246F68', '#AB4807', '#C79105', '#198754', '#0D6EFD', '#9333EA'];
 
+        // Screen rotation
+        var currentScreen = 0;
+        var screens = ['screen-receb', 'screen-indic'];
+        var labels = [
+            { text: 'Recebimento', cls: 'receb' },
+            { text: 'Indicadores', cls: 'indic' }
+        ];
+        var SCREEN_INTERVAL = 30000; // 30 seconds per screen
+
+        function switchScreen() {
+            document.getElementById(screens[currentScreen]).classList.remove('active');
+            currentScreen = (currentScreen + 1) % screens.length;
+            document.getElementById(screens[currentScreen]).classList.add('active');
+
+            var lbl = $('#tv-screen-label');
+            lbl.textContent = labels[currentScreen].text;
+            lbl.className = 'tv-screen-label ' + labels[currentScreen].cls;
+        }
+
+        setInterval(switchScreen, SCREEN_INTERVAL);
+
         function clock() {
             var d = new Date();
             $('#tv-clock').textContent = d.toLocaleTimeString('pt-BR');
             $('#tv-date').textContent = d.toLocaleDateString('pt-BR', {
                 weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
             });
+        }
+
+        function renderIndicadores(ind) {
+            if (!ind) return;
+
+            // Tickets
+            var tickEl = document.getElementById('ind-tickets');
+            tickEl.innerHTML =
+                '<div style="text-align:center;margin-bottom:16px">' +
+                    '<div class="ind-big" style="color:#246F68">' + (ind.tickets_resolved || 0) + '</div>' +
+                    '<div class="ind-label">Resolvidos no Ano</div>' +
+                '</div>';
+
+            // SLA
+            var slaEl = document.getElementById('ind-sla');
+            var pct = ind.sla_compliance_pct || 0;
+            var pctColor = pct >= 90 ? '#198754' : pct >= 70 ? '#C79105' : '#dc2626';
+            slaEl.innerHTML =
+                '<div style="text-align:center;margin-bottom:12px">' +
+                    '<div class="ind-big" style="color:' + pctColor + '">' + pct + '%</div>' +
+                    '<div class="ind-label">Conformidade</div>' +
+                '</div>' +
+                '<div class="ind-progress-bar">' +
+                    '<div class="ind-progress-fill" style="width:' + Math.min(pct, 100) + '%;background:' + pctColor + '"></div>' +
+                '</div>' +
+                '<div class="ind-stats-row">' +
+                    '<div class="ind-stat"><div class="ind-stat-val" style="color:#198754">' + (ind.sla_met || 0) + '</div>' +
+                        '<div class="ind-stat-lbl">Dentro</div></div>' +
+                    '<div class="ind-stat"><div class="ind-stat-val" style="color:#dc2626">' + (ind.sla_breached || 0) + '</div>' +
+                        '<div class="ind-stat-lbl">Violados</div></div>' +
+                    '<div class="ind-stat"><div class="ind-stat-val">' + (ind.sla_total || 0) + '</div>' +
+                        '<div class="ind-stat-lbl">Total</div></div>' +
+                '</div>';
+
+            // TMA Coletores
+            var tma = ind.tma || {};
+            var colEl = document.getElementById('ind-tma-col');
+            if (tma.coletor) {
+                colEl.innerHTML =
+                    '<div style="text-align:center">' +
+                        '<div class="ind-big" style="color:#246F68">' + tma.coletor.avg_hours + 'h</div>' +
+                        '<div class="ind-label">Tempo Médio</div>' +
+                        '<div style="color:var(--text-secondary);font-size:16px;margin-top:8px">' +
+                            tma.coletor.count + ' chamados</div>' +
+                    '</div>';
+            } else {
+                colEl.innerHTML = '<div class="ind-no-data">Sem dados de coletores.</div>';
+            }
+
+            // TMA SLEDs
+            var sledEl = document.getElementById('ind-tma-sled');
+            if (tma.sled) {
+                sledEl.innerHTML =
+                    '<div style="text-align:center">' +
+                        '<div class="ind-big" style="color:#AB4807">' + tma.sled.avg_hours + 'h</div>' +
+                        '<div class="ind-label">Tempo Médio</div>' +
+                        '<div style="color:var(--text-secondary);font-size:16px;margin-top:8px">' +
+                            tma.sled.count + ' chamados</div>' +
+                    '</div>';
+            } else {
+                sledEl.innerHTML = '<div class="ind-no-data">Sem dados de SLEDs.</div>';
+            }
+
+            // Updated time
+            if (ind.updated_at) {
+                var dt = new Date(ind.updated_at);
+                document.getElementById('ind-updated').textContent =
+                    'Cockpit Spare — Atualizado em ' + dt.toLocaleDateString('pt-BR') +
+                    ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            }
         }
 
         async function load() {
@@ -281,6 +504,11 @@
 
                 $('#tv-update').textContent = 'Última atualização: ' +
                     new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                // Render indicators if available
+                if (d.indicadores) {
+                    renderIndicadores(d.indicadores);
+                }
 
                 clearTimeout(timer);
                 timer = setTimeout(load, (d.config.interval || 60) * 1000);

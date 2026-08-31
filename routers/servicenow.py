@@ -832,3 +832,417 @@ def count_incidents(
         total += count
 
     return {"queue": queue, "total": total, "by_state": by_state}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SAÍDA DE ESTOQUE — busca e movimentação de ativos no alm_hardware
+# ═══════════════════════════════════════════════════════════════════
+
+VALID_STOCKROOMS = ["SPARE-ADM15", "SPARE-CD324", "SPARE-CD504"]
+
+
+class SaidaSearchIn(BaseModel):
+    asset_tag: str = ""
+    serial_number: str = ""
+    stockroom: str = ""
+
+
+class SaidaMovIn(BaseModel):
+    sys_id: str
+    destination_stockroom: str = ""
+    install_status: str = "In transit"
+    notes: str = ""
+
+
+@router.post("/saida/search")
+def saida_search(body: SaidaSearchIn, req: Request):
+    """Busca ativo no alm_hardware por asset_tag OU serial_number, filtrando por stockroom."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    if not body.asset_tag and not body.serial_number:
+        raise HTTPException(400, "Informe Asset Tag ou Número de Série.")
+
+    query_parts = []
+    if body.asset_tag and body.serial_number:
+        query_parts.append(f"asset_tag={body.asset_tag}^ORserial_number={body.serial_number}")
+    elif body.asset_tag:
+        query_parts.append(f"asset_tag={body.asset_tag}")
+    else:
+        query_parts.append(f"serial_number={body.serial_number}")
+
+    if body.stockroom:
+        query_parts.append(f"stockroom.name={body.stockroom}")
+    else:
+        sr_filter = "^OR".join(f"stockroom.name={s}" for s in VALID_STOCKROOMS)
+        query_parts.append(sr_filter)
+
+    sn_query = "^".join(query_parts)
+
+    fields = (
+        "sys_id,asset_tag,serial_number,display_name,model,model_category,"
+        "company,stockroom,install_status,substatus,assigned_to,"
+        "location,cost,purchase_date"
+    )
+
+    url = (
+        f"{SERVICENOW_BASE}/api/now/table/{HARDWARE_TABLE}"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_fields={fields}"
+        f"&sysparm_limit=20"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+    data = r.json()
+    return {"assets": data.get("result", [])}
+
+
+@router.post("/saida/move")
+def saida_move(body: SaidaMovIn, req: Request):
+    """Atualiza status/stockroom de um ativo (saída de estoque)."""
+    require_permission(req, "servicenow", "edit")
+    session = _sn_session_from_portal(req)
+
+    if not body.sys_id:
+        raise HTTPException(400, "sys_id obrigatório.")
+
+    update = {"install_status": INSTALL_STATUS_MAP.get(body.install_status.lower(), body.install_status)}
+    if body.destination_stockroom:
+        cache = {}
+        _, BS = _get_http()
+        sr_id = _lookup_reference(session, "stockroom", body.destination_stockroom, cache, BS)
+        update["stockroom"] = sr_id
+    if body.notes:
+        update["work_notes"] = body.notes
+
+    url = f"{SERVICENOW_BASE}/api/now/table/{HARDWARE_TABLE}/{body.sys_id}"
+    try:
+        r = session.patch(url, json=update, headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+    if r.status_code not in (200, 204):
+        raise HTTPException(502, f"ServiceNow retornou {r.status_code}: {r.text[:200]}")
+
+    return {"ok": True, "message": "Ativo atualizado com sucesso."}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CHAMADOS CORREIOS — busca incidentes com correlation_display
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/chamados-correios")
+def chamados_correios(
+    req: Request,
+    queue: str = DEFAULT_QUEUE,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Lista incidentes com código de rastreio no correlation_display."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    sn_query = (
+        f"assignment_group.name={queue}"
+        f"^correlation_displayISNOTEMPTY"
+        f"^ORDERBYDESCsys_created_on"
+    )
+
+    fields = (
+        "sys_id,number,short_description,state,priority,"
+        "correlation_display,caller_id,opened_at,resolved_at,closed_at"
+    )
+
+    url = (
+        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_fields={fields}"
+        f"&sysparm_limit={min(limit, 200)}"
+        f"&sysparm_offset={offset}"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+    data = r.json()
+    incidents = data.get("result", [])
+    total = int(r.headers.get("X-Total-Count", len(incidents)))
+
+    return {"incidents": incidents, "total": total}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RELATÓRIOS — métricas de desempenho (task_sla, incident_sla, incident)
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/relatorios/tickets")
+def relatorios_tickets(req: Request, queue: str = DEFAULT_QUEUE):
+    """Chamados resolvidos nos últimos 12 meses (task_sla).
+    Filters: Assignment Group, Task Closed this year, Task State not Canceled.
+    Groups by month for chart display."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    year = datetime.now().year
+
+    sn_query = (
+        f"task.assignment_group.name={queue}"
+        f"^task.closed_atONThis year@javascript:gs.beginningOfThisYear()@javascript:gs.endOfThisYear()"
+        f"^task.stateNOT IN8"
+    )
+
+    # Try Stats API grouped by month
+    url = (
+        f"{SERVICENOW_BASE}/api/now/stats/task_sla"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_count=true"
+        f"&sysparm_group_by=task.closed_at"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+
+    # Fallback: just get the total count
+    total_url = (
+        f"{SERVICENOW_BASE}/api/now/table/task_sla"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_limit=1"
+        f"&sysparm_fields=sys_id"
+    )
+    try:
+        r2 = session.get(total_url, timeout=30)
+        total = int(r2.headers.get("X-Total-Count", 0))
+    except Exception:
+        total = 0
+
+    by_month = {}
+    if r.status_code == 200:
+        try:
+            data = r.json()
+            for item in data.get("result", []):
+                gf = item.get("groupby_fields", [{}])
+                label = gf[0].get("display_value", "") if gf else ""
+                count = int(item.get("stats", {}).get("count", 0))
+                if label:
+                    by_month[label] = count
+        except Exception:
+            pass
+
+    return {"total": total, "by_month": by_month, "year": year, "queue": queue}
+
+
+@router.get("/relatorios/sla")
+def relatorios_sla(req: Request, queue: str = DEFAULT_QUEUE):
+    """SLA compliance (incident_sla).
+    Filters: Assignment group, SLA definition P1-P5 TI_N2_FLD_RNR_CD464_SPARE,
+    Business elapsed percentage >= 100 (breached)."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    sla_definitions = [
+        "P1 TI_N2_FLD_RNR_CD464_SPARE",
+        "P2 TI_N2_FLD_RNR_CD464_SPARE",
+        "P3 TI_N2_FLD_RNR_CD464_SPARE",
+        "P4 TI_N2_FLD_RNR_CD464_SPARE",
+        "P5 TI_N2_FLD_RNR_CD464_SPARE",
+    ]
+    sla_filter = "^OR".join(f"sla.name={d}" for d in sla_definitions)
+
+    # Total SLAs for the group
+    total_query = (
+        f"task.assignment_group.name={queue}"
+        f"^{sla_filter}"
+    )
+    total_url = (
+        f"{SERVICENOW_BASE}/api/now/table/incident_sla"
+        f"?sysparm_query={total_query}"
+        f"&sysparm_limit=1"
+        f"&sysparm_fields=sys_id"
+    )
+
+    # Breached SLAs (percentage >= 100)
+    breach_query = (
+        f"task.assignment_group.name={queue}"
+        f"^{sla_filter}"
+        f"^business_percentage>=100"
+    )
+    breach_url = (
+        f"{SERVICENOW_BASE}/api/now/table/incident_sla"
+        f"?sysparm_query={breach_query}"
+        f"&sysparm_limit=1"
+        f"&sysparm_fields=sys_id"
+    )
+
+    total = 0
+    breached = 0
+    try:
+        r1 = session.get(total_url, timeout=30)
+        if r1.status_code == 200:
+            total = int(r1.headers.get("X-Total-Count", 0))
+
+        r2 = session.get(breach_url, timeout=30)
+        if r2.status_code == 200:
+            breached = int(r2.headers.get("X-Total-Count", 0))
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão: {e}")
+
+    met = total - breached
+    pct = round((met / total * 100), 1) if total > 0 else 0
+
+    # Per-priority breakdown
+    by_priority = {}
+    for sla_def in sla_definitions:
+        prio = sla_def.split()[0]  # P1, P2, etc.
+        pq = f"task.assignment_group.name={queue}^sla.name={sla_def}"
+        bq = f"{pq}^business_percentage>=100"
+        try:
+            rt = session.get(
+                f"{SERVICENOW_BASE}/api/now/table/incident_sla"
+                f"?sysparm_query={pq}&sysparm_limit=1&sysparm_fields=sys_id",
+                timeout=15,
+            )
+            rb = session.get(
+                f"{SERVICENOW_BASE}/api/now/table/incident_sla"
+                f"?sysparm_query={bq}&sysparm_limit=1&sysparm_fields=sys_id",
+                timeout=15,
+            )
+            pt = int(rt.headers.get("X-Total-Count", 0))
+            pb = int(rb.headers.get("X-Total-Count", 0))
+            by_priority[prio] = {"total": pt, "breached": pb, "met": pt - pb}
+        except Exception:
+            by_priority[prio] = {"total": 0, "breached": 0, "met": 0}
+
+    return {
+        "total": total,
+        "breached": breached,
+        "met": met,
+        "compliance_pct": pct,
+        "by_priority": by_priority,
+        "queue": queue,
+    }
+
+
+@router.get("/relatorios/tma")
+def relatorios_tma(req: Request, queue: str = DEFAULT_QUEUE):
+    """TMA para Coletores e SLEDs (incident table).
+    Filters: Assignment group, Subcategory in sled/RFID sled/coletor.
+    Calculates avg time between reassignment_count (bouncing) and closed_at."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    categories = {
+        "coletor": "subcategory=coletor",
+        "sled": "subcategoryINsled,rfid sled,RFID sled",
+    }
+
+    results = {}
+    for cat_key, cat_filter in categories.items():
+        sn_query = (
+            f"assignment_group.name={queue}"
+            f"^{cat_filter}"
+            f"^closed_atISNOTEMPTY"
+            f"^opened_atISNOTEMPTY"
+        )
+
+        fields = "sys_id,number,opened_at,closed_at,reassignment_count,subcategory"
+
+        url = (
+            f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
+            f"?sysparm_query={sn_query}"
+            f"&sysparm_fields={fields}"
+            f"&sysparm_limit=500"
+        )
+
+        try:
+            r = session.get(url, timeout=30)
+        except Exception as e:
+            results[cat_key] = {"count": 0, "avg_hours": 0, "error": str(e)}
+            continue
+
+        if r.status_code != 200:
+            results[cat_key] = {"count": 0, "avg_hours": 0, "error": f"HTTP {r.status_code}"}
+            continue
+
+        incidents = r.json().get("result", [])
+        total_hours = 0
+        valid = 0
+        for inc in incidents:
+            try:
+                opened = datetime.strptime(inc["opened_at"], "%Y-%m-%d %H:%M:%S")
+                closed = datetime.strptime(inc["closed_at"], "%Y-%m-%d %H:%M:%S")
+                diff = (closed - opened).total_seconds() / 3600
+                if diff > 0:
+                    total_hours += diff
+                    valid += 1
+            except (ValueError, KeyError):
+                continue
+
+        avg = round(total_hours / valid, 1) if valid > 0 else 0
+        total_count = int(r.headers.get("X-Total-Count", len(incidents)))
+        results[cat_key] = {"count": total_count, "sample": valid, "avg_hours": avg}
+
+    return {"tma": results, "queue": queue}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RELATÓRIOS — cache para TV (salva dados em Setting)
+# ═══════════════════════════════════════════════════════════════════
+
+@router.post("/relatorios/refresh-tv")
+def refresh_tv_cache(req: Request):
+    """Busca todos os relatórios e salva cache para o TV display."""
+    require_permission(req, "servicenow", "view")
+
+    tickets = relatorios_tickets(req)
+    sla = relatorios_sla(req)
+    tma = relatorios_tma(req)
+
+    cache_data = {
+        "tickets_resolved": tickets["total"],
+        "tickets_by_month": tickets["by_month"],
+        "sla_compliance_pct": sla["compliance_pct"],
+        "sla_total": sla["total"],
+        "sla_breached": sla["breached"],
+        "sla_met": sla["met"],
+        "sla_by_priority": sla["by_priority"],
+        "tma": tma["tma"],
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    with SessionLocal.begin() as s:
+        row = s.get(Setting, "sn_tv_cache")
+        if row:
+            row.value = cache_data
+        else:
+            s.add(Setting(key="sn_tv_cache", value=cache_data))
+
+    return {"ok": True, "data": cache_data}
