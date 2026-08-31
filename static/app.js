@@ -87,7 +87,12 @@
             try { d = await r.json(); } catch (_) { d = { detail: r.statusText }; }
             var msg = d.detail || 'Erro na requisição.';
             if (r.status === 401 && !url.match(/\/auth\/login/)) {
-                showLogin();
+                try {
+                    var chk = await fetch(API + '/auth/me', { credentials: 'include' });
+                    if (!chk.ok) showLogin();
+                } catch (_) {
+                    showLogin();
+                }
             }
             throw new Error(msg);
         }
