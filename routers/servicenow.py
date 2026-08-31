@@ -983,6 +983,13 @@ def chamados_correios(
 
     all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 500), offset)
 
+    print(f"[CHAMADOS-CORREIOS] Query: {sn_query}")
+    print(f"[CHAMADOS-CORREIOS] Total retornado do SN: {len(all_incidents)}")
+    for i, inc in enumerate(all_incidents[:10]):
+        cd = inc.get("correlation_display", "(campo ausente)")
+        num = inc.get("number", "?")
+        print(f"  [{i}] {num} | correlation_display={cd!r} | tipo={type(cd).__name__}")
+
     incidents = []
     for inc in all_incidents:
         tracking = _extract_tracking_code(inc)
@@ -990,6 +997,7 @@ def chamados_correios(
             inc["_tracking_code"] = tracking
             incidents.append(inc)
 
+    print(f"[CHAMADOS-CORREIOS] Após filtro regex: {len(incidents)} incidentes com rastreio")
     return {"incidents": incidents, "total": len(incidents)}
 
 
