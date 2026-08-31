@@ -512,8 +512,8 @@ async function renderCorreiosConfig(c, S) {
             cartao_postagem: document.getElementById('cor-cartao').value.trim(),
             ambiente: 'producao'
         };
-        if (!payload.usuario || !payload.senha_componente || !payload.cartao_postagem) {
-            S.toast('Preencha Usuário, Senha de acesso e Cartão de postagem.', 'error');
+        if (!payload.usuario || !payload.senha_componente) {
+            S.toast('Preencha Usuário e Senha de acesso.', 'error');
             return;
         }
         await S.api('/parametros/config/correios', { method: 'PUT', body: payload });

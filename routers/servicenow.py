@@ -1241,8 +1241,8 @@ def _get_correios_config():
         if not row or not row.value:
             raise HTTPException(400, "API dos Correios não configurada. Vá em Parâmetros > Correios API.")
         cfg = row.value
-        if not cfg.get("usuario") or not cfg.get("senha_componente") or not cfg.get("cartao_postagem"):
-            raise HTTPException(400, "Configuração dos Correios incompleta.")
+        if not cfg.get("usuario") or not cfg.get("senha_componente"):
+            raise HTTPException(400, "Configuração dos Correios incompleta (usuário e senha de acesso são obrigatórios).")
         return cfg
 
 
@@ -1261,10 +1261,14 @@ def _correios_authenticate(cfg: dict) -> str:
         f"{cfg['usuario']}:{cfg['senha_componente']}".encode()
     ).decode()
 
+    body = {}
+    if cfg.get("cartao_postagem"):
+        body["numero"] = cfg["cartao_postagem"]
+
     try:
         r = _req.post(
             urls["token"],
-            json={"numero": cfg["cartao_postagem"]},
+            json=body,
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Basic {credentials}",
