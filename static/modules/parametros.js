@@ -492,18 +492,11 @@ async function renderCorreiosConfig(c, S) {
     var body = S.el('div', { className: 'card-body' });
 
     var form = S.el('div', { className: 'form-grid cols-2' });
-    form.appendChild(_pField('Usuário (Meu Correios)', 'cor-usuario', d.usuario || ''));
-    form.appendChild(_pField('Senha do componente', 'cor-senha', d.senha_componente || '', 'password'));
+    form.appendChild(_pField('Usuário', 'cor-usuario', d.usuario || ''));
+    form.appendChild(_pField('Senha de acesso (chave)', 'cor-senha', d.senha_componente || '', 'password'));
+    form.appendChild(_pField('Contrato', 'cor-contrato', d.contrato || ''));
+    form.appendChild(_pField('DR (Diretoria Regional)', 'cor-dr', d.dr || ''));
     form.appendChild(_pField('Cartão de postagem', 'cor-cartao', d.cartao_postagem || ''));
-
-    var ambGroup = S.el('div', { className: 'form-group' });
-    ambGroup.innerHTML =
-        '<label>Ambiente</label>' +
-        '<select id="cor-ambiente" class="form-control">' +
-            '<option value="producao"' + (d.ambiente !== 'homologacao' ? ' selected' : '') + '>Produção</option>' +
-            '<option value="homologacao"' + (d.ambiente === 'homologacao' ? ' selected' : '') + '>Homologação</option>' +
-        '</select>';
-    form.appendChild(ambGroup);
 
     body.appendChild(form);
 
@@ -514,11 +507,13 @@ async function renderCorreiosConfig(c, S) {
         var payload = {
             usuario: document.getElementById('cor-usuario').value.trim(),
             senha_componente: document.getElementById('cor-senha').value,
+            contrato: document.getElementById('cor-contrato').value.trim(),
+            dr: document.getElementById('cor-dr').value.trim(),
             cartao_postagem: document.getElementById('cor-cartao').value.trim(),
-            ambiente: document.getElementById('cor-ambiente').value
+            ambiente: 'producao'
         };
         if (!payload.usuario || !payload.senha_componente || !payload.cartao_postagem) {
-            S.toast('Preencha todos os campos obrigatórios.', 'error');
+            S.toast('Preencha Usuário, Senha de acesso e Cartão de postagem.', 'error');
             return;
         }
         await S.api('/parametros/config/correios', { method: 'PUT', body: payload });
@@ -549,14 +544,14 @@ async function renderCorreiosConfig(c, S) {
     var info = S.el('div', { className: 'card mt-3' });
     info.innerHTML =
         '<div class="card-body">' +
-            '<h3 style="margin:0 0 8px">Como obter as credenciais</h3>' +
-            '<ol style="margin:0;padding-left:20px;color:var(--text-secondary)">' +
-                '<li>Acesse <strong>Meu Correios</strong> e crie ou acesse sua conta PJ</li>' +
-                '<li>No painel, acesse <strong>API dos Correios</strong></li>' +
-                '<li>Copie o <strong>usuário</strong> (e-mail cadastrado)</li>' +
-                '<li>Gere a <strong>senha do componente</strong> (diferente da senha de login)</li>' +
-                '<li>Copie o número do <strong>cartão de postagem</strong> ativo</li>' +
-            '</ol>' +
+            '<h3 style="margin:0 0 8px">Dados necessários</h3>' +
+            '<ul style="margin:0;padding-left:20px;color:var(--text-secondary)">' +
+                '<li><strong>Usuário</strong> — fornecido pelo contrato dos Correios</li>' +
+                '<li><strong>Senha de acesso</strong> — chave de acesso da API (não é a senha de login)</li>' +
+                '<li><strong>Contrato</strong> — número do contrato com os Correios</li>' +
+                '<li><strong>DR</strong> — Diretoria Regional vinculada ao contrato</li>' +
+                '<li><strong>Cartão de postagem</strong> — número do cartão de postagem ativo</li>' +
+            '</ul>' +
         '</div>';
     c.appendChild(info);
 }
