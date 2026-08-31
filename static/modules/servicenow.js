@@ -876,6 +876,18 @@ function _snRenderCorreios(container, S) {
                 }
                 html += '</div>';
 
+                // Info do objeto
+                if (d.tipo || d.dt_prevista) {
+                    html += '<div style="margin-top:16px;padding:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.9rem">' +
+                        '<div style="display:flex;gap:24px;flex-wrap:wrap">' +
+                            (d.tipo ? '<div><span style="color:var(--text-secondary)">Tipo:</span> <strong>' + S.esc(d.tipo) + '</strong>' +
+                                (d.tipo_nome ? ' — ' + S.esc(d.tipo_nome) : '') + '</div>' : '') +
+                            (d.tipo_categoria ? '<div><span style="color:var(--text-secondary)">Categoria:</span> ' + S.esc(d.tipo_categoria) + '</div>' : '') +
+                            (d.dt_prevista ? '<div><span style="color:var(--text-secondary)">Previsão de entrega:</span> ' + S.esc(d.dt_prevista) + '</div>' : '') +
+                        '</div>' +
+                    '</div>';
+                }
+
                 // Comprovante de entrega
                 if (d.entrega && d.entrega.entregue) {
                     var ent = d.entrega;
@@ -895,15 +907,98 @@ function _snRenderCorreios(container, S) {
                             '<div><span style="color:var(--text-secondary)">Data:</span> ' + entDt + '</div>' +
                             (ent.recebedor_nome ? '<div><span style="color:var(--text-secondary)">Recebedor:</span> <strong>' + S.esc(ent.recebedor_nome) + '</strong></div>' : '') +
                             (ent.recebedor_documento ? '<div><span style="color:var(--text-secondary)">Documento:</span> ' + S.esc(ent.recebedor_documento) + '</div>' : '') +
+                            (ent.recebedor_celular ? '<div><span style="color:var(--text-secondary)">Celular:</span> ' + S.esc(ent.recebedor_celular) + '</div>' : '') +
+                            (ent.recebedor_email ? '<div><span style="color:var(--text-secondary)">Email:</span> ' + S.esc(ent.recebedor_email) + '</div>' : '') +
                             (ent.local_entrega ? '<div><span style="color:var(--text-secondary)">Local:</span> ' + S.esc(ent.local_entrega) + '</div>' : '') +
                             (ent.destino ? '<div><span style="color:var(--text-secondary)">Destino:</span> ' + S.esc(ent.destino) + '</div>' : '') +
                             (ent.detalhe ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Detalhe:</span> ' + S.esc(ent.detalhe) + '</div>' : '') +
                             (ent.recebedor_comentario ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Obs:</span> ' + S.esc(ent.recebedor_comentario) + '</div>' : '') +
                         '</div>' +
+                        '<div style="margin-top:12px">' +
+                            '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:#198754;border-color:#198754">' +
+                                'Buscar AR Eletrônico / Imagem</button>' +
+                            '<div id="co-ar-result" style="margin-top:8px"></div>' +
+                        '</div>' +
                     '</div>';
                 }
 
                 body.innerHTML = html;
+
+                // Bind AR button
+                var arBtn = document.getElementById('co-ar-btn');
+                if (arBtn) {
+                    arBtn.onclick = function () {
+                        arBtn.disabled = true;
+                        arBtn.textContent = 'Buscando...';
+                        var arResult = document.getElementById('co-ar-result');
+                        S.api('/servicenow/correios/comprovante/' + encodeURIComponent(codigo))
+                            .then(function (ar) {
+                                if (!ar.encontrado) {
+                                    arResult.innerHTML = '<div style="color:var(--text-secondary);font-size:.85rem">' +
+                                        S.esc(ar.mensagem || 'Comprovante não disponível.') + '</div>';
+                                    return;
+                                }
+                                var comp = ar.comprovante || {};
+                                var arHtml = '<div style="font-size:.9rem">';
+                                if (comp.imagem) {
+                                    arHtml += '<div style="margin-bottom:8px"><img src="data:image/jpeg;base64,' + comp.imagem +
+                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                }
+                                if (comp.assinatura) {
+                                    arHtml += '<div style="margin-bottom:8px"><strong>Assinatura:</strong><br>' +
+                                        '<img src="data:image/png;base64,' + comp.assinatura +
+                                        '" style="max-width:300px;border:1px solid #333;border-radius:4px" /></div>';
+                                }
+                                if (comp.nome) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Nome:</span> ' + S.esc(comp.nome) + '</div>';
+                                }
+                                if (comp.documento) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Documento:</span> ' + S.esc(comp.documento) + '</div>';
+                                }
+                                if (comp.dataRecebimento) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Data recebimento:</span> ' + S.esc(comp.dataRecebimento) + '</div>';
+                                }
+                                // Handle nested objects/arrays from v3
+                                if (comp.objetos) {
+                                    var objs = Array.isArray(comp.objetos) ? comp.objetos : [comp.objetos];
+                                    for (var oi = 0; oi < objs.length; oi++) {
+                                        var o = objs[oi];
+                                        if (o.imagens) {
+                                            var imgs = Array.isArray(o.imagens) ? o.imagens : [o.imagens];
+                                            for (var ii = 0; ii < imgs.length; ii++) {
+                                                var img = imgs[ii];
+                                                if (typeof img === 'string') {
+                                                    arHtml += '<div style="margin:8px 0"><img src="data:image/jpeg;base64,' + img +
+                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                } else if (img.conteudo) {
+                                                    arHtml += '<div style="margin:8px 0"><img src="data:' + (img.tipo || 'image/jpeg') + ';base64,' + img.conteudo +
+                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                }
+                                            }
+                                        }
+                                        if (o.recebedor) {
+                                            var rec = o.recebedor;
+                                            if (rec.nome) arHtml += '<div><span style="color:var(--text-secondary)">Recebedor:</span> ' + S.esc(rec.nome) + '</div>';
+                                            if (rec.documento) arHtml += '<div><span style="color:var(--text-secondary)">Documento:</span> ' + S.esc(rec.documento) + '</div>';
+                                        }
+                                    }
+                                }
+                                if (!arHtml.replace(/<div style="font-size:\.9rem">/, '')) {
+                                    arHtml += '<div style="color:var(--text-secondary)">Dados retornados: ' +
+                                        S.esc(JSON.stringify(comp).substring(0, 500)) + '</div>';
+                                }
+                                arHtml += '</div>';
+                                arResult.innerHTML = arHtml;
+                            })
+                            .catch(function (e) {
+                                arResult.innerHTML = '<div style="color:#dc2626;font-size:.85rem">' + S.esc(e.message) + '</div>';
+                            })
+                            .finally(function () {
+                                arBtn.disabled = false;
+                                arBtn.textContent = 'Buscar AR Eletrônico / Imagem';
+                            });
+                    };
+                }
             })
             .catch(function (e) {
                 body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';

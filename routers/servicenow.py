@@ -972,8 +972,8 @@ def chamados_correios(
 
     sn_query = (
         f"assignment_group.name={queue}"
-        f"^correlation_idISNOTEMPTY"
-        f"^ORcorrelation_displayISNOTEMPTY"
+        f"^correlation_displayISNOTEMPTY"
+        f"^correlation_displayNOT LIKEAG.%"
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -1224,11 +1224,11 @@ def refresh_tv_cache(req: Request):
 CORREIOS_URLS = {
     "producao": {
         "token": "https://api.correios.com.br/token/v1/autentica/cartaopostagem",
-        "rastro": "https://api.correios.com.br/srorastro/v1/objetos",
+        "rastro": "https://api.correios.com.br/srorastro/v3/objetos",
     },
     "homologacao": {
         "token": "https://apihom.correios.com.br/token/v1/autentica/cartaopostagem",
-        "rastro": "https://apihom.correios.com.br/srorastro/v1/objetos",
+        "rastro": "https://apihom.correios.com.br/srorastro/v3/objetos",
     },
 }
 
@@ -1304,37 +1304,11 @@ def correios_rastrear(codigo: str, req: Request):
     cfg = _get_correios_config()
     token = _correios_authenticate(cfg)
 
-    _req, _ = _get_http()
     ambiente = cfg.get("ambiente", "producao")
     urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
 
     url = f"{urls['rastro']}/{codigo}?resultado=T"
-    try:
-        r = _req.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-            },
-            timeout=30,
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
-
-    if r.status_code == 401:
-        _correios_token_cache.clear()
-        token = _correios_authenticate(cfg)
-        try:
-            r = _req.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/json",
-                },
-                timeout=30,
-            )
-        except Exception as e:
-            raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+    r = _correios_get(cfg, token, url)
 
     if r.status_code != 200:
         detail = r.text[:300] if r.text else str(r.status_code)
@@ -1348,6 +1322,9 @@ def correios_rastrear(codigo: str, req: Request):
     obj = objetos[0]
     eventos = []
     entrega = None
+
+    tipo_postal = obj.get("tipoPostal", {})
+    servico = obj.get("servico", {})
 
     for ev in obj.get("eventos", []):
         unidade = ev.get("unidade", {})
@@ -1368,9 +1345,13 @@ def correios_rastrear(codigo: str, req: Request):
             "local": local_str,
             "codigo": ev_code,
             "tipo": ev.get("tipo", ""),
+            "latitude": ev.get("latitude", ""),
+            "longitude": ev.get("longitude", ""),
+            "unidade": unidade.get("nome", ""),
+            "municipio": endereco.get("cidade", ""),
+            "uf": endereco.get("uf", ""),
         }
 
-        # BDE/BDI/BDR = eventos de entrega
         if ev_code in ("BDE", "BDI", "BDR") and not entrega:
             dest = ev.get("unidadeDestino", {})
             dest_end = dest.get("endereco", {})
@@ -1394,6 +1375,8 @@ def correios_rastrear(codigo: str, req: Request):
                 "destino": dest_local or None,
                 "recebedor_nome": recebedor.get("nome", "") if recebedor else "",
                 "recebedor_documento": recebedor.get("documento", "") if recebedor else "",
+                "recebedor_celular": recebedor.get("celular", "") if recebedor else "",
+                "recebedor_email": recebedor.get("email", "") if recebedor else "",
                 "recebedor_comentario": recebedor.get("comentario", "") if recebedor else "",
             }
 
@@ -1402,8 +1385,70 @@ def correios_rastrear(codigo: str, req: Request):
     return {
         "codigo": codigo,
         "encontrado": True,
+        "tipo": tipo_postal.get("sigla", ""),
+        "tipo_nome": tipo_postal.get("nome", ""),
+        "tipo_categoria": tipo_postal.get("categoria", ""),
+        "servico_codigo": servico.get("codigo", ""),
+        "dt_prevista": obj.get("dtPrevista", ""),
         "eventos": eventos,
         "entrega": entrega,
+    }
+
+
+def _correios_get(cfg, token, url):
+    """Helper to GET from Correios API with auto-retry on 401."""
+    _req, _ = _get_http()
+    try:
+        r = _req.get(url, headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+
+    if r.status_code == 401:
+        _correios_token_cache.clear()
+        token = _correios_authenticate(cfg)
+        try:
+            r = _req.get(url, headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            }, timeout=30)
+        except Exception as e:
+            raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+
+    return r
+
+
+@router.get("/correios/comprovante/{codigo}")
+def correios_comprovante(codigo: str, req: Request):
+    """Busca comprovante de entrega (AR eletrônico) de um objeto."""
+    require_permission(req, "servicenow", "view")
+
+    codigo = codigo.strip().upper()
+    if not codigo or len(codigo) < 10:
+        raise HTTPException(400, "Código de rastreamento inválido.")
+
+    cfg = _get_correios_config()
+    token = _correios_authenticate(cfg)
+
+    ambiente = cfg.get("ambiente", "producao")
+    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
+
+    url = f"{urls['rastro']}/{codigo}/entregas"
+    r = _correios_get(cfg, token, url)
+
+    if r.status_code == 404:
+        return {"codigo": codigo, "encontrado": False, "mensagem": "Comprovante não disponível."}
+    if r.status_code != 200:
+        detail = r.text[:300] if r.text else str(r.status_code)
+        raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
+
+    data = r.json()
+    return {
+        "codigo": codigo,
+        "encontrado": True,
+        "comprovante": data,
     }
 
 
