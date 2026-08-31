@@ -7,131 +7,131 @@ import time
 
 from fastapi import APIRouter, Request, HTTPException
 
-from database import SessionLocal, Setting
 from security import require_permission
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
 SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
+# Credenciais vêm do .env (fora do controle de versão).
+CORREIOS_USUARIO = os.environ.get("CORREIOS_USUARIO", "")
+CORREIOS_CHAVE = os.environ.get("CORREIOS_CHAVE", "")
+CORREIOS_CARTOES = [
+    c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()
+]
+CORREIOS_DR = os.environ.get("CORREIOS_DR", "64")
 
-def _get_correios_proxy():
-    """Retorna proxy para Correios. Usa config se definido, senão SN_PROXY."""
-    try:
-        with SessionLocal() as s:
-            row = s.get(Setting, "correios")
-            if row and row.value and row.value.get("proxy"):
-                p = row.value["proxy"].strip()
-                if p.lower() == "nenhum" or p == "":
-                    return None
-                return p
-    except Exception:
-        pass
-    return SN_PROXY
-
-CORREIOS_URLS = {
-    "producao": {
-        "token": "https://api.correios.com.br/token/v1/autentica",
-        "rastro": "https://api.correios.com.br/srorastro/v1/objetos",
-    },
-    "homologacao": {
-        "token": "https://apihom.correios.com.br/token/v1/autentica",
-        "rastro": "https://apihom.correios.com.br/srorastro/v1/objetos",
-    },
-}
+CORREIOS_BASE = "https://api.correios.com.br"
 
 _correios_token_cache: dict = {}
 
 
-def _get_correios_config():
-    with SessionLocal() as s:
-        row = s.get(Setting, "correios")
-        if not row or not row.value:
-            raise HTTPException(400, "API dos Correios não configurada. Vá em Parâmetros > Correios API.")
-        cfg = row.value
-        if not cfg.get("usuario") or not cfg.get("chave_acesso") or not cfg.get("contrato"):
-            raise HTTPException(400, "Configuração dos Correios incompleta (usuário, chave de acesso e contrato são obrigatórios).")
-        return cfg
-
-
-def _correios_authenticate(cfg: dict) -> str:
-    cached = _correios_token_cache.get("token")
-    cached_at = _correios_token_cache.get("obtained_at", 0)
-    if cached and (time.time() - cached_at) < 21600:
-        return cached
-
+def _correios_session(proxy=SN_PROXY):
     import requests as _req
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    credentials = base64.b64encode(
-        f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
-    ).decode()
-
     sess = _req.Session()
     sess.verify = False
-    proxy = _get_correios_proxy()
     if proxy:
         sess.proxies = {"https": proxy, "http": proxy}
+    return sess
 
-    try:
-        r = sess.post(
-            "https://api.correios.com.br/token/v1/autentica",
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/json",
-            },
-            timeout=30,
+
+def _correios_request(method: str, url: str, **kwargs):
+    """Faz request aos Correios tentando o proxy e, se falhar, conexão direta."""
+    tentativas = [SN_PROXY, None] if SN_PROXY else [None]
+    erros = []
+    for proxy in tentativas:
+        sess = _correios_session(proxy)
+        try:
+            return sess.request(method, url, timeout=30, **kwargs)
+        except Exception as e:
+            origem = f"proxy {proxy}" if proxy else "conexão direta"
+            erros.append(f"{origem}: {type(e).__name__}: {e}")
+        finally:
+            sess.close()
+    raise HTTPException(502, "Erro ao conectar com Correios — " + " | ".join(erros))
+
+
+def _check_credenciais():
+    if not CORREIOS_USUARIO or not CORREIOS_CHAVE:
+        raise HTTPException(
+            500,
+            "Credenciais dos Correios ausentes. Defina CORREIOS_USUARIO, "
+            "CORREIOS_CHAVE e CORREIOS_CARTOES no arquivo .env do servidor.",
         )
-    except Exception as e:
-        raise HTTPException(502, f"Erro ao conectar com Correios: {e}")
-    finally:
-        sess.close()
+
+
+def _correios_authenticate() -> str:
+    """Autentica com Correios em duas etapas: token básico + cartão de postagem."""
+    _check_credenciais()
+    cached = _correios_token_cache.get("token")
+    cached_at = _correios_token_cache.get("obtained_at", 0)
+    if cached and (time.time() - cached_at) < 3600:
+        return cached
+
+    # Etapa 1: autenticação básica
+    credentials = base64.b64encode(
+        f"{CORREIOS_USUARIO}:{CORREIOS_CHAVE}".encode()
+    ).decode()
+
+    r = _correios_request(
+        "POST",
+        f"{CORREIOS_BASE}/token/v1/autentica",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/json",
+        },
+    )
 
     if r.status_code not in (200, 201):
         detail = r.text[:300] if r.text else str(r.status_code)
-        raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
+        raise HTTPException(502, f"Correios auth falhou ({r.status_code}): {detail}")
 
-    data = r.json()
-    token = data.get("token")
-    if not token:
+    token_basico = r.json().get("token", "")
+    if not token_basico:
         raise HTTPException(502, "Resposta do Correios sem token.")
 
-    _correios_token_cache["token"] = token
+    # Etapa 2: autenticação com cartão de postagem
+    for cartao in CORREIOS_CARTOES:
+        try:
+            r_cp = _correios_request(
+                "POST",
+                f"{CORREIOS_BASE}/token/v1/autentica/cartaopostagem",
+                headers={
+                    "Authorization": f"Bearer {token_basico}",
+                    "Content-Type": "application/json",
+                },
+                json={"numero": cartao},
+            )
+        except HTTPException:
+            continue
+        if r_cp.status_code in (200, 201):
+            token_cp = r_cp.json().get("token", "")
+            if token_cp:
+                _correios_token_cache["token"] = token_cp
+                _correios_token_cache["obtained_at"] = time.time()
+                _correios_token_cache["cartao"] = cartao
+                return token_cp
+
+    # Fallback: usa token básico se nenhum cartão funcionou
+    _correios_token_cache["token"] = token_basico
     _correios_token_cache["obtained_at"] = time.time()
-    return token
+    _correios_token_cache["cartao"] = None
+    return token_basico
 
 
-def _correios_get(cfg, token, url):
-    import requests as _req
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+def _correios_get(token, url):
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    r = _correios_request("GET", url, headers=headers)
 
-    sess = _req.Session()
-    sess.verify = False
-    proxy = _get_correios_proxy()
-    if proxy:
-        sess.proxies = {"https": proxy, "http": proxy}
+    if r.status_code in (401, 403):
+        _correios_token_cache.clear()
+        token = _correios_authenticate()
+        headers["Authorization"] = f"Bearer {token}"
+        r = _correios_request("GET", url, headers=headers)
 
-    try:
-        r = sess.get(url, headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        }, timeout=30)
-
-        if r.status_code == 401:
-            _correios_token_cache.clear()
-            token = _correios_authenticate(cfg)
-            r = sess.get(url, headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-            }, timeout=30)
-
-        return r
-    except Exception as e:
-        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
-    finally:
-        sess.close()
+    return r
 
 
 @router.get("/correios/rastrear/{codigo}")
@@ -143,14 +143,9 @@ def correios_rastrear(codigo: str, req: Request):
     if not codigo or len(codigo) < 10:
         raise HTTPException(400, "Código de rastreamento inválido.")
 
-    cfg = _get_correios_config()
-    token = _correios_authenticate(cfg)
-
-    ambiente = cfg.get("ambiente", "producao")
-    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
-
-    url = f"{urls['rastro']}?codigosObjetos={codigo}&resultado=T"
-    r = _correios_get(cfg, token, url)
+    token = _correios_authenticate()
+    url = f"{CORREIOS_BASE}/srorastro/v1/objetos?codigosObjetos={codigo}&resultado=T"
+    r = _correios_get(token, url)
 
     if r.status_code != 200:
         detail = r.text[:300] if r.text else str(r.status_code)
@@ -192,8 +187,6 @@ def correios_rastrear(codigo: str, req: Request):
         }
 
         if ev_code in ("BDE", "BDI", "BDR") and not entrega:
-            dest = ev.get("unidadeDestino", {})
-            dest_end = dest.get("endereco", {}) if dest else {}
             recebedor = ev.get("recebedor", {})
             entrega = {
                 "entregue": True,
@@ -227,14 +220,9 @@ def correios_comprovante(codigo: str, req: Request):
     if not codigo or len(codigo) < 10:
         raise HTTPException(400, "Código de rastreamento inválido.")
 
-    cfg = _get_correios_config()
-    token = _correios_authenticate(cfg)
-
-    ambiente = cfg.get("ambiente", "producao")
-    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
-
-    url = f"{urls['rastro']}?codigosObjetos={codigo}&resultado=T"
-    r = _correios_get(cfg, token, url)
+    token = _correios_authenticate()
+    url = f"{CORREIOS_BASE}/srorastro/v1/objetos?codigosObjetos={codigo}&resultado=T"
+    r = _correios_get(token, url)
 
     if r.status_code == 404:
         return {"codigo": codigo, "encontrado": False, "mensagem": "Comprovante não disponível."}
@@ -278,121 +266,104 @@ def correios_rastrear_lote(body: dict, req: Request):
 
 @router.post("/correios/test")
 def correios_test(req: Request):
-    """Testa conexão com Correios mostrando detalhes completos de cada tentativa."""
+    """Testa conexão com Correios mostrando detalhes de cada etapa."""
     require_permission(req, "servicenow", "view")
-    cfg = _get_correios_config()
+    _check_credenciais()
     _correios_token_cache.clear()
 
-    import requests as _req
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    sess = _req.Session()
-    sess.verify = False
-    proxy = _get_correios_proxy()
-    if proxy:
-        sess.proxies = {"https": proxy, "http": proxy}
-
     credentials = base64.b64encode(
-        f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
+        f"{CORREIOS_USUARIO}:{CORREIOS_CHAVE}".encode()
     ).decode()
 
-    contrato = cfg.get("contrato", "")
-    proxy = _get_correios_proxy()
     result = {
         "config": {
-            "usuario": cfg["usuario"],
-            "contrato": contrato,
-            "proxy": proxy or "(nenhum / direto)",
-            "proxy_origem": cfg.get("proxy", "(usando SN_PROXY padrão)"),
+            "usuario": CORREIOS_USUARIO,
+            "cartoes": CORREIOS_CARTOES,
+            "proxy": SN_PROXY or "(direto)",
         }
     }
 
     try:
-        # 1) Autenticação básica
-        r = sess.post(
-            "https://api.correios.com.br/token/v1/autentica",
+        # 1) Auth básica
+        r = _correios_request(
+            "POST",
+            f"{CORREIOS_BASE}/token/v1/autentica",
             headers={
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/json",
             },
-            timeout=30,
         )
-        auth_data = r.json() if r.status_code in (200, 201) else {}
-        result["auth"] = {
+        result["1_auth_basica"] = {
             "status": r.status_code,
-            "url": r.url,
-            "response": r.text[:800],
+            "response": r.text[:600],
         }
         if r.status_code not in (200, 201):
             return result
 
-        token = auth_data.get("token", "")
-        cartao_postagem = auth_data.get("cartaoPostagem", "")
-        result["auth"]["cartao_postagem_retornado"] = cartao_postagem or "(nenhum)"
+        auth_data = r.json()
+        token_basico = auth_data.get("token", "")
+        result["1_auth_basica"]["cartao_retornado"] = auth_data.get("cartaoPostagem", "(nenhum)")
 
-        # 2) Autenticação com cartão de postagem (se retornado)
+        # 2) Auth com cada cartão de postagem
         token_cp = ""
-        if cartao_postagem:
-            r_cp = sess.post(
-                f"https://api.correios.com.br/token/v1/autentica/cartaopostagem",
+        cartao_ok = ""
+        for cartao in CORREIOS_CARTOES:
+            r_cp = _correios_request(
+                "POST",
+                f"{CORREIOS_BASE}/token/v1/autentica/cartaopostagem",
                 headers={
-                    "Authorization": f"Bearer {token}",
+                    "Authorization": f"Bearer {token_basico}",
                     "Content-Type": "application/json",
                 },
-                json={"numero": cartao_postagem},
-                timeout=30,
+                json={"numero": cartao},
             )
-            result["auth_cartao_postagem"] = {
+            result[f"2_cartao_{cartao}"] = {
                 "status": r_cp.status_code,
-                "url": r_cp.url,
-                "response": r_cp.text[:500],
+                "response": r_cp.text[:300],
             }
-            if r_cp.status_code in (200, 201):
-                cp_data = r_cp.json()
-                token_cp = cp_data.get("token", "")
+            if r_cp.status_code in (200, 201) and not token_cp:
+                token_cp = r_cp.json().get("token", "")
+                cartao_ok = cartao
 
         # 3) Rastreio com token básico
-        rastro_url = "https://api.correios.com.br/srorastro/v1/objetos?codigosObjetos=AD852897611BR&resultado=T"
+        rastro_url = f"{CORREIOS_BASE}/srorastro/v1/objetos?codigosObjetos=AD852897611BR&resultado=T"
 
-        r2 = sess.get(
+        r2 = _correios_request(
+            "GET",
             rastro_url,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            timeout=30,
+            headers={"Authorization": f"Bearer {token_basico}", "Accept": "application/json"},
         )
-        result["rastreio_token_basico"] = {
+        result["3_rastreio_token_basico"] = {
             "status": r2.status_code,
-            "url": r2.url,
-            "headers_enviados": {"Authorization": "Bearer <token_basico>", "Accept": "application/json"},
             "response": r2.text[:500],
         }
 
-        # 4) Rastreio com token do cartão de postagem (se obtido)
+        # 4) Rastreio com token do cartão
         if token_cp:
-            r3 = sess.get(
+            r3 = _correios_request(
+                "GET",
                 rastro_url,
                 headers={"Authorization": f"Bearer {token_cp}", "Accept": "application/json"},
-                timeout=30,
             )
-            result["rastreio_token_cartao"] = {
+            result["4_rastreio_token_cartao"] = {
                 "status": r3.status_code,
-                "url": r3.url,
+                "cartao_usado": cartao_ok,
                 "response": r3.text[:500],
             }
 
-        ok_basico = result["rastreio_token_basico"]["status"] == 200
-        ok_cartao = result.get("rastreio_token_cartao", {}).get("status") == 200
+        ok_basico = result["3_rastreio_token_basico"]["status"] == 200
+        ok_cartao = result.get("4_rastreio_token_cartao", {}).get("status") == 200
         result["ok"] = ok_basico or ok_cartao
-        if ok_cartao and not ok_basico:
-            result["message"] = "Rastreio funciona com token do cartão de postagem! Atualizando autenticação."
+        if ok_cartao:
+            result["message"] = f"Rastreio OK com cartão {cartao_ok}!"
         elif ok_basico:
-            result["message"] = "Rastreio funciona com token básico!"
+            result["message"] = "Rastreio OK com token básico!"
         else:
-            result["message"] = "Autenticação OK mas rastreio retornou erro em ambos os tokens."
+            result["message"] = "Auth OK mas rastreio falhou. Verifique permissões dos cartões."
 
+    except HTTPException as e:
+        result["erro"] = str(e.detail)
     except Exception as e:
-        result["erro"] = str(e)
-    finally:
-        sess.close()
+        result["erro"] = f"{type(e).__name__}: {e}"
 
     return result

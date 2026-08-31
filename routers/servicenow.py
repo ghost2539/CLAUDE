@@ -569,24 +569,69 @@ def list_statuses(req: Request):
 
 @router.post("/test-login")
 def test_login(body: TestLoginIn, req: Request):
-    """Testa conexão SSO com ServiceNow e salva cookies na sessão do portal."""
+    """Testa conexão SSO com ServiceNow e salva cookies na sessão do portal.
+
+    Tenta primeiro com o proxy configurado; se o proxy estiver inacessível,
+    repete a tentativa em conexão direta.
+    """
     sd = require_permission(req, "servicenow", "create")
     _req, BS = _get_http()
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
-    try:
-        ok = _login_sso(session, body.usuario, body.senha, _req, BS)
-    except Exception as e:
-        raise HTTPException(502, f"Erro SSO: {e}")
-    if not ok:
-        raise HTTPException(401, "Login SSO falhou — verifique usuário e senha.")
-    sd["sn_cookies"] = dict(session.cookies)
-    return {"ok": True, "message": "Conexão SSO com ServiceNow estabelecida."}
+
+    tentativas = [SN_PROXY, None] if SN_PROXY else [None]
+    erros = []
+
+    for proxy in tentativas:
+        session = _req.Session()
+        session.verify = False
+        if proxy:
+            session.proxies = {"https": proxy, "http": proxy}
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        origem = f"proxy {proxy}" if proxy else "conexão direta"
+        try:
+            ok = _login_sso(session, body.usuario, body.senha, _req, BS)
+        except Exception as e:
+            msg = f"{origem}: {type(e).__name__}: {e}"
+            print(f"[SSO] Falha via {msg}")
+            erros.append(msg)
+            continue
+        if not ok:
+            raise HTTPException(401, "Login SSO falhou — verifique usuário e senha.")
+        sd["sn_cookies"] = dict(session.cookies)
+        return {
+            "ok": True,
+            "message": f"Conexão SSO com ServiceNow estabelecida ({origem}).",
+            "via": origem,
+        }
+
+    raise HTTPException(502, "Erro SSO — " + " | ".join(erros))
+
+
+@router.get("/proxy-check")
+def proxy_check(req: Request):
+    """Diagnóstico: testa se o proxy e o ServiceNow estão acessíveis."""
+    require_permission(req, "servicenow", "view")
+    _req, _ = _get_http()
+
+    resultado = {"proxy_configurado": SN_PROXY or "(nenhum)"}
+
+    for nome, proxy in (("com_proxy", SN_PROXY), ("direto", None)):
+        if nome == "com_proxy" and not SN_PROXY:
+            continue
+        sess = _req.Session()
+        sess.verify = False
+        if proxy:
+            sess.proxies = {"https": proxy, "http": proxy}
+        try:
+            r = sess.get(f"{SERVICENOW_BASE}/login.do", timeout=15, allow_redirects=True)
+            resultado[nome] = {"ok": True, "status": r.status_code, "url_final": r.url}
+        except Exception as e:
+            resultado[nome] = {"ok": False, "erro": f"{type(e).__name__}: {e}"}
+        finally:
+            sess.close()
+
+    return resultado
 
 
 @router.get("/session-status")

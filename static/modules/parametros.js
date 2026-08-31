@@ -18,11 +18,10 @@ window.SPARE_MODULES.parametros = {
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['tv',              'TV'],
-            ['correios',        'Correios API'],
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias', 'correios'];
+        var adminOnly = ['visual', 'permissoes', 'sequencias'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -41,7 +40,6 @@ window.SPARE_MODULES.parametros = {
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
             tv:             renderTV,
-            correios:       renderCorreiosConfig,
             conta:          renderAccount
         };
 
@@ -481,76 +479,6 @@ async function renderTV(c, S) {
     card.appendChild(cardBody);
     c.appendChild(card);
     c.appendChild(saveBtn);
-}
-
-/* ── Correios API ──────────────────────────────────────────────── */
-async function renderCorreiosConfig(c, S) {
-    c.innerHTML = '<h1 class="page-title">Correios API</h1>';
-    var d = await S.api('/parametros/config/correios');
-
-    var card = S.el('div', { className: 'card' });
-    var body = S.el('div', { className: 'card-body' });
-
-    var form = S.el('div', { className: 'form-grid cols-2' });
-    form.appendChild(_pField('Usuário', 'cor-usuario', d.usuario || ''));
-    form.appendChild(_pField('Chave de acesso', 'cor-senha', d.chave_acesso || '', 'password'));
-    form.appendChild(_pField('Contrato', 'cor-contrato', d.contrato || ''));
-    form.appendChild(_pField('Proxy (vazio=mesmo do SN, "nenhum"=direto)', 'cor-proxy', d.proxy || ''));
-
-    body.appendChild(form);
-
-    var btnRow = S.el('div', { className: 'btn-row mt-2' });
-
-    var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
-    saveBtn.onclick = async function () {
-        var payload = {
-            usuario: document.getElementById('cor-usuario').value.trim(),
-            chave_acesso: document.getElementById('cor-senha').value,
-            contrato: document.getElementById('cor-contrato').value.trim(),
-            proxy: document.getElementById('cor-proxy').value.trim(),
-        };
-        if (!payload.usuario || !payload.chave_acesso || !payload.contrato) {
-            S.toast('Preencha Usuário, Chave de acesso e Contrato.', 'error');
-            return;
-        }
-        await S.api('/parametros/config/correios', { method: 'PUT', body: payload });
-        S.toast('Configuração dos Correios salva.', 'success');
-    };
-    btnRow.appendChild(saveBtn);
-
-    var testBtn = S.el('button', { className: 'btn btn-outline', textContent: 'Testar conexão', style: 'margin-left:8px' });
-    testBtn.onclick = async function () {
-        testBtn.disabled = true;
-        testBtn.textContent = 'Testando...';
-        try {
-            await S.api('/servicenow/correios/test', { method: 'POST' });
-            S.toast('Autenticação com Correios bem-sucedida!', 'success');
-        } catch (e) {
-            S.toast(e.message || 'Falha na autenticação.', 'error');
-        } finally {
-            testBtn.disabled = false;
-            testBtn.textContent = 'Testar conexão';
-        }
-    };
-    btnRow.appendChild(testBtn);
-
-    body.appendChild(btnRow);
-    card.appendChild(body);
-    c.appendChild(card);
-
-    var info = S.el('div', { className: 'card mt-3' });
-    info.innerHTML =
-        '<div class="card-body">' +
-            '<h3 style="margin:0 0 8px">Dados necessários</h3>' +
-            '<ul style="margin:0;padding-left:20px;color:var(--text-secondary)">' +
-                '<li><strong>Usuário</strong> — fornecido pelo contrato dos Correios</li>' +
-                '<li><strong>Senha de acesso</strong> — chave de acesso da API (não é a senha de login)</li>' +
-                '<li><strong>Contrato</strong> — número do contrato com os Correios</li>' +
-                '<li><strong>DR</strong> — Diretoria Regional vinculada ao contrato</li>' +
-                '<li><strong>Cartão de postagem</strong> — número do cartão de postagem ativo</li>' +
-            '</ul>' +
-        '</div>';
-    c.appendChild(info);
 }
 
 /* ── Minha conta ────────────────────────────────────────────────── */
