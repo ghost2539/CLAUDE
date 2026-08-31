@@ -998,60 +998,43 @@ def chamados_correios_debug(
     req: Request,
     queue: str = DEFAULT_QUEUE,
 ):
-    """Debug: busca últimos 5 incidentes da fila com todos os campos para identificar
-    qual campo contém o código de rastreio dos Correios."""
+    """Debug: busca 10 incidentes com correlation_display preenchido
+    e mostra os valores brutos para diagnosticar o filtro."""
     require_permission(req, "servicenow", "view")
     session = _sn_session_from_portal(req)
 
     sn_query = (
         f"assignment_group.name={queue}"
+        f"^correlation_displayISNOTEMPTY"
         f"^ORDERBYDESCsys_created_on"
     )
 
-    incidents = _sn_query(session, INCIDENT_TABLE, sn_query, limit=5)
+    incidents = _sn_query(
+        session, INCIDENT_TABLE, sn_query,
+        fields="number,correlation_id,correlation_display,state,short_description",
+        limit=10,
+    )
 
-    tracking_fields = {}
+    results = []
     for inc in incidents:
-        for key, val in inc.items():
-            dv = val
-            if isinstance(val, dict):
-                dv = val.get("display_value", val.get("value", ""))
-            if dv and isinstance(dv, str) and len(dv) >= 10:
-                import re as _re
-                if _re.match(r'^[A-Z]{2}\d{9}[A-Z]{2}$', dv.strip()):
-                    if key not in tracking_fields:
-                        tracking_fields[key] = []
-                    tracking_fields[key].append({
-                        "incident": inc.get("number", {}).get("display_value", inc.get("number", "")),
-                        "value": dv.strip(),
-                    })
-
-    correlation_fields = {}
-    for inc in incidents:
+        cd = inc.get("correlation_display", "")
+        ci = inc.get("correlation_id", "")
         num = inc.get("number", "")
-        if isinstance(num, dict):
-            num = num.get("display_value", num.get("value", ""))
-        for key in ["correlation_id", "correlation_display", "u_tracking_number",
-                     "u_codigo_rastreio", "u_rastreio"]:
-            val = inc.get(key, "")
-            if isinstance(val, dict):
-                val = val.get("display_value", val.get("value", ""))
-            correlation_fields.setdefault(key, []).append({
-                "incident": num,
-                "value": val or "(vazio)",
-            })
-
-    all_fields = []
-    if incidents:
-        all_fields = sorted(incidents[0].keys())
+        tracking = _extract_tracking_code(inc)
+        results.append({
+            "number": num,
+            "correlation_display_raw": cd,
+            "correlation_display_type": type(cd).__name__,
+            "correlation_id_raw": ci,
+            "state": inc.get("state", ""),
+            "tracking_extracted": tracking or "(nenhum)",
+            "regex_match": bool(tracking),
+        })
 
     return {
         "queue": queue,
-        "total_incidents": int(r.headers.get("X-Total-Count", len(incidents))),
-        "sample_count": len(incidents),
-        "all_field_names": all_fields,
-        "correlation_fields": correlation_fields,
-        "detected_tracking_codes": tracking_fields,
+        "total_returned": len(incidents),
+        "incidents": results,
     }
 
 
