@@ -973,7 +973,7 @@ def chamados_correios(
     sn_query = (
         f"assignment_group.name={queue}"
         f"^correlation_displayISNOTEMPTY"
-        f"^correlation_display!STARTSWITAG."
+        f"^correlation_display!LIKEAG."
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -1223,11 +1223,11 @@ def refresh_tv_cache(req: Request):
 
 CORREIOS_URLS = {
     "producao": {
-        "token": "https://api.correios.com.br/token/v1/autentica/cartaopostagem",
+        "token": "https://api.correios.com.br/token/v1/autentica/contrato",
         "rastro": "https://api.correios.com.br/srorastro/v3/objetos",
     },
     "homologacao": {
-        "token": "https://apihom.correios.com.br/token/v1/autentica/cartaopostagem",
+        "token": "https://apihom.correios.com.br/token/v1/autentica/contrato",
         "rastro": "https://apihom.correios.com.br/srorastro/v3/objetos",
     },
 }
@@ -1241,8 +1241,8 @@ def _get_correios_config():
         if not row or not row.value:
             raise HTTPException(400, "API dos Correios não configurada. Vá em Parâmetros > Correios API.")
         cfg = row.value
-        if not cfg.get("usuario") or not cfg.get("senha_componente"):
-            raise HTTPException(400, "Configuração dos Correios incompleta (usuário e senha de acesso são obrigatórios).")
+        if not cfg.get("usuario") or not cfg.get("senha_componente") or not cfg.get("contrato"):
+            raise HTTPException(400, "Configuração dos Correios incompleta (usuário, senha de acesso e contrato são obrigatórios).")
         return cfg
 
 
@@ -1261,9 +1261,9 @@ def _correios_authenticate(cfg: dict) -> str:
         f"{cfg['usuario']}:{cfg['senha_componente']}".encode()
     ).decode()
 
-    body = {}
-    if cfg.get("cartao_postagem"):
-        body["numero"] = cfg["cartao_postagem"]
+    body = {"numero": cfg.get("contrato", "")}
+    if cfg.get("dr"):
+        body["dr"] = int(cfg["dr"])
 
     try:
         r = _req.post(
