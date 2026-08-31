@@ -20,6 +20,7 @@ CORREIOS_CARTOES = [
     c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()
 ]
 CORREIOS_DR = os.environ.get("CORREIOS_DR", "64")
+CORREIOS_CONTRATO = os.environ.get("CORREIOS_CONTRATO", "")
 
 CORREIOS_BASE = "https://api.correios.com.br"
 
@@ -92,32 +93,56 @@ def _correios_authenticate() -> str:
     if not token_basico:
         raise HTTPException(502, "Resposta do Correios sem token.")
 
-    # Etapa 2: autenticação com cartão de postagem
-    for cartao in CORREIOS_CARTOES:
+    # Etapa 2: eleva o token via cartão de postagem ou contrato. É esse
+    # token elevado que carrega o escopo do SRO Rastro; o token básico
+    # sozinho é recusado pelo gateway com GTW-012.
+    tentativas = []
+
+    escopos = [
+        ("cartaopostagem", {"numero": c}, f"cartão {c}")
+        for c in CORREIOS_CARTOES
+    ]
+    if CORREIOS_CONTRATO:
+        escopos.append(
+            ("contrato",
+             {"numero": CORREIOS_CONTRATO, "dr": CORREIOS_DR},
+             f"contrato {CORREIOS_CONTRATO}/DR {CORREIOS_DR}")
+        )
+
+    for caminho, corpo, rotulo in escopos:
         try:
-            r_cp = _correios_request(
+            r_esc = _correios_request(
                 "POST",
-                f"{CORREIOS_BASE}/token/v1/autentica/cartaopostagem",
+                f"{CORREIOS_BASE}/token/v1/autentica/{caminho}",
                 headers={
                     "Authorization": f"Bearer {token_basico}",
                     "Content-Type": "application/json",
                 },
-                json={"numero": cartao},
+                json=corpo,
             )
-        except HTTPException:
+        except HTTPException as e:
+            tentativas.append(f"{rotulo}: {e.detail}")
             continue
-        if r_cp.status_code in (200, 201):
-            token_cp = r_cp.json().get("token", "")
-            if token_cp:
-                _correios_token_cache["token"] = token_cp
-                _correios_token_cache["obtained_at"] = time.time()
-                _correios_token_cache["cartao"] = cartao
-                return token_cp
 
-    # Fallback: usa token básico se nenhum cartão funcionou
+        if r_esc.status_code in (200, 201):
+            token_esc = r_esc.json().get("token", "")
+            if token_esc:
+                _correios_token_cache["token"] = token_esc
+                _correios_token_cache["obtained_at"] = time.time()
+                _correios_token_cache["escopo"] = rotulo
+                _correios_token_cache["tentativas"] = tentativas
+                return token_esc
+            tentativas.append(f"{rotulo}: HTTP {r_esc.status_code} sem token no corpo")
+        else:
+            tentativas.append(f"{rotulo}: HTTP {r_esc.status_code} {r_esc.text[:150]}")
+
+    # Nenhum escopo funcionou. Guardamos o diagnóstico e devolvemos o token
+    # básico mesmo assim, para que o erro do gateway venha acompanhado do
+    # motivo real em vez de um 403 solto.
     _correios_token_cache["token"] = token_basico
     _correios_token_cache["obtained_at"] = time.time()
-    _correios_token_cache["cartao"] = None
+    _correios_token_cache["escopo"] = None
+    _correios_token_cache["tentativas"] = tentativas
     return token_basico
 
 
@@ -149,6 +174,16 @@ def correios_rastrear(codigo: str, req: Request):
 
     if r.status_code != 200:
         detail = r.text[:300] if r.text else str(r.status_code)
+        escopo = _correios_token_cache.get("escopo")
+        if not escopo:
+            falhas = _correios_token_cache.get("tentativas") or []
+            detail += (
+                " | Token sem escopo: nenhum cartão/contrato foi aceito, "
+                "então a consulta usou o token básico. Tentativas: "
+                + ("; ".join(falhas) if falhas else "(nenhuma registrada)")
+            )
+        else:
+            detail += f" | Token elevado via {escopo}"
         raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
 
     data = r.json()
