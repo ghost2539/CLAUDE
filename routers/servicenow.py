@@ -1211,11 +1211,11 @@ def refresh_tv_cache(req: Request):
 CORREIOS_URLS = {
     "producao": {
         "token": "https://api.correios.com.br/token/v1/autentica",
-        "rastro": "https://api.correios.com.br/srorastro/v3/objetos",
+        "rastro": "https://api.correios.com.br/srorastro/v1/objetos",
     },
     "homologacao": {
         "token": "https://apihom.correios.com.br/token/v1/autentica",
-        "rastro": "https://apihom.correios.com.br/srorastro/v3/objetos",
+        "rastro": "https://apihom.correios.com.br/srorastro/v1/objetos",
     },
 }
 
@@ -1296,7 +1296,7 @@ def correios_rastrear(codigo: str, req: Request):
     ambiente = cfg.get("ambiente", "producao")
     urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
 
-    url = f"{urls['rastro']}/{codigo}?resultado=T"
+    url = f"{urls['rastro']}?codigosObjetos={codigo}&resultado=T"
     r = _correios_get(cfg, token, url)
 
     if r.status_code != 200:
@@ -1313,7 +1313,6 @@ def correios_rastrear(codigo: str, req: Request):
     entrega = None
 
     tipo_postal = obj.get("tipoPostal", {})
-    servico = obj.get("servico", {})
 
     for ev in obj.get("eventos", []):
         unidade = ev.get("unidade", {})
@@ -1334,8 +1333,6 @@ def correios_rastrear(codigo: str, req: Request):
             "local": local_str,
             "codigo": ev_code,
             "tipo": ev.get("tipo", ""),
-            "latitude": ev.get("latitude", ""),
-            "longitude": ev.get("longitude", ""),
             "unidade": unidade.get("nome", ""),
             "municipio": endereco.get("cidade", ""),
             "uf": endereco.get("uf", ""),
@@ -1343,17 +1340,7 @@ def correios_rastrear(codigo: str, req: Request):
 
         if ev_code in ("BDE", "BDI", "BDR") and not entrega:
             dest = ev.get("unidadeDestino", {})
-            dest_end = dest.get("endereco", {})
-            dest_local_parts = [
-                dest_end.get("logradouro", ""),
-                dest_end.get("numero", ""),
-                dest_end.get("bairro", ""),
-                dest_end.get("cidade", ""),
-                dest_end.get("uf", ""),
-                dest_end.get("cep", ""),
-            ]
-            dest_local = ", ".join(p for p in dest_local_parts if p)
-
+            dest_end = dest.get("endereco", {}) if dest else {}
             recebedor = ev.get("recebedor", {})
             entrega = {
                 "entregue": True,
@@ -1361,12 +1348,8 @@ def correios_rastrear(codigo: str, req: Request):
                 "descricao": ev.get("descricao", ""),
                 "detalhe": ev.get("detalhe", ""),
                 "local_entrega": local_str,
-                "destino": dest_local or None,
                 "recebedor_nome": recebedor.get("nome", "") if recebedor else "",
                 "recebedor_documento": recebedor.get("documento", "") if recebedor else "",
-                "recebedor_celular": recebedor.get("celular", "") if recebedor else "",
-                "recebedor_email": recebedor.get("email", "") if recebedor else "",
-                "recebedor_comentario": recebedor.get("comentario", "") if recebedor else "",
             }
 
         eventos.append(evento_data)
@@ -1377,8 +1360,6 @@ def correios_rastrear(codigo: str, req: Request):
         "tipo": tipo_postal.get("sigla", ""),
         "tipo_nome": tipo_postal.get("nome", ""),
         "tipo_categoria": tipo_postal.get("categoria", ""),
-        "servico_codigo": servico.get("codigo", ""),
-        "dt_prevista": obj.get("dtPrevista", ""),
         "eventos": eventos,
         "entrega": entrega,
     }
@@ -1431,7 +1412,7 @@ def correios_comprovante(codigo: str, req: Request):
     ambiente = cfg.get("ambiente", "producao")
     urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
 
-    url = f"{urls['rastro']}/{codigo}/entregas"
+    url = f"{urls['rastro']}?codigosObjetos={codigo}&resultado=T"
     r = _correios_get(cfg, token, url)
 
     if r.status_code == 404:
