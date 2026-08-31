@@ -950,7 +950,10 @@ def _extract_tracking_code(incident: dict) -> str:
     if isinstance(val, dict):
         val = val.get("display_value", val.get("value", ""))
     if val:
-        m = _TRACKING_RE.search(str(val).strip())
+        val = str(val).strip()
+        if val.upper().startswith("AG."):
+            return ""
+        m = _TRACKING_RE.search(val)
         if m:
             return m.group(0)
     return ""
