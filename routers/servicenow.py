@@ -969,6 +969,31 @@ def saida_move(body: SaidaMovIn, req: Request):
 # CHAMADOS CORREIOS — busca incidentes com correlation_display
 # ═══════════════════════════════════════════════════════════════════
 
+_TRACKING_RE = re.compile(r'[A-Z]{2}\d{9}[A-Z]{2}')
+
+
+def _extract_tracking_code(incident: dict) -> str:
+    """Try to find a Correios tracking code (XX000000000XX) from incident fields."""
+    for field in ("correlation_display", "correlation_id",
+                  "u_tracking_number", "u_codigo_rastreio", "u_rastreio"):
+        val = incident.get(field, "")
+        if isinstance(val, dict):
+            val = val.get("display_value", val.get("value", ""))
+        if val:
+            m = _TRACKING_RE.search(val.strip())
+            if m:
+                return m.group(0)
+    for field in ("short_description", "description", "comments", "work_notes"):
+        val = incident.get(field, "")
+        if isinstance(val, dict):
+            val = val.get("display_value", val.get("value", ""))
+        if val:
+            m = _TRACKING_RE.search(val)
+            if m:
+                return m.group(0)
+    return ""
+
+
 @router.get("/chamados-correios")
 def chamados_correios(
     req: Request,
@@ -1015,6 +1040,9 @@ def chamados_correios(
     data = r.json()
     incidents = data.get("result", [])
     total = int(r.headers.get("X-Total-Count", len(incidents)))
+
+    for inc in incidents:
+        inc["_tracking_code"] = _extract_tracking_code(inc)
 
     return {"incidents": incidents, "total": total}
 

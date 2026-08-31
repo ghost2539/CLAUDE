@@ -837,17 +837,22 @@ function _snRenderCorreios(container, S) {
 
                 for (var i = 0; i < items.length; i++) {
                     var inc = items[i];
-                    var trackCode = displayVal(inc.correlation_display) || displayVal(inc.correlation_id);
+                    var trackCode = inc._tracking_code || displayVal(inc.correlation_display) || displayVal(inc.correlation_id);
+                    var hasValidCode = trackCode && /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(trackCode);
                     html += '<tr>' +
                         '<td style="white-space:nowrap;font-weight:600">' + S.esc(displayVal(inc.number)) + '</td>' +
                         '<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">' +
                             S.esc(displayVal(inc.short_description)) + '</td>' +
                         '<td>' +
-                            '<button class="btn btn-sm btn-outline co-track-btn" ' +
-                                'data-code="' + S.esc(trackCode) + '" ' +
-                                'style="font-weight:600;color:#c06010">' +
-                                S.esc(trackCode) +
-                            '</button>' +
+                            (hasValidCode
+                                ? '<button class="btn btn-sm btn-outline co-track-btn" ' +
+                                    'data-code="' + S.esc(trackCode) + '" ' +
+                                    'style="font-weight:600;color:#c06010">' +
+                                    S.esc(trackCode) + '</button>'
+                                : '<span style="color:var(--text-secondary);font-size:.85rem" title="' +
+                                    S.esc(trackCode) + '">' +
+                                    (trackCode ? S.esc(trackCode.substring(0, 20)) + '...' : '(sem código)') +
+                                    '</span>') +
                         '</td>' +
                         '<td>' + S.esc(displayVal(inc.state)) + '</td>' +
                         '<td>' + S.esc(displayVal(inc.caller_id)) + '</td>' +
