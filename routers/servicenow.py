@@ -231,6 +231,56 @@ def _lookup_reference(session, field, display_value, cache, BS):
     return display_value
 
 
+def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_value=True):
+    """Query ServiceNow via JSONv2 API (works with SSO cookies).
+    Returns list of records."""
+    params = [
+        f"sysparm_action=getRecords",
+        f"sysparm_record_count={limit}",
+    ]
+    if query:
+        params.append(f"sysparm_query={query}")
+    if fields:
+        params.append(f"sysparm_fields={fields}")
+    if offset:
+        params.append(f"sysparm_first_row={offset}")
+    if display_value:
+        params.append("displayvalue=true")
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&{'&'.join(params)}"
+    r = session.get(url, headers={
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }, timeout=30)
+    if r.status_code == 200 and "login" not in r.url.lower():
+        ct = r.headers.get("Content-Type", "")
+        if "json" in ct:
+            data = r.json()
+            return data.get("records", [])
+    if r.status_code == 401 or "login" in r.url.lower():
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte.")
+    raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+
+def _sn_update(session, table, sys_id, updates):
+    """Update a record via JSONv2 API (works with SSO cookies)."""
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&sysparm_action=update&sysparm_query=sys_id={sys_id}"
+    r = session.post(url, json=updates, headers={
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }, timeout=30)
+    if r.status_code == 200 and "login" not in r.url.lower():
+        ct = r.headers.get("Content-Type", "")
+        if "json" in ct:
+            data = r.json()
+            records = data.get("records", [])
+            if records:
+                return True
+    if r.status_code == 401 or "login" in r.url.lower():
+        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte.")
+    raise HTTPException(502, f"ServiceNow retornou {r.status_code}: {r.text[:200]}")
+
+
 def _insert_record(session, record):
     url = f"{SERVICENOW_BASE}/{HARDWARE_TABLE}.do?JSONv2&sysparm_action=insert"
     r = session.post(
@@ -553,13 +603,12 @@ def sn_session_status(req: Request):
         if SN_PROXY:
             sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
         sess.cookies.update(sn_cookies)
-        r = sess.get(
-            f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
-            headers={"Accept": "application/json"},
-            timeout=15,
-            allow_redirects=False,
-        )
-        if r.status_code == 200:
+        url = f"{SERVICENOW_BASE}/sys_user.do?JSONv2&sysparm_action=getRecords&sysparm_record_count=1"
+        r = sess.get(url, headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        }, timeout=15)
+        if r.status_code == 200 and "login" not in r.url.lower() and "json" in r.headers.get("Content-Type", ""):
             sd["sn_cookies"] = dict(sess.cookies)
             return {"active": True}
         return {"active": False, "reason": "expired"}
@@ -739,29 +788,8 @@ def list_incidents(
         "resolved_at,closed_at,close_code,close_notes"
     )
 
-    url = (
-        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_fields={fields}"
-        f"&sysparm_limit={min(limit, 200)}"
-        f"&sysparm_offset={offset}"
-        f"&sysparm_display_value=true"
-    )
-
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
-
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-
-    if r.status_code != 200:
-        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
-
-    data = r.json()
-    incidents = data.get("result", [])
-    total = int(r.headers.get("X-Total-Count", len(incidents)))
+    incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 200), offset)
+    total = len(incidents)
 
     return {
         "incidents": incidents,
@@ -798,47 +826,15 @@ def count_incidents(
     session.cookies.update(sn_cookies)
 
     sn_query = f"assignment_group.name={queue}"
-    url = (
-        f"{SERVICENOW_BASE}/api/now/stats/{INCIDENT_TABLE}"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_count=true"
-        f"&sysparm_group_by=state"
-        f"&sysparm_display_value=true"
-    )
 
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
+    records = _sn_query(session, INCIDENT_TABLE, sn_query, "sys_id,state", limit=5000, display_value=True)
 
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
+    by_state: dict = {}
+    for rec in records:
+        state_label = rec.get("state", "Desconhecido") or "Desconhecido"
+        by_state[state_label] = by_state.get(state_label, 0) + 1
 
-    if r.status_code != 200:
-        # Fallback: aggregate API may not be available, use table API with count
-        url_fb = (
-            f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
-            f"?sysparm_query={sn_query}"
-            f"&sysparm_limit=1"
-            f"&sysparm_fields=sys_id"
-        )
-        try:
-            r_fb = session.get(url_fb, timeout=30)
-            total = int(r_fb.headers.get("X-Total-Count", 0))
-            return {"queue": queue, "total": total, "by_state": {}}
-        except Exception:
-            raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
-
-    data = r.json()
-    results = data.get("result", [])
-    by_state = {}
-    total = 0
-    for item in results:
-        state_label = item.get("groupby_fields", [{}])[0].get("display_value", "Desconhecido")
-        count = int(item.get("stats", {}).get("count", 0))
-        by_state[state_label] = count
-        total += count
-
+    total = len(records)
     return {"queue": queue, "total": total, "by_state": by_state}
 
 
@@ -898,26 +894,9 @@ def saida_search(body: SaidaSearchIn, req: Request):
         "location,cost,purchase_date"
     )
 
-    url = (
-        f"{SERVICENOW_BASE}/api/now/table/{HARDWARE_TABLE}"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_fields={fields}"
-        f"&sysparm_limit=20"
-        f"&sysparm_display_value=true"
-    )
+    assets = _sn_query(session, HARDWARE_TABLE, sn_query, fields, limit=20)
 
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão com ServiceNow: {e}")
-
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-    if r.status_code != 200:
-        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
-
-    data = r.json()
-    return {"assets": data.get("result", [])}
+    return {"assets": assets}
 
 
 @router.get("/saida/locations")
@@ -953,19 +932,7 @@ def saida_move(body: SaidaMovIn, req: Request):
     if body.notes:
         update["work_notes"] = body.notes
 
-    url = f"{SERVICENOW_BASE}/api/now/table/{HARDWARE_TABLE}/{body.sys_id}"
-    try:
-        r = session.patch(url, json=update, headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão: {e}")
-
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-    if r.status_code not in (200, 204):
-        raise HTTPException(502, f"ServiceNow retornou {r.status_code}: {r.text[:200]}")
+    _sn_update(session, HARDWARE_TABLE, body.sys_id, update)
 
     return {"ok": True, "message": "Ativo atualizado com sucesso."}
 
@@ -1023,28 +990,8 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    url = (
-        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_fields={fields}"
-        f"&sysparm_limit={min(limit, 200)}"
-        f"&sysparm_offset={offset}"
-        f"&sysparm_display_value=true"
-    )
-
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão: {e}")
-
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-    if r.status_code != 200:
-        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
-
-    data = r.json()
-    incidents = data.get("result", [])
-    total = int(r.headers.get("X-Total-Count", len(incidents)))
+    incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 200), offset)
+    total = len(incidents)
 
     for inc in incidents:
         inc["_tracking_code"] = _extract_tracking_code(inc)
@@ -1067,25 +1014,7 @@ def chamados_correios_debug(
         f"^ORDERBYDESCsys_created_on"
     )
 
-    url = (
-        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_limit=5"
-        f"&sysparm_display_value=true"
-    )
-
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão: {e}")
-
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-    if r.status_code != 200:
-        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
-
-    data = r.json()
-    incidents = data.get("result", [])
+    incidents = _sn_query(session, INCIDENT_TABLE, sn_query, limit=5)
 
     tracking_fields = {}
     for inc in incidents:
@@ -1152,50 +1081,16 @@ def relatorios_tickets(req: Request, queue: str = DEFAULT_QUEUE):
         f"^task.stateNOT IN8"
     )
 
-    # Try Stats API grouped by month
-    url = (
-        f"{SERVICENOW_BASE}/api/now/stats/task_sla"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_count=true"
-        f"&sysparm_group_by=task.closed_at"
-        f"&sysparm_display_value=true"
-    )
+    records = _sn_query(session, "task_sla", sn_query, "sys_id,task.closed_at", limit=5000, display_value=True)
 
-    try:
-        r = session.get(url, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão: {e}")
+    by_month: dict = {}
+    for rec in records:
+        closed = rec.get("task.closed_at", "") or ""
+        if closed:
+            month_key = closed[:7]  # "YYYY-MM"
+            by_month[month_key] = by_month.get(month_key, 0) + 1
 
-    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
-        raise HTTPException(409, "Sessão ServiceNow expirou. Reconecte na aba Entrada de Estoque.")
-
-    # Fallback: just get the total count
-    total_url = (
-        f"{SERVICENOW_BASE}/api/now/table/task_sla"
-        f"?sysparm_query={sn_query}"
-        f"&sysparm_limit=1"
-        f"&sysparm_fields=sys_id"
-    )
-    try:
-        r2 = session.get(total_url, timeout=30)
-        total = int(r2.headers.get("X-Total-Count", 0))
-    except Exception:
-        total = 0
-
-    by_month = {}
-    if r.status_code == 200:
-        try:
-            data = r.json()
-            for item in data.get("result", []):
-                gf = item.get("groupby_fields", [{}])
-                label = gf[0].get("display_value", "") if gf else ""
-                count = int(item.get("stats", {}).get("count", 0))
-                if label:
-                    by_month[label] = count
-        except Exception:
-            pass
-
-    return {"total": total, "by_month": by_month, "year": year, "queue": queue}
+    return {"total": len(records), "by_month": by_month, "year": year, "queue": queue}
 
 
 @router.get("/relatorios/sla")
@@ -1215,69 +1110,25 @@ def relatorios_sla(req: Request, queue: str = DEFAULT_QUEUE):
     ]
     sla_filter = "^OR".join(f"sla.name={d}" for d in sla_definitions)
 
-    # Total SLAs for the group
     total_query = (
         f"task.assignment_group.name={queue}"
         f"^{sla_filter}"
     )
-    total_url = (
-        f"{SERVICENOW_BASE}/api/now/table/incident_sla"
-        f"?sysparm_query={total_query}"
-        f"&sysparm_limit=1"
-        f"&sysparm_fields=sys_id"
-    )
 
-    # Breached SLAs (percentage >= 100)
-    breach_query = (
-        f"task.assignment_group.name={queue}"
-        f"^{sla_filter}"
-        f"^business_percentage>=100"
-    )
-    breach_url = (
-        f"{SERVICENOW_BASE}/api/now/table/incident_sla"
-        f"?sysparm_query={breach_query}"
-        f"&sysparm_limit=1"
-        f"&sysparm_fields=sys_id"
-    )
+    all_records = _sn_query(session, "incident_sla", total_query, "sys_id,sla,business_percentage", limit=5000, display_value=True)
 
-    total = 0
-    breached = 0
-    try:
-        r1 = session.get(total_url, timeout=30)
-        if r1.status_code == 200:
-            total = int(r1.headers.get("X-Total-Count", 0))
-
-        r2 = session.get(breach_url, timeout=30)
-        if r2.status_code == 200:
-            breached = int(r2.headers.get("X-Total-Count", 0))
-    except Exception as e:
-        raise HTTPException(502, f"Erro de conexão: {e}")
-
+    total = len(all_records)
+    breached = sum(1 for r in all_records if float(r.get("business_percentage") or 0) >= 100)
     met = total - breached
     pct = round((met / total * 100), 1) if total > 0 else 0
 
-    # Per-priority breakdown
-    by_priority = {}
+    by_priority: dict = {}
     for sla_def in sla_definitions:
-        prio = sla_def.split()[0]  # P1, P2, etc.
-        pq = f"task.assignment_group.name={queue}^sla.name={sla_def}"
-        bq = f"{pq}^business_percentage>=100"
-        try:
-            rt = session.get(
-                f"{SERVICENOW_BASE}/api/now/table/incident_sla"
-                f"?sysparm_query={pq}&sysparm_limit=1&sysparm_fields=sys_id",
-                timeout=15,
-            )
-            rb = session.get(
-                f"{SERVICENOW_BASE}/api/now/table/incident_sla"
-                f"?sysparm_query={bq}&sysparm_limit=1&sysparm_fields=sys_id",
-                timeout=15,
-            )
-            pt = int(rt.headers.get("X-Total-Count", 0))
-            pb = int(rb.headers.get("X-Total-Count", 0))
-            by_priority[prio] = {"total": pt, "breached": pb, "met": pt - pb}
-        except Exception:
-            by_priority[prio] = {"total": 0, "breached": 0, "met": 0}
+        prio = sla_def.split()[0]
+        prio_records = [r for r in all_records if (r.get("sla") or "") == sla_def]
+        pt = len(prio_records)
+        pb = sum(1 for r in prio_records if float(r.get("business_percentage") or 0) >= 100)
+        by_priority[prio] = {"total": pt, "breached": pb, "met": pt - pb}
 
     return {
         "total": total,
@@ -1313,24 +1164,12 @@ def relatorios_tma(req: Request, queue: str = DEFAULT_QUEUE):
 
         fields = "sys_id,number,opened_at,closed_at,reassignment_count,subcategory"
 
-        url = (
-            f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
-            f"?sysparm_query={sn_query}"
-            f"&sysparm_fields={fields}"
-            f"&sysparm_limit=500"
-        )
-
         try:
-            r = session.get(url, timeout=30)
+            incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, limit=500, display_value=False)
         except Exception as e:
             results[cat_key] = {"count": 0, "avg_hours": 0, "error": str(e)}
             continue
 
-        if r.status_code != 200:
-            results[cat_key] = {"count": 0, "avg_hours": 0, "error": f"HTTP {r.status_code}"}
-            continue
-
-        incidents = r.json().get("result", [])
         total_hours = 0
         valid = 0
         for inc in incidents:
@@ -1345,8 +1184,7 @@ def relatorios_tma(req: Request, queue: str = DEFAULT_QUEUE):
                 continue
 
         avg = round(total_hours / valid, 1) if valid > 0 else 0
-        total_count = int(r.headers.get("X-Total-Count", len(incidents)))
-        results[cat_key] = {"count": total_count, "sample": valid, "avg_hours": avg}
+        results[cat_key] = {"count": len(incidents), "sample": valid, "avg_hours": avg}
 
     return {"tma": results, "queue": queue}
 
