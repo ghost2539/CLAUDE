@@ -970,8 +970,8 @@ def chamados_correios(
 
     sn_query = (
         f"assignment_group.name={queue}"
-        f"^correlation_idISNOTEMPTY"
-        f"^ORcorrelation_displayISNOTEMPTY"
+        f"^correlation_displayISNOTEMPTY"
+        f"^stateIN1,2,3,6"
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -981,7 +981,7 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 2000, 0)
+    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 500, 0)
 
     incidents = []
     for inc in all_incidents:
