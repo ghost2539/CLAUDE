@@ -387,6 +387,22 @@ def correios_test(req: Request):
         token_basico = auth_data.get("token", "")
         result["1_auth_basica"]["cartao_retornado"] = auth_data.get("cartaoPostagem", "(nenhum)")
 
+        # O payload do token diz o perfil e quais APIs o usuário pode chamar.
+        # É a forma de saber se existe direito a AR digitalizado sem depender
+        # de tentativa e erro em endpoints adivinhados.
+        result["1_auth_basica"]["perfil"] = {
+            k: v for k, v in auth_data.items() if k != "token"
+        }
+        try:
+            import json as _json
+            miolo = token_basico.split(".")[1]
+            miolo += "=" * (-len(miolo) % 4)
+            result["1_auth_basica"]["escopos_do_token"] = _json.loads(
+                base64.urlsafe_b64decode(miolo).decode("utf-8", "replace")
+            )
+        except Exception as e:
+            result["1_auth_basica"]["escopos_do_token"] = f"(não decodificado: {e})"
+
         # 2) Auth com cada cartão de postagem
         token_cp = ""
         cartao_ok = ""
