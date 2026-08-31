@@ -1228,8 +1228,8 @@ def _get_correios_config():
         if not row or not row.value:
             raise HTTPException(400, "API dos Correios não configurada. Vá em Parâmetros > Correios API.")
         cfg = row.value
-        if not cfg.get("usuario") or not cfg.get("senha_componente") or not cfg.get("contrato"):
-            raise HTTPException(400, "Configuração dos Correios incompleta (usuário, senha de acesso e contrato são obrigatórios).")
+        if not cfg.get("usuario") or not cfg.get("chave_acesso") or not cfg.get("contrato"):
+            raise HTTPException(400, "Configuração dos Correios incompleta (usuário, chave de acesso e contrato são obrigatórios).")
         return cfg
 
 
@@ -1240,17 +1240,17 @@ def _correios_authenticate(cfg: dict) -> str:
     if cached and (time.time() - cached_at) < 21600:
         return cached
 
-    _req, _ = _get_http()
-    ambiente = cfg.get("ambiente", "producao")
-    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
+    import requests as _req
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     credentials = base64.b64encode(
-        f"{cfg['usuario']}:{cfg['senha_componente']}".encode()
+        f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
     ).decode()
 
     try:
         r = _req.post(
-            urls["token"],
+            "https://api.correios.com.br/token/v1/autentica",
             headers={
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/json",
@@ -1261,7 +1261,7 @@ def _correios_authenticate(cfg: dict) -> str:
     except Exception as e:
         raise HTTPException(502, f"Erro ao conectar com Correios: {e}")
 
-    if r.status_code != 201 and r.status_code != 200:
+    if r.status_code not in (200, 201):
         detail = r.text[:300] if r.text else str(r.status_code)
         raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
 
@@ -1380,7 +1380,9 @@ def correios_rastrear(codigo: str, req: Request):
 
 def _correios_get(cfg, token, url):
     """Helper to GET from Correios API with auto-retry on 401."""
-    _req, _ = _get_http()
+    import requests as _req
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     try:
         r = _req.get(url, headers={
             "Authorization": f"Bearer {token}",

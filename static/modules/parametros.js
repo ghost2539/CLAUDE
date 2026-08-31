@@ -493,10 +493,8 @@ async function renderCorreiosConfig(c, S) {
 
     var form = S.el('div', { className: 'form-grid cols-2' });
     form.appendChild(_pField('Usuário', 'cor-usuario', d.usuario || ''));
-    form.appendChild(_pField('Senha de acesso (chave)', 'cor-senha', d.senha_componente || '', 'password'));
+    form.appendChild(_pField('Chave de acesso', 'cor-senha', d.chave_acesso || '', 'password'));
     form.appendChild(_pField('Contrato', 'cor-contrato', d.contrato || ''));
-    form.appendChild(_pField('DR (Diretoria Regional)', 'cor-dr', d.dr || ''));
-    form.appendChild(_pField('Cartão de postagem', 'cor-cartao', d.cartao_postagem || ''));
 
     body.appendChild(form);
 
@@ -506,14 +504,11 @@ async function renderCorreiosConfig(c, S) {
     saveBtn.onclick = async function () {
         var payload = {
             usuario: document.getElementById('cor-usuario').value.trim(),
-            senha_componente: document.getElementById('cor-senha').value,
+            chave_acesso: document.getElementById('cor-senha').value,
             contrato: document.getElementById('cor-contrato').value.trim(),
-            dr: document.getElementById('cor-dr').value.trim(),
-            cartao_postagem: document.getElementById('cor-cartao').value.trim(),
-            ambiente: 'producao'
         };
-        if (!payload.usuario || !payload.senha_componente || !payload.contrato) {
-            S.toast('Preencha Usuário, Senha de acesso e Contrato.', 'error');
+        if (!payload.usuario || !payload.chave_acesso || !payload.contrato) {
+            S.toast('Preencha Usuário, Chave de acesso e Contrato.', 'error');
             return;
         }
         await S.api('/parametros/config/correios', { method: 'PUT', body: payload });
