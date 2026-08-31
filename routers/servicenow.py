@@ -1408,8 +1408,6 @@ def correios_rastrear_lote(body: dict, req: Request):
     codigos = body.get("codigos", [])
     if not codigos:
         raise HTTPException(400, "Informe ao menos um código.")
-    if len(codigos) > 20:
-        raise HTTPException(400, "Máximo 20 códigos por consulta.")
 
     resultados = {}
     for cod in codigos:
