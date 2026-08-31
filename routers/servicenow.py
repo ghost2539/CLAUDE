@@ -971,7 +971,6 @@ def chamados_correios(
     sn_query = (
         f"assignment_group.name={queue}"
         f"^stateNOT IN6,7,8"
-        f"^correlation_displayENDSWITHBR"
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -981,20 +980,14 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 200, 0)
+    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 500, 0)
 
     incidents = []
     for inc in all_incidents:
-        cd = inc.get("correlation_display", "")
-        if isinstance(cd, dict):
-            cd = cd.get("display_value", cd.get("value", ""))
-        cd = str(cd).strip() if cd else ""
-        if cd.upper().startswith("AG."):
-            continue
         tracking = _extract_tracking_code(inc)
         if tracking:
             inc["_tracking_code"] = tracking
-        incidents.append(inc)
+            incidents.append(inc)
 
     total = len(incidents)
     page = incidents[offset:offset + limit]
