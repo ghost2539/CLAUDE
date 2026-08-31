@@ -360,27 +360,20 @@ function _snRenderSaida(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Saída de Estoque</h1>' +
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Busca e movimentação de ativos no ServiceNow (alm_hardware).</p>' +
+            'Busca global e movimentação de ativos no ServiceNow.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Buscar Ativo</div>' +
             '<div class="card-body">' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.8rem;align-items:end">' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.8rem;align-items:end">' +
                     '<div><label>Asset Tag</label>' +
                         '<input id="sa-tag" class="form-control" placeholder="Ex: A-123456"></div>' +
                     '<div><label>Número de Série</label>' +
                         '<input id="sa-serial" class="form-control" placeholder="Ex: SN12345678"></div>' +
-                    '<div><label>Stockroom</label>' +
-                        '<select id="sa-stockroom" class="form-control">' +
-                            '<option value="">Todos (SPARE)</option>' +
-                            '<option value="SPARE-ADM15">SPARE-ADM15</option>' +
-                            '<option value="SPARE-CD324">SPARE-CD324</option>' +
-                            '<option value="SPARE-CD504">SPARE-CD504</option>' +
-                        '</select></div>' +
                     '<button class="btn btn-primary" id="sa-search">Buscar</button>' +
                 '</div>' +
                 '<p style="color:var(--text-secondary);font-size:.8rem;margin-top:.5rem">' +
-                    'A busca usa Asset Tag OU Número de Série. Stockroom é obrigatório (filtra SPARE-ADM15, SPARE-CD324 ou SPARE-CD504).</p>' +
+                    'Busca global no ServiceNow por Asset Tag e/ou Número de Série.</p>' +
             '</div>' +
         '</div>' +
 
@@ -399,6 +392,22 @@ function _snRenderSaida(container, S) {
                 '<div class="card-body">' +
                     '<div id="sa-selected-info" style="margin-bottom:1rem"></div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
+                        '<div><label>BU <span style="color:#dc2626">*</span></label>' +
+                            '<select id="sa-bu" class="form-control">' +
+                                '<option value="">Selecione...</option>' +
+                                '<option value="Renner Brasil">Renner Brasil</option>' +
+                                '<option value="Youcom">Youcom</option>' +
+                                '<option value="Camicado">Camicado</option>' +
+                                '<option value="Ashua">Ashua</option>' +
+                            '</select></div>' +
+                        '<div><label>Código da Loja <span style="color:#dc2626">*</span></label>' +
+                            '<input id="sa-store-code" class="form-control" placeholder="Ex: 401"></div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+                        '<div><label>Local (ServiceNow) <span style="color:#dc2626">*</span></label>' +
+                            '<select id="sa-location" class="form-control">' +
+                                '<option value="">Informe BU e código da loja</option>' +
+                            '</select></div>' +
                         '<div><label>Novo Status</label>' +
                             '<select id="sa-new-status" class="form-control">' +
                                 '<option value="In transit">Em Trânsito</option>' +
@@ -407,8 +416,6 @@ function _snRenderSaida(container, S) {
                                 '<option value="On maintenance">Em Manutenção</option>' +
                                 '<option value="Retired">Desativado</option>' +
                             '</select></div>' +
-                        '<div><label>Stockroom Destino (opcional)</label>' +
-                            '<input id="sa-dest-stockroom" class="form-control" placeholder="Ex: SPARE-CD504"></div>' +
                     '</div>' +
                     '<div style="margin-top:1rem"><label>Observações</label>' +
                         '<textarea id="sa-notes" class="form-control" rows="2" placeholder="Motivo da movimentação..."></textarea></div>' +
@@ -420,6 +427,11 @@ function _snRenderSaida(container, S) {
             '</div>' +
         '</div>';
 
+    _saLocations = [];
+    S.api('/servicenow/saida/locations').then(function (d) {
+        _saLocations = d.locations || [];
+    }).catch(function () {});
+
     document.getElementById('sa-search').addEventListener('click', function () { _saSearch(S); });
     document.getElementById('sa-tag').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); _saSearch(S); }
@@ -427,18 +439,55 @@ function _snRenderSaida(container, S) {
     document.getElementById('sa-serial').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); _saSearch(S); }
     });
+
+    document.getElementById('sa-store-code').addEventListener('input', function () {
+        var code = this.value.trim();
+        var buSel = document.getElementById('sa-bu');
+        if (code.length > 0) {
+            if (code.charAt(0) === '4') buSel.value = 'Camicado';
+            else if (code.charAt(0) === '3') buSel.value = 'Youcom';
+        }
+        _saFilterLocations(S);
+    });
+    document.getElementById('sa-bu').addEventListener('change', function () { _saFilterLocations(S); });
 }
 
 var _saSelectedAsset = null;
+var _saLocations = [];
+
+function _saFilterLocations(S) {
+    var bu = document.getElementById('sa-bu').value;
+    var code = document.getElementById('sa-store-code').value.trim();
+    var sel = document.getElementById('sa-location');
+    sel.innerHTML = '<option value="">Selecione...</option>';
+
+    if (!code) return;
+
+    var filtered = _saLocations.filter(function (loc) {
+        return loc.codigo === code;
+    });
+
+    if (!filtered.length) {
+        sel.innerHTML = '<option value="">Nenhum local encontrado para código ' + S.esc(code) + '</option>';
+        return;
+    }
+
+    for (var i = 0; i < filtered.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = filtered[i].name;
+        opt.textContent = filtered[i].name;
+        sel.appendChild(opt);
+    }
+    if (filtered.length === 1) sel.value = filtered[0].name;
+}
 
 function _saSearch(S) {
     var tag = document.getElementById('sa-tag').value.trim();
     var serial = document.getElementById('sa-serial').value.trim();
-    var stockroom = document.getElementById('sa-stockroom').value;
 
     if (!tag && !serial) { S.toast('Informe Asset Tag ou Número de Série', 'warning'); return; }
 
-    var body = { asset_tag: tag, serial_number: serial, stockroom: stockroom };
+    var body = { asset_tag: tag, serial_number: serial };
 
     document.getElementById('sa-results').style.display = '';
     document.getElementById('sa-table').innerHTML =
@@ -450,37 +499,32 @@ function _saSearch(S) {
             var assets = d.assets || [];
             if (!assets.length) {
                 document.getElementById('sa-table').innerHTML =
-                    '<div style="padding:1rem;color:var(--text-secondary)">Nenhum ativo encontrado.</div>';
+                    '<div style="padding:1rem;color:var(--text-secondary)">Nenhum ativo encontrado no ServiceNow.</div>';
                 return;
             }
 
             var html = '<table class="data-table"><thead><tr>' +
                 '<th></th><th>Asset Tag</th><th>Série</th><th>Nome</th><th>Modelo</th>' +
-                '<th>Stockroom</th><th>Status</th><th>Empresa</th>' +
+                '<th>Local Atual</th><th>Stockroom</th><th>Status</th><th>Empresa</th>' +
                 '</tr></thead><tbody>';
 
             for (var i = 0; i < assets.length; i++) {
                 var a = assets[i];
-                var displayVal = function (v) {
-                    if (!v) return '';
-                    if (typeof v === 'object') return v.display_value || v.value || '';
-                    return v;
-                };
                 html += '<tr style="cursor:pointer" data-idx="' + i + '">' +
                     '<td><input type="radio" name="sa-sel" value="' + i + '"></td>' +
-                    '<td style="font-weight:600">' + S.esc(displayVal(a.asset_tag)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.serial_number)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.display_name)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.model)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.stockroom)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.install_status)) + '</td>' +
-                    '<td>' + S.esc(displayVal(a.company)) + '</td>' +
+                    '<td style="font-weight:600">' + S.esc(_saDisp(a.asset_tag)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.serial_number)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.display_name)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.model)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.location)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.stockroom)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.install_status)) + '</td>' +
+                    '<td>' + S.esc(_saDisp(a.company)) + '</td>' +
                     '</tr>';
             }
             html += '</tbody></table>';
             document.getElementById('sa-table').innerHTML = html;
 
-            // Store assets data for selection
             window._saAssets = assets;
 
             document.querySelectorAll('#sa-table tr[data-idx]').forEach(function (row) {
@@ -498,22 +542,25 @@ function _saSearch(S) {
         });
 }
 
+function _saDisp(v) {
+    if (!v) return '';
+    if (typeof v === 'object') return v.display_value || v.value || '';
+    return v;
+}
+
 function _saSelectAsset(S, asset) {
     _saSelectedAsset = asset;
-    var displayVal = function (v) {
-        if (!v) return '';
-        if (typeof v === 'object') return v.display_value || v.value || '';
-        return v;
-    };
 
     document.getElementById('sa-action').style.display = '';
     document.getElementById('sa-selected-info').innerHTML =
-        '<div class="asset-info-grid">' +
-            '<div><strong>Asset Tag:</strong> ' + S.esc(displayVal(asset.asset_tag)) + '</div>' +
-            '<div><strong>Série:</strong> ' + S.esc(displayVal(asset.serial_number)) + '</div>' +
-            '<div><strong>Nome:</strong> ' + S.esc(displayVal(asset.display_name)) + '</div>' +
-            '<div><strong>Stockroom:</strong> ' + S.esc(displayVal(asset.stockroom)) + '</div>' +
-            '<div><strong>Status:</strong> ' + S.esc(displayVal(asset.install_status)) + '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem;' +
+            'background:var(--bg-root);padding:.8rem;border-radius:6px;border:1px solid var(--border-color)">' +
+            '<div><strong>Asset Tag:</strong> ' + S.esc(_saDisp(asset.asset_tag)) + '</div>' +
+            '<div><strong>Série:</strong> ' + S.esc(_saDisp(asset.serial_number)) + '</div>' +
+            '<div><strong>Nome:</strong> ' + S.esc(_saDisp(asset.display_name)) + '</div>' +
+            '<div><strong>Local Atual:</strong> ' + S.esc(_saDisp(asset.location)) + '</div>' +
+            '<div><strong>Stockroom:</strong> ' + S.esc(_saDisp(asset.stockroom)) + '</div>' +
+            '<div><strong>Status:</strong> ' + S.esc(_saDisp(asset.install_status)) + '</div>' +
         '</div>';
 
     document.getElementById('sa-move').onclick = function () { _saMove(S); };
@@ -524,12 +571,20 @@ function _saMove(S) {
     var sysId = _saSelectedAsset.sys_id;
     if (typeof sysId === 'object') sysId = sysId.value || sysId.display_value;
 
-    if (!confirm('Confirmar saída deste ativo?')) return;
+    var bu = document.getElementById('sa-bu').value;
+    var storeCode = document.getElementById('sa-store-code').value.trim();
+    var location = document.getElementById('sa-location').value;
+
+    if (!bu) { S.toast('Selecione a BU.', 'warning'); return; }
+    if (!storeCode) { S.toast('Informe o código da loja.', 'warning'); return; }
+    if (!location) { S.toast('Selecione o local de destino.', 'warning'); return; }
+
+    if (!confirm('Confirmar saída deste ativo para ' + location + '?')) return;
 
     var body = {
         sys_id: sysId,
         install_status: document.getElementById('sa-new-status').value,
-        destination_stockroom: document.getElementById('sa-dest-stockroom').value.trim(),
+        location: location,
         notes: document.getElementById('sa-notes').value.trim()
     };
 

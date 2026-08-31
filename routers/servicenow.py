@@ -54,6 +54,7 @@ REFERENCE_TABLE_MAP = {
     "company": "core_company",
     "stockroom": "alm_stockroom",
     "depreciation": "cmdb_depreciation",
+    "location": "cmn_location",
 }
 
 REFERENCE_NAME_FIELD = {
@@ -62,6 +63,7 @@ REFERENCE_NAME_FIELD = {
     "company": "name",
     "stockroom": "name",
     "depreciation": "name",
+    "location": "name",
 }
 
 CURRENCY_MAP = {
@@ -841,6 +843,13 @@ def count_incidents(
 
 VALID_STOCKROOMS = ["SPARE-ADM15", "SPARE-CD324", "SPARE-CD504"]
 
+BU_MAP = {
+    "renner": "Renner Brasil",
+    "youcom": "Youcom",
+    "camicado": "Camicado",
+    "ashua": "Ashua",
+}
+
 
 class SaidaSearchIn(BaseModel):
     asset_tag: str = ""
@@ -850,14 +859,15 @@ class SaidaSearchIn(BaseModel):
 
 class SaidaMovIn(BaseModel):
     sys_id: str
-    destination_stockroom: str = ""
     install_status: str = "In transit"
+    location: str = ""
     notes: str = ""
 
 
 @router.post("/saida/search")
 def saida_search(body: SaidaSearchIn, req: Request):
-    """Busca ativo no alm_hardware por asset_tag OU serial_number, filtrando por stockroom."""
+    """Busca ativo no alm_hardware por asset_tag OU serial_number.
+    Sem filtro de stockroom por padrão (busca global para verificar se existe)."""
     require_permission(req, "servicenow", "view")
     session = _sn_session_from_portal(req)
 
@@ -874,9 +884,6 @@ def saida_search(body: SaidaSearchIn, req: Request):
 
     if body.stockroom:
         query_parts.append(f"stockroom.name={body.stockroom}")
-    else:
-        sr_filter = "^OR".join(f"stockroom.name={s}" for s in VALID_STOCKROOMS)
-        query_parts.append(sr_filter)
 
     sn_query = "^".join(query_parts)
 
@@ -908,9 +915,22 @@ def saida_search(body: SaidaSearchIn, req: Request):
     return {"assets": data.get("result", [])}
 
 
+@router.get("/saida/locations")
+def saida_locations(req: Request):
+    """Retorna lista de lojas/locais do ServiceNow (cmn_location)."""
+    require_permission(req, "servicenow", "view")
+    import json as _json
+    loc_path = os.path.join(os.path.dirname(__file__), "..", "static", "data", "locations_sn.json")
+    try:
+        with open(loc_path, "r", encoding="utf-8") as f:
+            return {"locations": _json.load(f)}
+    except FileNotFoundError:
+        return {"locations": []}
+
+
 @router.post("/saida/move")
 def saida_move(body: SaidaMovIn, req: Request):
-    """Atualiza status/stockroom de um ativo (saída de estoque)."""
+    """Atualiza status e local de um ativo (saída de estoque)."""
     require_permission(req, "servicenow", "edit")
     session = _sn_session_from_portal(req)
 
@@ -918,11 +938,13 @@ def saida_move(body: SaidaMovIn, req: Request):
         raise HTTPException(400, "sys_id obrigatório.")
 
     update = {"install_status": INSTALL_STATUS_MAP.get(body.install_status.lower(), body.install_status)}
-    if body.destination_stockroom:
+
+    if body.location:
         cache = {}
         _, BS = _get_http()
-        sr_id = _lookup_reference(session, "stockroom", body.destination_stockroom, cache, BS)
-        update["stockroom"] = sr_id
+        loc_id = _lookup_reference(session, "location", body.location, cache, BS)
+        update["location"] = loc_id
+
     if body.notes:
         update["work_notes"] = body.notes
 
