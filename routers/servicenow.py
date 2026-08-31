@@ -1457,14 +1457,62 @@ def correios_rastrear_lote(body: dict, req: Request):
 
 @router.post("/correios/test")
 def correios_test(req: Request):
-    """Testa a conexão com a API dos Correios (autenticação)."""
+    """Testa conexão com Correios: autenticação + rastreio de teste."""
+    import base64
     require_permission(req, "servicenow", "view")
     cfg = _get_correios_config()
     _correios_token_cache.clear()
+
+    import requests as _req
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    sess = _req.Session()
+    sess.verify = False
+    if SN_PROXY:
+        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+
+    credentials = base64.b64encode(
+        f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
+    ).decode()
+
+    result = {"config": {"usuario": cfg["usuario"], "contrato": cfg.get("contrato", ""), "proxy": SN_PROXY or "(nenhum)"}}
+
     try:
-        token = _correios_authenticate(cfg)
-        return {"ok": True, "message": "Autenticação com Correios bem-sucedida."}
-    except HTTPException:
-        raise
+        r = sess.post(
+            "https://api.correios.com.br/token/v1/autentica",
+            headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
+            timeout=30,
+        )
+        result["auth"] = {
+            "status": r.status_code,
+            "url": r.url,
+            "response": r.text[:500],
+        }
+        if r.status_code not in (200, 201):
+            sess.close()
+            return result
+
+        token = r.json().get("token", "")
+        _correios_token_cache["token"] = token
+        _correios_token_cache["obtained_at"] = time.time()
+
+        r2 = sess.get(
+            "https://api.correios.com.br/srorastro/v1/objetos?codigosObjetos=AD852897611BR&resultado=T",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=30,
+        )
+        result["rastreio_test"] = {
+            "status": r2.status_code,
+            "url": r2.url,
+            "response": r2.text[:500],
+        }
     except Exception as e:
-        raise HTTPException(502, f"Falha na autenticação: {e}")
+        result["erro"] = str(e)
+    finally:
+        sess.close()
+
+    result["ok"] = result.get("auth", {}).get("status") in (200, 201) and result.get("rastreio_test", {}).get("status") == 200
+    if result["ok"]:
+        result["message"] = "Autenticação e rastreio OK!"
+    return result
