@@ -517,8 +517,8 @@ def list_statuses(req: Request):
 
 @router.post("/test-login")
 def test_login(body: TestLoginIn, req: Request):
-    """Testa conexão SSO com ServiceNow."""
-    require_permission(req, "servicenow", "create")
+    """Testa conexão SSO com ServiceNow e salva cookies na sessão do portal."""
+    sd = require_permission(req, "servicenow", "create")
     _req, BS = _get_http()
     session = _req.Session()
     session.verify = False
@@ -533,6 +533,7 @@ def test_login(body: TestLoginIn, req: Request):
         raise HTTPException(502, f"Erro SSO: {e}")
     if not ok:
         raise HTTPException(401, "Login SSO falhou — verifique usuário e senha.")
+    sd["sn_cookies"] = dict(session.cookies)
     return {"ok": True, "message": "Conexão SSO com ServiceNow estabelecida."}
 
 
