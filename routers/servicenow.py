@@ -945,24 +945,14 @@ _TRACKING_RE = re.compile(r'[A-Z]{2}\d{9}[A-Z]{2}')
 
 
 def _extract_tracking_code(incident: dict) -> str:
-    """Try to find a Correios tracking code (XX000000000XX) from incident fields."""
-    for field in ("correlation_display", "correlation_id",
-                  "u_tracking_number", "u_codigo_rastreio", "u_rastreio"):
-        val = incident.get(field, "")
-        if isinstance(val, dict):
-            val = val.get("display_value", val.get("value", ""))
-        if val:
-            m = _TRACKING_RE.search(val.strip())
-            if m:
-                return m.group(0)
-    for field in ("short_description", "description", "comments", "work_notes"):
-        val = incident.get(field, "")
-        if isinstance(val, dict):
-            val = val.get("display_value", val.get("value", ""))
-        if val:
-            m = _TRACKING_RE.search(val)
-            if m:
-                return m.group(0)
+    """Extract Correios tracking code (XX000000000XX) from correlation_display only."""
+    val = incident.get("correlation_display", "")
+    if isinstance(val, dict):
+        val = val.get("display_value", val.get("value", ""))
+    if val:
+        m = _TRACKING_RE.search(str(val).strip())
+        if m:
+            return m.group(0)
     return ""
 
 
