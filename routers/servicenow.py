@@ -1250,6 +1250,8 @@ def _correios_authenticate(cfg: dict) -> str:
 
     sess = _req.Session()
     sess.verify = False
+    if SN_PROXY:
+        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
 
     try:
         r = sess.post(
@@ -1390,6 +1392,8 @@ def _correios_get(cfg, token, url):
 
     sess = _req.Session()
     sess.verify = False
+    if SN_PROXY:
+        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
 
     try:
         r = sess.get(url, headers={
