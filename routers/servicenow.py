@@ -261,6 +261,26 @@ def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_v
     raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
 
 
+def _sn_query_all(session, table, query="", fields="", page_size=500, max_records=10000):
+    """Busca todos os registros paginando até esgotar a fila.
+
+    O JSONv2 devolve no máximo sysparm_record_count por chamada; aqui
+    percorremos as páginas via sysparm_first_row até o ServiceNow parar
+    de retornar registros (ou até max_records, como trava de segurança).
+    """
+    todos = []
+    offset = 0
+    while offset < max_records:
+        lote = _sn_query(session, table, query, fields, page_size, offset)
+        if not lote:
+            break
+        todos.extend(lote)
+        if len(lote) < page_size:
+            break
+        offset += page_size
+    return todos
+
+
 def _sn_update(session, table, sys_id, updates):
     """Update a record via JSONv2 API (works with SSO cookies)."""
     url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&sysparm_action=update&sysparm_query=sys_id={sys_id}"
@@ -1016,7 +1036,6 @@ def chamados_correios(
     sn_query = (
         f"assignment_group.name={queue}"
         f"^stateNOT IN6,7,8"
-        f"^correlation_displayISNOTEMPTY"
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -1026,7 +1045,9 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 200, 0)
+    # Busca a fila inteira paginando; o filtro de rastreio é feito em
+    # Python porque o JSONv2 não suporta LIKE/ENDSWITH de forma confiável.
+    all_incidents = _sn_query_all(session, INCIDENT_TABLE, sn_query, fields)
 
     incidents = []
     for inc in all_incidents:
@@ -1038,7 +1059,11 @@ def chamados_correios(
     total = len(incidents)
     page = incidents[offset:offset + limit]
 
-    return {"incidents": page, "total": total}
+    return {
+        "incidents": page,
+        "total": total,
+        "total_fila": len(all_incidents),
+    }
 
 
 @router.get("/chamados-correios/debug")
@@ -1046,43 +1071,49 @@ def chamados_correios_debug(
     req: Request,
     queue: str = DEFAULT_QUEUE,
 ):
-    """Debug: busca 10 incidentes com correlation_display preenchido
-    e mostra os valores brutos para diagnosticar o filtro."""
+    """Debug: percorre a fila inteira e mostra o que o ServiceNow devolve,
+    para diagnosticar por que o filtro de rastreio não casa."""
     require_permission(req, "servicenow", "view")
     session = _sn_session_from_portal(req)
 
     sn_query = (
         f"assignment_group.name={queue}"
-        f"^correlation_displayISNOTEMPTY"
+        f"^stateNOT IN6,7,8"
         f"^ORDERBYDESCsys_created_on"
     )
 
-    incidents = _sn_query(
+    incidents = _sn_query_all(
         session, INCIDENT_TABLE, sn_query,
         fields="number,correlation_id,correlation_display,state,short_description",
-        limit=10,
     )
 
-    results = []
+    com_rastreio = []
+    sem_rastreio = []
     for inc in incidents:
         cd = inc.get("correlation_display", "")
-        ci = inc.get("correlation_id", "")
-        num = inc.get("number", "")
-        tracking = _extract_tracking_code(inc)
-        results.append({
-            "number": num,
-            "correlation_display_raw": cd,
-            "correlation_display_type": type(cd).__name__,
-            "correlation_id_raw": ci,
+        if isinstance(cd, dict):
+            cd = cd.get("display_value", cd.get("value", ""))
+        registro = {
+            "number": inc.get("number", ""),
+            "correlation_display": cd,
+            "correlation_display_type": type(inc.get("correlation_display")).__name__,
+            "correlation_id": inc.get("correlation_id", ""),
             "state": inc.get("state", ""),
-            "tracking_extracted": tracking or "(nenhum)",
-            "regex_match": bool(tracking),
-        })
+        }
+        if _extract_tracking_code(inc):
+            registro["tracking"] = _extract_tracking_code(inc)
+            com_rastreio.append(registro)
+        else:
+            sem_rastreio.append(registro)
 
     return {
         "queue": queue,
-        "total_returned": len(incidents),
-        "incidents": results,
+        "total_na_fila": len(incidents),
+        "com_rastreio": len(com_rastreio),
+        "sem_rastreio": len(sem_rastreio),
+        "regex_usado": _TRACKING_RE.pattern,
+        "exemplos_com_rastreio": com_rastreio[:10],
+        "exemplos_sem_rastreio": sem_rastreio[:20],
     }
 
 
