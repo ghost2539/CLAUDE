@@ -566,6 +566,7 @@ function _snRenderCorreios(container, S) {
                     '<div style="flex:1"><label>Fila</label>' +
                         '<input id="co-queue" class="form-control" value="TI_N2_FLD_RNR_LOJAS_SPARE"></div>' +
                     '<button class="btn btn-primary" id="co-load">Carregar</button>' +
+                    '<button class="btn btn-outline" id="co-debug" title="Mostra campos disponíveis nos incidentes para identificar onde está o código de rastreio">Diagnosticar campos</button>' +
                 '</div>' +
             '</div>' +
         '</div>' +
@@ -605,6 +606,69 @@ function _snRenderCorreios(container, S) {
     document.getElementById('co-next').addEventListener('click', function () {
         coPage++;
         loadCorreios();
+    });
+
+    document.getElementById('co-debug').addEventListener('click', function () {
+        var queue = document.getElementById('co-queue').value.trim();
+        if (!queue) { S.toast('Informe a fila', 'warning'); return; }
+        var panel = document.getElementById('co-tracking-panel');
+        var body = document.getElementById('co-track-body');
+        var title = document.getElementById('co-track-title');
+        panel.style.display = '';
+        title.textContent = 'Diagnóstico de campos';
+        body.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)"><span class="spinner spinner-sm"></span> Analisando...</div>';
+
+        S.api('/servicenow/chamados-correios/debug?queue=' + encodeURIComponent(queue))
+            .then(function (d) {
+                var html = '<div style="margin-bottom:12px"><strong>Fila:</strong> ' + S.esc(d.queue) +
+                    ' | <strong>Total incidentes:</strong> ' + d.total_incidents +
+                    ' | <strong>Amostra:</strong> ' + d.sample_count + '</div>';
+
+                // Campos de correlação
+                html += '<h3 style="margin:16px 0 8px">Campos de correlação/rastreio</h3>';
+                html += '<table class="data-table"><thead><tr><th>Campo</th><th>Incidente</th><th>Valor</th></tr></thead><tbody>';
+                var cf = d.correlation_fields || {};
+                for (var field in cf) {
+                    var entries = cf[field];
+                    for (var j = 0; j < entries.length; j++) {
+                        html += '<tr><td style="font-weight:600">' + S.esc(field) + '</td>' +
+                            '<td>' + S.esc(entries[j].incident) + '</td>' +
+                            '<td style="color:' + (entries[j].value === '(vazio)' ? 'var(--text-secondary)' : '#c06010') + '">' +
+                                S.esc(entries[j].value) + '</td></tr>';
+                    }
+                }
+                html += '</tbody></table>';
+
+                // Códigos detectados automaticamente
+                var det = d.detected_tracking_codes || {};
+                var detKeys = Object.keys(det);
+                if (detKeys.length) {
+                    html += '<h3 style="margin:16px 0 8px;color:#198754">Códigos de rastreio detectados automaticamente</h3>';
+                    html += '<table class="data-table"><thead><tr><th>Campo</th><th>Incidente</th><th>Código</th></tr></thead><tbody>';
+                    for (var k = 0; k < detKeys.length; k++) {
+                        var items = det[detKeys[k]];
+                        for (var m = 0; m < items.length; m++) {
+                            html += '<tr><td style="font-weight:600;color:#198754">' + S.esc(detKeys[k]) + '</td>' +
+                                '<td>' + S.esc(items[m].incident) + '</td>' +
+                                '<td style="font-weight:600;color:#c06010">' + S.esc(items[m].value) + '</td></tr>';
+                        }
+                    }
+                    html += '</tbody></table>';
+                } else {
+                    html += '<div style="margin-top:12px;color:var(--text-secondary)">' +
+                        'Nenhum código de rastreio (formato XX000000000XX) detectado automaticamente nos últimos 5 incidentes.</div>';
+                }
+
+                // Todos os campos disponíveis
+                html += '<h3 style="margin:16px 0 8px">Todos os campos disponíveis (' + (d.all_field_names || []).length + ')</h3>';
+                html += '<div style="font-size:.8rem;color:var(--text-secondary);word-break:break-all">' +
+                    (d.all_field_names || []).join(', ') + '</div>';
+
+                body.innerHTML = html;
+            })
+            .catch(function (e) {
+                body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+            });
     });
 
     function displayVal(v) {
@@ -718,7 +782,7 @@ function _snRenderCorreios(container, S) {
 
                 for (var i = 0; i < items.length; i++) {
                     var inc = items[i];
-                    var trackCode = displayVal(inc.correlation_display);
+                    var trackCode = displayVal(inc.correlation_display) || displayVal(inc.correlation_id);
                     html += '<tr>' +
                         '<td style="white-space:nowrap;font-weight:600">' + S.esc(displayVal(inc.number)) + '</td>' +
                         '<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">' +

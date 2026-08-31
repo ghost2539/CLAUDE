@@ -954,19 +954,21 @@ def chamados_correios(
     limit: int = 50,
     offset: int = 0,
 ):
-    """Lista incidentes com código de rastreio no correlation_display."""
+    """Lista incidentes com código de rastreio (correlation_id ou correlation_display)."""
     require_permission(req, "servicenow", "view")
     session = _sn_session_from_portal(req)
 
     sn_query = (
         f"assignment_group.name={queue}"
-        f"^correlation_displayISNOTEMPTY"
+        f"^correlation_idISNOTEMPTY"
+        f"^ORcorrelation_displayISNOTEMPTY"
         f"^ORDERBYDESCsys_created_on"
     )
 
     fields = (
         "sys_id,number,short_description,state,priority,"
-        "correlation_display,caller_id,opened_at,resolved_at,closed_at"
+        "correlation_id,correlation_display,"
+        "caller_id,opened_at,resolved_at,closed_at"
     )
 
     url = (
@@ -993,6 +995,86 @@ def chamados_correios(
     total = int(r.headers.get("X-Total-Count", len(incidents)))
 
     return {"incidents": incidents, "total": total}
+
+
+@router.get("/chamados-correios/debug")
+def chamados_correios_debug(
+    req: Request,
+    queue: str = DEFAULT_QUEUE,
+):
+    """Debug: busca últimos 5 incidentes da fila com todos os campos para identificar
+    qual campo contém o código de rastreio dos Correios."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    sn_query = (
+        f"assignment_group.name={queue}"
+        f"^ORDERBYDESCsys_created_on"
+    )
+
+    url = (
+        f"{SERVICENOW_BASE}/api/now/table/{INCIDENT_TABLE}"
+        f"?sysparm_query={sn_query}"
+        f"&sysparm_limit=5"
+        f"&sysparm_display_value=true"
+    )
+
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Erro de conexão: {e}")
+
+    if r.status_code == 401 or (r.status_code == 200 and "login" in r.url.lower()):
+        raise HTTPException(401, "Sessão ServiceNow expirou. Reconecte.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"ServiceNow retornou {r.status_code}")
+
+    data = r.json()
+    incidents = data.get("result", [])
+
+    tracking_fields = {}
+    for inc in incidents:
+        for key, val in inc.items():
+            dv = val
+            if isinstance(val, dict):
+                dv = val.get("display_value", val.get("value", ""))
+            if dv and isinstance(dv, str) and len(dv) >= 10:
+                import re as _re
+                if _re.match(r'^[A-Z]{2}\d{9}[A-Z]{2}$', dv.strip()):
+                    if key not in tracking_fields:
+                        tracking_fields[key] = []
+                    tracking_fields[key].append({
+                        "incident": inc.get("number", {}).get("display_value", inc.get("number", "")),
+                        "value": dv.strip(),
+                    })
+
+    correlation_fields = {}
+    for inc in incidents:
+        num = inc.get("number", "")
+        if isinstance(num, dict):
+            num = num.get("display_value", num.get("value", ""))
+        for key in ["correlation_id", "correlation_display", "u_tracking_number",
+                     "u_codigo_rastreio", "u_rastreio"]:
+            val = inc.get(key, "")
+            if isinstance(val, dict):
+                val = val.get("display_value", val.get("value", ""))
+            correlation_fields.setdefault(key, []).append({
+                "incident": num,
+                "value": val or "(vazio)",
+            })
+
+    all_fields = []
+    if incidents:
+        all_fields = sorted(incidents[0].keys())
+
+    return {
+        "queue": queue,
+        "total_incidents": int(r.headers.get("X-Total-Count", len(incidents))),
+        "sample_count": len(incidents),
+        "all_field_names": all_fields,
+        "correlation_fields": correlation_fields,
+        "detected_tracking_codes": tracking_fields,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
