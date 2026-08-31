@@ -111,11 +111,13 @@ def _correios_authenticate() -> str:
 
     for caminho, corpo, rotulo in escopos:
         try:
+            # A elevação usa Basic com usuário/senha, não o Bearer do token
+            # básico: o gateway responde GTW-014 pedindo Basic explicitamente.
             r_esc = _correios_request(
                 "POST",
                 f"{CORREIOS_BASE}/token/v1/autentica/{caminho}",
                 headers={
-                    "Authorization": f"Bearer {token_basico}",
+                    "Authorization": f"Basic {credentials}",
                     "Content-Type": "application/json",
                 },
                 json=corpo,
@@ -347,7 +349,7 @@ def correios_test(req: Request):
                 "POST",
                 f"{CORREIOS_BASE}/token/v1/autentica/cartaopostagem",
                 headers={
-                    "Authorization": f"Bearer {token_basico}",
+                    "Authorization": f"Basic {credentials}",
                     "Content-Type": "application/json",
                 },
                 json={"numero": cartao},
