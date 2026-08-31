@@ -495,6 +495,7 @@ async function renderCorreiosConfig(c, S) {
     form.appendChild(_pField('Usuário', 'cor-usuario', d.usuario || ''));
     form.appendChild(_pField('Chave de acesso', 'cor-senha', d.chave_acesso || '', 'password'));
     form.appendChild(_pField('Contrato', 'cor-contrato', d.contrato || ''));
+    form.appendChild(_pField('Proxy (vazio=mesmo do SN, "nenhum"=direto)', 'cor-proxy', d.proxy || ''));
 
     body.appendChild(form);
 
@@ -506,6 +507,7 @@ async function renderCorreiosConfig(c, S) {
             usuario: document.getElementById('cor-usuario').value.trim(),
             chave_acesso: document.getElementById('cor-senha').value,
             contrato: document.getElementById('cor-contrato').value.trim(),
+            proxy: document.getElementById('cor-proxy').value.trim(),
         };
         if (!payload.usuario || !payload.chave_acesso || !payload.contrato) {
             S.toast('Preencha Usuário, Chave de acesso e Contrato.', 'error');

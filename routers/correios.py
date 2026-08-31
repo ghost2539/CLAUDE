@@ -14,6 +14,21 @@ router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
 SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
+
+def _get_correios_proxy():
+    """Retorna proxy para Correios. Usa config se definido, senão SN_PROXY."""
+    try:
+        with SessionLocal() as s:
+            row = s.get(Setting, "correios")
+            if row and row.value and row.value.get("proxy"):
+                p = row.value["proxy"].strip()
+                if p.lower() == "nenhum" or p == "":
+                    return None
+                return p
+    except Exception:
+        pass
+    return SN_PROXY
+
 CORREIOS_URLS = {
     "producao": {
         "token": "https://api.correios.com.br/token/v1/autentica",
@@ -55,8 +70,9 @@ def _correios_authenticate(cfg: dict) -> str:
 
     sess = _req.Session()
     sess.verify = False
-    if SN_PROXY:
-        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    proxy = _get_correios_proxy()
+    if proxy:
+        sess.proxies = {"https": proxy, "http": proxy}
 
     try:
         r = sess.post(
@@ -93,8 +109,9 @@ def _correios_get(cfg, token, url):
 
     sess = _req.Session()
     sess.verify = False
-    if SN_PROXY:
-        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    proxy = _get_correios_proxy()
+    if proxy:
+        sess.proxies = {"https": proxy, "http": proxy}
 
     try:
         r = sess.get(url, headers={
@@ -272,19 +289,22 @@ def correios_test(req: Request):
 
     sess = _req.Session()
     sess.verify = False
-    if SN_PROXY:
-        sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    proxy = _get_correios_proxy()
+    if proxy:
+        sess.proxies = {"https": proxy, "http": proxy}
 
     credentials = base64.b64encode(
         f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
     ).decode()
 
     contrato = cfg.get("contrato", "")
+    proxy = _get_correios_proxy()
     result = {
         "config": {
             "usuario": cfg["usuario"],
             "contrato": contrato,
-            "proxy": SN_PROXY or "(nenhum)",
+            "proxy": proxy or "(nenhum / direto)",
+            "proxy_origem": cfg.get("proxy", "(usando SN_PROXY padrão)"),
         }
     }
 
