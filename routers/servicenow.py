@@ -973,7 +973,6 @@ def chamados_correios(
     sn_query = (
         f"assignment_group.name={queue}"
         f"^correlation_displayISNOTEMPTY"
-        f"^correlation_display!LIKEAG."
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -983,13 +982,20 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 200), offset)
-    total = len(incidents)
+    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 200), offset)
 
-    for inc in incidents:
+    incidents = []
+    for inc in all_incidents:
+        cd = inc.get("correlation_display", "")
+        if isinstance(cd, dict):
+            cd = cd.get("display_value", cd.get("value", ""))
+        cd = str(cd).strip()
+        if cd.upper().startswith("AG."):
+            continue
         inc["_tracking_code"] = _extract_tracking_code(inc)
+        incidents.append(inc)
 
-    return {"incidents": incidents, "total": total}
+    return {"incidents": incidents, "total": len(incidents)}
 
 
 @router.get("/chamados-correios/debug")
@@ -1223,11 +1229,11 @@ def refresh_tv_cache(req: Request):
 
 CORREIOS_URLS = {
     "producao": {
-        "token": "https://api.correios.com.br/token/v1/autentica/contrato",
+        "token": "https://api.correios.com.br/token/v1/autentica",
         "rastro": "https://api.correios.com.br/srorastro/v3/objetos",
     },
     "homologacao": {
-        "token": "https://apihom.correios.com.br/token/v1/autentica/contrato",
+        "token": "https://apihom.correios.com.br/token/v1/autentica",
         "rastro": "https://apihom.correios.com.br/srorastro/v3/objetos",
     },
 }
@@ -1261,16 +1267,10 @@ def _correios_authenticate(cfg: dict) -> str:
         f"{cfg['usuario']}:{cfg['senha_componente']}".encode()
     ).decode()
 
-    body = {"numero": cfg.get("contrato", "")}
-    if cfg.get("dr"):
-        body["dr"] = int(cfg["dr"])
-
     try:
         r = _req.post(
             urls["token"],
-            json=body,
             headers={
-                "Content-Type": "application/json",
                 "Authorization": f"Basic {credentials}",
             },
             timeout=30,
