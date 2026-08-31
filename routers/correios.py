@@ -225,14 +225,19 @@ def correios_rastrear(codigo: str, req: Request):
 
         if ev_code in ("BDE", "BDI", "BDR") and not entrega:
             recebedor = ev.get("recebedor", {})
+            recebedor = recebedor or {}
             entrega = {
                 "entregue": True,
                 "data": ev.get("dtHrCriado", ""),
                 "descricao": ev.get("descricao", ""),
                 "detalhe": ev.get("detalhe", ""),
                 "local_entrega": local_str,
-                "recebedor_nome": recebedor.get("nome", "") if recebedor else "",
-                "recebedor_documento": recebedor.get("documento", "") if recebedor else "",
+                "recebedor_nome": recebedor.get("nome", ""),
+                "recebedor_documento": recebedor.get("documento", ""),
+                "recebedor_celular": recebedor.get("celular", ""),
+                "recebedor_email": recebedor.get("email", ""),
+                "recebedor_comentario": recebedor.get("comentario", "")
+                or ev.get("comentario", ""),
             }
 
         eventos.append(evento_data)
@@ -250,7 +255,14 @@ def correios_rastrear(codigo: str, req: Request):
 
 @router.get("/correios/comprovante/{codigo}")
 def correios_comprovante(codigo: str, req: Request):
-    """Busca comprovante de entrega (AR eletrônico) de um objeto."""
+    """Comprovante de entrega a partir do evento de entrega do SRO.
+
+    O SRO Rastro não devolve a imagem digitalizada do AR — ela é um
+    produto à parte dos Correios. O que existe aqui são os dados do
+    recebimento (nome, documento, data, local), que é o que o evento
+    BDE/BDI/BDR carrega; quando o objeto traz imagens, elas são
+    repassadas em `imagens`.
+    """
     require_permission(req, "servicenow", "view")
 
     codigo = codigo.strip().upper()
@@ -262,16 +274,50 @@ def correios_comprovante(codigo: str, req: Request):
     r = _correios_get(token, url)
 
     if r.status_code == 404:
-        return {"codigo": codigo, "encontrado": False, "mensagem": "Comprovante não disponível."}
+        return {"codigo": codigo, "encontrado": False, "mensagem": "Objeto não encontrado."}
     if r.status_code != 200:
         detail = r.text[:300] if r.text else str(r.status_code)
         raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
 
-    data = r.json()
+    objetos = r.json().get("objetos", [])
+    if not objetos:
+        return {"codigo": codigo, "encontrado": False, "mensagem": "Objeto não encontrado."}
+
+    obj = objetos[0]
+    for ev in obj.get("eventos", []):
+        if ev.get("codigo", "") not in ("BDE", "BDI", "BDR"):
+            continue
+
+        recebedor = ev.get("recebedor") or {}
+        unidade = ev.get("unidade", {})
+        endereco = unidade.get("endereco", {})
+        local = " - ".join(
+            p for p in (endereco.get("cidade", ""), endereco.get("uf", "")) if p
+        )
+        if unidade.get("nome"):
+            local = f"{unidade['nome']} ({local})" if local else unidade["nome"]
+
+        return {
+            "codigo": codigo,
+            "encontrado": True,
+            "comprovante": {
+                "nome": recebedor.get("nome", ""),
+                "documento": recebedor.get("documento", ""),
+                "celular": recebedor.get("celular", ""),
+                "email": recebedor.get("email", ""),
+                "comentario": recebedor.get("comentario", "") or ev.get("comentario", ""),
+                "dataRecebimento": ev.get("dtHrCriado", ""),
+                "descricao": ev.get("descricao", ""),
+                "detalhe": ev.get("detalhe", ""),
+                "local": local,
+                "imagens": ev.get("imagens", []),
+            },
+        }
+
     return {
         "codigo": codigo,
-        "encontrado": True,
-        "comprovante": data,
+        "encontrado": False,
+        "mensagem": "Objeto ainda não foi entregue — não há comprovante.",
     }
 
 

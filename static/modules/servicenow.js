@@ -916,7 +916,7 @@ function _snRenderCorreios(container, S) {
                         '</div>' +
                         '<div style="margin-top:12px">' +
                             '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:#198754;border-color:#198754">' +
-                                'Buscar AR Eletrônico / Imagem</button>' +
+                                'Comprovante de entrega</button>' +
                             '<div id="co-ar-result" style="margin-top:8px"></div>' +
                         '</div>' +
                     '</div>';
@@ -958,6 +958,33 @@ function _snRenderCorreios(container, S) {
                                 if (comp.dataRecebimento) {
                                     arHtml += '<div><span style="color:var(--text-secondary)">Data recebimento:</span> ' + S.esc(comp.dataRecebimento) + '</div>';
                                 }
+                                if (comp.celular) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Celular:</span> ' + S.esc(comp.celular) + '</div>';
+                                }
+                                if (comp.email) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Email:</span> ' + S.esc(comp.email) + '</div>';
+                                }
+                                if (comp.local) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Local:</span> ' + S.esc(comp.local) + '</div>';
+                                }
+                                if (comp.descricao) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Evento:</span> ' + S.esc(comp.descricao) + '</div>';
+                                }
+                                if (comp.comentario) {
+                                    arHtml += '<div><span style="color:var(--text-secondary)">Obs:</span> ' + S.esc(comp.comentario) + '</div>';
+                                }
+                                if (comp.imagens && comp.imagens.length) {
+                                    for (var gi = 0; gi < comp.imagens.length; gi++) {
+                                        var gimg = comp.imagens[gi];
+                                        var src = (typeof gimg === 'string')
+                                            ? 'data:image/jpeg;base64,' + gimg
+                                            : (gimg.conteudo ? 'data:' + (gimg.tipo || 'image/jpeg') + ';base64,' + gimg.conteudo : '');
+                                        if (src) {
+                                            arHtml += '<div style="margin:8px 0"><img src="' + src +
+                                                '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                        }
+                                    }
+                                }
                                 // Handle nested objects/arrays from v3
                                 if (comp.objetos) {
                                     var objs = Array.isArray(comp.objetos) ? comp.objetos : [comp.objetos];
@@ -995,7 +1022,7 @@ function _snRenderCorreios(container, S) {
                             })
                             .finally(function () {
                                 arBtn.disabled = false;
-                                arBtn.textContent = 'Buscar AR Eletrônico / Imagem';
+                                arBtn.textContent = 'Comprovante de entrega';
                             });
                     };
                 }
