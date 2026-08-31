@@ -983,12 +983,13 @@ def chamados_correios(
 
     all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, min(limit, 500), offset)
 
-    print(f"[CHAMADOS-CORREIOS] Query: {sn_query}")
-    print(f"[CHAMADOS-CORREIOS] Total retornado do SN: {len(all_incidents)}")
-    for i, inc in enumerate(all_incidents[:10]):
-        cd = inc.get("correlation_display", "(campo ausente)")
-        num = inc.get("number", "?")
-        print(f"  [{i}] {num} | correlation_display={cd!r} | tipo={type(cd).__name__}")
+    debug_samples = []
+    for inc in all_incidents[:10]:
+        debug_samples.append({
+            "number": inc.get("number", "?"),
+            "correlation_display": inc.get("correlation_display", "(AUSENTE)"),
+            "correlation_id": inc.get("correlation_id", "(AUSENTE)"),
+        })
 
     incidents = []
     for inc in all_incidents:
@@ -997,8 +998,16 @@ def chamados_correios(
             inc["_tracking_code"] = tracking
             incidents.append(inc)
 
-    print(f"[CHAMADOS-CORREIOS] Após filtro regex: {len(incidents)} incidentes com rastreio")
-    return {"incidents": incidents, "total": len(incidents)}
+    return {
+        "incidents": incidents,
+        "total": len(incidents),
+        "_debug": {
+            "query": sn_query,
+            "total_from_sn": len(all_incidents),
+            "after_filter": len(incidents),
+            "samples": debug_samples,
+        },
+    }
 
 
 @router.get("/chamados-correios/debug")
