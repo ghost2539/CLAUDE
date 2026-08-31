@@ -584,9 +584,12 @@ function _snRenderCorreios(container, S) {
             '</div>' +
         '</div>' +
 
-        '<div class="alert alert-info">' +
-            'A integração com a API dos Correios será configurada posteriormente. ' +
-            'Por enquanto, os códigos de rastreio são exibidos conforme registrados no ServiceNow.</div>';
+        '<div id="co-tracking-panel" style="display:none">' +
+            '<div class="card mb-3">' +
+                '<div class="card-header" id="co-track-title">Rastreamento</div>' +
+                '<div class="card-body" id="co-track-body"></div>' +
+            '</div>' +
+        '</div>';
 
     var coPage = 0;
     var coLimit = 50;
@@ -604,11 +607,66 @@ function _snRenderCorreios(container, S) {
         loadCorreios();
     });
 
+    function displayVal(v) {
+        if (!v) return '';
+        if (typeof v === 'object') return v.display_value || v.value || '';
+        return v;
+    }
+
+    function rastrear(codigo) {
+        var panel = document.getElementById('co-tracking-panel');
+        var title = document.getElementById('co-track-title');
+        var body = document.getElementById('co-track-body');
+        panel.style.display = '';
+        title.textContent = 'Rastreamento: ' + codigo;
+        body.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)">' +
+            '<span class="spinner spinner-sm"></span> Consultando Correios...</div>';
+        panel.scrollIntoView({ behavior: 'smooth' });
+
+        S.api('/servicenow/correios/rastrear/' + encodeURIComponent(codigo))
+            .then(function (d) {
+                if (!d.encontrado || !d.eventos || !d.eventos.length) {
+                    body.innerHTML = '<div style="padding:1rem;color:var(--text-secondary)">' +
+                        'Nenhum evento encontrado para ' + S.esc(codigo) + '.</div>';
+                    return;
+                }
+                var html = '<div style="position:relative;padding-left:24px">';
+                for (var i = 0; i < d.eventos.length; i++) {
+                    var ev = d.eventos[i];
+                    var isFirst = i === 0;
+                    var dotColor = isFirst ? '#198754' : '#666';
+                    var dtStr = '';
+                    if (ev.data) {
+                        try {
+                            var dt = new Date(ev.data);
+                            dtStr = dt.toLocaleDateString('pt-BR') + ' ' +
+                                dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        } catch (_) { dtStr = ev.data; }
+                    }
+                    html += '<div style="position:relative;padding-bottom:20px;' +
+                        (i < d.eventos.length - 1 ? 'border-left:2px solid #333;margin-left:6px;padding-left:24px' : 'margin-left:6px;padding-left:24px') + '">' +
+                        '<div style="position:absolute;left:-7px;top:2px;width:14px;height:14px;border-radius:50%;background:' + dotColor + '"></div>' +
+                        '<div style="font-weight:600;font-size:.95rem">' + S.esc(ev.descricao) + '</div>' +
+                        (ev.detalhe ? '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(ev.detalhe) + '</div>' : '') +
+                        '<div style="color:var(--text-secondary);font-size:.8rem;margin-top:2px">' +
+                            (ev.local ? S.esc(ev.local) + ' — ' : '') + dtStr +
+                        '</div>' +
+                    '</div>';
+                }
+                html += '</div>';
+                body.innerHTML = html;
+            })
+            .catch(function (e) {
+                body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+            });
+    }
+
     function loadCorreios() {
         var queue = document.getElementById('co-queue').value.trim();
         if (!queue) { S.toast('Informe a fila', 'warning'); return; }
 
         document.getElementById('co-table-wrap').style.display = '';
+        document.getElementById('co-tracking-panel').style.display = 'none';
         document.getElementById('co-table').innerHTML =
             '<div style="padding:1rem;color:var(--text-secondary)"><span class="spinner spinner-sm"></span> Buscando...</div>';
 
@@ -625,12 +683,6 @@ function _snRenderCorreios(container, S) {
                     return;
                 }
 
-                var displayVal = function (v) {
-                    if (!v) return '';
-                    if (typeof v === 'object') return v.display_value || v.value || '';
-                    return v;
-                };
-
                 var html = '<table class="data-table"><thead><tr>' +
                     '<th>Número</th><th>Descrição</th><th>Código Rastreio</th>' +
                     '<th>Estado</th><th>Solicitante</th><th>Aberto em</th>' +
@@ -638,12 +690,18 @@ function _snRenderCorreios(container, S) {
 
                 for (var i = 0; i < items.length; i++) {
                     var inc = items[i];
+                    var trackCode = displayVal(inc.correlation_display);
                     html += '<tr>' +
                         '<td style="white-space:nowrap;font-weight:600">' + S.esc(displayVal(inc.number)) + '</td>' +
                         '<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">' +
                             S.esc(displayVal(inc.short_description)) + '</td>' +
-                        '<td style="font-weight:600;color:#c06010">' +
-                            S.esc(displayVal(inc.correlation_display)) + '</td>' +
+                        '<td>' +
+                            '<button class="btn btn-sm btn-outline co-track-btn" ' +
+                                'data-code="' + S.esc(trackCode) + '" ' +
+                                'style="font-weight:600;color:#c06010">' +
+                                S.esc(trackCode) +
+                            '</button>' +
+                        '</td>' +
                         '<td>' + S.esc(displayVal(inc.state)) + '</td>' +
                         '<td>' + S.esc(displayVal(inc.caller_id)) + '</td>' +
                         '<td style="white-space:nowrap;font-size:.85rem">' + S.esc(displayVal(inc.opened_at)) + '</td>' +
@@ -651,6 +709,12 @@ function _snRenderCorreios(container, S) {
                 }
                 html += '</tbody></table>';
                 document.getElementById('co-table').innerHTML = html;
+
+                document.querySelectorAll('.co-track-btn').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        rastrear(btn.getAttribute('data-code'));
+                    });
+                });
 
                 var pager = document.getElementById('co-pager');
                 pager.hidden = total <= coLimit && coPage === 0;

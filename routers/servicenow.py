@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
-from database import SessionLocal, Asset, ReceiptCycle
+from database import SessionLocal, Asset, ReceiptCycle, Setting
 from security import require_permission, get_session
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
@@ -1246,3 +1246,199 @@ def refresh_tv_cache(req: Request):
             s.add(Setting(key="sn_tv_cache", value=cache_data))
 
     return {"ok": True, "data": cache_data}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CORREIOS API — autenticação e rastreio de objetos
+# ═══════════════════════════════════════════════════════════════════
+
+CORREIOS_URLS = {
+    "producao": {
+        "token": "https://api.correios.com.br/token/v1/autentica/cartaopostagem",
+        "rastro": "https://api.correios.com.br/srorastro/v1/objetos",
+    },
+    "homologacao": {
+        "token": "https://apihom.correios.com.br/token/v1/autentica/cartaopostagem",
+        "rastro": "https://apihom.correios.com.br/srorastro/v1/objetos",
+    },
+}
+
+_correios_token_cache: dict = {}
+
+
+def _get_correios_config():
+    with SessionLocal() as s:
+        row = s.get(Setting, "correios")
+        if not row or not row.value:
+            raise HTTPException(400, "API dos Correios não configurada. Vá em Parâmetros > Correios API.")
+        cfg = row.value
+        if not cfg.get("usuario") or not cfg.get("senha_componente") or not cfg.get("cartao_postagem"):
+            raise HTTPException(400, "Configuração dos Correios incompleta.")
+        return cfg
+
+
+def _correios_authenticate(cfg: dict) -> str:
+    import base64
+    cached = _correios_token_cache.get("token")
+    cached_at = _correios_token_cache.get("obtained_at", 0)
+    if cached and (time.time() - cached_at) < 21600:
+        return cached
+
+    _req, _ = _get_http()
+    ambiente = cfg.get("ambiente", "producao")
+    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
+
+    credentials = base64.b64encode(
+        f"{cfg['usuario']}:{cfg['senha_componente']}".encode()
+    ).decode()
+
+    try:
+        r = _req.post(
+            urls["token"],
+            json={"numero": cfg["cartao_postagem"]},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {credentials}",
+            },
+            timeout=30,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Erro ao conectar com Correios: {e}")
+
+    if r.status_code != 201 and r.status_code != 200:
+        detail = r.text[:300] if r.text else str(r.status_code)
+        raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
+
+    data = r.json()
+    token = data.get("token")
+    if not token:
+        raise HTTPException(502, "Resposta do Correios sem token.")
+
+    _correios_token_cache["token"] = token
+    _correios_token_cache["obtained_at"] = time.time()
+    return token
+
+
+@router.get("/correios/rastrear/{codigo}")
+def correios_rastrear(codigo: str, req: Request):
+    """Rastreia um objeto pelos Correios usando o código de rastreamento."""
+    require_permission(req, "servicenow", "view")
+
+    codigo = codigo.strip().upper()
+    if not codigo or len(codigo) < 10:
+        raise HTTPException(400, "Código de rastreamento inválido.")
+
+    cfg = _get_correios_config()
+    token = _correios_authenticate(cfg)
+
+    _req, _ = _get_http()
+    ambiente = cfg.get("ambiente", "producao")
+    urls = CORREIOS_URLS.get(ambiente, CORREIOS_URLS["producao"])
+
+    url = f"{urls['rastro']}/{codigo}?resultado=T"
+    try:
+        r = _req.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            },
+            timeout=30,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+
+    if r.status_code == 401:
+        _correios_token_cache.clear()
+        token = _correios_authenticate(cfg)
+        try:
+            r = _req.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
+                timeout=30,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+
+    if r.status_code != 200:
+        detail = r.text[:300] if r.text else str(r.status_code)
+        raise HTTPException(502, f"Correios retornou {r.status_code}: {detail}")
+
+    data = r.json()
+    objetos = data.get("objetos", [])
+    if not objetos:
+        return {"codigo": codigo, "encontrado": False, "eventos": []}
+
+    obj = objetos[0]
+    eventos = []
+    for ev in obj.get("eventos", []):
+        unidade = ev.get("unidade", {})
+        endereco = unidade.get("endereco", {})
+        local_parts = [
+            endereco.get("cidade", ""),
+            endereco.get("uf", ""),
+        ]
+        local_str = " - ".join(p for p in local_parts if p)
+        if unidade.get("nome"):
+            local_str = f"{unidade['nome']} ({local_str})" if local_str else unidade["nome"]
+
+        eventos.append({
+            "data": ev.get("dtHrCriado", ""),
+            "descricao": ev.get("descricao", ""),
+            "detalhe": ev.get("detalhe", ""),
+            "local": local_str,
+            "codigo": ev.get("codigo", ""),
+            "tipo": ev.get("tipo", ""),
+        })
+
+    return {
+        "codigo": codigo,
+        "encontrado": True,
+        "eventos": eventos,
+    }
+
+
+@router.post("/correios/rastrear-lote")
+def correios_rastrear_lote(body: dict, req: Request):
+    """Rastreia múltiplos objetos de uma vez (máximo 20)."""
+    require_permission(req, "servicenow", "view")
+
+    codigos = body.get("codigos", [])
+    if not codigos:
+        raise HTTPException(400, "Informe ao menos um código.")
+    if len(codigos) > 20:
+        raise HTTPException(400, "Máximo 20 códigos por consulta.")
+
+    resultados = {}
+    for cod in codigos:
+        cod = str(cod).strip().upper()
+        if not cod or len(cod) < 10:
+            resultados[cod] = {"encontrado": False, "erro": "Código inválido"}
+            continue
+        try:
+            r = correios_rastrear(cod, req)
+            resultados[cod] = r
+        except HTTPException as e:
+            resultados[cod] = {"encontrado": False, "erro": e.detail}
+        except Exception as e:
+            resultados[cod] = {"encontrado": False, "erro": str(e)[:200]}
+
+    return {"resultados": resultados}
+
+
+@router.post("/correios/test")
+def correios_test(req: Request):
+    """Testa a conexão com a API dos Correios (autenticação)."""
+    require_permission(req, "servicenow", "view")
+    cfg = _get_correios_config()
+    _correios_token_cache.clear()
+    try:
+        token = _correios_authenticate(cfg)
+        return {"ok": True, "message": "Autenticação com Correios bem-sucedida."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Falha na autenticação: {e}")

@@ -34,16 +34,28 @@
             font-weight: 700;
         }
         .tv-head h1 { font-size: 36px; margin: 0; }
-        .tv-screen-label {
+        .tv-screen-toggle {
+            display: flex;
+            gap: 0;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 2px solid #444;
+        }
+        .tv-toggle-btn {
             font-size: 16px;
-            padding: 6px 18px;
-            border-radius: 20px;
+            padding: 8px 24px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: .5px;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            color: var(--text-secondary);
+            transition: background .2s, color .2s;
         }
-        .tv-screen-label.receb { background: #246F68; color: #fff; }
-        .tv-screen-label.indic { background: #AB4807; color: #fff; }
+        .tv-toggle-btn:hover { background: rgba(255,255,255,.08); }
+        .tv-toggle-btn.active[data-screen="0"] { background: #246F68; color: #fff; }
+        .tv-toggle-btn.active[data-screen="1"] { background: #AB4807; color: #fff; }
         .tv-connection {
             display: flex;
             align-items: center;
@@ -249,10 +261,13 @@
                 <span class="tv-logo">OP</span>
                 <h1 id="tv-title">Painel de Operações</h1>
             </div>
-            <span class="tv-screen-label receb" id="tv-screen-label">Recebimento</span>
+            <div class="tv-screen-toggle">
+                <button class="tv-toggle-btn active" id="tv-btn-receb" data-screen="0">Recebimento</button>
+                <button class="tv-toggle-btn" id="tv-btn-indic" data-screen="1">Cockpit Spare</button>
+            </div>
             <div class="tv-connection">
-                <span id="tv-dot" class="dot dot-red"></span>
-                <span id="tv-state">Sem conexão</span>
+                <span id="tv-dot" class="dot dot-muted"></span>
+                <span id="tv-state">Carregando...</span>
             </div>
             <div>
                 <strong id="tv-clock"></strong>
@@ -359,23 +374,35 @@
         // Screen rotation
         var currentScreen = 0;
         var screens = ['screen-receb', 'screen-indic'];
-        var labels = [
-            { text: 'Recebimento', cls: 'receb' },
-            { text: 'Indicadores', cls: 'indic' }
-        ];
-        var SCREEN_INTERVAL = 30000; // 30 seconds per screen
+        var SCREEN_INTERVAL = 30000;
+        var autoRotate = true;
+        var autoTimer;
 
-        function switchScreen() {
+        function goToScreen(idx) {
             document.getElementById(screens[currentScreen]).classList.remove('active');
-            currentScreen = (currentScreen + 1) % screens.length;
+            currentScreen = idx;
             document.getElementById(screens[currentScreen]).classList.add('active');
-
-            var lbl = $('#tv-screen-label');
-            lbl.textContent = labels[currentScreen].text;
-            lbl.className = 'tv-screen-label ' + labels[currentScreen].cls;
+            var btns = document.querySelectorAll('.tv-toggle-btn');
+            btns.forEach(function (b) { b.classList.remove('active'); });
+            btns[currentScreen].classList.add('active');
         }
 
-        setInterval(switchScreen, SCREEN_INTERVAL);
+        function switchScreen() {
+            goToScreen((currentScreen + 1) % screens.length);
+        }
+
+        // Click handlers for toggle buttons
+        document.querySelectorAll('.tv-toggle-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var idx = parseInt(btn.getAttribute('data-screen'), 10);
+                goToScreen(idx);
+                // Reset auto-rotation timer on manual click
+                clearInterval(autoTimer);
+                autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
+            });
+        });
+
+        autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
 
         function clock() {
             var d = new Date();
