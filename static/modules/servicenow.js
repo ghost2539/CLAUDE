@@ -654,6 +654,34 @@ function _snRenderCorreios(container, S) {
                     '</div>';
                 }
                 html += '</div>';
+
+                // Comprovante de entrega
+                if (d.entrega && d.entrega.entregue) {
+                    var ent = d.entrega;
+                    var entDt = '';
+                    if (ent.data) {
+                        try {
+                            var edt = new Date(ent.data);
+                            entDt = edt.toLocaleDateString('pt-BR') + ' ' +
+                                edt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        } catch (_) { entDt = ent.data; }
+                    }
+                    html += '<div style="margin-top:20px;padding:16px;background:rgba(25,135,84,.1);border:1px solid rgba(25,135,84,.3);border-radius:8px">' +
+                        '<div style="font-weight:700;font-size:1rem;color:#198754;margin-bottom:8px">' +
+                            'COMPROVANTE DE ENTREGA</div>' +
+                        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.9rem">' +
+                            '<div><span style="color:var(--text-secondary)">Status:</span> ' + S.esc(ent.descricao) + '</div>' +
+                            '<div><span style="color:var(--text-secondary)">Data:</span> ' + entDt + '</div>' +
+                            (ent.recebedor_nome ? '<div><span style="color:var(--text-secondary)">Recebedor:</span> <strong>' + S.esc(ent.recebedor_nome) + '</strong></div>' : '') +
+                            (ent.recebedor_documento ? '<div><span style="color:var(--text-secondary)">Documento:</span> ' + S.esc(ent.recebedor_documento) + '</div>' : '') +
+                            (ent.local_entrega ? '<div><span style="color:var(--text-secondary)">Local:</span> ' + S.esc(ent.local_entrega) + '</div>' : '') +
+                            (ent.destino ? '<div><span style="color:var(--text-secondary)">Destino:</span> ' + S.esc(ent.destino) + '</div>' : '') +
+                            (ent.detalhe ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Detalhe:</span> ' + S.esc(ent.detalhe) + '</div>' : '') +
+                            (ent.recebedor_comentario ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Obs:</span> ' + S.esc(ent.recebedor_comentario) + '</div>' : '') +
+                        '</div>' +
+                    '</div>';
+                }
+
                 body.innerHTML = html;
             })
             .catch(function (e) {

@@ -1374,6 +1374,8 @@ def correios_rastrear(codigo: str, req: Request):
 
     obj = objetos[0]
     eventos = []
+    entrega = None
+
     for ev in obj.get("eventos", []):
         unidade = ev.get("unidade", {})
         endereco = unidade.get("endereco", {})
@@ -1385,19 +1387,50 @@ def correios_rastrear(codigo: str, req: Request):
         if unidade.get("nome"):
             local_str = f"{unidade['nome']} ({local_str})" if local_str else unidade["nome"]
 
-        eventos.append({
+        ev_code = ev.get("codigo", "")
+        evento_data = {
             "data": ev.get("dtHrCriado", ""),
             "descricao": ev.get("descricao", ""),
             "detalhe": ev.get("detalhe", ""),
             "local": local_str,
-            "codigo": ev.get("codigo", ""),
+            "codigo": ev_code,
             "tipo": ev.get("tipo", ""),
-        })
+        }
+
+        # BDE/BDI/BDR = eventos de entrega
+        if ev_code in ("BDE", "BDI", "BDR") and not entrega:
+            dest = ev.get("unidadeDestino", {})
+            dest_end = dest.get("endereco", {})
+            dest_local_parts = [
+                dest_end.get("logradouro", ""),
+                dest_end.get("numero", ""),
+                dest_end.get("bairro", ""),
+                dest_end.get("cidade", ""),
+                dest_end.get("uf", ""),
+                dest_end.get("cep", ""),
+            ]
+            dest_local = ", ".join(p for p in dest_local_parts if p)
+
+            recebedor = ev.get("recebedor", {})
+            entrega = {
+                "entregue": True,
+                "data": ev.get("dtHrCriado", ""),
+                "descricao": ev.get("descricao", ""),
+                "detalhe": ev.get("detalhe", ""),
+                "local_entrega": local_str,
+                "destino": dest_local or None,
+                "recebedor_nome": recebedor.get("nome", "") if recebedor else "",
+                "recebedor_documento": recebedor.get("documento", "") if recebedor else "",
+                "recebedor_comentario": recebedor.get("comentario", "") if recebedor else "",
+            }
+
+        eventos.append(evento_data)
 
     return {
         "codigo": codigo,
         "encontrado": True,
         "eventos": eventos,
+        "entrega": entrega,
     }
 
 
