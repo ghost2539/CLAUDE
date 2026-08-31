@@ -1248,18 +1248,22 @@ def _correios_authenticate(cfg: dict) -> str:
         f"{cfg['usuario']}:{cfg['chave_acesso']}".encode()
     ).decode()
 
+    sess = _req.Session()
+    sess.verify = False
+
     try:
-        r = _req.post(
+        r = sess.post(
             "https://api.correios.com.br/token/v1/autentica",
             headers={
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/json",
             },
-            verify=False,
             timeout=30,
         )
     except Exception as e:
         raise HTTPException(502, f"Erro ao conectar com Correios: {e}")
+    finally:
+        sess.close()
 
     if r.status_code not in (200, 201):
         detail = r.text[:300] if r.text else str(r.status_code)
@@ -1383,26 +1387,29 @@ def _correios_get(cfg, token, url):
     import requests as _req
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    sess = _req.Session()
+    sess.verify = False
+
     try:
-        r = _req.get(url, headers={
+        r = sess.get(url, headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-        }, verify=False, timeout=30)
-    except Exception as e:
-        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+        }, timeout=30)
 
-    if r.status_code == 401:
-        _correios_token_cache.clear()
-        token = _correios_authenticate(cfg)
-        try:
-            r = _req.get(url, headers={
+        if r.status_code == 401:
+            _correios_token_cache.clear()
+            token = _correios_authenticate(cfg)
+            r = sess.get(url, headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-            }, verify=False, timeout=30)
-        except Exception as e:
-            raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+            }, timeout=30)
 
-    return r
+        return r
+    except Exception as e:
+        raise HTTPException(502, f"Erro ao consultar Correios: {e}")
+    finally:
+        sess.close()
 
 
 @router.get("/correios/comprovante/{codigo}")
