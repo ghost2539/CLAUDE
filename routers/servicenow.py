@@ -970,7 +970,8 @@ def chamados_correios(
 
     sn_query = (
         f"assignment_group.name={queue}"
-        f"^stateIN1,2,3,6"
+        f"^correlation_idISNOTEMPTY"
+        f"^ORcorrelation_displayISNOTEMPTY"
         f"^ORDERBYDESCsys_created_on"
     )
 
