@@ -945,14 +945,12 @@ _TRACKING_RE = re.compile(r'[A-Z]{2}\d{9}[A-Z]{2}')
 
 
 def _extract_tracking_code(incident: dict) -> str:
-    """Extract Correios tracking code (XX000000000XX) from correlation_display only."""
+    """Extract Correios tracking code (XX000000000XX) from correlation_display."""
     val = incident.get("correlation_display", "")
     if isinstance(val, dict):
         val = val.get("display_value", val.get("value", ""))
     if val:
         val = str(val).strip()
-        if val.upper().startswith("AG."):
-            return ""
         m = _TRACKING_RE.search(val)
         if m:
             return m.group(0)
@@ -972,6 +970,7 @@ def chamados_correios(
 
     sn_query = (
         f"assignment_group.name={queue}"
+        f"^correlation_displayISNOTEMPTY"
         f"^ORDERBYDESCsys_created_on"
     )
 
