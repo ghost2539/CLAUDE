@@ -971,7 +971,7 @@ def chamados_correios(
     sn_query = (
         f"assignment_group.name={queue}"
         f"^stateIN1,2,3,6"
-        f"^correlation_displayISNOTEMPTY"
+        f"^correlation_displayLIKEBR"
         f"^ORDERBYDESCsys_created_on"
     )
 
@@ -981,7 +981,7 @@ def chamados_correios(
         "caller_id,opened_at,resolved_at,closed_at"
     )
 
-    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 2000, 0)
+    all_incidents = _sn_query(session, INCIDENT_TABLE, sn_query, fields, 500, 0)
 
     incidents = []
     for inc in all_incidents:
@@ -1253,7 +1253,9 @@ def _correios_authenticate(cfg: dict) -> str:
             urls["token"],
             headers={
                 "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/json",
             },
+            verify=False,
             timeout=30,
         )
     except Exception as e:
@@ -1383,7 +1385,7 @@ def _correios_get(cfg, token, url):
         r = _req.get(url, headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-        }, timeout=30)
+        }, verify=False, timeout=30)
     except Exception as e:
         raise HTTPException(502, f"Erro ao consultar Correios: {e}")
 
@@ -1394,7 +1396,7 @@ def _correios_get(cfg, token, url):
             r = _req.get(url, headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-            }, timeout=30)
+            }, verify=False, timeout=30)
         except Exception as e:
             raise HTTPException(502, f"Erro ao consultar Correios: {e}")
 
