@@ -1020,23 +1020,6 @@ function _snRenderCorreios(container, S) {
                 var items = d.incidents || [];
                 var total = d.total || 0;
 
-                // DEBUG temporário — mostra dados brutos do SN
-                if (d._debug) {
-                    var dbg = d._debug;
-                    var debugHtml = '<div style="background:#fff3cd;border:1px solid #ffc107;padding:12px;margin-bottom:12px;border-radius:6px;font-size:13px">' +
-                        '<b>DEBUG</b> | Query: <code>' + S.esc(dbg.query) + '</code><br>' +
-                        'Total do SN: <b>' + dbg.total_from_sn + '</b> | Após filtro regex: <b>' + dbg.after_filter + '</b><br>';
-                    if (dbg.samples && dbg.samples.length) {
-                        debugHtml += '<br><b>Primeiros 10 incidentes do SN:</b><br>';
-                        for (var si = 0; si < dbg.samples.length; si++) {
-                            var s = dbg.samples[si];
-                            debugHtml += S.esc(s.number) + ' → correlation_display=<b>"' + S.esc(String(s.correlation_display)) + '"</b> | correlation_id="' + S.esc(String(s.correlation_id)) + '"<br>';
-                        }
-                    }
-                    debugHtml += '</div>';
-                    document.getElementById('co-table').insertAdjacentHTML('beforebegin', debugHtml);
-                }
-
                 if (!items.length) {
                     document.getElementById('co-table').innerHTML =
                         '<div style="padding:1rem;color:var(--text-secondary)">Nenhum chamado com rastreio encontrado.</div>';
