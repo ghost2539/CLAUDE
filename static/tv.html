@@ -391,18 +391,21 @@
             goToScreen((currentScreen + 1) % screens.length);
         }
 
-        // Click handlers for toggle buttons
-        document.querySelectorAll('.tv-toggle-btn').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var idx = parseInt(btn.getAttribute('data-screen'), 10);
-                goToScreen(idx);
-                // Reset auto-rotation timer on manual click
-                clearInterval(autoTimer);
-                autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
+        // Click handlers for toggle buttons (não pode bloquear o resto).
+        try {
+            document.querySelectorAll('.tv-toggle-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var idx = parseInt(btn.getAttribute('data-screen'), 10);
+                    goToScreen(idx);
+                    // Reset auto-rotation timer on manual click
+                    clearInterval(autoTimer);
+                    autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
+                });
             });
-        });
-
-        autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
+            autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
+        } catch (e) {
+            console.error('[TV] rotação de telas:', e);
+        }
 
         function clock() {
             var d = new Date();
@@ -541,13 +544,19 @@
                 timer = setTimeout(load, (d.config.interval || 60) * 1000);
             } catch (e) {
                 $('#tv-dot').className = 'dot dot-red';
-                $('#tv-state').textContent = 'Sem conexão';
+                $('#tv-state').textContent = 'Erro: ' + (e && e.message ? e.message : 'sem conexão');
+                console.error('[TV] falha ao carregar dashboard:', e);
                 timer = setTimeout(load, 15000);
             }
         }
 
-        setInterval(clock, 1000);
-        clock();
+        // A rotação de telas/relógio não pode impedir a carga dos dados.
+        try {
+            setInterval(clock, 1000);
+            clock();
+        } catch (e) {
+            console.error('[TV] relógio:', e);
+        }
         load();
     })();
     </script>
