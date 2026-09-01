@@ -1062,8 +1062,10 @@ function _snRenderCorreios(container, S) {
                 var autoList = [];
                 for (var i = 0; i < items.length; i++) {
                     var inc = items[i];
-                    var trackCode = inc._tracking_code || displayVal(inc.correlation_display) || displayVal(inc.correlation_id);
-                    var hasValidCode = trackCode && /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(trackCode);
+                    var rawCode = inc._tracking_code || displayVal(inc.correlation_display) || displayVal(inc.correlation_id) || '';
+                    var codeMatch = String(rawCode).toUpperCase().match(/[A-Z]{2}\d{9}[A-Z]{2}/);
+                    var hasValidCode = !!codeMatch;
+                    var trackCode = codeMatch ? codeMatch[0] : String(rawCode).toUpperCase();
                     var sysId = displayVal(inc.sys_id);
                     var entId = 'co-ent-' + (sysId || i);
                     if (hasValidCode && sysId) {

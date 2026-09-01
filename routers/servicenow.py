@@ -1006,11 +1006,15 @@ def saida_move(body: SaidaMovIn, req: Request):
 # CHAMADOS CORREIOS — busca incidentes com correlation_display
 # ═══════════════════════════════════════════════════════════════════
 
-_TRACKING_RE = re.compile(r'[A-Z]{2}\d{9}[A-Z]{2}')
+_TRACKING_RE = re.compile(r'[A-Za-z]{2}\d{9}[A-Za-z]{2}')
 
 
 def _extract_tracking_code(incident: dict) -> str:
-    """Extract Correios tracking code (XX000000000XX) from correlation_display."""
+    """Extract Correios tracking code (XX000000000XX) from correlation_display.
+
+    Aceita maiúsculas ou minúsculas e normaliza para maiúsculas (a API
+    dos Correios espera o código em caixa alta).
+    """
     val = incident.get("correlation_display", "")
     if isinstance(val, dict):
         val = val.get("display_value", val.get("value", ""))
@@ -1018,7 +1022,7 @@ def _extract_tracking_code(incident: dict) -> str:
         val = str(val).strip()
         m = _TRACKING_RE.search(val)
         if m:
-            return m.group(0)
+            return m.group(0).upper()
     return ""
 
 
