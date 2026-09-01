@@ -229,7 +229,9 @@
         var name = state.user.display_name || state.user.username;
         $('#topbar-user-name').textContent = name;
         $('#topbar-user-avatar').textContent = name[0].toUpperCase();
-        if (state.user.must_change_password) {
+        // Troca obrigatória só para usuários LOCAIS no primeiro acesso.
+        // AD/SN autenticam externamente e não trocam senha aqui.
+        if (state.user.must_change_password && state.user.auth_source === 'LOCAL') {
             forcePasswordChange();
             return;
         }
