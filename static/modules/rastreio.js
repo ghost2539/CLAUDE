@@ -35,6 +35,8 @@
         card.appendChild(body);
         content.appendChild(card);
 
+        renderEncerramento(content, S);
+
         function erroBox(titulo, detalhe) {
             result.innerHTML =
                 '<div style="padding:12px;border:1px solid rgba(220,38,38,.3);' +
@@ -113,6 +115,82 @@
                 .catch(function (err) { erroBox('Falha no teste', err.message); })
                 .finally(function () { testBtn.disabled = false; testBtn.textContent = 'Testar conexão'; });
         };
+    }
+
+    /* ── Encerramento de chamados entregues (escreve no ServiceNow) ── */
+    function renderEncerramento(content, S) {
+        var card = S.el('div', { className: 'card', style: 'margin-top:16px' });
+        var body = S.el('div', { className: 'card-body' });
+        body.innerHTML =
+            '<h2 style="margin:0 0 4px;font-size:1.1rem">Encerramento de chamados entregues</h2>' +
+            '<p style="color:var(--text-secondary);margin:0 0 12px;font-size:.9rem">' +
+            'Lista chamados On Hold/In Progress de coletor/sled cujo objeto já foi entregue. ' +
+            'O encerramento <strong>altera o ServiceNow</strong> — revise antes de confirmar.</p>';
+
+        var btn = S.el('button', { className: 'btn btn-outline', textContent: 'Buscar candidatos' });
+        body.appendChild(btn);
+        var out = S.el('div', { id: 'enc-out', style: 'margin-top:12px' });
+        body.appendChild(out);
+        card.appendChild(body);
+        content.appendChild(card);
+
+        function carregar() {
+            btn.disabled = true; btn.textContent = 'Buscando...';
+            out.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Analisando fila...</div>';
+            S.api('/servicenow/encerramento/candidatos')
+                .then(function (d) {
+                    var els = d.elegiveis || [];
+                    if (!els.length) {
+                        out.innerHTML = '<div style="color:var(--text-secondary)">' +
+                            'Nenhum candidato. Analisados: ' + (d.total_analisados || 0) + '.</div>';
+                        return;
+                    }
+                    var h = '<div style="margin-bottom:8px;color:var(--text-secondary)">' +
+                        els.length + ' candidato(s) (de ' + d.total_analisados + ' analisados):</div>' +
+                        '<table class="table"><thead><tr><th>Número</th><th>Subcat.</th>' +
+                        '<th>Rastreio</th><th>Entrega</th><th></th></tr></thead><tbody>';
+                    els.forEach(function (c) {
+                        var ent = c.entrega || {};
+                        h += '<tr>' +
+                            '<td>' + S.esc(c.number) + '</td>' +
+                            '<td>' + S.esc(c.subcategory) + '</td>' +
+                            '<td>' + S.esc(c.tracking) + '</td>' +
+                            '<td>' + S.esc((ent.data || '') + ' ' + (ent.recebedor_nome || '')) + '</td>' +
+                            '<td><button class="btn btn-sm btn-primary" data-sid="' + S.esc(c.sys_id) +
+                            '" data-num="' + S.esc(c.number) + '">Encerrar</button></td>' +
+                        '</tr>';
+                    });
+                    h += '</tbody></table>';
+                    out.innerHTML = h;
+                    out.querySelectorAll('button[data-sid]').forEach(function (b) {
+                        b.onclick = function () { encerrar(b.getAttribute('data-sid'), b.getAttribute('data-num'), b); };
+                    });
+                })
+                .catch(function (err) {
+                    out.innerHTML = '<div style="color:#dc2626">' + S.esc(err.message) + '</div>';
+                })
+                .finally(function () { btn.disabled = false; btn.textContent = 'Buscar candidatos'; });
+        }
+
+        function encerrar(sysId, numero, b) {
+            if (!confirm('Encerrar o chamado ' + numero + ' no ServiceNow?\n\n' +
+                'Isto muda o estado para Resolvido e preenche a closure information. ' +
+                'Ação real, não pode ser desfeita pelo portal.')) return;
+            b.disabled = true; b.textContent = 'Encerrando...';
+            S.api('/servicenow/encerramento/executar', {
+                method: 'POST', body: { sys_id: sysId, confirmar: true }
+            })
+                .then(function (r) {
+                    S.toast('Chamado ' + (r.encerrado || numero) + ' encerrado.', 'success');
+                    b.textContent = 'Encerrado ✓';
+                })
+                .catch(function (err) {
+                    S.toast(err.message || 'Falha ao encerrar.', 'error');
+                    b.disabled = false; b.textContent = 'Encerrar';
+                });
+        }
+
+        btn.onclick = carregar;
     }
 
     window.SPARE_MODULES = window.SPARE_MODULES || {};
