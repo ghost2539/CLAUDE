@@ -165,8 +165,16 @@ def _correios_get(token, url):
 def correios_rastrear(codigo: str, req: Request):
     """Rastreia um objeto pelos Correios usando o código de rastreamento."""
     require_permission(req, "servicenow", "view")
+    return consultar_rastreio(codigo)
 
-    codigo = codigo.strip().upper()
+
+def consultar_rastreio(codigo: str) -> dict:
+    """Consulta o rastreio de um objeto (puro, sem permissão/Request).
+
+    Reutilizável por outras rotinas (ex.: encerramento automático de
+    chamados). Retorna o mesmo dicionário do endpoint /rastrear.
+    """
+    codigo = (codigo or "").strip().upper()
     if not codigo or len(codigo) < 10:
         raise HTTPException(400, "Código de rastreamento inválido.")
 
