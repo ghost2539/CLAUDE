@@ -1,8 +1,9 @@
 """Encerramento automático de chamados Correios entregues.
 
-Módulo isolado: escreve no ServiceNow (encerra chamados) só quando o
-objeto foi entregue e a subcategoria é de coletor/sled. Mantido separado
-da listagem e do rastreio para não impactar o que já funciona.
+Módulo isolado: escreve no ServiceNow (encerra chamados) quando o objeto
+foi entregue, para chamados On Hold/In Progress com código de rastreio no
+correlation_display. Mantido separado da listagem e do rastreio para não
+impactar o que já funciona.
 
 Fluxo de encerramento (exigência do ServiceNow):
   state 3 (On Hold) -> 2 (In Progress) [salva] -> 6 (Resolved) com:
@@ -27,9 +28,6 @@ from routers.servicenow import (
 from routers.correios import consultar_rastreio
 
 router = APIRouter(prefix="/api/servicenow/encerramento", tags=["Encerramento"])
-
-# Subcategorias encerráveis (normalizadas: minúsculas, _ vira espaço).
-SUBCATS_ENCERRAVEIS = {"rfid sled", "sled rfid", "coletor"}
 
 CLOSE_CODE = "Solved (Permanently)"
 
@@ -85,9 +83,8 @@ def _avaliar(session, inc: dict) -> dict:
         "entrega": None,
     }
 
-    if subcat not in SUBCATS_ENCERRAVEIS:
-        resultado["motivo"] = f"subcategoria '{subcat}' não encerrável"
-        return resultado
+    # Regra de subcategoria removida: encerra qualquer chamado entregue que
+    # tenha código de rastreio no correlation_display (independe de subcategoria).
     if state_norm not in ("on hold", "in progress"):
         resultado["motivo"] = f"estado '{state}' não é On Hold/In Progress"
         return resultado
