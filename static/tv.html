@@ -5,363 +5,136 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Painel de Operações — TV</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/static/app.css">
     <style>
-        /* ── TV-specific styles ─────────────────────────────────── */
-        .tv-body { overflow: hidden; }
-        .tv-shell {
-            padding: 40px 48px;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+        :root {
+            --bg: #f4f5f7;
+            --surface: #ffffff;
+            --ink: #1f2733;
+            --muted: #6b7280;
+            --border: #e6e8eb;
+            --c-amber: #D97706;
+            --c-blue: #2563EB;
+            --c-emerald: #059669;
+            --c-violet: #7C3AED;
+            --c-pink: #DB2777;
+            --c-cyan: #0891B2;
+            --good: #16A34A;
+            --warn: #D97706;
+            --bad: #DC2626;
         }
-        .tv-head {
-            display: grid;
-            grid-template-columns: 1fr auto auto auto;
-            gap: 36px;
-            align-items: center;
-            padding-bottom: 24px;
-            border-bottom: 1px solid var(--border-subtle);
+        * { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; }
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
-        .tv-brand { display: flex; align-items: center; gap: 20px; }
-        .tv-logo {
-            width: 60px;
-            height: 60px;
-            display: grid;
-            place-items: center;
-            background: linear-gradient(135deg, #AB4807, #C79105);
-            font-size: 26px;
-            font-weight: 700;
-        }
-        .tv-head h1 { font-size: 36px; margin: 0; }
-        .tv-screen-toggle {
-            display: flex;
-            gap: 0;
-            border-radius: 24px;
-            overflow: hidden;
-            border: 2px solid #444;
-        }
-        .tv-toggle-btn {
-            font-size: 16px;
-            padding: 8px 24px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: .5px;
-            border: none;
-            cursor: pointer;
-            background: transparent;
-            color: var(--text-secondary);
-            transition: background .2s, color .2s;
-        }
-        .tv-toggle-btn:hover { background: rgba(255,255,255,.08); }
-        .tv-toggle-btn.active[data-screen="0"] { background: #246F68; color: #fff; }
-        .tv-toggle-btn.active[data-screen="1"] { background: #AB4807; color: #fff; }
-        .tv-connection {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 18px;
-            color: var(--text-secondary);
-        }
-        #tv-clock { font-size: 34px; }
-        #tv-date { font-size: 18px; color: var(--text-secondary); }
+        .shell { min-height: 100vh; padding: 28px 40px 36px; display: flex; flex-direction: column; gap: 24px; }
 
-        /* ── Screen containers ── */
-        .tv-screen { flex: 1; display: none; flex-direction: column; min-height: 0; }
-        .tv-screen.active { display: flex; }
+        /* Header */
+        .head { display: flex; align-items: center; gap: 20px; }
+        .logo {
+            width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center;
+            background: linear-gradient(135deg, var(--c-blue), var(--c-cyan)); color: #fff; font-size: 24px;
+        }
+        .head h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.5px; }
+        .head .sub { color: var(--muted); font-size: 15px; margin-top: 2px; }
+        .head .spacer { flex: 1; }
+        .clock { text-align: right; }
+        .clock .time { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .clock .date { color: var(--muted); font-size: 14px; text-transform: capitalize; }
+        .conn { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-left: 20px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+        .dot.green { background: var(--good); }
+        .dot.red { background: var(--bad); }
 
-        /* ── Recebimento screen ── */
-        .tv-grid {
-            display: grid;
-            grid-template-columns: 38% 62%;
-            gap: 28px;
-            padding-top: 28px;
-            min-height: 0;
+        /* KPI cards */
+        .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+        .kpi {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 18px 20px; border-left: 5px solid var(--muted);
+            box-shadow: 0 1px 2px rgba(16,24,40,.04);
         }
-        .tv-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 22px;
-        }
-        .tv-card {
-            padding: 38px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-light);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            position: relative;
-        }
-        .tv-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 5px;
-        }
-        .tv-card.teal::before   { background: #246F68; }
-        .tv-card.orange::before { background: #AB4807; }
-        .tv-card.gold::before   { background: #C79105; }
-        .tv-card.green::before  { background: #198754; }
-        .tv-card.blue::before   { background: #0D6EFD; }
-        .tv-card.red::before    { background: #dc2626; }
-        .tv-card strong { font-size: 64px; }
-        .tv-card span {
-            font-size: 20px;
-            text-transform: uppercase;
-            color: var(--text-secondary);
-        }
+        .kpi .lbl { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .4px; }
+        .kpi .val { font-size: 34px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+        .kpi.amber { border-left-color: var(--c-amber); } .kpi.amber .val { color: var(--c-amber); }
+        .kpi.blue { border-left-color: var(--c-blue); } .kpi.blue .val { color: var(--c-blue); }
+        .kpi.emerald { border-left-color: var(--c-emerald); } .kpi.emerald .val { color: var(--c-emerald); }
+        .kpi.violet { border-left-color: var(--c-violet); } .kpi.violet .val { color: var(--c-violet); }
+        .kpi.cyan { border-left-color: var(--c-cyan); } .kpi.cyan .val { color: var(--c-cyan); }
+        .kpi.pink { border-left-color: var(--c-pink); } .kpi.pink .val { color: var(--c-pink); }
 
-        .tv-panels { display: grid; gap: 22px; }
-        .tv-panel {
-            padding: 24px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-light);
+        /* Charts row */
+        .charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 18px 20px; box-shadow: 0 1px 2px rgba(16,24,40,.04);
         }
-        .tv-panel h2 { margin: 0 0 24px; }
+        .card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; }
+        .donut-wrap { display: flex; align-items: center; gap: 18px; }
+        .donut { position: relative; width: 150px; height: 150px; flex: none; }
+        .donut .center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+        .donut .center b { font-size: 26px; font-weight: 700; }
+        .donut .center span { display: block; color: var(--muted); font-size: 12px; }
+        .legend { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+        .legend-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .legend-row .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+        .legend-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .legend-row .qt { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .legend-row .pc { color: var(--muted); width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+        .empty { color: var(--muted); font-size: 14px; padding: 24px 0; text-align: center; }
 
-        .bar-row {
-            display: grid;
-            grid-template-columns: 140px 1fr 60px;
-            gap: 12px;
-            align-items: center;
-            margin: 12px 0;
-        }
-        .bar-track { height: 12px; background: #222; }
-        .bar-value { height: 100%; background: #246F68; }
-
-        .status-stack {
-            display: flex;
-            height: 58px;
-            overflow: hidden;
-        }
-        .status-stack span {
-            display: grid;
-            place-items: center;
-            font-weight: 700;
-            min-width: 50px;
-        }
-
-        .tv-table-panel {
-            margin-top: 22px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-light);
-            position: relative;
-            overflow: hidden;
-        }
-        .tv-update {
-            position: absolute;
-            right: 16px;
-            top: 14px;
-            color: #ff4050;
-        }
-        .tv-table-panel table { width: 100%; border-collapse: collapse; }
-        .tv-table-panel th,
-        .tv-table-panel td {
-            padding: 14px 24px;
-            text-align: left;
-            border-top: 1px solid var(--border-subtle);
-            font-size: 18px;
-        }
-        .tv-table-panel th {
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-
-        /* ── Indicadores screen ── */
-        .ind-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 28px;
-            padding-top: 28px;
-            flex: 1;
-            min-height: 0;
-        }
-        .ind-section {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-light);
-            padding: 28px;
-            display: flex;
-            flex-direction: column;
-        }
-        .ind-section h2 {
-            margin: 0 0 20px;
-            font-size: 22px;
-            text-transform: uppercase;
-            letter-spacing: .5px;
-        }
-        .ind-big {
-            font-size: 72px;
-            font-weight: 700;
-            line-height: 1;
-        }
-        .ind-label {
-            font-size: 18px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            margin-top: 8px;
-        }
-        .ind-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-subtle);
-            font-size: 18px;
-        }
-        .ind-row:last-child { border-bottom: none; }
-        .ind-stats-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 16px;
-            margin-top: 16px;
-        }
-        .ind-stat {
-            text-align: center;
-            padding: 16px;
-            background: var(--bg-base);
-            border-radius: 8px;
-        }
-        .ind-stat-val { font-size: 36px; font-weight: 700; }
-        .ind-stat-lbl { font-size: 14px; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
-        .ind-progress-bar {
-            height: 20px;
-            background: #333;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 12px;
-        }
-        .ind-progress-fill {
-            height: 100%;
-            border-radius: 10px;
-            transition: width .5s;
-        }
-
-        .ind-no-data {
-            color: var(--text-secondary);
-            font-size: 18px;
-            padding: 20px;
-            text-align: center;
-        }
-
-        @media (max-width: 1200px) {
-            .tv-shell { padding: 20px; }
-            .tv-grid { grid-template-columns: 1fr; }
-            .tv-stats { grid-template-columns: repeat(4, 1fr); }
-            .tv-card { padding: 20px; }
-            .tv-card strong { font-size: 40px; }
-            .ind-grid { grid-template-columns: 1fr; }
-            .ind-big { font-size: 48px; }
+        /* Table */
+        .tablecard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); padding: 8px 12px; border-bottom: 2px solid var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 15px; }
+        tbody tr:last-child td { border-bottom: none; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef2f7; color: #334155; }
+        @media (max-width: 1100px) {
+            .kpis { grid-template-columns: repeat(3, 1fr); }
+            .charts { grid-template-columns: 1fr; }
         }
     </style>
 </head>
-<body class="tv-body">
-    <main class="tv-shell">
-        <header class="tv-head">
-            <div class="tv-brand">
-                <span class="tv-logo">OP</span>
-                <h1 id="tv-title">Painel de Operações</h1>
-            </div>
-            <div class="tv-screen-toggle">
-                <button class="tv-toggle-btn active" id="tv-btn-receb" data-screen="0">Recebimento</button>
-                <button class="tv-toggle-btn" id="tv-btn-indic" data-screen="1">Cockpit Spare</button>
-            </div>
-            <div class="tv-connection">
-                <span id="tv-dot" class="dot dot-muted"></span>
-                <span id="tv-state">Carregando...</span>
-            </div>
+<body>
+    <div class="shell">
+        <div class="head">
+            <div class="logo">◧</div>
             <div>
-                <strong id="tv-clock"></strong>
-                <div id="tv-date"></div>
+                <h1 id="tv-title">Painel de Operações</h1>
+                <div class="sub" id="tv-update">Carregando…</div>
             </div>
-        </header>
-
-        <!-- Screen 1: Recebimento -->
-        <div class="tv-screen active" id="screen-receb">
-            <section class="tv-grid">
-                <div class="tv-stats">
-                    <div class="tv-card teal">
-                        <strong id="tv-today">0</strong>
-                        <span>Recebidos hoje</span>
-                    </div>
-                    <div class="tv-card orange">
-                        <strong id="tv-month">0</strong>
-                        <span>Recebidos no mês</span>
-                    </div>
-                    <div class="tv-card gold">
-                        <strong id="tv-year">0</strong>
-                        <span>Recebidos no ano</span>
-                    </div>
-                    <div class="tv-card green">
-                        <strong id="tv-unique">0</strong>
-                        <span>Ativos únicos</span>
-                    </div>
-                </div>
-                <div class="tv-panels">
-                    <div class="tv-panel">
-                        <h2>Recebimentos por Categoria</h2>
-                        <div id="tv-categories"></div>
-                    </div>
-                    <div class="tv-panel">
-                        <h2>Distribuição por Status</h2>
-                        <div id="tv-status"></div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="tv-table-panel">
-                <div class="tv-update" id="tv-update">Última atualização: --:--</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Hora</th>
-                            <th>Imobilizado</th>
-                            <th>Descrição</th>
-                            <th>Categoria</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tv-rows"></tbody>
-                </table>
-            </section>
+            <div class="spacer"></div>
+            <div class="clock">
+                <div class="time" id="tv-clock">--:--</div>
+                <div class="date" id="tv-date"></div>
+            </div>
+            <div class="conn"><span class="dot" id="tv-dot"></span><span id="tv-state">Carregando…</span></div>
         </div>
 
-        <!-- Screen 2: Indicadores (Cockpit Spare) -->
-        <div class="tv-screen" id="screen-indic">
-            <section class="ind-grid">
-                <div class="ind-section">
-                    <h2>Chamados Resolvidos</h2>
-                    <div id="ind-tickets">
-                        <div class="ind-no-data">Dados não disponíveis. Atualize pelo módulo ServiceNow > Relatórios.</div>
-                    </div>
-                </div>
-                <div class="ind-section">
-                    <h2>Conformidade SLA</h2>
-                    <div id="ind-sla">
-                        <div class="ind-no-data">Dados não disponíveis. Atualize pelo módulo ServiceNow > Relatórios.</div>
-                    </div>
-                </div>
-                <div class="ind-section">
-                    <h2>TMA — Coletores</h2>
-                    <div id="ind-tma-col">
-                        <div class="ind-no-data">Dados não disponíveis.</div>
-                    </div>
-                </div>
-                <div class="ind-section">
-                    <h2>TMA — SLEDs</h2>
-                    <div id="ind-tma-sled">
-                        <div class="ind-no-data">Dados não disponíveis.</div>
-                    </div>
-                </div>
-            </section>
-            <div style="text-align:center;padding:12px 0;color:var(--text-secondary);font-size:14px" id="ind-updated">
-                Cockpit Spare — Indicadores ServiceNow
-            </div>
+        <div class="kpis" id="tv-kpis"></div>
+
+        <div class="charts">
+            <div class="card"><h2>Recebimentos por Categoria</h2><div id="tv-cat"></div></div>
+            <div class="card"><h2>Distribuição por Status</h2><div id="tv-status"></div></div>
+            <div class="card"><h2 id="tv-chart3-title">Indicadores</h2><div id="tv-chart3"></div></div>
         </div>
-    </main>
+
+        <div class="card tablecard">
+            <h2>Últimos Recebimentos</h2>
+            <table>
+                <thead><tr><th>Hora</th><th>Imobilizado</th><th>Descrição</th><th>Categoria</th><th>Status</th></tr></thead>
+                <tbody id="tv-rows"></tbody>
+            </table>
+        </div>
+    </div>
 
     <script>
     (function () {
         var timer;
+        var PALETTE = ['#D97706', '#2563EB', '#059669', '#7C3AED', '#DB2777', '#0891B2'];
         var $ = function (s) { return document.querySelector(s); };
         var esc = function (s) {
             return String(s == null ? '' : s).replace(/[&<>'"]/g, function (c) {
@@ -369,194 +142,113 @@
             });
         };
 
-        var COLORS = ['#246F68', '#AB4807', '#C79105', '#198754', '#0D6EFD', '#9333EA'];
-
-        // Screen rotation
-        var currentScreen = 0;
-        var screens = ['screen-receb', 'screen-indic'];
-        var SCREEN_INTERVAL = 30000;
-        var autoRotate = true;
-        var autoTimer;
-
-        function goToScreen(idx) {
-            document.getElementById(screens[currentScreen]).classList.remove('active');
-            currentScreen = idx;
-            document.getElementById(screens[currentScreen]).classList.add('active');
-            var btns = document.querySelectorAll('.tv-toggle-btn');
-            btns.forEach(function (b) { b.classList.remove('active'); });
-            btns[currentScreen].classList.add('active');
-        }
-
-        function switchScreen() {
-            goToScreen((currentScreen + 1) % screens.length);
-        }
-
-        // Click handlers for toggle buttons (não pode bloquear o resto).
-        try {
-            document.querySelectorAll('.tv-toggle-btn').forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    var idx = parseInt(btn.getAttribute('data-screen'), 10);
-                    goToScreen(idx);
-                    // Reset auto-rotation timer on manual click
-                    clearInterval(autoTimer);
-                    autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
-                });
-            });
-            autoTimer = setInterval(switchScreen, SCREEN_INTERVAL);
-        } catch (e) {
-            console.error('[TV] rotação de telas:', e);
-        }
-
         function clock() {
             var d = new Date();
-            $('#tv-clock').textContent = d.toLocaleTimeString('pt-BR');
-            $('#tv-date').textContent = d.toLocaleDateString('pt-BR', {
-                weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
-            });
+            $('#tv-clock').textContent = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            $('#tv-date').textContent = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
         }
 
-        function renderIndicadores(ind) {
-            if (!ind) return;
+        function kpi(cls, label, value) {
+            return '<div class="kpi ' + cls + '"><div class="lbl">' + esc(label) + '</div>' +
+                '<div class="val">' + esc(value) + '</div></div>';
+        }
 
-            // Tickets
-            var tickEl = document.getElementById('ind-tickets');
-            tickEl.innerHTML =
-                '<div style="text-align:center;margin-bottom:16px">' +
-                    '<div class="ind-big" style="color:#246F68">' + (ind.tickets_resolved || 0) + '</div>' +
-                    '<div class="ind-label">Resolvidos no Ano</div>' +
-                '</div>';
-
-            // SLA
-            var slaEl = document.getElementById('ind-sla');
-            var pct = ind.sla_compliance_pct || 0;
-            var pctColor = pct >= 90 ? '#198754' : pct >= 70 ? '#C79105' : '#dc2626';
-            slaEl.innerHTML =
-                '<div style="text-align:center;margin-bottom:12px">' +
-                    '<div class="ind-big" style="color:' + pctColor + '">' + pct + '%</div>' +
-                    '<div class="ind-label">Conformidade</div>' +
-                '</div>' +
-                '<div class="ind-progress-bar">' +
-                    '<div class="ind-progress-fill" style="width:' + Math.min(pct, 100) + '%;background:' + pctColor + '"></div>' +
-                '</div>' +
-                '<div class="ind-stats-row">' +
-                    '<div class="ind-stat"><div class="ind-stat-val" style="color:#198754">' + (ind.sla_met || 0) + '</div>' +
-                        '<div class="ind-stat-lbl">Dentro</div></div>' +
-                    '<div class="ind-stat"><div class="ind-stat-val" style="color:#dc2626">' + (ind.sla_breached || 0) + '</div>' +
-                        '<div class="ind-stat-lbl">Violados</div></div>' +
-                    '<div class="ind-stat"><div class="ind-stat-val">' + (ind.sla_total || 0) + '</div>' +
-                        '<div class="ind-stat-lbl">Total</div></div>' +
-                '</div>';
-
-            // TMA Coletores
-            var tma = ind.tma || {};
-            var colEl = document.getElementById('ind-tma-col');
-            if (tma.coletor) {
-                colEl.innerHTML =
-                    '<div style="text-align:center">' +
-                        '<div class="ind-big" style="color:#246F68">' + tma.coletor.avg_hours + 'h</div>' +
-                        '<div class="ind-label">Tempo Médio</div>' +
-                        '<div style="color:var(--text-secondary);font-size:16px;margin-top:8px">' +
-                            tma.coletor.count + ' chamados</div>' +
-                    '</div>';
-            } else {
-                colEl.innerHTML = '<div class="ind-no-data">Sem dados de coletores.</div>';
-            }
-
-            // TMA SLEDs
-            var sledEl = document.getElementById('ind-tma-sled');
-            if (tma.sled) {
-                sledEl.innerHTML =
-                    '<div style="text-align:center">' +
-                        '<div class="ind-big" style="color:#AB4807">' + tma.sled.avg_hours + 'h</div>' +
-                        '<div class="ind-label">Tempo Médio</div>' +
-                        '<div style="color:var(--text-secondary);font-size:16px;margin-top:8px">' +
-                            tma.sled.count + ' chamados</div>' +
-                    '</div>';
-            } else {
-                sledEl.innerHTML = '<div class="ind-no-data">Sem dados de SLEDs.</div>';
-            }
-
-            // Updated time
-            if (ind.updated_at) {
-                var dt = new Date(ind.updated_at);
-                document.getElementById('ind-updated').textContent =
-                    'Cockpit Spare — Atualizado em ' + dt.toLocaleDateString('pt-BR') +
-                    ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-            }
+        // Donut SVG: data = [{label, value}]. Colors from PALETTE by index.
+        function donut(el, data, centerLabel) {
+            var total = data.reduce(function (a, x) { return a + (x.value || 0); }, 0);
+            if (!total) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
+            var R = 15.9155, C = 2 * Math.PI * R, gap = 1.5;
+            var off = 0, arcs = '';
+            data.forEach(function (x, i) {
+                var frac = x.value / total;
+                var len = Math.max(0, frac * C - gap);
+                arcs += '<circle cx="18" cy="18" r="' + R + '" fill="none" stroke="' +
+                    PALETTE[i % PALETTE.length] + '" stroke-width="4" ' +
+                    'stroke-dasharray="' + len + ' ' + (C - len) + '" ' +
+                    'stroke-dashoffset="' + (-off) + '" transform="rotate(-90 18 18)"></circle>';
+                off += frac * C;
+            });
+            var legend = data.map(function (x, i) {
+                var pc = Math.round(x.value / total * 100);
+                return '<div class="legend-row">' +
+                    '<span class="sw" style="background:' + PALETTE[i % PALETTE.length] + '"></span>' +
+                    '<span class="nm" title="' + esc(x.label) + '">' + esc(x.label) + '</span>' +
+                    '<span class="qt">' + x.value + '</span>' +
+                    '<span class="pc">' + pc + '%</span></div>';
+            }).join('');
+            el.innerHTML = '<div class="donut-wrap">' +
+                '<div class="donut"><svg viewBox="0 0 36 36" width="150" height="150">' +
+                '<circle cx="18" cy="18" r="' + R + '" fill="none" stroke="#eef0f3" stroke-width="4"></circle>' +
+                arcs + '</svg>' +
+                '<div class="center"><div><b>' + total + '</b><span>' + esc(centerLabel || 'total') + '</span></div></div></div>' +
+                '<div class="legend">' + legend + '</div></div>';
         }
 
         async function load() {
             try {
                 var r = await fetch('/api/tv/dashboard');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
                 var d = await r.json();
 
-                $('#tv-dot').className = 'dot dot-green';
+                $('#tv-dot').className = 'dot green';
                 $('#tv-state').textContent = 'Conectado';
-                $('#tv-title').textContent = d.config.title || 'Painel de Operações';
+                $('#tv-title').textContent = (d.config && d.config.title) || 'Painel de Operações';
 
-                $('#tv-today').textContent = d.recebidos_hoje;
-                $('#tv-month').textContent = d.recebidos_mes;
-                $('#tv-year').textContent = d.recebidos_ano;
-                $('#tv-unique').textContent = d.ativos_unicos;
+                var ind = d.indicadores || null;
+                var cards =
+                    kpi('blue', 'Recebidos Hoje', d.recebidos_hoje) +
+                    kpi('amber', 'Recebidos no Mês', d.recebidos_mes) +
+                    kpi('emerald', 'Recebidos no Ano', d.recebidos_ano) +
+                    kpi('violet', 'Ativos Únicos', d.ativos_unicos);
+                if (ind) {
+                    cards += kpi('cyan', 'Tickets Resolvidos', ind.tickets_resolved || 0);
+                    cards += kpi('pink', 'SLA Conformidade', (ind.sla_compliance_pct || 0) + '%');
+                }
+                $('#tv-kpis').innerHTML = cards;
 
-                // Categories bar chart
-                var max = Math.max(1, Math.max.apply(null, d.por_categoria.map(function (x) { return x.total; })));
-                $('#tv-categories').innerHTML = d.por_categoria.map(function (x, i) {
-                    return '<div class="bar-row">' +
-                        '<span>' + esc(x.categoria) + '</span>' +
-                        '<div class="bar-track">' +
-                            '<div class="bar-value" style="width:' + (x.total / max * 100) +
-                                '%;background:' + COLORS[i % COLORS.length] + '"></div>' +
-                        '</div>' +
-                        '<strong>' + x.total + '</strong>' +
-                    '</div>';
-                }).join('');
+                donut($('#tv-cat'), (d.por_categoria || []).map(function (x) {
+                    return { label: x.categoria, value: x.total };
+                }), 'ativos');
 
-                // Status distribution
-                var total = d.por_status.reduce(function (a, x) { return a + x.total; }, 0) || 1;
-                $('#tv-status').innerHTML = '<div class="status-stack">' +
-                    d.por_status.map(function (x, i) {
-                        return '<span style="width:' + (x.total / total * 100) +
-                            '%;background:' + COLORS[i % COLORS.length] + '">' +
-                            Math.round(x.total / total * 100) + '%</span>';
-                    }).join('') + '</div>';
+                donut($('#tv-status'), (d.por_status || []).map(function (x) {
+                    return { label: x.status, value: x.total };
+                }), 'ciclos');
 
-                // Recent rows
-                $('#tv-rows').innerHTML = d.ultimos.map(function (x) {
-                    return '<tr>' +
-                        '<td>' + esc(x.hora) + '</td>' +
+                // Terceiro gráfico: SLA (dentro x violado) se houver indicadores.
+                if (ind && (ind.sla_total || 0) > 0) {
+                    $('#tv-chart3-title').textContent = 'SLA — Dentro x Violado';
+                    donut($('#tv-chart3'), [
+                        { label: 'Dentro do prazo', value: ind.sla_met || 0 },
+                        { label: 'Violados', value: ind.sla_breached || 0 }
+                    ], 'chamados');
+                } else {
+                    $('#tv-chart3-title').textContent = 'Indicadores';
+                    $('#tv-chart3').innerHTML = '<div class="empty">Sem indicadores do ServiceNow.<br>Atualize o cache em Parâmetros › TV.</div>';
+                }
+
+                $('#tv-rows').innerHTML = (d.ultimos || []).map(function (x) {
+                    return '<tr><td>' + esc(x.hora) + '</td>' +
                         '<td><strong>' + esc(x.imobilizado) + '</strong></td>' +
                         '<td>' + esc(x.descricao) + '</td>' +
                         '<td>' + esc(x.categoria) + '</td>' +
-                        '<td>' + esc(x.status) + '</td>' +
-                    '</tr>';
-                }).join('');
+                        '<td><span class="badge">' + esc(x.status) + '</span></td></tr>';
+                }).join('') || '<tr><td colspan="5" class="empty">Nenhum recebimento recente.</td></tr>';
 
-                $('#tv-update').textContent = 'Última atualização: ' +
-                    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-                // Render indicators if available
-                if (d.indicadores) {
-                    renderIndicadores(d.indicadores);
-                }
+                var upd = new Date();
+                $('#tv-update').textContent = 'Atualizado às ' +
+                    upd.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
                 clearTimeout(timer);
-                timer = setTimeout(load, (d.config.interval || 60) * 1000);
+                timer = setTimeout(load, ((d.config && d.config.interval) || 60) * 1000);
             } catch (e) {
-                $('#tv-dot').className = 'dot dot-red';
+                $('#tv-dot').className = 'dot red';
                 $('#tv-state').textContent = 'Erro: ' + (e && e.message ? e.message : 'sem conexão');
                 console.error('[TV] falha ao carregar dashboard:', e);
                 timer = setTimeout(load, 15000);
             }
         }
 
-        // A rotação de telas/relógio não pode impedir a carga dos dados.
-        try {
-            setInterval(clock, 1000);
-            clock();
-        } catch (e) {
-            console.error('[TV] relógio:', e);
-        }
+        try { setInterval(clock, 1000); clock(); } catch (e) { console.error('[TV] relógio:', e); }
         load();
     })();
     </script>
