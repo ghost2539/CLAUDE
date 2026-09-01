@@ -61,14 +61,29 @@ def _display(v):
     return v or ""
 
 
+# Estado vem no idioma do usuário (display_value). Classificamos de forma
+# independente de idioma: código numérico, inglês ou português.
+_ESTADOS = {
+    "on_hold": {"3", "on hold", "em espera"},
+    "in_progress": {"2", "in progress", "em andamento"},
+    "resolved": {"6", "resolved", "resolvido"},
+}
+
+
+def _estado_canonico(state_txt: str) -> str:
+    s = (state_txt or "").strip().lower()
+    for canon, valores in _ESTADOS.items():
+        if s in valores:
+            return canon
+    return ""
+
+
 def _avaliar(session, inc: dict) -> dict:
     """Decide se um incidente pode ser encerrado. Só leitura."""
     number = _display(inc.get("number"))
     subcat = _norm(_display(inc.get("subcategory")))
-    # A consulta usa display_value=true: o estado vem como texto ("On Hold",
-    # "In Progress"), não como código numérico. Comparamos pelo texto.
     state = str(_display(inc.get("state")) or "").strip()
-    state_norm = state.lower()
+    estado = _estado_canonico(state)
     tracking = _extract_tracking_code(inc)
 
     resultado = {
@@ -76,7 +91,7 @@ def _avaliar(session, inc: dict) -> dict:
         "number": number,
         "subcategory": subcat,
         "state": state,
-        "state_norm": state_norm,
+        "estado": estado,
         "tracking": tracking,
         "elegivel": False,
         "motivo": "",
@@ -85,8 +100,8 @@ def _avaliar(session, inc: dict) -> dict:
 
     # Regra de subcategoria removida: encerra qualquer chamado entregue que
     # tenha código de rastreio no correlation_display (independe de subcategoria).
-    if state_norm not in ("on hold", "in progress"):
-        resultado["motivo"] = f"estado '{state}' não é On Hold/In Progress"
+    if estado not in ("on_hold", "in_progress"):
+        resultado["motivo"] = f"estado '{state}' não é Em Espera/Em andamento"
         return resultado
     if not tracking:
         resultado["motivo"] = "sem código de rastreio válido"
@@ -186,8 +201,8 @@ def executar(body: EncerrarIn, req: Request):
         return {"ok": True, "dry_run": True, "acao": "encerraria", **aval}
 
     # Passo 1: garantir In Progress (2) — obrigatório antes de resolver.
-    # Se está On Hold, precisa passar por In Progress primeiro.
-    if aval.get("state_norm") == "on hold":
+    # Se está Em Espera (On Hold), precisa passar por Em andamento primeiro.
+    if aval.get("estado") == "on_hold":
         _sn_update(session, INCIDENT_TABLE, body.sys_id, {"state": "2"})
 
     # Passo 2: resolver (6) com os campos de closure obrigatórios.
