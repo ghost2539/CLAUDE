@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+
+# Dumps de diagnostico do EBS (HTML interno, tokens de sessao)
+ebs_probe_out/
+tools/ebs_probe_out/
+forms_capture*.jsonl
