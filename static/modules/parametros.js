@@ -272,7 +272,13 @@ async function renderPermissions(c, S) {
         '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário local</button>' +
         '<div id="pm-users"></div>';
 
-    var MODULES = ['bemvindo', 'consulta', 'recebimento', 'reparos', 'status', 'parametros'];
+    var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
+        'servicenow', 'rastreio', 'reparos', 'status', 'parametros'];
+    var MODULE_LABELS = {
+        bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
+        identificacao: 'Identificação', servicenow: 'ServiceNow', rastreio: 'Correios',
+        reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros'
+    };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];
 
@@ -369,7 +375,7 @@ async function renderPermissions(c, S) {
         MODULES.forEach(function (m) {
             var perms = permMap[m] || {};
             var tr = S.el('tr');
-            tr.innerHTML = '<td><strong>' + S.esc(m) + '</strong></td>' +
+            tr.innerHTML = '<td><strong>' + S.esc(MODULE_LABELS[m] || m) + '</strong></td>' +
                 ACTIONS.map(function (k) {
                     return '<td><input class="perm-check" data-module="' + S.esc(m) +
                         '" data-key="' + k + '" type="checkbox" ' +

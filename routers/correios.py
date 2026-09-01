@@ -164,7 +164,7 @@ def _correios_get(token, url):
 @router.get("/correios/rastrear/{codigo}")
 def correios_rastrear(codigo: str, req: Request):
     """Rastreia um objeto pelos Correios usando o código de rastreamento."""
-    require_permission(req, "servicenow", "view")
+    require_permission(req, "rastreio", "view")
     return consultar_rastreio(codigo)
 
 
@@ -271,7 +271,7 @@ def correios_comprovante(codigo: str, req: Request):
     BDE/BDI/BDR carrega; quando o objeto traz imagens, elas são
     repassadas em `imagens`.
     """
-    require_permission(req, "servicenow", "view")
+    require_permission(req, "rastreio", "view")
 
     codigo = codigo.strip().upper()
     if not codigo or len(codigo) < 10:
@@ -332,7 +332,7 @@ def correios_comprovante(codigo: str, req: Request):
 @router.post("/correios/rastrear-lote")
 def correios_rastrear_lote(body: dict, req: Request):
     """Rastreia múltiplos objetos de uma vez (máximo 20)."""
-    require_permission(req, "servicenow", "view")
+    require_permission(req, "rastreio", "view")
 
     codigos = body.get("codigos", [])
     if not codigos:
@@ -358,7 +358,7 @@ def correios_rastrear_lote(body: dict, req: Request):
 @router.post("/correios/test")
 def correios_test(req: Request):
     """Testa conexão com Correios mostrando detalhes de cada etapa."""
-    require_permission(req, "servicenow", "view")
+    require_permission(req, "rastreio", "view")
     _check_credenciais()
     _correios_token_cache.clear()
 

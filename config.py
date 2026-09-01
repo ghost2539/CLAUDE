@@ -35,7 +35,8 @@ class Settings:
     SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
 
     MODULES: list[str] = [
-        "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros", "identificacao", "servicenow"
+        "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
+        "identificacao", "servicenow", "rastreio"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
