@@ -1056,13 +1056,19 @@ function _snRenderCorreios(container, S) {
 
                 var html = '<table class="data-table"><thead><tr>' +
                     '<th>Número</th><th>Descrição</th><th>Código Rastreio</th>' +
-                    '<th>Estado</th><th>Solicitante</th><th>Aberto em</th>' +
+                    '<th>Estado</th><th>Entrega</th><th>Solicitante</th><th>Aberto em</th>' +
                     '</tr></thead><tbody>';
 
+                var autoList = [];
                 for (var i = 0; i < items.length; i++) {
                     var inc = items[i];
                     var trackCode = inc._tracking_code || displayVal(inc.correlation_display) || displayVal(inc.correlation_id);
                     var hasValidCode = trackCode && /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(trackCode);
+                    var sysId = displayVal(inc.sys_id);
+                    var entId = 'co-ent-' + (sysId || i);
+                    if (hasValidCode && sysId) {
+                        autoList.push({ code: trackCode, sysId: sysId, number: displayVal(inc.number), entId: entId });
+                    }
                     html += '<tr>' +
                         '<td style="white-space:nowrap;font-weight:600">' + S.esc(displayVal(inc.number)) + '</td>' +
                         '<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">' +
@@ -1079,6 +1085,11 @@ function _snRenderCorreios(container, S) {
                                     '</span>') +
                         '</td>' +
                         '<td>' + S.esc(displayVal(inc.state)) + '</td>' +
+                        '<td id="' + entId + '" style="white-space:nowrap">' +
+                            (hasValidCode
+                                ? '<span style="color:var(--text-secondary);font-size:.82rem">Verificando…</span>'
+                                : '<span style="color:var(--text-secondary)">—</span>') +
+                        '</td>' +
                         '<td>' + S.esc(displayVal(inc.caller_id)) + '</td>' +
                         '<td style="white-space:nowrap;font-size:.85rem">' + S.esc(displayVal(inc.opened_at)) + '</td>' +
                         '</tr>';
@@ -1092,6 +1103,8 @@ function _snRenderCorreios(container, S) {
                     });
                 });
 
+                _coAutoRastrear(autoList, S, function () { loadCorreios(); });
+
                 var pager = document.getElementById('co-pager');
                 pager.hidden = total <= coLimit && coPage === 0;
                 var from = coPage * coLimit + 1;
@@ -1104,6 +1117,58 @@ function _snRenderCorreios(container, S) {
                 _snShowError('co-table', e, S, function () { loadCorreios(); });
             });
     }
+}
+
+/* Rastreia automaticamente cada chamado da lista e mostra o status de
+   entrega na coluna Entrega: "Encerrar" (entregue) ou "Aguardando Entrega". */
+async function _coAutoRastrear(lista, S, reloadFn) {
+    for (var i = 0; i < lista.length; i++) {
+        var item = lista[i];
+        var cell = document.getElementById(item.entId);
+        if (!cell) continue;
+        try {
+            var d = await S.api('/servicenow/correios/rastrear/' + encodeURIComponent(item.code));
+            var entregue = d && d.encontrado && d.entrega && d.entrega.entregue;
+            if (entregue) {
+                _coCellEncerrar(cell, item, S, reloadFn);
+            } else if (d && !d.encontrado) {
+                cell.innerHTML = '<span style="color:#6b7280;font-size:.82rem">Não encontrado</span>';
+            } else {
+                cell.innerHTML = '<span style="color:#2563eb;font-size:.82rem;font-weight:600">Aguardando Entrega</span>';
+            }
+        } catch (err) {
+            cell.innerHTML = '<span style="color:#dc2626;font-size:.8rem" title="' +
+                S.esc(err.message || '') + '">Erro no rastreio</span>';
+        }
+    }
+}
+
+function _coCellEncerrar(cell, item, S, reloadFn) {
+    cell.innerHTML = '';
+    var wrap = S.el('div', { style: 'display:flex;align-items:center;gap:6px' });
+    wrap.appendChild(S.el('span', {
+        style: 'color:#16a34a;font-weight:600;font-size:.82rem', textContent: 'Entregue'
+    }));
+    var btn = S.el('button', { className: 'btn btn-sm btn-primary', textContent: 'Encerrar' });
+    btn.onclick = function () {
+        if (!confirm('Encerrar o chamado ' + item.number + ' no ServiceNow?\n\n' +
+            'Muda o estado para Resolvido e preenche a closure information. ' +
+            'Ação real, não pode ser desfeita pelo portal.')) return;
+        btn.disabled = true; btn.textContent = 'Encerrando…';
+        S.api('/servicenow/encerramento/executar', {
+            method: 'POST', body: { sys_id: item.sysId, confirmar: true }
+        })
+            .then(function (r) {
+                S.toast('Chamado ' + (r.encerrado || item.number) + ' encerrado.', 'success');
+                cell.innerHTML = '<span style="color:#16a34a;font-weight:600">Encerrado ✓</span>';
+            })
+            .catch(function (err) {
+                S.toast(err.message || 'Falha ao encerrar.', 'error');
+                btn.disabled = false; btn.textContent = 'Encerrar';
+            });
+    };
+    wrap.appendChild(btn);
+    cell.appendChild(wrap);
 }
 
 function _snShowError(targetId, err, S, retryFn) {
