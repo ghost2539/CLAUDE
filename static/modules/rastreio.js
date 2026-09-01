@@ -141,8 +141,19 @@
                 .then(function (d) {
                     var els = d.elegiveis || [];
                     if (!els.length) {
-                        out.innerHTML = '<div style="color:var(--text-secondary)">' +
-                            'Nenhum candidato. Analisados: ' + (d.total_analisados || 0) + '.</div>';
+                        var diag = '<div style="color:var(--text-secondary)">' +
+                            'Nenhum candidato. Analisados: ' + (d.total_analisados || 0) +
+                            ' | com rastreio: ' + (d.total_com_rastreio || 0) + '.</div>';
+                        diag += '<div style="margin-top:10px;font-weight:600">Subcategorias encontradas na fila:</div>' +
+                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px">' +
+                            S.esc(JSON.stringify(d.subcategorias_encontradas || {}, null, 2)) + '</pre>';
+                        diag += '<div style="margin-top:6px;font-weight:600">Motivos de rejeição:</div>' +
+                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px">' +
+                            S.esc(JSON.stringify(d.motivos_rejeicao || {}, null, 2)) + '</pre>';
+                        diag += '<div style="margin-top:6px;font-weight:600">Amostra (com rastreio):</div>' +
+                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px;max-height:320px;overflow:auto">' +
+                            S.esc(JSON.stringify(d.amostra_com_rastreio || [], null, 2)) + '</pre>';
+                        out.innerHTML = diag;
                         return;
                     }
                     var h = '<div style="margin-bottom:8px;color:var(--text-secondary)">' +
