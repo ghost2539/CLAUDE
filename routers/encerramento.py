@@ -118,7 +118,7 @@ def candidatos(req: Request, queue: str = DEFAULT_QUEUE):
 
     Não altera nada — serve para conferir antes de executar.
     """
-    require_permission(req, "servicenow", "view")
+    require_permission(req, "rastreio", "view")
     session = _sn_session_from_portal(req)
 
     sn_query = (
@@ -172,7 +172,7 @@ def executar(body: EncerrarIn, req: Request):
     closure. É a ação manual de teste; a rotina automática reutiliza
     a mesma validação.
     """
-    require_permission(req, "servicenow", "edit")
+    require_permission(req, "rastreio", "edit")
     session = _sn_session_from_portal(req)
 
     recs = _sn_query(session, INCIDENT_TABLE, f"sys_id={body.sys_id}", FIELDS, 1)
