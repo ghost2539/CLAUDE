@@ -8,21 +8,19 @@ import time
 from fastapi import APIRouter, Request, HTTPException
 
 from security import require_permission
-from creds import get_credential
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
 SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
-# Credenciais: preferem o cofre do systemd (LoadCredentialEncrypted),
-# com fallback para variáveis de ambiente durante a migração.
-CORREIOS_USUARIO = get_credential("correios_usuario")
-CORREIOS_CHAVE = get_credential("correios_chave")
+# Credenciais vêm do .env (fora do controle de versão).
+CORREIOS_USUARIO = os.environ.get("CORREIOS_USUARIO", "")
+CORREIOS_CHAVE = os.environ.get("CORREIOS_CHAVE", "")
 CORREIOS_CARTOES = [
-    c.strip() for c in get_credential("correios_cartoes").split(",") if c.strip()
+    c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()
 ]
-CORREIOS_DR = get_credential("correios_dr", "64")
-CORREIOS_CONTRATO = get_credential("correios_contrato")
+CORREIOS_DR = os.environ.get("CORREIOS_DR", "64")
+CORREIOS_CONTRATO = os.environ.get("CORREIOS_CONTRATO", "")
 
 CORREIOS_BASE = "https://api.correios.com.br"
 

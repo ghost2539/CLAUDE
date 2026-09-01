@@ -13,6 +13,7 @@
         recebimento:    'Recebimento',
         identificacao:  'Identificação',
         servicenow:     'ServiceNow',
+        rastreio:       'Rastreio',
         reparos:        'Central de Reparos',
         status:         'Status',
         parametros:     'Parâmetros'
