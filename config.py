@@ -16,7 +16,7 @@ class Settings:
     EBS_SEARCH_URL: str = os.getenv("EBS_SEARCH_URL", "")
     VERIFY_SSL: bool = os.getenv("VERIFY_SSL", "false").lower() == "true"
     TIMEOUT: int = int(os.getenv("TIMEOUT_SECONDS", "15"))
-    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "10"))
+    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "40"))
     CREDENTIALS_DIRECTORY: str = os.getenv("CREDENTIALS_DIRECTORY", "")
 
     HOST: str = os.getenv("HOST", "0.0.0.0")
