@@ -433,11 +433,20 @@ def access_control_set(payload: dict, req: Request):
 
 # ── User creation ─────────────────────────────────────────────────
 
+def _gerar_senha_temporaria() -> str:
+    """Senha temporária legível e forte para primeiro acesso."""
+    import secrets
+    import string
+    alfabeto = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alfabeto) for _ in range(12))
+
+
 @router.post("/usuarios")
 def user_create(body: UserCreateIn, req: Request):
     require_permission(req, "parametros", "admin")
     check_rate_limit(req)
 
+    senha_temporaria = None
     with SessionLocal.begin() as s:
         existing = s.scalar(
             select(User).where(func.lower(User.login) == body.login.lower())
@@ -445,7 +454,17 @@ def user_create(body: UserCreateIn, req: Request):
         if existing:
             raise HTTPException(409, "Usuário já existe.")
 
-        pwd_hash = hash_password(body.password) if body.password else None
+        if body.auth_source == "LOCAL":
+            # Usuário local: sempre gera senha temporária e obriga a troca
+            # no primeiro acesso. Ignora qualquer senha enviada pela tela.
+            senha_temporaria = _gerar_senha_temporaria()
+            pwd_hash = hash_password(senha_temporaria)
+            must_change = True
+        else:
+            # AD/SN: autenticação externa, sem senha local.
+            pwd_hash = None
+            must_change = False
+
         u = User(
             login=body.login,
             display_name=body.display_name.strip() or body.login,
@@ -453,9 +472,37 @@ def user_create(body: UserCreateIn, req: Request):
             auth_source=body.auth_source,
             is_admin=body.is_admin,
             active=True,
-            must_change_password=bool(body.password),
+            must_change_password=must_change,
         )
         s.add(u)
+    return {"ok": True, "login": body.login, "senha_temporaria": senha_temporaria}
+
+
+@router.delete("/usuarios/{login}")
+def user_delete(login: str, req: Request):
+    """Exclui um usuário. Só admin; protege o admin inicial e o próprio usuário."""
+    sd = require_permission(req, "parametros", "admin")
+
+    if login.lower() == _cfg.INITIAL_ADMIN_LOGIN.lower():
+        raise HTTPException(400, "O administrador inicial não pode ser excluído.")
+    if login.lower() == sd["username"].lower():
+        raise HTTPException(400, "Você não pode excluir o próprio usuário.")
+
+    with SessionLocal.begin() as s:
+        u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
+        if not u:
+            raise HTTPException(404, "Usuário não encontrado.")
+        # Remove permissões vinculadas antes de excluir o usuário.
+        for p in s.scalars(select(Permission).where(Permission.user_id == u.id)).all():
+            s.delete(p)
+        s.delete(u)
+        s.add(AccessLog(
+            login=sd["username"],
+            auth_source=sd.get("auth_source", "LOCAL"),
+            success=True,
+            ip=client_ip(req),
+            detail=f"Usuário excluído: {login}"[:500],
+        ))
     return {"ok": True}
 
 
