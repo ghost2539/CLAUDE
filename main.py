@@ -51,6 +51,10 @@ def create_app() -> FastAPI:
     def tv():
         return (_cfg.STATIC / "tv.html").read_text(encoding="utf-8")
 
+    @app.get("/tv2", response_class=HTMLResponse)
+    def tv2():
+        return (_cfg.STATIC / "tv2.html").read_text(encoding="utf-8")
+
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
         path = _cfg.STATIC / "favicon.svg"
