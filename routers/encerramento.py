@@ -67,7 +67,10 @@ def _avaliar(session, inc: dict) -> dict:
     """Decide se um incidente pode ser encerrado. Só leitura."""
     number = _display(inc.get("number"))
     subcat = _norm(_display(inc.get("subcategory")))
+    # A consulta usa display_value=true: o estado vem como texto ("On Hold",
+    # "In Progress"), não como código numérico. Comparamos pelo texto.
     state = str(_display(inc.get("state")) or "").strip()
+    state_norm = state.lower()
     tracking = _extract_tracking_code(inc)
 
     resultado = {
@@ -75,6 +78,7 @@ def _avaliar(session, inc: dict) -> dict:
         "number": number,
         "subcategory": subcat,
         "state": state,
+        "state_norm": state_norm,
         "tracking": tracking,
         "elegivel": False,
         "motivo": "",
@@ -84,8 +88,8 @@ def _avaliar(session, inc: dict) -> dict:
     if subcat not in SUBCATS_ENCERRAVEIS:
         resultado["motivo"] = f"subcategoria '{subcat}' não encerrável"
         return resultado
-    if state not in ("2", "3"):
-        resultado["motivo"] = f"estado {state} não é On Hold/In Progress"
+    if state_norm not in ("on hold", "in progress"):
+        resultado["motivo"] = f"estado '{state}' não é On Hold/In Progress"
         return resultado
     if not tracking:
         resultado["motivo"] = "sem código de rastreio válido"
@@ -185,7 +189,8 @@ def executar(body: EncerrarIn, req: Request):
         return {"ok": True, "dry_run": True, "acao": "encerraria", **aval}
 
     # Passo 1: garantir In Progress (2) — obrigatório antes de resolver.
-    if aval["state"] == "3":
+    # Se está On Hold, precisa passar por In Progress primeiro.
+    if aval.get("state_norm") == "on hold":
         _sn_update(session, INCIDENT_TABLE, body.sys_id, {"state": "2"})
 
     # Passo 2: resolver (6) com os campos de closure obrigatórios.
