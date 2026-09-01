@@ -172,6 +172,18 @@
             { key: 'erro',          label: 'Erro' }
         ];
 
+        function setProgresso(out, feito, total) {
+            var pct = total ? Math.round((feito / total) * 100) : 0;
+            out.innerHTML =
+                '<div style="margin:8px 0 16px">' +
+                '<div style="display:flex;justify-content:space-between;font-size:.85rem;' +
+                'color:var(--text-secondary,#666);margin-bottom:4px">' +
+                '<span>Consultando...</span><span>' + pct + '% (' + feito + '/' + total + ')</span></div>' +
+                '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
+                '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div>' +
+                '</div></div>';
+        }
+
         document.getElementById('q-run').onclick = async function () {
             lastIds = document.getElementById('q-input').value
                 .split(/[\n,;\t]+/)
@@ -179,24 +191,37 @@
                 .filter(Boolean);
             if (!lastIds.length) return toast('Informe identificadores.', 'warning');
 
+            var runBtn = document.getElementById('q-run');
+            var out = document.getElementById('q-results');
+            runBtn.disabled = true;
+            setProgresso(out, 0, lastIds.length);
+
+            var LOTE = 25;
+            var acumulado = [];
+            var encontrados = 0, naoEncontrados = 0;
             try {
-                loading(true);
-                var d = await api('/consulta', {
-                    method: 'POST',
-                    body: { identificadores: lastIds }
-                });
-                var out = document.getElementById('q-results');
+                for (var i = 0; i < lastIds.length; i += LOTE) {
+                    var chunk = lastIds.slice(i, i + LOTE);
+                    var d = await api('/consulta', {
+                        method: 'POST',
+                        body: { identificadores: chunk }
+                    });
+                    encontrados += d.encontrados || 0;
+                    naoEncontrados += d.nao_encontrados || 0;
+                    acumulado = acumulado.concat(d.resultados || []);
+                    setProgresso(out, Math.min(i + LOTE, lastIds.length), lastIds.length);
+                }
                 out.innerHTML =
-                    '<p class="text-muted">' +
-                    d.encontrados + ' encontrado(s) e ' +
-                    d.nao_encontrados + ' não encontrado(s).</p>';
-                out.appendChild(table(columns, d.resultados));
+                    '<p class="text-muted">' + encontrados + ' encontrado(s) e ' +
+                    naoEncontrados + ' não encontrado(s).</p>';
+                out.appendChild(table(columns, acumulado));
                 document.getElementById('q-export').disabled = false;
                 toast('Consulta concluída.', 'success');
             } catch (e) {
+                out.innerHTML = '<p style="color:#dc2626">' + (e.message || 'Erro na consulta.') + '</p>';
                 toast(e.message, 'error');
             } finally {
-                loading(false);
+                runBtn.disabled = false;
             }
         };
 
