@@ -184,51 +184,62 @@
                 '<div class="legend">' + legend + '</div></div>';
         }
 
-        // Dados fictícios para validação de layout: abra a TV com ?demo=1
+        // Dados fictícios ALEATÓRIOS para validação de layout.
+        // Ative com ?demo=1 (ou ?demo, ou #demo) na URL da TV.
+        function rnd(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+        function pick(arr) { return arr[rnd(0, arr.length - 1)]; }
+
         function demoData() {
+            var cats = ['Coletor', 'SLED', 'Impressora', 'Notebook', 'Monitor', 'Outros'];
+            var stats = ['RECEBIDO', 'EM TRIAGEM', 'ENVIADO LOJA', 'S/ REPARO', 'VENDA'];
+            var modelos = [
+                'Coletor Zebra TC22', 'Coletor Zebra TC52', 'SLED Honeywell CT60',
+                'SLED Honeywell EDA52', 'Impressora Zebra ZD421', 'Impressora Zebra ZT411',
+                'Notebook Dell Latitude 3440', 'Monitor Dell P2422H'
+            ];
+            var porCat = cats.map(function (c) { return { categoria: c, total: rnd(80, 1800) }; });
+            var porStat = stats.map(function (s) { return { status: s, total: rnd(120, 1600) }; });
+
+            var slaTotal = rnd(600, 1500);
+            var slaMet = rnd(Math.round(slaTotal * 0.75), slaTotal);
+            var slaBreached = slaTotal - slaMet;
+
+            var ultimos = [];
+            var agora = new Date();
+            for (var i = 0; i < 8; i++) {
+                var t = new Date(agora.getTime() - i * rnd(3, 9) * 60000);
+                var cat = pick(cats);
+                ultimos.push({
+                    hora: t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                    imobilizado: '1004' + rnd(10000, 99999),
+                    descricao: pick(modelos),
+                    categoria: cat,
+                    status: pick(stats)
+                });
+            }
+
             return {
-                config: { title: 'Painel de Operações — DEMO', interval: 60 },
-                recebidos_hoje: 27,
-                recebidos_mes: 412,
-                recebidos_ano: 4863,
-                ativos_unicos: 3971,
-                por_categoria: [
-                    { categoria: 'Coletor', total: 1820 },
-                    { categoria: 'SLED', total: 1240 },
-                    { categoria: 'Impressora', total: 640 },
-                    { categoria: 'Notebook', total: 520 },
-                    { categoria: 'Monitor', total: 310 },
-                    { categoria: 'Outros', total: 333 }
-                ],
-                por_status: [
-                    { status: 'RECEBIDO', total: 1560 },
-                    { status: 'EM TRIAGEM', total: 980 },
-                    { status: 'ENVIADO LOJA', total: 1420 },
-                    { status: 'S/ REPARO', total: 470 },
-                    { status: 'VENDA', total: 433 }
-                ],
+                config: { title: 'Painel de Operações — DEMO', interval: 8 },
+                recebidos_hoje: rnd(8, 60),
+                recebidos_mes: rnd(200, 700),
+                recebidos_ano: rnd(3000, 8000),
+                ativos_unicos: rnd(2500, 7000),
+                por_categoria: porCat,
+                por_status: porStat,
                 indicadores: {
-                    tickets_resolved: 1287,
-                    sla_compliance_pct: 92,
-                    sla_met: 1184,
-                    sla_breached: 103,
-                    sla_total: 1287
+                    tickets_resolved: rnd(800, 1800),
+                    sla_compliance_pct: Math.round(slaMet / slaTotal * 100),
+                    sla_met: slaMet,
+                    sla_breached: slaBreached,
+                    sla_total: slaTotal
                 },
-                ultimos: [
-                    { hora: '14:52', imobilizado: '100482731', descricao: 'Coletor Zebra TC22', categoria: 'Coletor', status: 'RECEBIDO' },
-                    { hora: '14:47', imobilizado: '100479210', descricao: 'Impressora Zebra ZD421', categoria: 'Impressora', status: 'EM TRIAGEM' },
-                    { hora: '14:41', imobilizado: '100488002', descricao: 'SLED Honeywell CT60', categoria: 'SLED', status: 'ENVIADO LOJA' },
-                    { hora: '14:33', imobilizado: '100471559', descricao: 'Notebook Dell Latitude 3440', categoria: 'Notebook', status: 'RECEBIDO' },
-                    { hora: '14:28', imobilizado: '100490117', descricao: 'Monitor Dell P2422H', categoria: 'Monitor', status: 'S/ REPARO' },
-                    { hora: '14:19', imobilizado: '100483664', descricao: 'Coletor Zebra TC52', categoria: 'Coletor', status: 'RECEBIDO' },
-                    { hora: '14:05', imobilizado: '100477788', descricao: 'SLED Honeywell EDA52', categoria: 'SLED', status: 'ENVIADO LOJA' },
-                    { hora: '13:58', imobilizado: '100492045', descricao: 'Impressora Zebra ZT411', categoria: 'Impressora', status: 'VENDA' }
-                ],
+                ultimos: ultimos,
                 updated_at: new Date().toISOString()
             };
         }
 
-        var DEMO = /[?&]demo=1\b/.test(location.search);
+        var DEMO = /(^|[?&])demo(=1)?(&|$)/.test(location.search) || /demo/.test(location.hash);
+        if (DEMO) { console.log('[TV] modo DEMO ativo — dados aleatórios'); }
 
         async function load() {
             try {
