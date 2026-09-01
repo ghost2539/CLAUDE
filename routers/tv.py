@@ -32,7 +32,10 @@ def tv_dashboard():
             select(ReceiptCycle).order_by(ReceiptCycle.id.desc()).limit(8)
         ).all()
 
-        cat = Counter(c.asset.category or "N/D" for c in year_cycles)
+        cat = Counter(
+            (c.asset.category if c.asset else None) or "N/D"
+            for c in year_cycles
+        )
         stat = Counter(c.status for c in year_cycles)
 
         cfg_row = s.get(Setting, "tv")
@@ -63,12 +66,14 @@ def tv_dashboard():
                 {
                     "hora": (
                         c.created_at.astimezone().strftime("%H:%M")
-                        if c.created_at.tzinfo
-                        else c.created_at.strftime("%H:%M")
+                        if c.created_at and c.created_at.tzinfo
+                        else (c.created_at.strftime("%H:%M") if c.created_at else "")
                     ),
-                    "imobilizado": c.asset.asset_id or c.asset.asset_number,
-                    "descricao": c.asset.description,
-                    "categoria": c.asset.category,
+                    "imobilizado": (
+                        (c.asset.asset_id or c.asset.asset_number) if c.asset else "—"
+                    ),
+                    "descricao": c.asset.description if c.asset else "",
+                    "categoria": c.asset.category if c.asset else "",
                     "status": c.status,
                 }
                 for c in recent
