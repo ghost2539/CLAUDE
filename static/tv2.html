@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Controle de Orçamento — TV2</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <style>
+        :root {
+            --bg: #f3f4f6;
+            --surface: #ffffff;
+            --ink: #1f2733;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --navy: #0f2138;
+            /* cores exatas do dashboard de referência */
+            --c-red: #d24b5a;
+            --c-orange: #f5871f;
+            --c-blue: #1f6feb;
+            --c-cyan: #17a2b8;
+            --c-amber: #f0a500;
+            --c-green: #1e9e5a;
+            --c-yellow: #f5c518;
+            --c-gray: #b8bfc9;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; }
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Header navy */
+        .topbar {
+            background: var(--navy); color: #fff; height: 64px;
+            display: flex; align-items: center; padding: 0 28px; gap: 14px;
+        }
+        .topbar .brand { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; }
+        .topbar .brand .ic {
+            width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center;
+            background: rgba(255,255,255,.12); font-size: 18px;
+        }
+        .topbar .spacer { flex: 1; }
+        .topbar .user { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #cdd5e0; }
+        .topbar .user .badge-ro {
+            background: rgba(255,255,255,.14); color: #fff; font-size: 12px;
+            padding: 3px 10px; border-radius: 6px; font-weight: 600;
+        }
+        .topbar .logout {
+            width: 38px; height: 38px; border-radius: 8px; display: grid; place-items: center;
+            background: rgba(255,255,255,.10); color: #fff; font-size: 18px; cursor: pointer;
+        }
+
+        .wrap { padding: 22px 28px 40px; }
+
+        /* Title row */
+        .titlerow { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+        .titlerow h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.5px; }
+        .titlerow .spacer { flex: 1; }
+        .selyear, .btn-csv {
+            border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+            height: 40px; border-radius: 8px; font-size: 15px; padding: 0 14px; cursor: pointer;
+        }
+        .selyear { min-width: 110px; }
+        .btn-csv { display: inline-flex; align-items: center; gap: 8px; }
+
+        /* KPI cards */
+        .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 22px; }
+        .kpi {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 18px 20px; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+            border-left: 6px solid var(--c-gray);
+        }
+        .kpi .lbl { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .3px; }
+        .kpi .val { font-size: 26px; font-weight: 700; margin-top: 8px; font-variant-numeric: tabular-nums; }
+        .kpi.k-red    { border-left-color: var(--c-red); }
+        .kpi.k-blue   { border-left-color: var(--c-blue); }
+        .kpi.k-cyan   { border-left-color: var(--c-cyan); }
+        .kpi.k-amber  { border-left-color: var(--c-amber); }
+        .kpi.k-green  { border-left-color: var(--c-green); }
+
+        /* Charts */
+        .charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 22px; }
+        .card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 18px 22px; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+        }
+        .card h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+        .card h2 .info { color: var(--muted); font-size: 13px; }
+        .donut-box { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 8px 0 4px; }
+        .donut { width: 190px; height: 190px; }
+        .legend { display: flex; justify-content: center; gap: 22px; flex-wrap: wrap; }
+        .legend-row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #374151; }
+        .legend-row .sw { width: 13px; height: 13px; border-radius: 3px; flex: none; }
+
+        /* Filters */
+        .filters {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 16px 20px; margin-bottom: 18px; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+            display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 16px; align-items: end;
+        }
+        .filters .fld label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+        .filters .fld select {
+            width: 100%; height: 42px; border: 1px solid var(--border); border-radius: 8px;
+            background: var(--surface); font-size: 15px; padding: 0 12px; color: var(--ink);
+        }
+        .filters .btn-clear {
+            height: 42px; border: 1px solid var(--border); background: var(--surface);
+            border-radius: 8px; padding: 0 20px; font-size: 15px; cursor: pointer; color: var(--ink);
+        }
+
+        /* Table */
+        .tablecard { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            box-shadow: 0 1px 2px rgba(16,24,40,.05); overflow: hidden; }
+        .table-scroll { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+        thead th {
+            background: #10151c; color: #e5e7eb; text-align: left; font-size: 12px;
+            text-transform: uppercase; letter-spacing: .3px; padding: 12px 14px; white-space: nowrap;
+        }
+        tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 14px; white-space: nowrap; }
+        tbody tr:last-child td { border-bottom: none; }
+        .num { font-variant-numeric: tabular-nums; }
+        .impact { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .badge { display: inline-block; padding: 3px 12px; border-radius: 7px; font-size: 12px; font-weight: 600; }
+        .b-sim   { background: var(--c-green); color: #fff; }
+        .b-capex { background: var(--c-blue); color: #fff; }
+        .b-desej { background: var(--c-yellow); color: #4a3800; }
+
+        @media (max-width: 1100px) {
+            .kpis { grid-template-columns: repeat(3, 1fr); }
+            .charts { grid-template-columns: 1fr; }
+            .filters { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="brand"><span class="ic">◧</span> Controle de Orçamento</div>
+        <div class="spacer"></div>
+        <div class="user">
+            <span>👤 Raphael Steilein</span>
+            <span class="badge-ro">leitura</span>
+        </div>
+        <div class="logout" title="Sair">⇥</div>
+    </div>
+
+    <div class="wrap">
+        <div class="titlerow">
+            <h1>Orçamento 2027</h1>
+            <div class="spacer"></div>
+            <select class="selyear"><option>2027</option></select>
+            <button class="btn-csv">⬇ CSV</button>
+        </div>
+
+        <div class="kpis" id="kpis"></div>
+
+        <div class="charts">
+            <div class="card">
+                <h2>Demandas por Vertical <span class="info" title="Distribuição das demandas por vertical">ⓘ</span></h2>
+                <div id="chart-vertical"></div>
+            </div>
+            <div class="card">
+                <h2>CAPEX x OPEX</h2>
+                <div id="chart-capex"></div>
+            </div>
+            <div class="card">
+                <h2>Por Prioridade</h2>
+                <div id="chart-prioridade"></div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <div class="fld"><label>Vertical</label><select><option>Todas</option></select></div>
+            <div class="fld"><label>Tipo</label><select><option>Todos</option></select></div>
+            <div class="fld"><label>Prioridade</label><select><option>Todas</option></select></div>
+            <div class="fld"><label>Status</label><select><option>Todos</option></select></div>
+            <button class="btn-clear">Limpar</button>
+        </div>
+
+        <div class="tablecard">
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Motivo/Função</th>
+                            <th>Prioridade</th>
+                            <th>Estratégia</th>
+                            <th>Impacto Não Fazer</th>
+                            <th>Orça?</th>
+                            <th>CAPEX/OPEX</th>
+                            <th>QTD</th>
+                            <th>Valor Estimado (R$)</th>
+                            <th>Valor USD</th>
+                            <th>Total (R$)</th>
+                            <th>Duração</th>
+                            <th>Vencimento</th>
+                            <th>Base Volum.</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var esc = function (s) {
+            return String(s == null ? '' : s).replace(/[&<>'"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c];
+            });
+        };
+
+        // ── Dados exatos da imagem "Controle de Orçamento — Orçamento 2027" ──
+        var DADOS = {
+            kpis: [
+                { cls: '',        lbl: 'Demandas',      val: '4' },
+                { cls: 'k-red',   lbl: 'Valor Total',   val: 'R$ 16.444.886,00' },
+                { cls: 'k-blue',  lbl: 'CAPEX',         val: 'R$ 16.444.886,00' },
+                { cls: 'k-cyan',  lbl: 'OPEX',          val: 'R$ 0,00' },
+                { cls: 'k-amber', lbl: 'Mandatórios',   val: '0' },
+                { cls: 'k-green', lbl: 'Aprovado (R$)', val: 'R$ 7.875.006,00' }
+            ],
+            // valores relativos apenas para reproduzir as fatias da imagem
+            vertical:   [ { label: 'Field Operations', value: 58, color: 'var(--c-red)' },
+                          { label: '(vazio)',          value: 42, color: 'var(--c-orange)' } ],
+            capex:      [ { label: 'CAPEX',   value: 75, color: 'var(--c-blue)' },
+                          { label: '(vazio)', value: 25, color: 'var(--c-gray)' } ],
+            prioridade: [ { label: 'Desejável', value: 75, color: 'var(--c-yellow)' },
+                          { label: '(vazio)',   value: 25, color: 'var(--c-gray)' } ],
+            rows: [
+                { motivo: '', prioridade: '', estrategia: '', impacto: '', orca: 'Sim',
+                  co: '', qtd: 1, estimado: 'R$ 0,00', usd: '$ 0.00', total: 'R$ 0,00',
+                  duracao: '', vencimento: '', base: '', status: '' },
+                { motivo: 'Obsolescência', prioridade: 'Desejável', estrategia: 'Substituir',
+                  impacto: 'Queda de desempenho dos equipamentos', orca: 'Sim', co: 'CAPEX', qtd: 1,
+                  estimado: 'R$ 7.875.006,00', usd: '$ 0.00', total: 'R$ 7.875.006,00',
+                  duracao: '', vencimento: '', base: '', status: '' },
+                { motivo: 'Obsolescência', prioridade: 'Desejável', estrategia: 'Substituir',
+                  impacto: 'Queda de desempenho dos equipamentos', orca: 'Sim', co: 'CAPEX', qtd: 1,
+                  estimado: 'R$ 8.043.378,00', usd: '$ 0.00', total: 'R$ 8.043.378,00',
+                  duracao: '', vencimento: '', base: '', status: '' },
+                { motivo: 'Obsolescência', prioridade: 'Desejável', estrategia: 'Substituir',
+                  impacto: 'Queda de desempenho dos equipamentos', orca: 'Sim', co: 'CAPEX', qtd: 1,
+                  estimado: 'R$ 526.502,00', usd: '$ 0.00', total: 'R$ 526.502,00',
+                  duracao: '', vencimento: '', base: '', status: '' }
+            ]
+        };
+
+        // ── Donut SVG (rosca) — legenda apenas com swatch + rótulo, como na imagem ──
+        function donut(el, data) {
+            var total = data.reduce(function (a, x) { return a + x.value; }, 0);
+            var R = 15.9155, C = 2 * Math.PI * R, off = 0, arcs = '';
+            data.forEach(function (x) {
+                var len = x.value / total * C;
+                arcs += '<circle cx="18" cy="18" r="' + R + '" fill="none" stroke="' + x.color +
+                    '" stroke-width="4.6" stroke-dasharray="' + len + ' ' + (C - len) + '" ' +
+                    'stroke-dashoffset="' + (-off) + '" transform="rotate(-90 18 18)"></circle>';
+                off += len;
+            });
+            var legend = data.map(function (x) {
+                return '<div class="legend-row"><span class="sw" style="background:' + x.color + '"></span>' +
+                    esc(x.label) + '</div>';
+            }).join('');
+            el.innerHTML = '<div class="donut-box"><svg class="donut" viewBox="0 0 36 36">' + arcs +
+                '</svg><div class="legend">' + legend + '</div></div>';
+        }
+
+        // KPIs
+        document.getElementById('kpis').innerHTML = DADOS.kpis.map(function (k) {
+            return '<div class="kpi ' + k.cls + '"><div class="lbl">' + esc(k.lbl) + '</div>' +
+                '<div class="val">' + esc(k.val) + '</div></div>';
+        }).join('');
+
+        donut(document.getElementById('chart-vertical'), DADOS.vertical);
+        donut(document.getElementById('chart-capex'), DADOS.capex);
+        donut(document.getElementById('chart-prioridade'), DADOS.prioridade);
+
+        // Tabela
+        function coBadge(co) {
+            if (co === 'CAPEX') return '<span class="badge b-capex">CAPEX</span>';
+            if (co === 'OPEX')  return '<span class="badge b-capex">OPEX</span>';
+            return '';
+        }
+        function prBadge(pr) {
+            if (pr === 'Desejável') return '<span class="badge b-desej">Desejável</span>';
+            return esc(pr);
+        }
+        document.getElementById('rows').innerHTML = DADOS.rows.map(function (r) {
+            return '<tr>' +
+                '<td>' + esc(r.motivo) + '</td>' +
+                '<td>' + prBadge(r.prioridade) + '</td>' +
+                '<td>' + esc(r.estrategia) + '</td>' +
+                '<td class="impact" title="' + esc(r.impacto) + '">' + esc(r.impacto) + '</td>' +
+                '<td>' + (r.orca === 'Sim' ? '<span class="badge b-sim">Sim</span>' : esc(r.orca)) + '</td>' +
+                '<td>' + coBadge(r.co) + '</td>' +
+                '<td class="num">' + esc(r.qtd) + '</td>' +
+                '<td class="num">' + esc(r.estimado) + '</td>' +
+                '<td class="num">' + esc(r.usd) + '</td>' +
+                '<td class="num">' + esc(r.total) + '</td>' +
+                '<td>' + esc(r.duracao) + '</td>' +
+                '<td>' + esc(r.vencimento) + '</td>' +
+                '<td>' + esc(r.base) + '</td>' +
+                '<td>' + esc(r.status) + '</td>' +
+                '</tr>';
+        }).join('');
+    })();
+    </script>
+</body>
+</html>
