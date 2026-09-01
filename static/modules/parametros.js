@@ -298,10 +298,16 @@ async function renderPermissions(c, S) {
             }},
             {
                 key: 'a', label: '',
+                html: true,
                 render: function (_, u) {
+                    var wrap = S.el('div', { style: 'display:flex;gap:6px' });
                     var b = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
                     b.onclick = function () { editUser(u); };
-                    return b;
+                    wrap.appendChild(b);
+                    var del = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                    del.onclick = function () { deleteUser(u); };
+                    wrap.appendChild(del);
+                    return wrap;
                 }
             }
         ];
@@ -318,6 +324,14 @@ async function renderPermissions(c, S) {
         });
         S.toast(blocked ? 'Bloqueio de acesso externo ativado.' : 'Bloqueio de acesso externo desativado.', 'success');
     };
+
+    function deleteUser(u) {
+        if (!confirm('Excluir o usuário "' + (u.username) + '"?\n\n' +
+            'Esta ação remove o usuário e suas permissões e não pode ser desfeita.')) return;
+        S.api('/parametros/usuarios/' + encodeURIComponent(u.username), { method: 'DELETE' })
+            .then(function () { S.toast('Usuário excluído.', 'success'); load(); })
+            .catch(function (e) { S.toast(e.message || 'Falha ao excluir.', 'error'); });
+    }
 
     function editUser(u) {
         var box = S.el('div');
@@ -394,21 +408,52 @@ async function renderPermissions(c, S) {
             ['Login', 'pm-ul', ''],
             ['Nome',  'pm-un', '']
         ].forEach(function (x) { f.appendChild(_pField(x[0], x[1], x[2])); });
-        f.appendChild(_pField('Senha temporária', 'pm-up', '', 'password'));
+        var aviso = S.el('p', {
+            className: 'text-muted',
+            style: 'margin:8px 0 0;font-size:.85rem',
+            textContent: 'Uma senha temporária será gerada automaticamente. ' +
+                'O usuário será obrigado a trocá-la no primeiro acesso.'
+        });
+        f.appendChild(aviso);
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Criar' });
         saveBtn.onclick = async function () {
-            await S.api('/parametros/usuarios', {
-                method: 'POST',
-                body: {
-                    login:        document.getElementById('pm-ul').value,
-                    display_name: document.getElementById('pm-un').value,
-                    password:     document.getElementById('pm-up').value
-                }
-            });
+            var login = document.getElementById('pm-ul').value.trim();
+            if (!login) { S.toast('Informe o login.', 'warning'); return; }
+            var r;
+            try {
+                r = await S.api('/parametros/usuarios', {
+                    method: 'POST',
+                    body: {
+                        login:        login,
+                        display_name: document.getElementById('pm-un').value,
+                        auth_source:  'LOCAL'
+                    }
+                });
+            } catch (e) {
+                S.toast(e.message || 'Falha ao criar usuário.', 'error');
+                return;
+            }
             S.closeModal();
-            S.toast('Usuário criado.', 'success');
             load();
+            // Mostra a senha temporária gerada para o admin repassar.
+            var box = S.el('div');
+            box.innerHTML =
+                '<p>Usuário <strong>' + S.esc(r.login) + '</strong> criado.</p>' +
+                '<p style="margin:8px 0 4px">Senha temporária (copie e repasse ao usuário — ' +
+                'ele terá que trocá-la no primeiro acesso):</p>' +
+                '<div style="display:flex;gap:8px;align-items:center">' +
+                '<code id="pm-temp-pass" style="font-size:1.1rem;padding:8px 12px;' +
+                'background:var(--bg-secondary);border-radius:6px;user-select:all">' +
+                S.esc(r.senha_temporaria || '') + '</code></div>';
+            var copyBtn = S.el('button', { className: 'btn btn-outline', textContent: 'Copiar senha' });
+            copyBtn.onclick = function () {
+                try {
+                    navigator.clipboard.writeText(r.senha_temporaria || '');
+                    S.toast('Senha copiada.', 'success');
+                } catch (_) { S.toast('Copie manualmente.', 'info'); }
+            };
+            S.openModal('Usuário criado', box, [copyBtn]);
         };
         S.openModal('Novo usuário', f, [saveBtn]);
     };
