@@ -126,11 +126,26 @@ def candidatos(req: Request, queue: str = DEFAULT_QUEUE):
 
     avaliados = [_avaliar(session, inc) for inc in incidentes]
     elegiveis = [a for a in avaliados if a["elegivel"]]
+
+    # Resumo diagnóstico: quantos caíram em cada filtro, e exemplos.
+    from collections import Counter
+    motivos = Counter(a["motivo"] for a in avaliados if not a["elegivel"])
+    com_tracking = [a for a in avaliados if a["tracking"]]
+    subcats = Counter(a["subcategory"] for a in avaliados)
+
     return {
         "queue": queue,
         "total_analisados": len(avaliados),
+        "total_com_rastreio": len(com_tracking),
         "elegiveis": elegiveis,
         "total_elegiveis": len(elegiveis),
+        "motivos_rejeicao": dict(motivos),
+        "subcategorias_encontradas": dict(subcats.most_common(15)),
+        "amostra_com_rastreio": [
+            {"number": a["number"], "subcategory": a["subcategory"],
+             "state": a["state"], "tracking": a["tracking"], "motivo": a["motivo"]}
+            for a in com_tracking[:10]
+        ],
     }
 
 
