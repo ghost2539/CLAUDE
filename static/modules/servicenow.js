@@ -9,7 +9,7 @@ window.SPARE_MODULES.servicenow = {
         var TAB_LIST = [
             ['entrada',   'Entrada de estoque'],
             ['saida',     'Saída de estoque'],
-            ['correios',  'Chamados correios'],
+            ['correios',  'Rastreio - Chamados'],
             ['relatorios','Relatórios']
         ];
         sub = sub || 'entrada';

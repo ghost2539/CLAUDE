@@ -1,107 +1,145 @@
-/* Rastreio Correios avulso — consulta direta, sem ServiceNow.
-   Serve para testar a API dos Correios isoladamente. */
+/* Correios — rastreio de objetos e encerramento de chamados entregues.
+   Sub-abas: Rastreios (consulta em lote) e Encerramento. */
 (function () {
     var S = window.SPARE;
 
-    function render(content) {
+    function render(content, sub) {
+        var TABS = [
+            ['rastreios',     'Rastreios'],
+            ['encerramento',  'Encerramento']
+        ];
+        sub = sub || 'rastreios';
+        S.tabs(TABS, sub, 'rastreio');
         content.innerHTML = '';
+        if (sub === 'encerramento') renderEncerramento(content, S);
+        else renderRastreios(content, S);
+    }
 
+    /* ── Barra de progresso reutilizável ──────────────────────────── */
+    function novoProgresso(S) {
+        var wrap = S.el('div', { style: 'margin:12px 0;display:none' });
+        wrap.innerHTML =
+            '<div style="display:flex;justify-content:space-between;font-size:.85rem;' +
+            'color:var(--text-secondary);margin-bottom:4px">' +
+            '<span class="pg-label">Processando...</span><span class="pg-pct">0%</span></div>' +
+            '<div style="height:10px;background:var(--bg-secondary,#eee);border-radius:6px;overflow:hidden">' +
+            '<div class="pg-fill" style="height:100%;width:0%;background:#3b82f6;transition:width .2s"></div></div>';
+        return {
+            el: wrap,
+            iniciar: function (label) {
+                wrap.style.display = 'block';
+                wrap.querySelector('.pg-label').textContent = label || 'Processando...';
+                wrap.querySelector('.pg-pct').textContent = '0%';
+                wrap.querySelector('.pg-fill').style.width = '0%';
+            },
+            atualizar: function (feito, total, label) {
+                var pct = total ? Math.round((feito / total) * 100) : 0;
+                wrap.querySelector('.pg-pct').textContent = pct + '% (' + feito + '/' + total + ')';
+                wrap.querySelector('.pg-fill').style.width = pct + '%';
+                if (label) wrap.querySelector('.pg-label').textContent = label;
+            },
+            terminar: function (label) {
+                wrap.querySelector('.pg-fill').style.width = '100%';
+                wrap.querySelector('.pg-pct').textContent = '100%';
+                if (label) wrap.querySelector('.pg-label').textContent = label;
+                setTimeout(function () { wrap.style.display = 'none'; }, 800);
+            }
+        };
+    }
+
+    /* ── Aba Rastreios (consulta em lote) ─────────────────────────── */
+    function renderRastreios(content, S) {
         var card = S.el('div', { className: 'card' });
         var body = S.el('div', { className: 'card-body' });
         body.innerHTML =
-            '<h1 class="page-title">Rastreio Correios</h1>' +
+            '<h1 class="page-title">Rastreios</h1>' +
             '<p style="color:var(--text-secondary);margin:0 0 12px">' +
-            'Consulta avulsa de um objeto pelos Correios. Não depende do ServiceNow.</p>';
+            'Cole um ou vários códigos de rastreio (um por linha ou separados por espaço/vírgula) ' +
+            'e consulte o status de todos de uma vez.</p>';
 
-        var row = S.el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' });
-        var input = S.el('input', {
-            id: 'rt-cod', className: 'form-control',
-            placeholder: 'Código de rastreio (ex: AD852897611BR)',
-            style: 'max-width:320px;text-transform:uppercase'
+        var ta = S.el('textarea', {
+            id: 'rt-cods', className: 'form-control',
+            placeholder: 'AD852897611BR\nAD528273626BR\n...',
+            style: 'width:100%;min-height:110px;text-transform:uppercase;font-family:monospace'
         });
-        var btn = S.el('button', { className: 'btn btn-primary', textContent: 'Rastrear' });
-        var testBtn = S.el('button', {
-            className: 'btn btn-outline', textContent: 'Testar conexão',
-            style: 'margin-left:4px'
-        });
-        row.appendChild(input);
+        body.appendChild(ta);
+
+        var row = S.el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px' });
+        var btn = S.el('button', { className: 'btn btn-primary', textContent: 'Rastrear todos' });
+        var testBtn = S.el('button', { className: 'btn btn-outline', textContent: 'Testar conexão' });
         row.appendChild(btn);
         row.appendChild(testBtn);
         body.appendChild(row);
 
-        var result = S.el('div', { id: 'rt-result', style: 'margin-top:16px' });
+        var prog = novoProgresso(S);
+        body.appendChild(prog.el);
+
+        var result = S.el('div', { id: 'rt-result', style: 'margin-top:12px' });
         body.appendChild(result);
 
         card.appendChild(body);
         content.appendChild(card);
 
-        renderEncerramento(content, S);
-
-        function erroBox(titulo, detalhe) {
-            result.innerHTML =
-                '<div style="padding:12px;border:1px solid rgba(220,38,38,.3);' +
-                'background:rgba(220,38,38,.08);border-radius:8px">' +
-                '<div style="font-weight:600;color:#dc2626;margin-bottom:6px">' + S.esc(titulo) + '</div>' +
-                '<pre style="white-space:pre-wrap;word-break:break-word;margin:0;font-size:.82rem;color:var(--text-secondary)">' +
-                S.esc(detalhe || '') + '</pre></div>';
+        function statusDoObjeto(d) {
+            if (!d.encontrado) return { txt: 'Não encontrado', cor: '#6b7280' };
+            if (d.entrega && d.entrega.entregue) return { txt: 'Entregue', cor: '#16a34a' };
+            return { txt: 'Em trânsito', cor: '#2563eb' };
         }
 
-        function rastrear() {
-            var cod = (input.value || '').trim().toUpperCase();
-            if (!cod || cod.length < 10) { S.toast('Informe um código válido.', 'warning'); return; }
+        function cardResultado(cod, d, erro) {
+            var st = erro ? { txt: 'Erro', cor: '#dc2626' } : statusDoObjeto(d);
+            var ultimo = '';
+            if (!erro && d.eventos && d.eventos.length) {
+                var ev = d.eventos[0];
+                ultimo = (ev.descricao || '') + (ev.local ? ' — ' + ev.local : '') +
+                    (ev.data ? ' (' + ev.data + ')' : '');
+            }
+            var rec = '';
+            if (!erro && d.entrega && d.entrega.entregue && d.entrega.recebedor_nome) {
+                rec = 'Recebedor: ' + d.entrega.recebedor_nome;
+            }
+            var det = erro ? erro : (ultimo || rec || '—');
+            return '<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 10px;' +
+                'border:1px solid var(--border,#eee);border-radius:8px;margin-bottom:6px">' +
+                '<span style="font-family:monospace;min-width:130px;font-weight:600">' + S.esc(cod) + '</span>' +
+                '<span style="min-width:110px;font-weight:600;color:' + st.cor + '">' + S.esc(st.txt) + '</span>' +
+                '<span style="color:var(--text-secondary);font-size:.88rem;flex:1">' + S.esc(det) +
+                (rec && ultimo ? '<br>' + S.esc(rec) : '') + '</span></div>';
+        }
+
+        function parseCodigos() {
+            var brutos = (ta.value || '').toUpperCase().split(/[\s,;]+/);
+            var vistos = {}, out = [];
+            brutos.forEach(function (c) {
+                c = c.trim();
+                if (c.length >= 10 && !vistos[c]) { vistos[c] = 1; out.push(c); }
+            });
+            return out;
+        }
+
+        async function rastrearTodos() {
+            var cods = parseCodigos();
+            if (!cods.length) { S.toast('Cole ao menos um código válido.', 'warning'); return; }
             btn.disabled = true; btn.textContent = 'Consultando...';
-            result.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando Correios...</div>';
-            S.api('/servicenow/correios/rastrear/' + encodeURIComponent(cod))
-                .then(function (d) {
-                    if (!d.encontrado) {
-                        erroBox('Objeto não encontrado', d.mensagem || 'Sem eventos para este código.');
-                        return;
-                    }
-                    var html = '<div style="font-size:1rem;font-weight:600;margin-bottom:12px">' +
-                        S.esc(cod) + (d.tipo_nome ? ' — ' + S.esc(d.tipo_nome) : '') + '</div>';
-                    var evs = d.eventos || [];
-                    if (!evs.length) {
-                        html += '<div style="color:var(--text-secondary)">Sem eventos.</div>';
-                    }
-                    for (var i = 0; i < evs.length; i++) {
-                        var ev = evs[i];
-                        var dtStr = ev.data || '';
-                        try {
-                            var dt = new Date(ev.data);
-                            if (!isNaN(dt)) {
-                                dtStr = dt.toLocaleDateString('pt-BR') + ' ' +
-                                    dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                            }
-                        } catch (_) { }
-                        html += '<div style="position:relative;margin-left:6px;padding-left:24px;padding-bottom:18px;' +
-                            (i < evs.length - 1 ? 'border-left:2px solid #333' : '') + '">' +
-                            '<div style="position:absolute;left:-7px;top:2px;width:14px;height:14px;border-radius:50%;background:#3b82f6"></div>' +
-                            '<div style="font-weight:600;font-size:.95rem">' + S.esc(ev.descricao || '') + '</div>' +
-                            (ev.detalhe ? '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(ev.detalhe) + '</div>' : '') +
-                            '<div style="color:var(--text-secondary);font-size:.8rem;margin-top:2px">' +
-                            (ev.local ? S.esc(ev.local) + ' — ' : '') + dtStr + '</div>' +
-                        '</div>';
-                    }
-                    if (d.entrega && d.entrega.entregue) {
-                        var e = d.entrega;
-                        html += '<div style="margin-top:8px;padding:12px;background:rgba(22,163,74,.08);' +
-                            'border:1px solid rgba(22,163,74,.25);border-radius:8px;font-size:.9rem">' +
-                            '<div style="font-weight:600;color:#16a34a;margin-bottom:4px">Entregue</div>' +
-                            (e.recebedor_nome ? '<div>Recebedor: <strong>' + S.esc(e.recebedor_nome) + '</strong></div>' : '') +
-                            (e.recebedor_documento ? '<div>Documento: ' + S.esc(e.recebedor_documento) + '</div>' : '') +
-                            (e.local_entrega ? '<div>Local: ' + S.esc(e.local_entrega) + '</div>' : '') +
-                        '</div>';
-                    }
-                    result.innerHTML = html;
-                })
-                .catch(function (err) { erroBox('Falha no rastreio', err.message); })
-                .finally(function () { btn.disabled = false; btn.textContent = 'Rastrear'; });
+            result.innerHTML = '';
+            prog.iniciar('Consultando ' + cods.length + ' objeto(s)...');
+            var html = '';
+            for (var i = 0; i < cods.length; i++) {
+                var cod = cods[i];
+                try {
+                    var d = await S.api('/servicenow/correios/rastrear/' + encodeURIComponent(cod));
+                    html += cardResultado(cod, d, null);
+                } catch (err) {
+                    html += cardResultado(cod, null, err.message || 'falha');
+                }
+                result.innerHTML = html;
+                prog.atualizar(i + 1, cods.length);
+            }
+            prog.terminar('Concluído: ' + cods.length + ' consultado(s).');
+            btn.disabled = false; btn.textContent = 'Rastrear todos';
         }
 
-        btn.onclick = rastrear;
-        input.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') { e.preventDefault(); rastrear(); }
-        });
+        btn.onclick = rastrearTodos;
 
         testBtn.onclick = function () {
             testBtn.disabled = true; testBtn.textContent = 'Testando...';
@@ -112,17 +150,19 @@
                         'font-size:.8rem;background:var(--bg-secondary);padding:12px;border-radius:8px;' +
                         'max-height:480px;overflow:auto">' + S.esc(JSON.stringify(d, null, 2)) + '</pre>';
                 })
-                .catch(function (err) { erroBox('Falha no teste', err.message); })
+                .catch(function (err) {
+                    result.innerHTML = '<div style="color:#dc2626">' + S.esc(err.message) + '</div>';
+                })
                 .finally(function () { testBtn.disabled = false; testBtn.textContent = 'Testar conexão'; });
         };
     }
 
     /* ── Encerramento de chamados entregues (escreve no ServiceNow) ── */
     function renderEncerramento(content, S) {
-        var card = S.el('div', { className: 'card', style: 'margin-top:16px' });
+        var card = S.el('div', { className: 'card' });
         var body = S.el('div', { className: 'card-body' });
         body.innerHTML =
-            '<h2 style="margin:0 0 4px;font-size:1.1rem">Encerramento de chamados entregues</h2>' +
+            '<h1 class="page-title">Encerramento de chamados entregues</h1>' +
             '<p style="color:var(--text-secondary);margin:0 0 12px;font-size:.9rem">' +
             'Lista chamados On Hold/In Progress de coletor/sled cujo objeto já foi entregue. ' +
             'O encerramento <strong>altera o ServiceNow</strong> — revise antes de confirmar.</p>';
