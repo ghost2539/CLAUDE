@@ -9,3 +9,7 @@ venv/
 ebs_probe_out/
 tools/ebs_probe_out/
 forms_capture*.jsonl
+
+# Banco SQLite do módulo Controle de Orçamento (/tv2)
+data/controle_orcamento.db*
+frontend/**/node_modules/

@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { min-height: 100%; }
+body { background: #f3f4f6; color: #111827; }
+
+@layer components {
+  /* Inputs da tabela: parecem texto até receberem foco */
+  .cell-input {
+    @apply w-full bg-transparent border border-transparent rounded px-1.5 py-1 text-[12px] text-gray-800 outline-none transition-colors;
+  }
+  .cell-input:hover { @apply border-gray-300 bg-white; }
+  .cell-input:focus { @apply border-blue-500 bg-white ring-2 ring-blue-100; }
+  .cell-input.num { @apply text-right tabular-nums; }
+  select.cell-input { @apply cursor-pointer appearance-none pr-5; }
+
+  .badge {
+    @apply inline-flex items-center justify-center rounded px-2 py-0.5 text-[11px] font-semibold leading-4 whitespace-nowrap;
+  }
+
+  .select-wrap { @apply relative; }
+  .select-wrap::after {
+    content: "";
+    @apply pointer-events-none absolute right-1.5 top-1/2 -mt-1 h-2 w-2 border-b border-r border-gray-400 rotate-45;
+  }
+
+  .th { @apply px-1.5 py-2 font-semibold whitespace-nowrap align-middle; }
+  .td { @apply px-1.5 py-1 align-middle whitespace-nowrap; }
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+.recharts-wrapper, .recharts-surface { outline: none; }

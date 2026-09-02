@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -51,10 +52,6 @@ def create_app() -> FastAPI:
     def tv():
         return (_cfg.STATIC / "tv.html").read_text(encoding="utf-8")
 
-    @app.get("/tv2", response_class=HTMLResponse)
-    def tv2():
-        return (_cfg.STATIC / "tv2.html").read_text(encoding="utf-8")
-
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
         path = _cfg.STATIC / "favicon.svg"
@@ -88,6 +85,18 @@ def create_app() -> FastAPI:
     app.include_router(servicenow_router)
     app.include_router(correios_router)
     app.include_router(encerramento_router)
+
+    # ── Controle de Orçamento em /tv2 (código e banco próprios) ─────────
+    # Carregamento isolado: qualquer erro (arquivo ausente, dependência,
+    # banco) é apenas registrado no log e o portal sobe normalmente sem ele.
+    try:
+        from routers.controle_orcamento import router as controle_orcamento_router
+        app.include_router(controle_orcamento_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("controle_orcamento").error(
+            "Módulo Controle de Orçamento (/tv2) NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
 
     return app
 
