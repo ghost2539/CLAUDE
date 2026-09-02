@@ -21,6 +21,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import logging
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
@@ -32,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 
 from config import get_settings
-from database_orcamento import BudgetProject, SessionLocal, ensure_db
+from database_orcamento import BudgetCategory, BudgetProject, SessionLocal, ensure_db
 from security import check_rate_limit, client_ip, get_session
 
 _cfg = get_settings()
@@ -45,7 +46,7 @@ router = APIRouter(tags=["Controle de Orçamento"], include_in_schema=False)
 # criada na primeira requisição à API (ver _com_banco / ensure_db).
 
 TIPOS = ("CAPEX", "OPEX")
-CATEGORIAS = ("Manutenção", "Expansão", "Estratégico", "Legal/Compliance", "Outros")
+# Categorias: cadastradas pelo usuário (tabela budget_categories)
 ESTAGIOS = ("Planejamento", "Aprovação", "Em Execução", "Concluído")
 PRIORIDADES = ("Alta", "Média", "Baixa")
 _MAX_VALOR = Decimal("9999999999999.99")  # limite do Numeric(18, 2)
@@ -170,7 +171,8 @@ class ProjetoIn(BaseModel):
     @field_validator("categoria", mode="before")
     @classmethod
     def _v_categoria(cls, v):
-        return None if v is None else _opcao(v, CATEGORIAS, "Categoria")
+        # existência verificada no banco (categorias são cadastráveis)
+        return None if v is None else _texto(v, 60)
 
     @field_validator("estagio", mode="before")
     @classmethod
@@ -243,6 +245,56 @@ def _dict(p: BudgetProject) -> dict:
     }
 
 
+def _categoria_existe(s, nome: str) -> bool:
+    return bool(s.scalar(select(BudgetCategory.id).where(BudgetCategory.name == nome)))
+
+
+def _checar_categoria(s, dados: dict) -> None:
+    if "categoria" in dados and dados["categoria"] is not None:
+        if not dados["categoria"]:
+            raise HTTPException(422, "Categoria obrigatória.")
+        if not _categoria_existe(s, dados["categoria"]):
+            raise HTTPException(422, f"Categoria inexistente: {dados['categoria']!r}. Cadastre-a em Categorias.")
+
+
+def _cat_dict(c: BudgetCategory) -> dict:
+    return {"id": c.id, "nome": c.name, "cor": c.color, "ordem": c.sort_order}
+
+
+def _listar_categorias(s) -> list[dict]:
+    rows = s.scalars(select(BudgetCategory).order_by(BudgetCategory.sort_order, BudgetCategory.id)).all()
+    return [_cat_dict(c) for c in rows]
+
+
+_COR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class CategoriaIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nome: Optional[str] = None
+    cor: Optional[str] = None
+
+    @field_validator("nome", mode="before")
+    @classmethod
+    def _v_nome(cls, v):
+        if v is None:
+            return None
+        v = _texto(v, 60)
+        if not v:
+            raise ValueError("Nome da categoria obrigatório.")
+        return v
+
+    @field_validator("cor", mode="before")
+    @classmethod
+    def _v_cor(cls, v):
+        if v is None:
+            return None
+        v = _texto(v, 9).lower()
+        if not _COR_RE.match(v):
+            raise ValueError("Cor inválida (use #rrggbb).")
+        return v
+
+
 def _autor(req: Request) -> str:
     sd = get_session(req, required=False)
     if sd and sd.get("username"):
@@ -290,7 +342,7 @@ def listar_projetos():
             "projetos": [_dict(p) for p in rows],
             "opcoes": {
                 "tipos": list(TIPOS),
-                "categorias": list(CATEGORIAS),
+                "categorias": _listar_categorias(s),
                 "estagios": list(ESTAGIOS),
                 "prioridades": list(PRIORIDADES),
             },
@@ -303,6 +355,7 @@ def criar_projeto(body: ProjetoIn, req: Request):
     check_rate_limit(req, "api")
     dados = body.model_dump(exclude_none=True)
     with SessionLocal.begin() as s:
+        _checar_categoria(s, dados)
         proximo = (s.scalar(select(func.max(BudgetProject.sort_order))) or 0) + 1
         p = BudgetProject(sort_order=proximo, updated_by=_autor(req))
         for campo, coluna in _CAMPOS.items():
@@ -321,6 +374,7 @@ def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
         p = s.get(BudgetProject, projeto_id)
         if not p:
             raise HTTPException(404, "Projeto não encontrado.")
+        _checar_categoria(s, dados)
         for campo, valor in dados.items():
             if campo == "vencimento":
                 p.due_date = valor  # None limpa a data
@@ -363,3 +417,65 @@ def duplicar_projeto(projeto_id: int, req: Request):
         s.add(copia)
         s.flush()
         return _dict(copia)
+
+
+# ── API: categorias ───────────────────────────────────────────────
+
+@router.get("/api/controle-orcamento/categorias")
+@_com_banco
+def listar_categorias():
+    with SessionLocal() as s:
+        return {"categorias": _listar_categorias(s)}
+
+
+@router.post("/api/controle-orcamento/categorias", status_code=201)
+@_com_banco
+def criar_categoria(body: CategoriaIn, req: Request):
+    check_rate_limit(req, "api")
+    if not body.nome:
+        raise HTTPException(422, "Nome da categoria obrigatório.")
+    with SessionLocal.begin() as s:
+        if _categoria_existe(s, body.nome):
+            raise HTTPException(409, f"Já existe a categoria {body.nome!r}.")
+        proximo = (s.scalar(select(func.max(BudgetCategory.sort_order))) or 0) + 1
+        c = BudgetCategory(name=body.nome, color=body.cor or "#9ca3af", sort_order=proximo)
+        s.add(c)
+        s.flush()
+        return _cat_dict(c)
+
+
+@router.patch("/api/controle-orcamento/categorias/{categoria_id}")
+@_com_banco
+def atualizar_categoria(categoria_id: int, body: CategoriaIn, req: Request):
+    """Renomear propaga o novo nome aos projetos que usam a categoria."""
+    check_rate_limit(req, "api")
+    with SessionLocal.begin() as s:
+        c = s.get(BudgetCategory, categoria_id)
+        if not c:
+            raise HTTPException(404, "Categoria não encontrada.")
+        if body.nome and body.nome != c.name:
+            if _categoria_existe(s, body.nome):
+                raise HTTPException(409, f"Já existe a categoria {body.nome!r}.")
+            antigo = c.name
+            c.name = body.nome
+            for p in s.scalars(select(BudgetProject).where(BudgetProject.category == antigo)).all():
+                p.category = body.nome
+        if body.cor:
+            c.color = body.cor
+        s.flush()
+        return _cat_dict(c)
+
+
+@router.delete("/api/controle-orcamento/categorias/{categoria_id}")
+@_com_banco
+def excluir_categoria(categoria_id: int, req: Request):
+    check_rate_limit(req, "api")
+    with SessionLocal.begin() as s:
+        c = s.get(BudgetCategory, categoria_id)
+        if not c:
+            raise HTTPException(404, "Categoria não encontrada.")
+        em_uso = s.scalar(select(func.count()).select_from(BudgetProject).where(BudgetProject.category == c.name)) or 0
+        if em_uso:
+            raise HTTPException(409, f"A categoria {c.name!r} está em uso por {em_uso} projeto(s). Altere a categoria desses projetos antes de excluir.")
+        s.delete(c)
+    return {"ok": True}

@@ -10,14 +10,15 @@ import {
 
 const TIPOS = ["CAPEX", "OPEX"];
 
-const CATEGORIAS = ["Manutenção", "Expansão", "Estratégico", "Legal/Compliance", "Outros"];
-const CATEGORIA_CORES = {
-  "Manutenção": "#2563eb",
-  "Expansão": "#f97316",
-  "Estratégico": "#8b5cf6",
-  "Legal/Compliance": "#22c55e",
-  "Outros": "#9ca3af",
+/* Categorias são cadastráveis: vêm da API ({ id, nome, cor }). */
+const COR_CATEGORIA_PADRAO = "#9ca3af";
+/* Paleta sugerida para novas categorias (primeira cor ainda não usada) */
+const PALETA_CATEGORIAS = ["#2563eb", "#f97316", "#8b5cf6", "#22c55e", "#9ca3af", "#0ea5e9", "#ec4899", "#14b8a6", "#eab308", "#ef4444", "#6366f1", "#84cc16", "#a16207", "#64748b"];
+const corSugerida = (categorias) => {
+  const usadas = new Set(categorias.map((c) => (c.cor || "").toLowerCase()));
+  return PALETA_CATEGORIAS.find((c) => !usadas.has(c)) || PALETA_CATEGORIAS[categorias.length % PALETA_CATEGORIAS.length];
 };
+const API_CATEGORIAS = "/api/controle-orcamento/categorias";
 
 const ESTAGIOS = ["Planejamento", "Aprovação", "Em Execução", "Concluído"];
 const ESTAGIO_CORES = {
@@ -218,6 +219,16 @@ const Icon = {
       <path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z" /><path d="M9 14l2 2 4-4" />
     </svg>
   ),
+  tag: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M20 12l-8 8-9-9V4h7z" /><circle cx="7.5" cy="7.5" r="1.5" />
+    </svg>
+  ),
+  close: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4">
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  ),
   back: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
       <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
@@ -365,6 +376,84 @@ function FilterSelect({ label, value, options, onChange }) {
   );
 }
 
+/* Gerenciador de categorias (nome + cor), com gravação imediata */
+function CategoriasModal({ categorias, emUso, onCriar, onAtualizar, onExcluir, onFechar }) {
+  const [novoNome, setNovoNome] = useState("");
+  const [novaCor, setNovaCor] = useState(() => corSugerida(categorias));
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  const executar = async (fn) => {
+    setOcupado(true); setErro("");
+    try { await fn(); } catch (e) { setErro(e.message); } finally { setOcupado(false); }
+  };
+
+  const criar = () => {
+    const nome = novoNome.trim();
+    if (!nome) return;
+    executar(async () => { await onCriar(nome, novaCor); setNovoNome(""); setNovaCor(corSugerida([...categorias, { cor: novaCor }])); });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-16" onMouseDown={(e) => { if (e.target === e.currentTarget) onFechar(); }}>
+      <div className="w-full max-w-lg bg-white rounded-lg shadow-xl border border-gray-200">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200">
+          <span className="text-gray-600">{Icon.tag}</span>
+          <h3 className="text-sm font-semibold text-gray-800">Categorias de projeto</h3>
+          <button onClick={onFechar} className="ml-auto p-1 rounded text-gray-500 hover:bg-gray-100" title="Fechar">{Icon.close}</button>
+        </div>
+
+        <div className="px-4 py-3 space-y-1 max-h-[55vh] overflow-y-auto">
+          {categorias.length === 0 && <div className="text-xs text-gray-500 py-4 text-center">Nenhuma categoria cadastrada.</div>}
+          {categorias.map((c) => (
+            <CategoriaLinha key={c.id} categoria={c} usos={emUso[c.nome] || 0}
+                            onSalvar={(campos) => executar(() => onAtualizar(c.id, campos))}
+                            onExcluir={() => { if (window.confirm(`Excluir a categoria "${c.nome}"?`)) executar(() => onExcluir(c.id)); }} />
+          ))}
+        </div>
+
+        <div className="px-4 py-3 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+          <div className="text-[11px] font-medium text-gray-600 mb-1.5">Nova categoria</div>
+          <div className="flex items-center gap-2">
+            <input type="color" value={novaCor} onChange={(e) => setNovaCor(e.target.value)} title="Cor" className="h-8 w-10 p-0.5 border border-gray-300 rounded bg-white cursor-pointer" />
+            <input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} onKeyDown={(e) => e.key === "Enter" && criar()}
+                   placeholder="Nome da categoria" maxLength={60}
+                   className="flex-1 border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            <button onClick={criar} disabled={ocupado || !novoNome.trim()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+              {Icon.plus} Adicionar
+            </button>
+          </div>
+          {erro && <div className="mt-2 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{erro}</div>}
+          <div className="mt-2 text-[11px] text-gray-500">Renomear atualiza os projetos que usam a categoria. Só é possível excluir categorias sem projetos vinculados.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoriaLinha({ categoria, usos, onSalvar, onExcluir }) {
+  const [nome, setNome] = useState(categoria.nome);
+  useEffect(() => setNome(categoria.nome), [categoria.nome]);
+  const salvarNome = () => {
+    const v = nome.trim();
+    if (!v) { setNome(categoria.nome); return; }
+    if (v !== categoria.nome) onSalvar({ nome: v });
+  };
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <input type="color" value={categoria.cor} title="Cor" onChange={(e) => onSalvar({ cor: e.target.value })}
+             className="h-8 w-10 p-0.5 border border-gray-300 rounded bg-white cursor-pointer" />
+      <input value={nome} maxLength={60} onChange={(e) => setNome(e.target.value)} onBlur={salvarNome}
+             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setNome(categoria.nome); }}
+             className="flex-1 border border-transparent hover:border-gray-300 focus:border-blue-500 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100" />
+      <span className="text-[11px] text-gray-500 w-20 text-right tabular-nums">{usos} projeto(s)</span>
+      <button onClick={onExcluir} disabled={usos > 0} title={usos > 0 ? "Em uso por projetos" : "Excluir categoria"}
+              className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed">{Icon.trash}</button>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════════════════════════════════
    App
    ════════════════════════════════════════════════════════════════ */
@@ -375,6 +464,8 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [filtros, setFiltros] = useState(FILTROS_INICIAIS);
   const [user, setUser] = useState(null);
+  const [categorias, setCategorias] = useState([]);
+  const [modalCategorias, setModalCategorias] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [pendentes, setPendentes] = useState(0);   // gravações em andamento
@@ -396,6 +487,7 @@ export default function App() {
     try {
       const data = await api(API);
       setProjects(data.projetos);
+      setCategorias(data.opcoes?.categorias || []);
     } catch (e) {
       setErro("Não foi possível carregar os projetos: " + e.message);
     } finally {
@@ -488,6 +580,29 @@ export default function App() {
     });
   };
 
+  /* ── Categorias ──────────────────────────────────────────────── */
+  const handleCriarCategoria = async (nome, cor) => {
+    const c = await api(API_CATEGORIAS, { method: "POST", body: JSON.stringify({ nome, cor }) });
+    setCategorias((prev) => [...prev, c]);
+    setUltimoSalvo(new Date());
+  };
+  const handleAtualizarCategoria = async (id, campos) => {
+    const antiga = categorias.find((c) => c.id === id);
+    const c = await api(`${API_CATEGORIAS}/${id}`, { method: "PATCH", body: JSON.stringify(campos) });
+    setCategorias((prev) => prev.map((x) => (x.id === id ? c : x)));
+    if (antiga && c.nome !== antiga.nome) {
+      // o servidor já propagou o novo nome aos projetos; refletir localmente
+      setProjects((prev) => prev.map((p) => (p.categoria === antiga.nome ? { ...p, categoria: c.nome } : p)));
+      if (filtros.categoria === antiga.nome) setFiltros({ ...filtros, categoria: c.nome });
+    }
+    setUltimoSalvo(new Date());
+  };
+  const handleExcluirCategoria = async (id) => {
+    await api(`${API_CATEGORIAS}/${id}`, { method: "DELETE" });
+    setCategorias((prev) => prev.filter((x) => x.id !== id));
+    setUltimoSalvo(new Date());
+  };
+
   const handleRecarregar = async () => {
     await Promise.all(Object.keys(filaRef.current).map((id) => enviar(Number(id))));
     await carregar();
@@ -496,18 +611,36 @@ export default function App() {
   /* ── Variáveis derivadas (recalculadas a cada render) ─────────── */
   const derived = useMemo(() => projects.map(derive), [projects]);
 
+  /* Nomes e cores das categorias (inclui nomes órfãos ainda usados em projetos) */
+  const nomesCategoria = useMemo(() => {
+    const nomes = categorias.map((c) => c.nome);
+    derived.forEach((p) => { if (p.categoria && !nomes.includes(p.categoria)) nomes.push(p.categoria); });
+    return nomes;
+  }, [categorias, derived]);
+  const coresCategoria = useMemo(() => {
+    const m = {};
+    categorias.forEach((c) => { m[c.nome] = c.cor || COR_CATEGORIA_PADRAO; });
+    nomesCategoria.forEach((n) => { if (!m[n]) m[n] = COR_CATEGORIA_PADRAO; });
+    return m;
+  }, [categorias, nomesCategoria]);
+  const usosCategoria = useMemo(() => {
+    const m = {};
+    derived.forEach((p) => { m[p.categoria] = (m[p.categoria] || 0) + 1; });
+    return m;
+  }, [derived]);
+
   const opcoesFiltro = useMemo(() => {
     const uniq = (arr) => Array.from(new Set(arr.filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
     return {
       ano: ["Todos", ...uniq(derived.map((p) => (p.vencimento || "").slice(0, 4)))],
       tipo: ["Todos", ...TIPOS],
       area: ["Todas", ...uniq(derived.map((p) => p.area))],
-      categoria: ["Todas", ...CATEGORIAS],
+      categoria: ["Todas", ...nomesCategoria],
       prioridade: ["Todas", ...PRIORIDADES],
       estagio: ["Todos", ...ESTAGIOS],
       status: ["Todos", ...Object.keys(STATUS_ESTILO)],
     };
-  }, [derived]);
+  }, [derived, nomesCategoria]);
 
   const visiveis = useMemo(() => derived.filter((p) =>
     (filtros.ano === "Todos" || (p.vencimento || "").startsWith(filtros.ano)) &&
@@ -532,7 +665,7 @@ export default function App() {
   const pct = (v) => (totalOrcamento > 0 ? fmtPct(v / totalOrcamento) : "0,0%") + " do orçamento total";
 
   /* Gráficos 1–3 */
-  const porCategoria = useMemo(() => groupSum(visiveis, "categoria", CATEGORIAS), [visiveis]);
+  const porCategoria = useMemo(() => groupSum(visiveis, "categoria", nomesCategoria), [visiveis, nomesCategoria]);
   const porEstagio = useMemo(() => groupSum(visiveis, "estagio", ESTAGIOS), [visiveis]);
   const porPrioridade = useMemo(() => groupSum(visiveis, "prioridade", PRIORIDADES), [visiveis]);
 
@@ -612,7 +745,7 @@ export default function App() {
         {/* Gráficos */}
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           <ChartCard title="Distribuição por Categoria" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-            <DonutChart data={porCategoria} colors={CATEGORIA_CORES} />
+            <DonutChart data={porCategoria} colors={coresCategoria} />
           </ChartCard>
 
           <ChartCard title="Estágio dos Projetos" subtitle="(Valor Aprovado)" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
@@ -694,8 +827,12 @@ export default function App() {
             <span className="text-[11px] text-gray-500">
               {visiveis.length} de {projects.length} projeto(s){filtrosAtivos ? " · filtros ativos" : ""} · clique em uma célula para editar
             </span>
+            <button onClick={() => setModalCategorias(true)} disabled={carregando}
+                    className="ml-auto disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+              {Icon.tag} Categorias
+            </button>
             <button onClick={handleAddProject} disabled={carregando}
-                    className="ml-auto disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5">
+                    className="disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5">
               {Icon.plus} Novo projeto
             </button>
           </div>
@@ -750,7 +887,7 @@ export default function App() {
                       <td className="td">
                         <div className="select-wrap">
                           <select className="cell-input min-w-[136px]" value={p.categoria} onChange={(e) => handleUpdateProject(p.id, "categoria", e.target.value)}>
-                            {CATEGORIAS.map((o) => <option key={o}>{o}</option>)}
+                            {nomesCategoria.map((o) => <option key={o}>{o}</option>)}
                           </select>
                         </div>
                       </td>
@@ -809,6 +946,12 @@ export default function App() {
             </table>
           </div>
         </section>
+
+        {modalCategorias && (
+          <CategoriasModal categorias={categorias} emUso={usosCategoria}
+                           onCriar={handleCriarCategoria} onAtualizar={handleAtualizarCategoria}
+                           onExcluir={handleExcluirCategoria} onFechar={() => setModalCategorias(false)} />
+        )}
 
         <footer className="text-[11px] text-gray-400 text-center pb-2">
           As edições são gravadas automaticamente no banco de dados exclusivo deste módulo e ficam visíveis para todos que acessarem a página.

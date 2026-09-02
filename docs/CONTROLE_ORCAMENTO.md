@@ -72,6 +72,18 @@ existirem) ou use o backup do banco dedicado.
   a KPIs, gráficos e tabela; incluir, duplicar e excluir projetos; botão
   "Atualizar" para recarregar do banco.
 
+## Categorias editáveis
+
+As categorias de projeto são cadastradas pelo usuário (tabela
+`budget_categories`, com nome e cor) pelo botão **Categorias** acima da
+tabela. As cinco iniciais (Manutenção, Expansão, Estratégico,
+Legal/Compliance, Outros) são criadas só quando a tabela está vazia.
+
+- Renomear uma categoria atualiza automaticamente os projetos que a usam.
+- A exclusão é bloqueada enquanto houver projeto vinculado (a tela informa
+  quantos). Troque a categoria desses projetos antes.
+- A cor escolhida é usada no gráfico "Distribuição por Categoria".
+
 ## API
 
 Todas as rotas são públicas e retornam JSON.
@@ -83,8 +95,12 @@ Todas as rotas são públicas e retornam JSON.
 | `PATCH` | `/api/controle-orcamento/projetos/{id}` | Atualiza apenas os campos enviados. |
 | `DELETE` | `/api/controle-orcamento/projetos/{id}` | Exclui. |
 | `POST` | `/api/controle-orcamento/projetos/{id}/duplicar` | Cria cópia logo após o original. |
+| `GET` | `/api/controle-orcamento/categorias` | Lista categorias (`id`, `nome`, `cor`). |
+| `POST` | `/api/controle-orcamento/categorias` | Cria categoria (`nome`, `cor` opcional `#rrggbb`). `409` se já existir. |
+| `PATCH` | `/api/controle-orcamento/categorias/{id}` | Renomeia e/ou recolore; o rename propaga aos projetos. |
+| `DELETE` | `/api/controle-orcamento/categorias/{id}` | Exclui; `409` se houver projeto usando. |
 
-Campos: `codigo`, `nome`, `tipo` (CAPEX/OPEX), `categoria`, `area`, `estagio`,
+Campos: `codigo`, `nome`, `tipo` (CAPEX/OPEX), `categoria` (precisa existir no cadastro), `area`, `estagio`,
 `prioridade`, `orcamento`, `comprometido`, `realizado` (≥ 0), `vencimento`
 (`AAAA-MM-DD` ou vazio). Valores fora das opções retornam `422`.
 
