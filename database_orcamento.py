@@ -25,6 +25,7 @@ from sqlalchemy import (
     BigInteger, Date, DateTime, Integer, Numeric, String, create_engine, event,
     func, select,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config import get_settings
@@ -47,20 +48,42 @@ _factory = None
 _engine_lock = threading.Lock()
 
 
+def url_efetiva():
+    """URL do banco do módulo usando o MESMO driver do portal.
+
+    Se a URL configurada for Postgres com um driver diferente do usado em
+    ``DATABASE_URL`` (ex.: ``postgresql+psycopg`` quando o portal usa
+    ``postgresql+psycopg2``), troca-se apenas o driver. Assim o módulo nunca
+    depende de um pacote que o portal não tenha instalado.
+    """
+    url = make_url(DATABASE_URL)
+    try:
+        portal = make_url(_cfg.DATABASE_URL)
+    except Exception:  # noqa: BLE001 — DATABASE_URL inválida não é problema deste módulo
+        return url
+    if (url.get_backend_name() == portal.get_backend_name()
+            and url.drivername != portal.drivername):
+        _log.info("Controle de Orçamento: usando driver do portal (%s) em vez de %s",
+                  portal.drivername, url.drivername)
+        url = url.set(drivername=portal.drivername)
+    return url
+
+
 def get_engine():
     global _engine
     if _engine is None:
         with _engine_lock:
             if _engine is None:
-                is_sqlite = DATABASE_URL.startswith("sqlite")
+                url = url_efetiva()
+                is_sqlite = url.get_backend_name() == "sqlite"
                 if is_sqlite:
                     # garante a pasta do arquivo (ex.: data/)
-                    caminho = DATABASE_URL.replace("sqlite:///", "", 1)
+                    caminho = url.database or ""
                     if caminho and caminho != ":memory:":
                         import os
                         os.makedirs(os.path.dirname(os.path.abspath(caminho)), exist_ok=True)
                 eng = create_engine(
-                    DATABASE_URL,
+                    url,
                     pool_pre_ping=True,
                     connect_args={"check_same_thread": False, "timeout": 15} if is_sqlite else {},
                 )
