@@ -156,6 +156,29 @@ class BudgetProject(Base):
     updated_by: Mapped[str] = mapped_column(String(80), default="")
 
 
+class BudgetCategory(Base):
+    """Categoria de projeto (editável pelo usuário na tela)."""
+    __tablename__ = "budget_categories"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(60), unique=True)
+    color: Mapped[str] = mapped_column(String(9), default="#9ca3af")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+# Categorias iniciais (nome, cor), carregadas apenas quando a tabela está vazia
+CATEGORY_SEED: list[tuple[str, str]] = [
+    ("Manutenção", "#2563eb"),
+    ("Expansão", "#f97316"),
+    ("Estratégico", "#8b5cf6"),
+    ("Legal/Compliance", "#22c55e"),
+    ("Outros", "#9ca3af"),
+]
+
 # Projetos de exemplo, carregados apenas quando a tabela está vazia
 SEED: list[dict] = [
     dict(code="PRJ-26001", name="Substituição de Coletor Principal", kind="CAPEX", category="Manutenção",       area="Operações",  stage="Em Execução",  priority="Alta",  approved_budget=18750000, committed=8250000,  realized=6125000, due_date=date(2026, 11, 30)),
@@ -180,6 +203,9 @@ def init_db() -> None:
             return
         Base.metadata.create_all(get_engine())
         with SessionLocal.begin() as s:
+            if not s.scalar(select(func.count()).select_from(BudgetCategory)):
+                for i, (name, color) in enumerate(CATEGORY_SEED):
+                    s.add(BudgetCategory(name=name, color=color, sort_order=i + 1))
             if not s.scalar(select(func.count()).select_from(BudgetProject)):
                 for i, row in enumerate(SEED):
                     s.add(BudgetProject(**row, sort_order=i + 1, updated_by="seed"))
