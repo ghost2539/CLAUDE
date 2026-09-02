@@ -511,6 +511,8 @@ function _snRenderSaida(container, S) {
                                 '<option value="Retired">Desativado</option>' +
                             '</select></div>' +
                     '</div>' +
+                    '<div style="margin-top:1rem"><label>Aisle and Space (Corredor e Espaço)</label>' +
+                        '<input id="sa-aisle" class="form-control" placeholder="Opcional — ex: A-12"></div>' +
                     '<div style="margin-top:1rem"><label>Observações</label>' +
                         '<textarea id="sa-notes" class="form-control" rows="2" placeholder="Motivo da movimentação..."></textarea></div>' +
                     '<div style="margin-top:1rem">' +
@@ -681,6 +683,7 @@ function _saMove(S) {
         sys_id: sysId,
         install_status: document.getElementById('sa-new-status').value,
         location: location,
+        aisle_space: document.getElementById('sa-aisle').value.trim(),
         notes: document.getElementById('sa-notes').value.trim()
     };
 
