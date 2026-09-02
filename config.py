@@ -9,6 +9,11 @@ class Settings:
     UPLOAD: Path = ROOT / "data" / "uploads"
 
     DATABASE_URL: str = os.environ["DATABASE_URL"]
+    # Banco EXCLUSIVO do módulo Controle de Orçamento (/tv2), separado do portal
+    ORCAMENTO_DATABASE_URL: str = os.getenv(
+        "CONTROLE_ORCAMENTO_DATABASE_URL",
+        "sqlite:///" + str(ROOT / "data" / "controle_orcamento.db"),
+    )
     SESSION_SECRET: str = os.environ["PORTAL_SESSION_SECRET"]
     SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
 
