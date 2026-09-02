@@ -43,6 +43,10 @@ módulo.
 | Outro banco | variável `CONTROLE_ORCAMENTO_DATABASE_URL`, ex.: `postgresql+psycopg://usuario:senha@127.0.0.1:5432/controle_orcamento_db` |
 | Tabela | `budget_projects` |
 
+Se a URL for Postgres, o módulo usa **o mesmo driver** da `DATABASE_URL` do
+portal (ex.: `psycopg2`), mesmo que a variável venha com outro. Lembre-se de
+liberar o banco novo no `pg_hba.conf` com as mesmas regras do banco do portal.
+
 No SQLite o módulo ativa `journal_mode=WAL` e `busy_timeout` para suportar
 vários usuários editando ao mesmo tempo. Na primeira execução, com a tabela
 vazia, são carregados 8 projetos de exemplo (`database_orcamento.SEED`); eles
