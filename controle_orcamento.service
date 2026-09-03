@@ -1,0 +1,22 @@
+[Unit]
+Description=Controle de Orcamento de Portfolio (/tv2) - servico isolado
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=portalspare
+Group=portalspare
+WorkingDirectory=/opt/controle-orcamento
+EnvironmentFile=/etc/controle_orcamento/environment
+ExecStart=/opt/controle-orcamento/venv/bin/python -m uvicorn controle_orcamento_app:app --host 0.0.0.0 --port 8902 --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/controle-orcamento/data
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
