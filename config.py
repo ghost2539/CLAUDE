@@ -47,7 +47,15 @@ class Settings:
     SN_API_PASS: str = os.getenv("SN_API_PASS", "")
     # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
     # https_proxy do ambiente se não houver um específico.
-    SN_API_PROXY: str = os.getenv("SN_API_PROXY", "") or os.getenv("https_proxy", "") or os.getenv("HTTPS_PROXY", "")
+    # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
+    # (SN_PROXY) — que é o que funciona neste servidor. Cai para https_proxy
+    # do ambiente se nada específico for definido.
+    SN_API_PROXY: str = (
+        os.getenv("SN_API_PROXY", "")
+        or os.getenv("SN_PROXY", "")
+        or os.getenv("https_proxy", "")
+        or os.getenv("HTTPS_PROXY", "")
+    )
     # Fila / grupo de atribuição dos indicadores.
     SN_INDIC_QUEUE: str = os.getenv("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
     # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome

@@ -9,6 +9,7 @@ Carregado de forma isolada no main.py: qualquer erro aqui NÃO derruba o portal.
 """
 from __future__ import annotations
 
+import calendar
 import logging
 from datetime import datetime
 
@@ -28,21 +29,66 @@ TMA_START = _cfg.SN_TMA_START_FIELD
 
 
 # ── Cliente REST do ServiceNow (conta de serviço, só leitura) ──────────
-def _sn_rest_get(table: str, query: str, fields: str,
-                 display_value: str = "false", limit: int = 20000) -> list[dict]:
-    import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+def _proxies():
+    if _cfg.SN_API_PROXY:
+        return {"http": _cfg.SN_API_PROXY, "https": _cfg.SN_API_PROXY}
+    return None
 
+
+def _checar_conta():
     if not _cfg.SN_API_USER or not _cfg.SN_API_PASS:
         raise RuntimeError(
             "Conta de serviço do ServiceNow não configurada "
             "(defina SN_API_USER e SN_API_PASS no ambiente do serviço)."
         )
-    proxies = None
-    if _cfg.SN_API_PROXY:
-        proxies = {"http": _cfg.SN_API_PROXY, "https": _cfg.SN_API_PROXY}
 
+
+def _sn_stats(table: str, query: str, group_by: str | None = None,
+              display_value: str = "true") -> object:
+    """API de AGREGAÇÃO do ServiceNow — conta no servidor, sem baixar linhas.
+
+    Sem group_by → retorna um int (contagem total).
+    Com group_by  → retorna lista de (valor, contagem).
+    """
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _checar_conta()
+
+    params = {"sysparm_query": query, "sysparm_count": "true"}
+    if group_by:
+        params["sysparm_group_by"] = group_by
+        params["sysparm_display_value"] = display_value
+
+    r = requests.get(
+        f"{_cfg.SN_API_BASE}/api/now/stats/{table}", params=params,
+        auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS), headers={"Accept": "application/json"},
+        proxies=_proxies(), verify=_cfg.VERIFY_SSL, timeout=45,
+    )
+    if r.status_code == 401:
+        raise RuntimeError("ServiceNow 401 — conta de serviço inválida ou sem papel de API.")
+    r.raise_for_status()
+    res = r.json().get("result")
+
+    if group_by:
+        out = []
+        for g in (res or []):
+            gf = g.get("groupby_fields") or []
+            val = gf[0].get("value") if gf else ""
+            cnt = int((g.get("stats") or {}).get("count") or 0)
+            out.append((val, cnt))
+        return out
+    return int(((res or {}).get("stats") or {}).get("count") or 0)
+
+
+def _sn_rest_get(table: str, query: str, fields: str,
+                 display_value: str = "false", limit: int = 8000) -> list[dict]:
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _checar_conta()
+
+    proxies = _proxies()
     url = f"{_cfg.SN_API_BASE}/api/now/table/{table}"
     out: list[dict] = []
     offset = 0
@@ -60,7 +106,7 @@ def _sn_rest_get(table: str, query: str, fields: str,
         r = requests.get(
             url, params=params, auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS),
             headers={"Accept": "application/json"}, proxies=proxies,
-            verify=_cfg.VERIFY_SSL, timeout=90,
+            verify=_cfg.VERIFY_SSL, timeout=45,
         )
         if r.status_code == 401:
             raise RuntimeError("ServiceNow 401 — usuário/senha da conta de serviço inválidos ou sem papel de API.")
@@ -93,48 +139,51 @@ def _meses_do_ano(ano: int) -> list[str]:
     return [f"{ano}-{m:02d}" for m in range(1, 13)]
 
 
+def _mes_janela(ano: int, mes: int) -> str:
+    """Fragmento de query para 'campo dentro do mês' via gs.dateGenerate."""
+    ultimo = calendar.monthrange(ano, mes)[1]
+    ini = f"{ano}-{mes:02d}-01"
+    fim = f"{ano}-{mes:02d}-{ultimo:02d}"
+    return ("javascript:gs.dateGenerate('%s','00:00:00')" % ini,
+            "javascript:gs.dateGenerate('%s','23:59:59')" % fim)
+
+
 # ── Indicador 1: Tickets resolvidos (12 meses) + SLA ───────────────────
 def _tickets_e_sla() -> dict:
-    ano = datetime.now().year
-    query = (
-        f"task.assignment_group.name={QUEUE}"
-        f"^task.closed_atONThis year@javascript:gs.beginningOfThisYear()@javascript:gs.endOfThisYear()"
-        f"^task.stateNOT IN8"
-    )
-    # has_breached: false = dentro do SLA, true = violou.
-    rows = _sn_rest_get(
-        "task_sla", query,
-        "task,task.closed_at,has_breached",
-        display_value="false", limit=20000,
-    )
+    """Tickets resolvidos por mês (incident, tickets distintos) + SLA por mês
+    (task_sla, has_breached), via API de agregação — rápido, sem baixar linhas.
+    """
+    hoje = datetime.now()
+    ano, cur = hoje.year, hoje.month
 
-    tickets_por_mes: dict[str, set] = {}
-    sla_por_mes: dict[str, dict] = {}
-    for r in rows:
-        mes = _mes(_mv(r.get("task.closed_at")))
-        if not mes:
-            continue
-        task_id = str(_mv(r.get("task")))
-        tickets_por_mes.setdefault(mes, set()).add(task_id)
-        d = sla_por_mes.setdefault(mes, {"total": 0, "violado": 0})
-        d["total"] += 1
-        if _is_true(r.get("has_breached")):
-            d["violado"] += 1
+    base_inc = f"assignment_group.name={QUEUE}^state!=8"
+    base_sla = f"task.assignment_group.name={QUEUE}^task.stateNOT IN8"
 
-    meses = _meses_do_ano(ano)
-    tickets = [{"mes": m, "total": len(tickets_por_mes.get(m, set()))} for m in meses]
-
-    sla_mes = []
+    tickets, sla_mes = [], []
     tot = viol = 0
-    for m in meses:
-        d = sla_por_mes.get(m, {"total": 0, "violado": 0})
-        dentro = d["total"] - d["violado"]
-        pct = round(dentro / d["total"] * 100, 1) if d["total"] else 0
-        sla_mes.append({"mes": m, "total": d["total"], "dentro": dentro,
-                        "violado": d["violado"], "pct": pct})
-        tot += d["total"]
-        viol += d["violado"]
-    sla_geral = round((tot - viol) / tot * 100, 1) if tot else 0
+    for mnum in range(1, cur + 1):
+        mes = f"{ano}-{mnum:02d}"
+        ini, fim = _mes_janela(ano, mnum)
+
+        # Tickets resolvidos no mês (incident = 1 linha por chamado = distinto)
+        inc_q = f"{base_inc}^closed_at>={ini}^closed_at<={fim}"
+        try:
+            n = _sn_stats("incident", inc_q)
+        except Exception:
+            n = 0
+        tickets.append({"mes": mes, "total": n})
+
+        # SLA no mês (task_sla, agrupado por has_breached)
+        sla_q = f"{base_sla}^task.closed_at>={ini}^task.closed_at<={fim}"
+        grupos = _sn_stats("task_sla", sla_q, group_by="has_breached", display_value="false")
+        total_m = sum(c for _, c in grupos)
+        viol_m = sum(c for v, c in grupos if str(v).strip().lower() in ("true", "1"))
+        dentro = total_m - viol_m
+        pct = round(dentro / total_m * 100, 1) if total_m else 0
+        sla_mes.append({"mes": mes, "total": total_m, "dentro": dentro,
+                        "violado": viol_m, "pct": pct})
+        tot += total_m
+        viol += viol_m
 
     return {
         "ano": ano,
@@ -144,39 +193,33 @@ def _tickets_e_sla() -> dict:
         "sla_total": tot,
         "sla_violado": viol,
         "sla_dentro": tot - viol,
-        "sla_compliance_pct": sla_geral,
+        "sla_compliance_pct": round((tot - viol) / tot * 100, 1) if tot else 0,
     }
 
 
 # ── Indicador 2: Top 20 lojas + Top 10 subcategorias ───────────────────
 def _top_lojas_categorias() -> dict:
-    query = (
-        f"task.assignment_group.name={QUEUE}"
-        f"^task.closed_atONThis year@javascript:gs.beginningOfThisYear()@javascript:gs.endOfThisYear()"
-        f"^task.stateNOT IN8"
+    """Top 20 lojas e Top 10 subcategorias (incident, este ano) via agregação
+    com GROUP BY — cada um é uma única chamada, sem baixar linhas."""
+    inc_q = (
+        f"assignment_group.name={QUEUE}^state!=8"
+        f"^closed_atONThis year@javascript:gs.beginningOfThisYear()@javascript:gs.endOfThisYear()"
     )
-    rows = _sn_rest_get(
-        "task_sla", query,
-        "task,task.location,task.subcategory",
-        display_value="true", limit=20000,
-    )
-    lojas: dict[str, set] = {}
-    subs: dict[str, set] = {}
-    for r in rows:
-        task_id = str(_mv(r.get("task")))
-        loja = str(_mv(r.get("task.location"))).strip() or "(sem local)"
-        sub = str(_mv(r.get("task.subcategory"))).strip() or "(sem subcategoria)"
-        lojas.setdefault(loja, set()).add(task_id)
-        subs.setdefault(sub, set()).add(task_id)
+    lojas = _sn_stats("incident", inc_q, group_by="location", display_value="true")
+    subs = _sn_stats("incident", inc_q, group_by="subcategory", display_value="true")
 
-    top_lojas = sorted(
-        ({"loja": k, "total": len(v)} for k, v in lojas.items()),
-        key=lambda x: x["total"], reverse=True,
-    )[:20]
-    top_subs = sorted(
-        ({"subcategoria": k, "total": len(v)} for k, v in subs.items()),
-        key=lambda x: x["total"], reverse=True,
-    )[:10]
+    def _norm(pairs, rotulo_vazio):
+        out = []
+        for nome, cnt in pairs:
+            nome = (str(nome).strip() or rotulo_vazio)
+            out.append({"nome": nome, "total": cnt})
+        out.sort(key=lambda x: x["total"], reverse=True)
+        return out
+
+    top_lojas = [{"loja": x["nome"], "total": x["total"]}
+                 for x in _norm(lojas, "(sem local)")[:20]]
+    top_subs = [{"subcategoria": x["nome"], "total": x["total"]}
+                for x in _norm(subs, "(sem subcategoria)")[:10]]
     return {"top_lojas": top_lojas, "top_subcategorias": top_subs}
 
 
@@ -197,7 +240,7 @@ def _tma() -> dict:
         f"^state!=8"
     )
     fields = f"number,opened_at,closed_at,resolved_at,subcategory,state,{TMA_START}"
-    rows = _sn_rest_get("incident", query, fields, display_value="false", limit=20000)
+    rows = _sn_rest_get("incident", query, fields, display_value="false", limit=8000)
 
     acc = {"Coletor": [], "SLED": []}
     considerados = {"Coletor": 0, "SLED": 0}
