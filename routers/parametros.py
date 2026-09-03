@@ -97,8 +97,8 @@ class UserCreateIn(BaseModel):
     @classmethod
     def validate_source(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD", "SN"):
-            raise ValueError("auth_source deve ser LOCAL, AD ou SN.")
+        if v not in ("LOCAL", "AD", "SN", "SSO"):
+            raise ValueError("auth_source deve ser LOCAL, AD, SN ou SSO.")
         return v
 
 
@@ -473,6 +473,8 @@ def user_create(body: UserCreateIn, req: Request):
             is_admin=body.is_admin,
             active=True,
             must_change_password=must_change,
+            # Usuário externo (AD/SN/SSO) criado pelo admin já entra liberado.
+            allowed=(body.auth_source != "LOCAL"),
         )
         s.add(u)
     return {"ok": True, "login": body.login, "senha_temporaria": senha_temporaria}

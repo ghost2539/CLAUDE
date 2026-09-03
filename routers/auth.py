@@ -48,8 +48,8 @@ class LoginIn(BaseModel):
     @classmethod
     def normalize_auth_type(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD", "SN"):
-            raise ValueError("auth_type deve ser LOCAL, AD ou SN.")
+        if v not in ("LOCAL", "AD", "SN", "SSO"):
+            raise ValueError("auth_type deve ser LOCAL, AD, SN ou SSO.")
         return v
 
 
@@ -165,6 +165,12 @@ def auth_login(body: LoginIn, req: Request):
             if source == "SN":
                 sn_cookies = _sn_login(login, body.password)
                 ebs_auth = None
+            elif source == "SSO":
+                # Login corporativo via loginsso (Oracle Access Manager).
+                # Valida a credencial de rede; a senha permanece no AD.
+                # Só entra quem foi previamente liberado por um administrador.
+                sn_cookies = _sn_login(login, body.password)
+                ebs_auth = None
             elif source == "AD":
                 ebs_auth = ebs_service.login(login, body.password)
                 sn_cookies = None
@@ -183,14 +189,18 @@ def auth_login(body: LoginIn, req: Request):
                 ebs_auth = None
                 sn_cookies = None
 
-            # Auto-create user on first SN/AD login
+            # Auto-create user on first SN/AD/SSO login.
+            # Para SSO, o usuário nasce SEM liberação (allowed=False) e só
+            # entra depois que um admin o liberar — exceto o admin inicial.
             if not u:
+                is_initial_admin = (login.lower() == _cfg.INITIAL_ADMIN_LOGIN.lower())
                 u = User(
                     login=login,
                     display_name=login,
                     auth_source=source,
                     active=True,
-                    is_admin=(login == _cfg.INITIAL_ADMIN_LOGIN),
+                    is_admin=is_initial_admin,
+                    allowed=(False if source == "SSO" and not is_initial_admin else True),
                 )
                 s.add(u)
                 s.flush()
@@ -198,8 +208,15 @@ def auth_login(body: LoginIn, req: Request):
             if not u.active:
                 raise ValueError("Usuário inativo.")
 
-            # Check external access control (SN/AD users)
-            if source in ("SN", "AD"):
+            # Check external access control
+            if source == "SSO":
+                # SSO sempre exige liberação prévia (só usuários permitidos entram).
+                if not u.allowed and login.lower() != _cfg.INITIAL_ADMIN_LOGIN.lower():
+                    raise ValueError(
+                        "Acesso ainda não liberado. Solicite a um administrador "
+                        "a liberação do seu usuário de rede."
+                    )
+            elif source in ("SN", "AD"):
                 ac_row = s.get(Setting, "access_control")
                 block_external = (ac_row.value if ac_row else {}).get("block_external", False)
                 if block_external and not u.allowed:

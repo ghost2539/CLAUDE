@@ -2,6 +2,10 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 sqlalchemy>=2.0,<3
 psycopg[binary]>=3.1,<4
+# Driver MySQL (servidor novo). PyMySQL é puro-Python (fácil de instalar);
+# 'cryptography' é exigido pelo auth caching_sha2_password do MySQL 8.
+PyMySQL>=1.1,<2
+cryptography>=42
 python-multipart>=0.0.9
 requests>=2.31
 pandas>=2.2
