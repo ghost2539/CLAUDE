@@ -927,6 +927,7 @@ class SaidaMovIn(BaseModel):
     sys_id: str
     install_status: str = "In transit"
     location: str = ""
+    aisle_space: str = ""
     notes: str = ""
 
 
@@ -993,6 +994,9 @@ def saida_move(body: SaidaMovIn, req: Request):
         _, BS = _get_http()
         loc_id = _lookup_reference(session, "location", body.location, cache, BS)
         update["location"] = loc_id
+
+    if body.aisle_space:
+        update["aisle_space_location"] = body.aisle_space
 
     if body.notes:
         update["work_notes"] = body.notes
