@@ -59,14 +59,23 @@ Teste depois de subir: menu **Correios → testar**, ou o endpoint
 
 ---
 
-## 3. Criar o banco MySQL
+## 3. Criar os bancos MySQL/MariaDB
 
-No MySQL (com um usuário admin):
+> O servidor usa **MariaDB** (o comando `mysql` abre o MariaDB). O driver
+> `mysql+pymysql://` funciona igual — nada muda no código.
+
+**Tudo em MySQL**: crie os TRÊS schemas (portal + os dois módulos isolados),
+todos separados entre si, e um usuário:
 
 ```sql
-CREATE DATABASE portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE portal              CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE indicadores         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE controle_orcamento  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE USER 'portal'@'%' IDENTIFIED BY 'SENHA_FORTE';
-GRANT ALL PRIVILEGES ON portal.* TO 'portal'@'%';
+GRANT ALL PRIVILEGES ON portal.*             TO 'portal'@'%';
+GRANT ALL PRIVILEGES ON indicadores.*        TO 'portal'@'%';
+GRANT ALL PRIVILEGES ON controle_orcamento.* TO 'portal'@'%';
 FLUSH PRIVILEGES;
 ```
 
@@ -88,9 +97,9 @@ SN_API_USER=SIS.ZABBIXDCSN
 SN_API_PASS=<senha da conta de serviço>     # (ou também via cofre, se preferir)
 # SN_API_PROXY não precisa: cai para SN_PROXY automaticamente
 
-# Módulos isolados (opcional): podem ficar em SQLite ou também no MySQL
-# INDICADORES_DATABASE_URL=mysql+pymysql://portal:SENHA@HOST/indicadores
-# CONTROLE_ORCAMENTO_DATABASE_URL=mysql+pymysql://portal:SENHA@HOST/orcamento
+# Módulos isolados — TUDO em MySQL (schemas separados):
+INDICADORES_DATABASE_URL=mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/indicadores
+CONTROLE_ORCAMENTO_DATABASE_URL=mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/controle_orcamento
 ```
 
 ---
@@ -125,8 +134,23 @@ Ele imprime linha a linha quantos registros copiou por tabela. Rode a partir de
 uma máquina que **enxergue os dois bancos** (o novo servidor, se ele alcançar o
 PostgreSQL antigo; senão, de um ponto intermediário).
 
-> Se algum módulo isolado (indicadores/orçamento) também precisa vir junto,
-> repita o script com as URLs desses bancos.
+**Tudo em MySQL — migre também os módulos isolados** (se hoje estão em SQLite,
+a origem é o arquivo `.db`):
+
+```bash
+# Controle de Orçamento (origem SQLite atual -> MySQL)
+python3 scripts/migrar_pg_para_mysql.py \
+  "sqlite:////opt/portal-spare-v2/data/controle_orcamento.db" \
+  "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/controle_orcamento"
+
+# Indicadores (só se já tiver snapshots que queira preservar)
+python3 scripts/migrar_pg_para_mysql.py \
+  "sqlite:////opt/portal-spare-v2/data/indicadores.db" \
+  "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/indicadores"
+```
+
+O script é genérico (origem PostgreSQL **ou** SQLite → destino MySQL); antes de
+cada um, suba o app apontando as URLs para o MySQL para o schema ser criado.
 
 ---
 
