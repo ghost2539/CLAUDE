@@ -457,36 +457,19 @@ function _snRenderSaida(container, S) {
         _snLoginBarHtml() +
 
         '<div class="card mb-3">' +
-            '<div class="card-header">Buscar Ativo</div>' +
+            '<div class="card-header">Buscar Ativos (em lote)</div>' +
             '<div class="card-body">' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.8rem;align-items:end">' +
-                    '<div><label>Asset Tag</label>' +
-                        '<input id="sa-tag" class="form-control" placeholder="Ex: A-123456"></div>' +
-                    '<div><label>Número de Série</label>' +
-                        '<input id="sa-serial" class="form-control" placeholder="Ex: SN12345678"></div>' +
-                    '<button class="btn btn-primary" id="sa-search">Buscar</button>' +
-                '</div>' +
-                '<p style="color:var(--text-secondary);font-size:.8rem;margin-top:.5rem">' +
-                    'Busca global no ServiceNow por Asset Tag e/ou Número de Série.</p>' +
-            '</div>' +
-        '</div>' +
-
-        '<div id="sa-results" style="display:none">' +
-            '<div class="card mb-3">' +
-                '<div class="card-header">Resultados</div>' +
-                '<div class="card-body">' +
-                    '<div id="sa-table" style="max-height:400px;overflow:auto"></div>' +
-                '</div>' +
-            '</div>' +
-        '</div>' +
-
-        '<div id="sa-action" style="display:none">' +
-            '<div class="card mb-3">' +
-                '<div class="card-header">Movimentar Ativo</div>' +
-                '<div class="card-body">' +
-                    '<div id="sa-selected-info" style="margin-bottom:1rem"></div>' +
+                '<label>Identificadores (Asset Tag ou Número de Série)</label>' +
+                '<textarea id="sa-ids" class="form-control" rows="5" ' +
+                    'placeholder="Um por linha ou separados por vírgula. Sem limite de quantidade."></textarea>' +
+                '<label style="display:flex;align-items:center;gap:.5rem;margin-top:.8rem;cursor:pointer">' +
+                    '<input type="checkbox" id="sa-apply-all"> ' +
+                    'Definir os dados de destino abaixo e aplicá-los a todos os ativos ao buscar' +
+                '</label>' +
+                '<div id="sa-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
-                        '<div><label>BU <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>BU</label>' +
                             '<select id="sa-bu" class="form-control">' +
                                 '<option value="">Selecione...</option>' +
                                 '<option value="Renner Brasil">Renner Brasil</option>' +
@@ -494,49 +477,64 @@ function _snRenderSaida(container, S) {
                                 '<option value="Camicado">Camicado</option>' +
                                 '<option value="Ashua">Ashua</option>' +
                             '</select></div>' +
-                        '<div><label>Código da Loja <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Código da Loja</label>' +
                             '<input id="sa-store-code" class="form-control" placeholder="Ex: 401"></div>' +
                     '</div>' +
-                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
-                        '<div><label>Local (ServiceNow) <span style="color:#dc2626">*</span></label>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
+                        '<div><label>Local (ServiceNow)</label>' +
                             '<select id="sa-location" class="form-control">' +
                                 '<option value="">Informe BU e código da loja</option>' +
                             '</select></div>' +
                         '<div><label>Novo Status</label>' +
-                            '<select id="sa-new-status" class="form-control">' +
-                                '<option value="In transit">Em Trânsito</option>' +
-                                '<option value="In use">Em Uso</option>' +
-                                '<option value="In stock">Em Estoque</option>' +
-                                '<option value="On maintenance">Em Manutenção</option>' +
-                                '<option value="Retired">Desativado</option>' +
-                            '</select></div>' +
+                            _saStatusSelectHtml('sa-new-status', 'In transit', '') + '</div>' +
                     '</div>' +
-                    '<div style="margin-top:1rem"><label>Aisle and Space (Corredor e Espaço)</label>' +
-                        '<input id="sa-aisle" class="form-control" placeholder="Opcional — ex: A-12"></div>' +
-                    '<div style="margin-top:1rem"><label>Observações</label>' +
-                        '<textarea id="sa-notes" class="form-control" rows="2" placeholder="Motivo da movimentação..."></textarea></div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
+                        '<div><label>Aisle and Space</label>' +
+                            '<input id="sa-aisle" class="form-control" placeholder="Opcional — ex: A-12"></div>' +
+                        '<div><label>Observações</label>' +
+                            '<input id="sa-notes" class="form-control" placeholder="Opcional"></div>' +
+                    '</div>' +
+                '</div>' +
+                '<div style="margin-top:1rem">' +
+                    '<button class="btn btn-primary" id="sa-search">Buscar ativos</button></div>' +
+                '<div id="sa-search-prog" style="margin-top:.5rem"></div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div id="sa-results" style="display:none">' +
+            '<div class="card mb-3">' +
+                '<div class="card-header">Ativos encontrados</div>' +
+                '<div class="card-body">' +
+                    '<div id="sa-found-info" style="margin-bottom:.6rem;color:var(--text-secondary)"></div>' +
+                    '<div id="sa-table" style="max-height:460px;overflow:auto"></div>' +
                     '<div style="margin-top:1rem">' +
-                        '<button class="btn btn-primary" id="sa-move">Confirmar Saída</button>' +
+                        '<button class="btn btn-primary" id="sa-move-all">Confirmar saída dos marcados</button>' +
                     '</div>' +
+                    '<div id="sa-move-prog" style="margin-top:.5rem"></div>' +
                     '<div id="sa-move-result" style="margin-top:.5rem"></div>' +
                 '</div>' +
             '</div>' +
-        '</div>';
+        '</div>' +
+        '<datalist id="sa-loc-list"></datalist>';
 
     _snLoginBarBind(S);
 
     _saLocations = [];
     S.api('/servicenow/saida/locations').then(function (d) {
         _saLocations = d.locations || [];
+        var dl = document.getElementById('sa-loc-list');
+        if (dl) {
+            dl.innerHTML = _saLocations.map(function (l) {
+                return '<option value="' + S.esc(l.name) + '"></option>';
+            }).join('');
+        }
     }).catch(function () {});
 
+    document.getElementById('sa-apply-all').addEventListener('change', function () {
+        document.getElementById('sa-defaults').style.display = this.checked ? '' : 'none';
+    });
+
     document.getElementById('sa-search').addEventListener('click', function () { _saSearch(S); });
-    document.getElementById('sa-tag').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); _saSearch(S); }
-    });
-    document.getElementById('sa-serial').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); _saSearch(S); }
-    });
 
     document.getElementById('sa-store-code').addEventListener('input', function () {
         var code = this.value.trim();
@@ -579,65 +577,102 @@ function _saFilterLocations(S) {
     if (filtered.length === 1) sel.value = filtered[0].name;
 }
 
+function _saStatusSelectHtml(id, selected, cls) {
+    var opts = [
+        ['In transit', 'Em Trânsito'],
+        ['In use', 'Em Uso'],
+        ['In stock', 'Em Estoque'],
+        ['On maintenance', 'Em Manutenção'],
+        ['Retired', 'Desativado']
+    ];
+    var attrs = 'class="form-control' + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '');
+    var h = '<select ' + attrs + '>';
+    for (var i = 0; i < opts.length; i++) {
+        h += '<option value="' + opts[i][0] + '"' +
+            (opts[i][0] === selected ? ' selected' : '') + '>' + opts[i][1] + '</option>';
+    }
+    return h + '</select>';
+}
+
 function _saSearch(S) {
-    var tag = document.getElementById('sa-tag').value.trim();
-    var serial = document.getElementById('sa-serial').value.trim();
+    var raw = document.getElementById('sa-ids').value || '';
+    var ids = raw.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!ids.length) { S.toast('Informe ao menos um identificador.', 'warning'); return; }
 
-    if (!tag && !serial) { S.toast('Informe Asset Tag ou Número de Série', 'warning'); return; }
+    var prog = document.getElementById('sa-search-prog');
+    prog.innerHTML = '<span class="spinner spinner-sm"></span> Buscando ' + ids.length + ' identificador(es)...';
+    document.getElementById('sa-results').style.display = 'none';
 
-    var body = { asset_tag: tag, serial_number: serial };
-
-    document.getElementById('sa-results').style.display = '';
-    document.getElementById('sa-table').innerHTML =
-        '<div style="padding:1rem;color:var(--text-secondary)"><span class="spinner spinner-sm"></span> Buscando...</div>';
-    document.getElementById('sa-action').style.display = 'none';
-
-    S.api('/servicenow/saida/search', { method: 'POST', body: body })
+    S.api('/servicenow/saida/search_lote', { method: 'POST', body: { identificadores: ids } })
         .then(function (d) {
-            var assets = d.assets || [];
-            if (!assets.length) {
-                document.getElementById('sa-table').innerHTML =
-                    '<div style="padding:1rem;color:var(--text-secondary)">Nenhum ativo encontrado no ServiceNow.</div>';
-                return;
-            }
-
-            var html = '<table class="data-table"><thead><tr>' +
-                '<th></th><th>Asset Tag</th><th>Série</th><th>Nome</th><th>Modelo</th>' +
-                '<th>Local Atual</th><th>Stockroom</th><th>Status</th><th>Empresa</th>' +
-                '</tr></thead><tbody>';
-
-            for (var i = 0; i < assets.length; i++) {
-                var a = assets[i];
-                html += '<tr style="cursor:pointer" data-idx="' + i + '">' +
-                    '<td><input type="radio" name="sa-sel" value="' + i + '"></td>' +
-                    '<td style="font-weight:600">' + S.esc(_saDisp(a.asset_tag)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.serial_number)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.display_name)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.model)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.location)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.stockroom)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.install_status)) + '</td>' +
-                    '<td>' + S.esc(_saDisp(a.company)) + '</td>' +
-                    '</tr>';
-            }
-            html += '</tbody></table>';
-            document.getElementById('sa-table').innerHTML = html;
-
-            window._saAssets = assets;
-
-            document.querySelectorAll('#sa-table tr[data-idx]').forEach(function (row) {
-                row.addEventListener('click', function () {
-                    var idx = parseInt(this.getAttribute('data-idx'));
-                    var radio = this.querySelector('input[type=radio]');
-                    if (radio) radio.checked = true;
-                    _saSelectAsset(S, window._saAssets[idx]);
-                });
-            });
+            window._saAssets = d.assets || [];
+            prog.innerHTML = '';
+            document.getElementById('sa-results').style.display = '';
+            _saRenderList(S, window._saAssets, d.nao_encontrados || [], d.solicitados || ids.length);
         })
         .catch(function (e) {
-            document.getElementById('sa-table').innerHTML =
-                '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
         });
+}
+
+function _saRenderList(S, assets, naoEncontrados, solicitados) {
+    var applyAll = document.getElementById('sa-apply-all').checked;
+    var locEl = document.getElementById('sa-location');
+    var stEl = document.getElementById('sa-new-status');
+    var aiEl = document.getElementById('sa-aisle');
+    var noEl = document.getElementById('sa-notes');
+    var defLoc = applyAll && locEl ? locEl.value : '';
+    var defStatus = applyAll && stEl ? stEl.value : 'In transit';
+    var defAisle = applyAll && aiEl ? aiEl.value.trim() : '';
+    var defNotes = applyAll && noEl ? noEl.value.trim() : '';
+
+    var info = document.getElementById('sa-found-info');
+    var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
+    if (naoEncontrados.length) {
+        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+            S.esc(naoEncontrados.join(', ')) + '</span>';
+    }
+    info.innerHTML = msg;
+
+    if (!assets.length) {
+        document.getElementById('sa-table').innerHTML =
+            '<div style="padding:1rem;color:var(--text-secondary)">Nenhum ativo encontrado.</div>';
+        return;
+    }
+
+    var html = '<table class="data-table" style="min-width:1150px"><thead><tr>' +
+        '<th><input type="checkbox" id="sa-check-all" checked></th>' +
+        '<th>Asset Tag</th><th>Série</th><th>Nome</th><th>Local Atual</th><th>Status Atual</th>' +
+        '<th>Local Destino</th><th>Novo Status</th><th>Aisle/Space</th><th>Obs</th><th>OK</th>' +
+        '</tr></thead><tbody>';
+
+    for (var i = 0; i < assets.length; i++) {
+        var a = assets[i];
+        html += '<tr data-idx="' + i + '">' +
+            '<td><input type="checkbox" class="sa-row-inc" checked></td>' +
+            '<td style="font-weight:600">' + S.esc(_saDisp(a.asset_tag)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.serial_number)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.display_name)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.location)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.install_status)) + '</td>' +
+            '<td><input class="form-control sa-row-loc" list="sa-loc-list" ' +
+                'style="min-width:170px" value="' + S.esc(defLoc) + '"></td>' +
+            '<td>' + _saStatusSelectHtml('', defStatus, 'sa-row-status') + '</td>' +
+            '<td><input class="form-control sa-row-aisle" style="min-width:90px" value="' + S.esc(defAisle) + '"></td>' +
+            '<td><input class="form-control sa-row-notes" style="min-width:120px" value="' + S.esc(defNotes) + '"></td>' +
+            '<td class="sa-row-result"></td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById('sa-table').innerHTML = html;
+
+    var chkAll = document.getElementById('sa-check-all');
+    if (chkAll) chkAll.addEventListener('change', function () {
+        var v = this.checked;
+        document.querySelectorAll('#sa-table .sa-row-inc').forEach(function (c) { c.checked = v; });
+    });
+
+    document.getElementById('sa-move-all').onclick = function () { _saMoveAll(S); };
 }
 
 function _saDisp(v) {
@@ -646,60 +681,76 @@ function _saDisp(v) {
     return v;
 }
 
-function _saSelectAsset(S, asset) {
-    _saSelectedAsset = asset;
+function _saMoveAll(S) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#sa-table tr[data-idx]'));
+    var selected = rows.filter(function (r) {
+        var c = r.querySelector('.sa-row-inc');
+        return c && c.checked;
+    });
+    if (!selected.length) { S.toast('Marque ao menos um ativo.', 'warning'); return; }
 
-    document.getElementById('sa-action').style.display = '';
-    document.getElementById('sa-selected-info').innerHTML =
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem;' +
-            'background:var(--bg-root);padding:.8rem;border-radius:6px;border:1px solid var(--border-color)">' +
-            '<div><strong>Asset Tag:</strong> ' + S.esc(_saDisp(asset.asset_tag)) + '</div>' +
-            '<div><strong>Série:</strong> ' + S.esc(_saDisp(asset.serial_number)) + '</div>' +
-            '<div><strong>Nome:</strong> ' + S.esc(_saDisp(asset.display_name)) + '</div>' +
-            '<div><strong>Local Atual:</strong> ' + S.esc(_saDisp(asset.location)) + '</div>' +
-            '<div><strong>Stockroom:</strong> ' + S.esc(_saDisp(asset.stockroom)) + '</div>' +
-            '<div><strong>Status:</strong> ' + S.esc(_saDisp(asset.install_status)) + '</div>' +
-        '</div>';
+    for (var i = 0; i < selected.length; i++) {
+        var locInput = selected[i].querySelector('.sa-row-loc');
+        if (!locInput.value.trim()) {
+            S.toast('Informe o Local Destino em todas as linhas marcadas.', 'warning');
+            locInput.focus();
+            return;
+        }
+    }
 
-    document.getElementById('sa-move').onclick = function () { _saMove(S); };
-}
+    if (!confirm('Confirmar saída de ' + selected.length + ' ativo(s)?')) return;
 
-function _saMove(S) {
-    if (!_saSelectedAsset) return;
-    var sysId = _saSelectedAsset.sys_id;
-    if (typeof sysId === 'object') sysId = sysId.value || sysId.display_value;
+    var btn = document.getElementById('sa-move-all');
+    btn.disabled = true;
+    var prog = document.getElementById('sa-move-prog');
+    var result = document.getElementById('sa-move-result');
+    result.innerHTML = '';
+    var total = selected.length, done = 0, ok = 0, fail = 0;
 
-    var bu = document.getElementById('sa-bu').value;
-    var storeCode = document.getElementById('sa-store-code').value.trim();
-    var location = document.getElementById('sa-location').value;
+    function setProg() {
+        var pct = Math.round(done / total * 100);
+        prog.innerHTML =
+            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
+            done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
+    }
+    setProg();
 
-    if (!bu) { S.toast('Selecione a BU.', 'warning'); return; }
-    if (!storeCode) { S.toast('Informe o código da loja.', 'warning'); return; }
-    if (!location) { S.toast('Selecione o local de destino.', 'warning'); return; }
+    var idx = 0;
+    function next() {
+        if (idx >= selected.length) {
+            btn.disabled = false;
+            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+                'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
+            S.toast('Saída concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
+            return;
+        }
+        var row = selected[idx];
+        var aidx = parseInt(row.getAttribute('data-idx'));
+        var asset = window._saAssets[aidx];
+        var sysId = asset.sys_id;
+        if (typeof sysId === 'object') sysId = sysId.value || sysId.display_value;
+        var cell = row.querySelector('.sa-row-result');
+        cell.innerHTML = '<span class="spinner spinner-sm"></span>';
 
-    if (!confirm('Confirmar saída deste ativo para ' + location + '?')) return;
+        var body = {
+            sys_id: sysId,
+            install_status: row.querySelector('.sa-row-status').value,
+            location: row.querySelector('.sa-row-loc').value.trim(),
+            aisle_space: row.querySelector('.sa-row-aisle').value.trim(),
+            notes: row.querySelector('.sa-row-notes').value.trim()
+        };
 
-    var body = {
-        sys_id: sysId,
-        install_status: document.getElementById('sa-new-status').value,
-        location: location,
-        aisle_space: document.getElementById('sa-aisle').value.trim(),
-        notes: document.getElementById('sa-notes').value.trim()
-    };
-
-    document.getElementById('sa-move').disabled = true;
-    S.api('/servicenow/saida/move', { method: 'POST', body: body })
-        .then(function () {
-            document.getElementById('sa-move-result').innerHTML =
-                '<span style="color:#16a34a;font-weight:600">Ativo movimentado com sucesso!</span>';
-            S.toast('Saída registrada com sucesso!', 'success');
-            document.getElementById('sa-move').disabled = false;
-        })
-        .catch(function (e) {
-            document.getElementById('sa-move-result').innerHTML =
-                '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
-            document.getElementById('sa-move').disabled = false;
-        });
+        S.api('/servicenow/saida/move', { method: 'POST', body: body })
+            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .catch(function (e) {
+                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                fail++;
+            })
+            .then(function () { done++; idx++; setProg(); next(); });
+    }
+    next();
 }
 
 
