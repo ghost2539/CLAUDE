@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Indicadores SPARE — RMR</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <style>
+        :root{
+            --bg:#f4f5f7; --surface:#fff; --ink:#1f2733; --muted:#6b7280; --border:#e6e8eb;
+            --navy:#0f2138;
+            --c1:#2563EB; --c2:#D97706; --c3:#059669; --c4:#7C3AED; --c5:#DB2777; --c6:#0891B2;
+            --good:#16A34A; --bad:#DC2626;
+        }
+        *{box-sizing:border-box}
+        html,body{margin:0}
+        body{background:var(--bg);color:var(--ink);
+            font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+        .topbar{background:var(--navy);color:#fff;height:60px;display:flex;align-items:center;gap:14px;padding:0 24px}
+        .topbar .logo{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;
+            background:linear-gradient(135deg,var(--c1),var(--c6));font-size:18px}
+        .topbar h1{font-size:19px;margin:0;font-weight:700}
+        .topbar .spacer{flex:1}
+        .ctrl{display:flex;align-items:center;gap:10px}
+        .ctrl select,.ctrl button{height:38px;border-radius:8px;border:1px solid rgba(255,255,255,.25);
+            background:rgba(255,255,255,.10);color:#fff;font-size:14px;padding:0 12px;cursor:pointer}
+        .ctrl button.primary{background:var(--c1);border-color:var(--c1);font-weight:600}
+        .wrap{padding:22px 24px 40px;max-width:1500px;margin:0 auto}
+        .status{font-size:13px;color:var(--muted);margin-bottom:14px}
+        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
+        .kpi{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--c1);
+            border-radius:14px;padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+        .kpi .lbl{color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px}
+        .kpi .val{font-size:30px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+        .kpi.k2{border-left-color:var(--c3)} .kpi.k3{border-left-color:var(--c2)} .kpi.k4{border-left-color:var(--c4)}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+            padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04);margin-bottom:16px}
+        .card h2{margin:0 0 12px;font-size:16px;font-weight:600}
+        .card .sub{color:var(--muted);font-size:12.5px;font-weight:400}
+        .empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
+        .err{color:var(--bad);font-size:13px;margin-top:6px}
+        svg{max-width:100%;height:auto;display:block}
+        .bar-row{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px}
+        .bar-row .nm{width:150px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .bar-row .track{flex:1;background:#eef0f3;border-radius:5px;height:18px;overflow:hidden}
+        .bar-row .fill{height:100%;border-radius:5px}
+        .bar-row .qt{width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+        @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="logo">📊</div>
+        <h1>Indicadores SPARE — RMR</h1>
+        <div class="spacer"></div>
+        <div class="ctrl">
+            <select id="ind-ref"></select>
+            <button id="ind-refresh" class="primary">Atualizar do ServiceNow</button>
+        </div>
+    </div>
+
+    <div class="wrap">
+        <div class="status" id="ind-status">Carregando…</div>
+
+        <div class="kpis" id="ind-kpis"></div>
+
+        <div class="card">
+            <h2>Tickets Resolvidos <span class="sub">— por mês (ano vigente)</span></h2>
+            <div id="ch-tickets"></div>
+        </div>
+
+        <div class="card">
+            <h2>Resolução dentro do SLA <span class="sub">— % por mês</span></h2>
+            <div id="ch-sla"></div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Top 20 Lojas <span class="sub">— em incidentes</span></h2>
+                <div id="ch-lojas"></div>
+            </div>
+            <div class="card">
+                <h2>Top 10 Subcategorias</h2>
+                <div id="ch-subs"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>TMA Coletor e SLED <span class="sub">— tempo médio em dias (abertos e encerrados no mês)</span></h2>
+            <div id="ch-tma"></div>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        var PALETTE=['#2563EB','#D97706','#059669','#7C3AED','#DB2777','#0891B2'];
+        var $=function(s){return document.querySelector(s);};
+        var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+        var mesLbl=function(m){var p=String(m||'').split('-');var n=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+            return p[1]?n[parseInt(p[1],10)]:m;};
+
+        // Gráfico de colunas (labels no topo)
+        function colChart(el, data, opts){
+            opts=opts||{}; var color=opts.color||PALETTE[0];
+            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
+            var W=Math.max(560,data.length*70), H=260, pad=34, bw=Math.min(46,(W-pad*2)/data.length-14);
+            var max=Math.max.apply(null,data.map(function(d){return d.v;}))||1;
+            var g='';
+            data.forEach(function(d,i){
+                var x=pad+i*((W-pad*2)/data.length)+((W-pad*2)/data.length-bw)/2;
+                var h=Math.round((H-pad-24)*(d.v/max));
+                var y=H-pad-h;
+                g+='<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+Math.max(h,1)+'" rx="4" fill="'+color+'"></rect>';
+                g+='<text x="'+(x+bw/2)+'" y="'+(y-6)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1f2733">'+(opts.fmt?opts.fmt(d.v):d.v)+'</text>';
+                g+='<text x="'+(x+bw/2)+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#6b7280">'+esc(d.l)+'</text>';
+            });
+            el.innerHTML='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" width="'+W+'">'+
+                '<line x1="'+pad+'" y1="'+(H-pad)+'" x2="'+(W-pad)+'" y2="'+(H-pad)+'" stroke="#e6e8eb"></line>'+g+'</svg></div>';
+        }
+
+        // Linha (0-100 %)
+        function lineChart(el, data, opts){
+            opts=opts||{}; var color=opts.color||PALETTE[2];
+            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
+            var W=Math.max(560,data.length*70), H=240, pad=34;
+            var max=100, plotW=W-pad*2, plotH=H-pad-24;
+            function X(i){return pad+ (data.length<=1?plotW/2 : i*(plotW/(data.length-1)));}
+            function Y(v){return H-pad-(plotH*(v/max));}
+            var pts=data.map(function(d,i){return X(i)+','+Y(d.v);}).join(' ');
+            var g='';
+            [0,25,50,75,100].forEach(function(gl){
+                g+='<line x1="'+pad+'" y1="'+Y(gl)+'" x2="'+(W-pad)+'" y2="'+Y(gl)+'" stroke="#f0f1f3"></line>'+
+                   '<text x="'+(pad-6)+'" y="'+(Y(gl)+4)+'" text-anchor="end" font-size="10" fill="#9aa1ab">'+gl+'</text>';
+            });
+            g+='<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2.5"></polyline>';
+            data.forEach(function(d,i){
+                g+='<circle cx="'+X(i)+'" cy="'+Y(d.v)+'" r="4" fill="'+color+'"></circle>';
+                g+='<text x="'+X(i)+'" y="'+(Y(d.v)-9)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#1f2733">'+d.v+'%</text>';
+                g+='<text x="'+X(i)+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#6b7280">'+esc(d.l)+'</text>';
+            });
+            el.innerHTML='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" width="'+W+'">'+g+'</svg></div>';
+        }
+
+        // Barras horizontais (ranking)
+        function hbar(el, data, color){
+            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
+            var max=Math.max.apply(null,data.map(function(d){return d.v;}))||1;
+            el.innerHTML=data.map(function(d,i){
+                var pct=Math.round(d.v/max*100);
+                return '<div class="bar-row"><span class="nm" title="'+esc(d.l)+'">'+esc(d.l)+'</span>'+
+                    '<span class="track"><span class="fill" style="width:'+pct+'%;background:'+(color||PALETTE[0])+'"></span></span>'+
+                    '<span class="qt">'+d.v+'</span></div>';
+            }).join('');
+        }
+
+        function kpi(cls,lbl,val){
+            return '<div class="kpi '+cls+'"><div class="lbl">'+esc(lbl)+'</div><div class="val">'+esc(val)+'</div></div>';
+        }
+
+        function render(snap){
+            if(!snap||!snap.dados){
+                $('#ind-status').textContent='Nenhum dado calculado ainda. Clique em "Atualizar do ServiceNow".';
+                $('#ind-kpis').innerHTML=''; return;
+            }
+            var d=snap.dados;
+            var ts=d.tickets_sla, top=d.top, tma=d.tma;
+
+            var kpis='';
+            if(ts){
+                kpis+=kpi('','Tickets resolvidos (ano)', ts.tickets_total);
+                kpis+=kpi('k2','SLA dentro do prazo', (ts.sla_compliance_pct||0)+'%');
+            }
+            if(tma&&tma.tma){
+                tma.tma.forEach(function(t,i){
+                    kpis+=kpi(i===0?'k3':'k4','TMA '+t.categoria+' (dias)', t.dias);
+                });
+            }
+            $('#ind-kpis').innerHTML=kpis;
+
+            // Tickets por mês
+            if(ts){
+                colChart($('#ch-tickets'), ts.tickets_por_mes.filter(function(m){return m.total>0;})
+                    .map(function(m){return {l:mesLbl(m.mes),v:m.total};}), {color:PALETTE[0]});
+                lineChart($('#ch-sla'), ts.sla_por_mes.filter(function(m){return m.total>0;})
+                    .map(function(m){return {l:mesLbl(m.mes),v:m.pct};}), {color:PALETTE[2]});
+            } else {
+                $('#ch-tickets').innerHTML='<div class="empty">Sem dados de tickets/SLA.</div>';
+                $('#ch-sla').innerHTML='';
+            }
+
+            if(top){
+                hbar($('#ch-lojas'), top.top_lojas.map(function(x){return {l:x.loja,v:x.total};}), PALETTE[0]);
+                hbar($('#ch-subs'), top.top_subcategorias.map(function(x){return {l:x.subcategoria,v:x.total};}), PALETTE[3]);
+            } else {
+                $('#ch-lojas').innerHTML='<div class="empty">Sem dados.</div>';
+                $('#ch-subs').innerHTML='<div class="empty">Sem dados.</div>';
+            }
+
+            if(tma&&tma.tma){
+                colChart($('#ch-tma'), tma.tma.map(function(t){return {l:t.categoria,v:t.dias};}),
+                    {color:PALETTE[1], fmt:function(v){return v+'d';}});
+            } else {
+                $('#ch-tma').innerHTML='<div class="empty">Sem dados de TMA.</div>';
+            }
+
+            var qi=[];
+            if(d.erros){for(var k in d.erros){if(d.erros[k])qi.push(k+': '+d.erros[k]);}}
+            $('#ind-status').innerHTML='Referência <strong>'+esc(snap.referencia)+'</strong> · gerado em '+
+                esc((d.gerado_em||'').replace('T',' ').slice(0,16))+
+                (qi.length?'<div class="err">Falhas: '+esc(qi.join(' | '))+'</div>':'');
+        }
+
+        function fillRefs(refs, atual){
+            var sel=$('#ind-ref');
+            if(!refs||!refs.length){sel.innerHTML='<option>—</option>';return;}
+            sel.innerHTML=refs.map(function(r){return '<option value="'+r+'"'+(r===atual?' selected':'')+'>'+r+'</option>';}).join('');
+        }
+
+        function load(ref){
+            $('#ind-status').textContent='Carregando…';
+            fetch('/api/indicadores/dados'+(ref?('?referencia='+encodeURIComponent(ref)):''))
+                .then(function(r){return r.json();})
+                .then(function(d){
+                    fillRefs(d.referencias, d.snapshot&&d.snapshot.referencia);
+                    render(d.snapshot);
+                })
+                .catch(function(e){$('#ind-status').innerHTML='<span class="err">Erro ao carregar: '+esc(e.message)+'</span>';});
+        }
+
+        $('#ind-ref').addEventListener('change',function(){load(this.value);});
+
+        $('#ind-refresh').addEventListener('click',function(){
+            var btn=this; btn.disabled=true; var txt=btn.textContent; btn.textContent='Atualizando…';
+            $('#ind-status').textContent='Consultando o ServiceNow (pode levar alguns segundos)…';
+            fetch('/api/indicadores/atualizar',{method:'POST'})
+                .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+                .then(function(res){
+                    if(!res.ok){throw new Error((res.j&&res.j.detail)||'Falha na atualização.');}
+                    load(res.j.referencia);
+                })
+                .catch(function(e){$('#ind-status').innerHTML='<span class="err">'+esc(e.message)+'</span>';})
+                .then(function(){btn.disabled=false;btn.textContent=txt;});
+        });
+
+        load('');
+    })();
+    </script>
+</body>
+</html>
