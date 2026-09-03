@@ -20,6 +20,19 @@ http://<ip-do-servidor>:8901/tv2
 - Para exigir login no futuro, basta chamar `get_session(req)` (ou
   `require_permission`) nos endpoints de `routers/controle_orcamento.py`.
 
+## Modos de execução
+
+| Modo | Como | URL |
+|---|---|---|
+| Embutido no portal | `main.py` carrega o router em bloco protegido | `http://<ip>:8901/tv2` |
+| **Serviço isolado** | `controle_orcamento_app.py` + `controle_orcamento.service` (instalador em `scripts/controle_orcamento_instalar.sh`) | `http://<ip>:8902/tv2` |
+
+No modo isolado nada do portal é carregado: atualizações do portal não
+afetam a tela, e ela pode ser instalada sozinha em outro servidor. Os dois
+modos podem apontar para o mesmo banco. Migração e backup: ver
+`docs/MIGRACAO_CONTROLE_ORCAMENTO.md` e `scripts/controle_orcamento_dados.py`
+(exporta/importa JSON).
+
 ## Isolamento do restante do portal
 
 - `main.py` carrega o router do módulo dentro de `try/except`: se o import

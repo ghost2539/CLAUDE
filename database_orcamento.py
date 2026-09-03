@@ -15,6 +15,7 @@ apenas na primeira requisição ao módulo.
 """
 from __future__ import annotations
 
+import importlib
 import logging
 import threading
 from datetime import date, datetime, timezone
@@ -66,6 +67,34 @@ def url_efetiva():
         _log.info("Controle de Orçamento: usando driver do portal (%s) em vez de %s",
                   portal.drivername, url.drivername)
         url = url.set(drivername=portal.drivername)
+    return _driver_instalado(url)
+
+
+_DRIVERS_PG = ("psycopg2", "psycopg", "pg8000")
+
+
+def _driver_instalado(url):
+    """Para Postgres, garante um driver que exista neste servidor.
+
+    Se o driver da URL não estiver instalado (ex.: ``psycopg`` num servidor
+    que só tem ``psycopg2``), troca pelo primeiro disponível. Útil ao migrar
+    o módulo para outro servidor sem editar a URL.
+    """
+    if url.get_backend_name() != "postgresql":
+        return url
+    atual = url.get_driver_name()
+    try:
+        importlib.import_module(atual)
+        return url
+    except ImportError:
+        pass
+    for nome in _DRIVERS_PG:
+        try:
+            importlib.import_module(nome)
+        except ImportError:
+            continue
+        _log.warning("Controle de Orçamento: driver %s não instalado; usando %s", atual, nome)
+        return url.set(drivername=f"postgresql+{nome}")
     return url
 
 
@@ -210,6 +239,11 @@ def init_db() -> None:
                 for i, row in enumerate(SEED):
                     s.add(BudgetProject(**row, sort_order=i + 1, updated_by="seed"))
         _ready = True
+
+
+def criar_tabelas() -> None:
+    """Cria as tabelas se não existirem, SEM carregar exemplos (uso em migração)."""
+    Base.metadata.create_all(get_engine())
 
 
 def ensure_db() -> None:

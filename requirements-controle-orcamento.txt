@@ -1,0 +1,8 @@
+# Dependências mínimas para rodar o Controle de Orçamento como serviço próprio
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+sqlalchemy>=2.0,<3
+pydantic>=2.7,<3
+itsdangerous>=2.2
+# driver Postgres (qualquer um dos dois; o módulo usa o que estiver instalado)
+psycopg2-binary>=2.9
