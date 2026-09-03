@@ -98,6 +98,20 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Indicadores (RMR) em /indicadores (código e banco próprios) ─────
+    # Carregamento isolado: qualquer erro (arquivo, dependência, banco) é
+    # apenas registrado no log e o portal sobe normalmente sem ele.
+    try:
+        import database_indicadores as _db_indic
+        _db_indic.init_db()
+        from routers.indicadores import router as indicadores_router
+        app.include_router(indicadores_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("indicadores").error(
+            "Módulo Indicadores (/indicadores) NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     return app
 
 

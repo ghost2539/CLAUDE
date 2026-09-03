@@ -410,22 +410,29 @@ async function renderPermissions(c, S) {
 
     document.getElementById('pm-user-add').onclick = function () {
         var f = S.el('div');
+
+        var tipoWrap = S.el('div', { style: 'margin-bottom:10px' });
+        tipoWrap.innerHTML =
+            '<label style="display:block;font-size:.85rem;margin-bottom:4px">Tipo de acesso</label>' +
+            '<select id="pm-utype" class="form-control">' +
+                '<option value="LOCAL">Local (senha gerada no portal)</option>' +
+                '<option value="SSO">Rede / SSO (senha do AD)</option>' +
+            '</select>';
+        f.appendChild(tipoWrap);
+
         [
-            ['Login', 'pm-ul', ''],
+            ['Login (usuário de rede)', 'pm-ul', ''],
             ['Nome',  'pm-un', '']
         ].forEach(function (x) { f.appendChild(_pField(x[0], x[1], x[2])); });
-        var aviso = S.el('p', {
-            className: 'text-muted',
-            style: 'margin:8px 0 0;font-size:.85rem',
-            textContent: 'Uma senha temporária será gerada automaticamente. ' +
-                'O usuário será obrigado a trocá-la no primeiro acesso.'
-        });
+
+        var aviso = S.el('p', { className: 'text-muted', style: 'margin:8px 0 0;font-size:.85rem' });
         f.appendChild(aviso);
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Criar' });
         saveBtn.onclick = async function () {
             var login = document.getElementById('pm-ul').value.trim();
             if (!login) { S.toast('Informe o login.', 'warning'); return; }
+            var tipo = document.getElementById('pm-utype').value;
             var r;
             try {
                 r = await S.api('/parametros/usuarios', {
@@ -433,7 +440,7 @@ async function renderPermissions(c, S) {
                     body: {
                         login:        login,
                         display_name: document.getElementById('pm-un').value,
-                        auth_source:  'LOCAL'
+                        auth_source:  tipo
                     }
                 });
             } catch (e) {
@@ -442,7 +449,13 @@ async function renderPermissions(c, S) {
             }
             S.closeModal();
             load();
-            // Mostra a senha temporária gerada para o admin repassar.
+
+            if (tipo !== 'LOCAL') {
+                S.toast('Usuário de rede "' + login + '" liberado para acesso via SSO.', 'success');
+                return;
+            }
+
+            // LOCAL: mostra a senha temporária gerada para o admin repassar.
             var box = S.el('div');
             box.innerHTML =
                 '<p>Usuário <strong>' + S.esc(r.login) + '</strong> criado.</p>' +
@@ -461,7 +474,17 @@ async function renderPermissions(c, S) {
             };
             S.openModal('Usuário criado', box, [copyBtn]);
         };
+
         S.openModal('Novo usuário', f, [saveBtn]);
+
+        function refreshAviso() {
+            var t = document.getElementById('pm-utype').value;
+            aviso.textContent = (t === 'LOCAL')
+                ? 'Uma senha temporária será gerada automaticamente. O usuário troca no primeiro acesso.'
+                : 'Login validado pelo SSO corporativo (loginsso). Sem senha no portal — a senha é a do AD. O usuário já entra liberado.';
+        }
+        refreshAviso();
+        document.getElementById('pm-utype').addEventListener('change', refreshAviso);
     };
 
     load();

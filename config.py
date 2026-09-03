@@ -39,6 +39,34 @@ class Settings:
     SSL_CERTFILE: str = os.getenv("SSL_CERTFILE", "")
     SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
 
+    # ── Indicadores (RMR) — módulo isolado em /indicadores ──────────────
+    # Banco próprio, separado do resto do sistema. Default: SQLite local.
+    INDICADORES_DATABASE_URL: str = os.getenv(
+        "INDICADORES_DATABASE_URL",
+        f"sqlite:///{(ROOT / 'data' / 'indicadores.db').as_posix()}",
+    )
+    # Conta de serviço do ServiceNow (API REST) — usada só para LEITURA.
+    # A senha nunca fica no repositório; vem do ambiente / systemd-creds.
+    SN_API_BASE: str = os.getenv("SN_API_BASE", "https://renner.service-now.com")
+    SN_API_USER: str = os.getenv("SN_API_USER", "")
+    SN_API_PASS: str = os.getenv("SN_API_PASS", "")
+    # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
+    # https_proxy do ambiente se não houver um específico.
+    # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
+    # (SN_PROXY) — que é o que funciona neste servidor. Cai para https_proxy
+    # do ambiente se nada específico for definido.
+    SN_API_PROXY: str = (
+        os.getenv("SN_API_PROXY", "")
+        or os.getenv("SN_PROXY", "")
+        or os.getenv("https_proxy", "")
+        or os.getenv("HTTPS_PROXY", "")
+    )
+    # Fila / grupo de atribuição dos indicadores.
+    SN_INDIC_QUEUE: str = os.getenv("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
+    # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome
+    # interno varia por instância; ajuste se necessário.
+    SN_TMA_START_FIELD: str = os.getenv("SN_TMA_START_FIELD", "u_data_bouncing")
+
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio"

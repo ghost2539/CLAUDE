@@ -13,14 +13,34 @@ router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
 SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
-# Credenciais vêm do .env (fora do controle de versão).
-CORREIOS_USUARIO = os.environ.get("CORREIOS_USUARIO", "")
-CORREIOS_CHAVE = os.environ.get("CORREIOS_CHAVE", "")
-CORREIOS_CARTOES = [
-    c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()
-]
-CORREIOS_DR = os.environ.get("CORREIOS_DR", "64")
-CORREIOS_CONTRATO = os.environ.get("CORREIOS_CONTRATO", "")
+
+def _secret(nome: str, default: str = "") -> str:
+    """Lê um segredo do cofre `vcreports_secrets` (servidor novo); se ele não
+    estiver disponível, cai para variável de ambiente (servidor atual/transição).
+
+    No servidor novo as credenciais dos Correios NÃO ficam em variável de
+    ambiente nem em arquivo — vêm somente do cofre, que só a aplicação lê.
+    """
+    try:
+        from vcreports_secrets import vcreports_secret  # type: ignore
+        val = vcreports_secret(nome)
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    return os.environ.get(nome, default)
+
+
+def _correios_creds():
+    """Retorna as credenciais dos Correios no momento do uso (não guarda em
+    global), buscando do cofre a cada chamada de autenticação."""
+    usuario = _secret("CORREIOS_USUARIO")
+    chave = _secret("CORREIOS_CHAVE")
+    cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
+    dr = _secret("CORREIOS_DR", "64")
+    contrato = _secret("CORREIOS_CONTRATO", "")
+    return usuario, chave, cartoes, dr, contrato
+
 
 CORREIOS_BASE = "https://api.correios.com.br"
 
@@ -55,17 +75,22 @@ def _correios_request(method: str, url: str, **kwargs):
 
 
 def _check_credenciais():
-    if not CORREIOS_USUARIO or not CORREIOS_CHAVE:
+    usuario, chave, *_ = _correios_creds()
+    if not usuario or not chave:
         raise HTTPException(
             500,
-            "Credenciais dos Correios ausentes. Defina CORREIOS_USUARIO, "
-            "CORREIOS_CHAVE e CORREIOS_CARTOES no arquivo .env do servidor.",
+            "Credenciais dos Correios ausentes. No servidor novo elas vêm do "
+            "cofre (vcreports_secret: CORREIOS_USUARIO, CORREIOS_CHAVE, "
+            "CORREIOS_CARTOES); no servidor atual, do ambiente.",
         )
 
 
 def _correios_authenticate() -> str:
     """Autentica com Correios em duas etapas: token básico + cartão de postagem."""
-    _check_credenciais()
+    usuario, chave, cartoes, dr, contrato = _correios_creds()
+    if not usuario or not chave:
+        _check_credenciais()
+
     cached = _correios_token_cache.get("token")
     cached_at = _correios_token_cache.get("obtained_at", 0)
     if cached and (time.time() - cached_at) < 3600:
@@ -73,7 +98,7 @@ def _correios_authenticate() -> str:
 
     # Etapa 1: autenticação básica
     credentials = base64.b64encode(
-        f"{CORREIOS_USUARIO}:{CORREIOS_CHAVE}".encode()
+        f"{usuario}:{chave}".encode()
     ).decode()
 
     r = _correios_request(
@@ -100,13 +125,13 @@ def _correios_authenticate() -> str:
 
     escopos = [
         ("cartaopostagem", {"numero": c}, f"cartão {c}")
-        for c in CORREIOS_CARTOES
+        for c in cartoes
     ]
-    if CORREIOS_CONTRATO:
+    if contrato:
         escopos.append(
             ("contrato",
-             {"numero": CORREIOS_CONTRATO, "dr": CORREIOS_DR},
-             f"contrato {CORREIOS_CONTRATO}/DR {CORREIOS_DR}")
+             {"numero": contrato, "dr": dr},
+             f"contrato {contrato}/DR {dr}")
         )
 
     for caminho, corpo, rotulo in escopos:
@@ -362,14 +387,15 @@ def correios_test(req: Request):
     _check_credenciais()
     _correios_token_cache.clear()
 
+    usuario, chave, cartoes, _dr, _contrato = _correios_creds()
     credentials = base64.b64encode(
-        f"{CORREIOS_USUARIO}:{CORREIOS_CHAVE}".encode()
+        f"{usuario}:{chave}".encode()
     ).decode()
 
     result = {
         "config": {
-            "usuario": CORREIOS_USUARIO,
-            "cartoes": CORREIOS_CARTOES,
+            "usuario": usuario,
+            "cartoes": cartoes,
             "proxy": SN_PROXY or "(direto)",
         }
     }
@@ -414,7 +440,7 @@ def correios_test(req: Request):
         # 2) Auth com cada cartão de postagem
         token_cp = ""
         cartao_ok = ""
-        for cartao in CORREIOS_CARTOES:
+        for cartao in cartoes:
             r_cp = _correios_request(
                 "POST",
                 f"{CORREIOS_BASE}/token/v1/autentica/cartaopostagem",

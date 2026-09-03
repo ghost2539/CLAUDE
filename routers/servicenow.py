@@ -1006,6 +1006,74 @@ def saida_move(body: SaidaMovIn, req: Request):
     return {"ok": True, "message": "Ativo atualizado com sucesso."}
 
 
+class SaidaSearchLoteIn(BaseModel):
+    identificadores: list = []
+
+
+@router.post("/saida/search_lote")
+def saida_search_lote(body: SaidaSearchLoteIn, req: Request):
+    """Busca vários ativos de uma vez por asset_tag OU serial_number.
+
+    Aceita uma lista sem limite; consulta o ServiceNow em blocos e
+    deduplica por sys_id. Retorna também os identificadores não achados.
+    """
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+
+    ids = []
+    seen = set()
+    for raw in body.identificadores:
+        v = str(raw or "").strip()
+        if v and v.lower() not in seen:
+            seen.add(v.lower())
+            ids.append(v)
+    if not ids:
+        raise HTTPException(400, "Informe ao menos um identificador.")
+
+    fields = (
+        "sys_id,asset_tag,serial_number,display_name,model,model_category,"
+        "company,stockroom,install_status,substatus,assigned_to,"
+        "location,aisle_space_location,cost,purchase_date"
+    )
+
+    def _plain(v):
+        if isinstance(v, dict):
+            return v.get("value") or v.get("display_value") or ""
+        return v or ""
+
+    assets_by_id = {}
+    CHUNK = 40
+    for i in range(0, len(ids), CHUNK):
+        chunk = ids[i:i + CHUNK]
+        lista = ",".join(chunk)
+        sn_query = f"asset_tagIN{lista}^ORserial_numberIN{lista}"
+        try:
+            found = _sn_query(
+                session, HARDWARE_TABLE, sn_query, fields,
+                limit=len(chunk) * 4 + 20,
+            )
+        except Exception:
+            found = []
+        for a in found:
+            sid = _plain(a.get("sys_id"))
+            if sid:
+                assets_by_id[str(sid)] = a
+
+    assets = list(assets_by_id.values())
+
+    achados = set()
+    for a in assets:
+        achados.add(str(_plain(a.get("asset_tag"))).strip().lower())
+        achados.add(str(_plain(a.get("serial_number"))).strip().lower())
+    nao_encontrados = [x for x in ids if x.strip().lower() not in achados]
+
+    return {
+        "assets": assets,
+        "solicitados": len(ids),
+        "nao_encontrados": nao_encontrados,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 # CHAMADOS CORREIOS — busca incidentes com correlation_display
 # ═══════════════════════════════════════════════════════════════════
