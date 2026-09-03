@@ -27,10 +27,52 @@ com três mudanças:
 
 ## 1. Colocar o código
 
-Traga o repositório (via bundle, como temos feito) para, por exemplo,
-`/opt/portal-spare-v2` (ou uma pasta onde você tenha escrita, sem sudo).
+O caminho do sistema no servidor novo é **`/var/www/vcreports/portal-spare`**.
+
+### Opção A — clonar do GitHub (recomendado)
+
+O código completo está no branch **`main`** do repositório. Como o repositório é
+privado, use um **Personal Access Token** (GitHub → Settings → Developer settings
+→ Tokens, escopo `repo`) embutido na URL:
 
 ```bash
+git clone \
+  "https://<SEU_USUARIO>:<SEU_TOKEN>@github.com/ghost2539/CLAUDE.git" \
+  /var/www/vcreports/portal-spare
+```
+
+Se o git não sair direto (mesmo com `curl` funcionando), configure o proxy:
+
+```bash
+cd /var/www/vcreports/portal-spare
+git config http.proxy http://10.115.30.135:8888
+git config http.sslVerify false   # só se o proxy usa certificado self-signed
+```
+
+Depois do clone, remova o token do `.git/config` (fica gravado na URL):
+
+```bash
+git remote set-url origin https://github.com/ghost2539/CLAUDE.git
+```
+
+**Atualizar depois** (quando houver mudanças novas no GitHub):
+
+```bash
+cd /var/www/vcreports/portal-spare
+git fetch origin
+git reset --hard origin/main      # descarta alterações locais NÃO commitadas
+```
+
+> O `.env`/arquivo de ambiente e os segredos **não** vêm no git — só o código.
+
+### Opção B — bundle (se não houver acesso ao GitHub)
+
+Traga o bundle e restaure em `/var/www/vcreports/portal-spare`.
+
+### Instalar dependências (qualquer opção)
+
+```bash
+cd /var/www/vcreports/portal-spare
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt      # já inclui PyMySQL + cryptography
 ```
@@ -140,12 +182,12 @@ a origem é o arquivo `.db`):
 ```bash
 # Controle de Orçamento (origem SQLite atual -> MySQL)
 python3 scripts/migrar_pg_para_mysql.py \
-  "sqlite:////opt/portal-spare-v2/data/controle_orcamento.db" \
+  "sqlite:////var/www/vcreports/portal-spare/data/controle_orcamento.db" \
   "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/controle_orcamento"
 
 # Indicadores (só se já tiver snapshots que queira preservar)
 python3 scripts/migrar_pg_para_mysql.py \
-  "sqlite:////opt/portal-spare-v2/data/indicadores.db" \
+  "sqlite:////var/www/vcreports/portal-spare/data/indicadores.db" \
   "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/indicadores"
 ```
 
@@ -194,7 +236,7 @@ loginctl enable-linger "$USER"   # mantém rodando após logout
 Como várias pessoas têm acesso:
 
 ```bash
-chmod -R o-rwx /opt/portal-spare-v2       # ninguém "outros" lê o código
+chmod -R o-rwx /var/www/vcreports/portal-spare       # ninguém "outros" lê o código
 # (idealmente dono = usuário do serviço; grupo restrito)
 ```
 
