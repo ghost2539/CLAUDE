@@ -346,9 +346,9 @@ def _build_a4_pdf(texto1: str, texto2: str, texto3: str) -> bytes:
     # ── Caminhos das imagens (assets do servidor) ──
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(base, "static", "identificacao", "assets")
-    img_logo = os.path.join(assets, "image2.png")
-    img_qual = os.path.join(assets, "image3.png")
-    img_5s = os.path.join(assets, "image1.png")
+    img_logo = os.path.join(assets, "logo_renner.png")
+    img_qual = os.path.join(assets, "programa_qualidade.png")
+    img_5s = os.path.join(assets, "programa_5s.png")
 
     # ── Logo RENNER — canto superior esquerdo ──
     logo_w = 55 * mm
