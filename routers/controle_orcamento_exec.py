@@ -60,6 +60,19 @@ EBS_CAPEX_PASS = getattr(_cfg, "EBS_CAPEX_PASS", "") or ""
 EBS_CAPEX_TOKEN = getattr(_cfg, "EBS_CAPEX_TOKEN", "") or ""
 EBS_CAPEX_TOKEN_SCHEME = getattr(_cfg, "EBS_CAPEX_TOKEN_SCHEME", "") or "Bearer"
 EBS_CAPEX_AUTH_HEADER = getattr(_cfg, "EBS_CAPEX_AUTH_HEADER", "") or "Authorization"
+EBS_CAPEX_ARS_BRL = float(getattr(_cfg, "EBS_CAPEX_ARS_BRL", 0) or 0)
+EBS_CAPEX_UYU_BRL = float(getattr(_cfg, "EBS_CAPEX_UYU_BRL", 0) or 0)
+EBS_CAPEX_FX_URL = getattr(_cfg, "EBS_CAPEX_FX_URL", "") or ""
+EBS_CAPEX_FX_PROXY = getattr(_cfg, "EBS_CAPEX_FX_PROXY", "") or ""
+
+# Paleta para categorias criadas pela barra de inclusão (evita tudo cinza).
+_PALETA_CAT = [
+    "#2563eb", "#f97316", "#8b5cf6", "#22c55e", "#0ea5e9", "#ec4899",
+    "#14b8a6", "#eab308", "#ef4444", "#6366f1", "#84cc16", "#a16207",
+]
+
+# Cache simples de cotação (BRL por 1 peso) por processo.
+_fx_cache: dict = {"rates": None, "expira": 0.0}
 
 
 # ── Página ────────────────────────────────────────────────────────
@@ -288,12 +301,15 @@ def _categoria_existe(s, nome: str) -> bool:
 
 
 def _garantir_categoria(s, nome: str) -> None:
-    """Cria a categoria se ainda não existir (a barra de inclusão é rápida)."""
+    """Cria a categoria se ainda não existir (a barra de inclusão é rápida),
+    já atribuindo uma cor da paleta (evita categorias todas cinza no gráfico)."""
     nome = (nome or "").strip()
     if not nome or _categoria_existe(s, nome):
         return
+    total = s.scalar(select(func.count()).select_from(BudgetCategory)) or 0
     proximo = (s.scalar(select(func.max(BudgetCategory.sort_order))) or 0) + 1
-    s.add(BudgetCategory(name=nome[:60], color="#9ca3af", sort_order=proximo))
+    cor = _PALETA_CAT[total % len(_PALETA_CAT)]
+    s.add(BudgetCategory(name=nome[:60], color=cor, sort_order=proximo))
 
 
 def _checar_categoria(s, dados: dict) -> None:
@@ -452,18 +468,78 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
     return out
 
 
-def _aplicar_ebs(p: BudgetProject, linha: dict) -> None:
-    """Preenche os campos financeiros do projeto a partir da linha do EBS.
-    NÃO altera nome/tipo/categoria/área (esses são definidos pelo usuário)."""
-    saldo_inicial = _valor(linha.get("saldo_inicial"))
+def _moeda_empresa(empresa: str) -> Optional[str]:
+    """Retorna a moeda estrangeira a converter conforme a empresa/país."""
+    e = (empresa or "").strip().upper()
+    if "ARGENTIN" in e:
+        return "ARS"
+    if "URUGUAI" in e or "URUGUAY" in e:
+        return "UYU"
+    return None
+
+
+def _fx_rates() -> dict:
+    """Cotação em REAIS por 1 peso: {'ARS': x, 'UYU': y}.
+    Prioriza valores fixados por env; senão tenta ao vivo (cache 1h)."""
+    import time
+    rates = {"ARS": (EBS_CAPEX_ARS_BRL or None), "UYU": (EBS_CAPEX_UYU_BRL or None)}
+    if rates["ARS"] and rates["UYU"]:
+        return rates
+    now = time.time()
+    live = _fx_cache["rates"] if (_fx_cache["rates"] and _fx_cache["expira"] > now) else None
+    if live is None and EBS_CAPEX_FX_URL:
+        live = {}
+        try:
+            import requests as _req
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            proxies = {"http": EBS_CAPEX_FX_PROXY, "https": EBS_CAPEX_FX_PROXY} if EBS_CAPEX_FX_PROXY else None
+            r = _req.get(EBS_CAPEX_FX_URL, timeout=10, verify=False, proxies=proxies)
+            if r.status_code == 200:
+                d = r.json()
+                for chave, moeda in (("ARSBRL", "ARS"), ("UYUBRL", "UYU")):
+                    bid = (d.get(chave) or {}).get("bid")
+                    if bid:
+                        live[moeda] = float(bid)
+                _fx_cache["rates"] = live
+                _fx_cache["expira"] = now + 3600
+        except Exception as exc:  # noqa: BLE001 — câmbio ao vivo é best-effort
+            _log.info("Cotação ao vivo indisponível: %s", exc)
+            live = {}
+    live = live or {}
+    for m in ("ARS", "UYU"):
+        if not rates[m]:
+            rates[m] = live.get(m)
+    return rates
+
+
+def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) -> str:
+    """Preenche os campos financeiros do projeto a partir da linha do EBS,
+    convertendo ARS/UYU→BRL quando a empresa for Argentina/Uruguai.
+    NÃO altera nome/tipo/categoria/área. Retorna aviso (ou "")."""
+    if rates is None:
+        rates = _fx_rates()
+    moeda = _moeda_empresa(linha.get("empresa"))
+    fator = Decimal("1")
+    aviso = ""
+    if moeda:
+        taxa = rates.get(moeda)
+        if taxa and taxa > 0:
+            fator = Decimal(str(taxa))
+        else:
+            aviso = f"{linha.get('nro_projeto')}: sem cotação {moeda} — valor mantido na moeda original"
+
+    def conv(v: Decimal) -> Decimal:
+        return (v * fator).quantize(Decimal("0.01"))
+
     comprometido = _valor(linha.get("comprometido"))
     reservados = _valor(linha.get("reservados"))
-    realizado = _valor(linha.get("realizado"))
-    p.approved_budget = saldo_inicial
-    p.committed = (comprometido + reservados).quantize(Decimal("0.01"))
-    p.realized = realizado
-    p.a_realizar = _valor_signed(linha.get("saldo_dia"))
+    p.approved_budget = conv(_valor(linha.get("saldo_inicial")))
+    p.committed = conv(comprometido + reservados)
+    p.realized = conv(_valor(linha.get("realizado")))
+    p.a_realizar = conv(_valor_signed(linha.get("saldo_dia")))
     p.synced_at = utcnow()
+    return aviso
 
 
 # ── API ───────────────────────────────────────────────────────────
@@ -510,8 +586,10 @@ def incluir(body: IncluirIn, req: Request):
         aviso = str(exc)
 
     autor = _autor(req)
+    rates = _fx_rates() if ebs else {}
     criados: list[dict] = []
     nao_encontrados: list[str] = []
+    avisos_fx: list[str] = []
     with SessionLocal.begin() as s:
         _garantir_categoria(s, body.categoria)
         base_ordem = (s.scalar(select(func.max(BudgetProject.sort_order))) or 0)
@@ -527,7 +605,9 @@ def incluir(body: IncluirIn, req: Request):
             )
             linha = ebs.get(numero)
             if linha:
-                _aplicar_ebs(p, linha)
+                av = _aplicar_ebs(p, linha, rates)
+                if av:
+                    avisos_fx.append(av)
             else:
                 if not aviso:
                     nao_encontrados.append(numero)
@@ -535,9 +615,11 @@ def incluir(body: IncluirIn, req: Request):
             s.flush()
             criados.append(_dict(p))
 
-    if nao_encontrados and not aviso:
-        aviso = "Não encontrado(s) no EBS: " + ", ".join(nao_encontrados)
-    return {"projetos": criados, "aviso": aviso}
+    partes = [x for x in [aviso] if x]
+    if nao_encontrados:
+        partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
+    partes.extend(avisos_fx)
+    return {"projetos": criados, "aviso": " · ".join(partes)}
 
 
 @router.post("/api/controle-orcamento-exec/sincronizar")
@@ -556,20 +638,27 @@ def sincronizar(req: Request):
         raise HTTPException(502, str(exc))
 
     autor = _autor(req)
+    rates = _fx_rates()
     atualizados = 0
     nao_encontrados: list[str] = []
+    avisos_fx: list[str] = []
     with SessionLocal.begin() as s:
         rows = s.scalars(_ordem_projetos()).all()
         for p in rows:
             linha = ebs.get((p.code or "").strip())
             if linha:
-                _aplicar_ebs(p, linha)
+                av = _aplicar_ebs(p, linha, rates)
+                if av:
+                    avisos_fx.append(av)
                 p.updated_by = autor
                 atualizados += 1
             elif p.code:
                 nao_encontrados.append(p.code)
-    aviso = ("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados)) if nao_encontrados else ""
-    return {"atualizados": atualizados, "aviso": aviso}
+    partes = []
+    if nao_encontrados:
+        partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
+    partes.extend(avisos_fx)
+    return {"atualizados": atualizados, "aviso": " · ".join(partes)}
 
 
 @router.post("/api/controle-orcamento-exec/projetos", status_code=201)

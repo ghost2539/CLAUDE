@@ -89,6 +89,15 @@ class Settings:
     EBS_CAPEX_TOKEN: str = os.getenv("EBS_CAPEX_TOKEN", "")
     EBS_CAPEX_TOKEN_SCHEME: str = os.getenv("EBS_CAPEX_TOKEN_SCHEME", "Bearer")
     EBS_CAPEX_AUTH_HEADER: str = os.getenv("EBS_CAPEX_AUTH_HEADER", "Authorization")
+    # Conversão de moeda para projetos de Argentina (ARS) e Uruguai (UYU) → BRL.
+    # Cotação em REAIS por 1 peso. Se 0, o sistema tenta buscar cotação ao vivo
+    # (EBS_CAPEX_FX_URL); se também falhar, não converte e avisa.
+    EBS_CAPEX_ARS_BRL: float = float(os.getenv("EBS_CAPEX_ARS_BRL", "0") or 0)
+    EBS_CAPEX_UYU_BRL: float = float(os.getenv("EBS_CAPEX_UYU_BRL", "0") or 0)
+    EBS_CAPEX_FX_URL: str = os.getenv(
+        "EBS_CAPEX_FX_URL", "https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL"
+    )
+    EBS_CAPEX_FX_PROXY: str = os.getenv("EBS_CAPEX_FX_PROXY", "")
 
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
