@@ -269,7 +269,7 @@ async function renderPermissions(c, S) {
                 '<button id="pm-save-ac" class="btn btn-sm btn-primary mt-2">Salvar</button>' +
             '</div>' +
         '</div>' +
-        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário local</button>' +
+        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário (Local ou Rede/SSO)</button>' +
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
