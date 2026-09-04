@@ -172,9 +172,9 @@ def _build_box_zpl(
 
     y = mx + hdr_h + 25
 
-    # ── Box number — ENORME, centralizado ──
-    zpl += f"^FO{mx},{y}^A0N,140,140^FB{inner},1,0,C^FD{box_number}^FS"
-    y += 160
+    # ── Box number — ENORME, centralizado (identificador visível de longe) ──
+    zpl += f"^FO{mx},{y}^A0N,170,170^FB{inner},1,0,C^FD{box_number}^FS"
+    y += 195
 
     # ── Separador ──
     zpl += f"^FO{mx + 10},{y}^GB{inner - 20},3,3^FS"
@@ -182,7 +182,7 @@ def _build_box_zpl(
 
     # ── Barcode Code 128 — GRANDE, centralizado, module 4 ──
     bc_module = 4
-    bc_height = 320
+    bc_height = 250
     bc_data_len = len(box_number)
     bc_w = ((bc_data_len + 3) * 11 + 2) * bc_module
     bc_x = max(mx + 10, (w - bc_w) // 2)
@@ -277,14 +277,14 @@ def _build_livre_zpl(
     # ── Barcode Code 128 — GRANDE, centralizado, module 4 ──
     if identificador:
         bc_module = 4
-        bc_height = 320
+        bc_height = 250
         bc_data_len = len(identificador)
         bc_w = ((bc_data_len + 3) * 11 + 2) * bc_module
         bc_x = max(mx + 10, (w - bc_w) // 2)
         zpl += f"^FO{bc_x},{y}^BY{bc_module}^BCN,{bc_height},N,N,N^FD{identificador}^FS"
         y += bc_height + 15
-        zpl += f"^FO{mx},{y}^A0N,50,50^FB{inner},1,0,C^FD{identificador}^FS"
-        y += 65
+        zpl += f"^FO{mx},{y}^A0N,80,80^FB{inner},1,0,C^FD{identificador}^FS"
+        y += 95
 
     # ── Separador ──
     zpl += f"^FO{mx + 10},{y}^GB{inner - 20},3,3^FS"
