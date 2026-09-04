@@ -66,6 +66,18 @@ class Settings:
     # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome
     # interno varia por instância; ajuste se necessário.
     SN_TMA_START_FIELD: str = os.getenv("SN_TMA_START_FIELD", "u_data_bouncing")
+    # ── Indicadores: fonte das ANS (task_sla) ───────────────────────────
+    # Só contam ANS cujo NOME contém este texto (ex.: "SPARE") — evita puxar
+    # SLA de outras filas. Ajuste para o nome exato da ANS de Resolução se
+    # precisar restringir mais (ex.: "SPARE Resolução").
+    SN_SLA_NAME_LIKE: str = os.getenv("SN_SLA_NAME_LIKE", "SPARE")
+    # Estágio da ANS considerado (só concluídas evita falso estouro de ANS
+    # ainda em andamento). Vazio = não filtra por estágio.
+    SN_SLA_STAGE: str = os.getenv("SN_SLA_STAGE", "completed")
+    # Filtro extra opcional na task_sla (ex.: para isolar só Resolução).
+    SN_SLA_EXTRA: str = os.getenv("SN_SLA_EXTRA", "")
+    # Campo de data usado para alocar a ANS no mês.
+    SN_SLA_DATE_FIELD: str = os.getenv("SN_SLA_DATE_FIELD", "task.closed_at")
 
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.

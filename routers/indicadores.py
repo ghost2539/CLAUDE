@@ -26,6 +26,21 @@ router = APIRouter(tags=["Indicadores"], include_in_schema=False)
 
 QUEUE = _cfg.SN_INDIC_QUEUE
 TMA_START = _cfg.SN_TMA_START_FIELD
+SLA_NAME_LIKE = getattr(_cfg, "SN_SLA_NAME_LIKE", "SPARE") or "SPARE"
+SLA_STAGE = getattr(_cfg, "SN_SLA_STAGE", "completed") or ""
+SLA_EXTRA = getattr(_cfg, "SN_SLA_EXTRA", "") or ""
+SLA_DATE = getattr(_cfg, "SN_SLA_DATE_FIELD", "task.closed_at") or "task.closed_at"
+
+
+def _sla_base_query() -> str:
+    """Filtro base das ANS: só as que têm SPARE no nome (não outras filas),
+    concluídas, mais eventual filtro extra (ex.: só Resolução)."""
+    q = "sla.nameLIKE" + SLA_NAME_LIKE
+    if SLA_STAGE:
+        q += "^stage=" + SLA_STAGE
+    if SLA_EXTRA:
+        q += "^" + SLA_EXTRA
+    return q
 
 
 # ── Cliente REST do ServiceNow (conta de serviço, só leitura) ──────────
@@ -150,36 +165,27 @@ def _mes_janela(ano: int, mes: int) -> str:
 
 # ── Indicador 1: Tickets resolvidos (12 meses) + SLA ───────────────────
 def _tickets_e_sla() -> dict:
-    """Tickets resolvidos por mês (incident, tickets distintos) + SLA por mês
-    (task_sla, has_breached), via API de agregação — rápido, sem baixar linhas.
+    """Tickets resolvidos e SLA por mês a partir das ANS (task_sla) que têm
+    SPARE no nome (não outras filas), concluídas. 'Tickets resolvidos' = ANS
+    concluídas no mês; SLA % = ANS dentro do prazo (has_breached=false).
+    Tudo via API de agregação (rápido, sem baixar linhas).
     """
     hoje = datetime.now()
     ano, cur = hoje.year, hoje.month
-
-    base_inc = f"assignment_group.name={QUEUE}^state!=8"
-    base_sla = f"task.assignment_group.name={QUEUE}^task.stateNOT IN8"
+    base_sla = _sla_base_query()
 
     tickets, sla_mes = [], []
     tot = viol = 0
     for mnum in range(1, cur + 1):
         mes = f"{ano}-{mnum:02d}"
         ini, fim = _mes_janela(ano, mnum)
-
-        # Tickets resolvidos no mês (incident = 1 linha por chamado = distinto)
-        inc_q = f"{base_inc}^closed_at>={ini}^closed_at<={fim}"
-        try:
-            n = _sn_stats("incident", inc_q)
-        except Exception:
-            n = 0
-        tickets.append({"mes": mes, "total": n})
-
-        # SLA no mês (task_sla, agrupado por has_breached)
-        sla_q = f"{base_sla}^task.closed_at>={ini}^task.closed_at<={fim}"
-        grupos = _sn_stats("task_sla", sla_q, group_by="has_breached", display_value="false")
+        q = f"{base_sla}^{SLA_DATE}>={ini}^{SLA_DATE}<={fim}"
+        grupos = _sn_stats("task_sla", q, group_by="has_breached", display_value="false")
         total_m = sum(c for _, c in grupos)
         viol_m = sum(c for v, c in grupos if str(v).strip().lower() in ("true", "1"))
         dentro = total_m - viol_m
         pct = round(dentro / total_m * 100, 1) if total_m else 0
+        tickets.append({"mes": mes, "total": total_m})   # resolvidos = ANS concluídas
         sla_mes.append({"mes": mes, "total": total_m, "dentro": dentro,
                         "violado": viol_m, "pct": pct})
         tot += total_m
@@ -187,6 +193,7 @@ def _tickets_e_sla() -> dict:
 
     return {
         "ano": ano,
+        "fonte": "task_sla (ANS) — nome contém '%s'" % SLA_NAME_LIKE,
         "tickets_por_mes": tickets,
         "tickets_total": sum(t["total"] for t in tickets),
         "sla_por_mes": sla_mes,
@@ -195,6 +202,25 @@ def _tickets_e_sla() -> dict:
         "sla_dentro": tot - viol,
         "sla_compliance_pct": round((tot - viol) / tot * 100, 1) if tot else 0,
     }
+
+
+# ── Indicador: Chamados ABERTOS por mês (por data de abertura) ─────────
+def _abertos_por_mes() -> dict:
+    """Volume de incidentes por mês de ABERTURA (opened_at) na fila do SPARE."""
+    hoje = datetime.now()
+    ano, cur = hoje.year, hoje.month
+    base = f"assignment_group.name={QUEUE}^state!=8"
+    out = []
+    for mnum in range(1, cur + 1):
+        mes = f"{ano}-{mnum:02d}"
+        ini, fim = _mes_janela(ano, mnum)
+        q = f"{base}^opened_at>={ini}^opened_at<={fim}"
+        try:
+            n = _sn_stats("incident", q)
+        except Exception:
+            n = 0
+        out.append({"mes": mes, "total": n})
+    return {"por_mes": out, "total": sum(x["total"] for x in out)}
 
 
 # ── Indicador 2: Top 20 lojas + Top 10 subcategorias ───────────────────
@@ -287,6 +313,7 @@ def _calcular_tudo() -> dict:
     resultado: dict = {"gerado_em": datetime.now().isoformat(), "erros": {}}
     for chave, fn in (
         ("tickets_sla", _tickets_e_sla),
+        ("aberturas", _abertos_por_mes),
         ("top", _top_lojas_categorias),
         ("tma", _tma),
     ):
@@ -319,6 +346,28 @@ def indicadores_dados(referencia: str = ""):
         "snapshot": snap,
         "referencias": db.listar_referencias(),
         "config": {"queue": QUEUE, "campo_tma": TMA_START},
+    }
+
+
+@router.get("/api/indicadores/diag-slas")
+def indicadores_diag_slas(like: str = ""):
+    """Diagnóstico: lista os NOMES de ANS (task_sla) e a contagem de cada um,
+    para confirmarmos o filtro correto (o que tem 'SPARE' no nome). Use
+    ?like=SPARE para restringir, ou vazio para ver todos ligados à fila."""
+    termo = like or SLA_NAME_LIKE
+    q = "sla.nameLIKE" + termo if termo else f"task.assignment_group.name={QUEUE}"
+    try:
+        grupos = _sn_stats("task_sla", q, group_by="sla.name", display_value="true")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, "Falha ao consultar ANS: %s" % exc)
+    grupos.sort(key=lambda x: x[1], reverse=True)
+    return {
+        "filtro": q,
+        "config": {
+            "SN_SLA_NAME_LIKE": SLA_NAME_LIKE, "SN_SLA_STAGE": SLA_STAGE,
+            "SN_SLA_EXTRA": SLA_EXTRA, "SN_SLA_DATE_FIELD": SLA_DATE,
+        },
+        "ans": [{"nome": n or "(sem nome)", "total": c} for n, c in grupos],
     }
 
 

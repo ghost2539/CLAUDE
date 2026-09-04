@@ -104,6 +104,7 @@
             <button data-tab="geral" class="active"><span class="dot" style="background:var(--accent)"></span> Visão Geral</button>
             <button data-tab="tickets"><span class="dot" style="background:var(--c1)"></span> Tickets Resolvidos</button>
             <button data-tab="sla"><span class="dot" style="background:var(--c3)"></span> SLA</button>
+            <button data-tab="aberturas"><span class="dot" style="background:var(--accent)"></span> Abertos por mês</button>
             <button data-tab="lojas"><span class="dot" style="background:var(--c2)"></span> Top Lojas</button>
             <button data-tab="subs"><span class="dot" style="background:var(--c4)"></span> Subcategorias</button>
             <button data-tab="tma"><span class="dot" style="background:var(--c6)"></span> TMA</button>
@@ -156,6 +157,14 @@
                 </div>
             </section>
 
+            <!-- Aberturas -->
+            <section class="tabpane" data-pane="aberturas">
+                <div class="card">
+                    <div class="panehead"><h2>Chamados Abertos</h2><span class="sub">por mês de abertura — fila SPARE</span></div>
+                    <div id="ch-aberturas"></div>
+                </div>
+            </section>
+
             <!-- Top Lojas -->
             <section class="tabpane" data-pane="lojas">
                 <div class="card">
@@ -182,6 +191,6 @@
         </div>
     </div>
 </div>
-<script src="/static/indicadores/app.js?v=20260904b"></script>
+<script src="/static/indicadores/app.js?v=20260904c"></script>
 </body>
 </html>
