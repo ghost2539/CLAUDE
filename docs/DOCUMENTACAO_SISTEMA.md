@@ -1,366 +1,314 @@
 # Documentação do Sistema — Portal de Operações SPARE
+### Referência completa para IA/handoff (atualizada)
 
-> Documento de referência completo: arquitetura, telas, funcionalidades,
-> integrações, modelo de dados e operação. Gerado a partir do código-fonte
-> (branch `main`).
+> Documento único para outra pessoa (ou uma IA) entender **toda** a aplicação:
+> arquitetura, telas, módulos, integrações, design, parâmetros e operação.
+> Gerado a partir do código-fonte (branch `main`).
 
 ---
 
 ## 1. Visão geral
 
-O **Portal de Operações SPARE** é a plataforma web da operação SPARE (gestão do
-ciclo de vida de ativos de TI de loja: recebimento, triagem, reparo,
-identificação/etiquetagem, saída de estoque e chamados). Ele concentra em um só
-lugar as integrações com **EBS (Oracle E-Business Suite)**, **ServiceNow** e
-**Correios**, além de painéis de TV e indicadores gerenciais.
+Plataforma web da operação **SPARE** (ciclo de vida de ativos de TI de loja:
+recebimento, triagem, reparo, identificação/etiquetagem, saída de estoque e
+chamados), integrando **EBS (Oracle E-Business Suite)**, **ServiceNow** e
+**Correios**, além de painéis (TV, Controle de Orçamento, Indicadores RMR).
 
 | Item | Valor |
 |---|---|
-| Backend | Python 3.11+ / **FastAPI** + Uvicorn |
-| Frontend principal | SPA em **JavaScript puro** (sem framework), CSS próprio |
-| Módulo Controle de Orçamento | **React** (build gerado e versionado) |
-| ORM / Banco | **SQLAlchemy 2** — PostgreSQL (atual) / **MySQL–MariaDB** (servidor novo) |
+| Backend | Python 3.11+ · **FastAPI** + Uvicorn |
+| Frontend do portal | **SPA em JavaScript puro** (sem framework), CSS próprio |
+| Controle de Orçamento (/tv2 e /controle-orcamento) | **React** (build gerado com esbuild, versionado) |
+| Indicadores (/indicadores) | HTML + **JS externo** + SVG inline (sem libs) |
+| ORM/Banco | **SQLAlchemy 2** — PostgreSQL (atual) / **MySQL–MariaDB** (servidor novo) |
 | Porta padrão | **8901** |
-| Serviço | systemd `portal_spare.service` |
-| Caminho (servidor novo) | `/var/www/vcreports/portal-spare` |
+| Serviço | systemd `portal_spare.service` (env em `/etc/portal_operacoes_spare/environment`) |
+| Caminho servidor atual | `/opt/portal-spare-v2` |
+| Caminho servidor novo | `/var/www/vcreports/portal-spare` |
+| Repositório | `github.com/ghost2539/CLAUDE` (branch `main`) |
 
-### Arquitetura em uma frase
-
-Um único serviço FastAPI serve: (a) a **SPA do portal** (com login e menu), (b) três
-**páginas autônomas** fora do menu (`/tv`, `/tv2`, `/indicadores`) e (c) toda a
-**API REST** (`/api/...`). Dois módulos rodam no mesmo processo mas com **banco de
-dados próprio e isolado**: Controle de Orçamento e Indicadores.
-
+### Arquitetura (um único serviço)
 ```
 Navegador
-   │
-   ├── /                 → SPA (login + módulos)            ── banco PORTAL
-   ├── /tv               → Painel de TV (operação)          ── banco PORTAL
-   ├── /tv2, /controle-orcamento → Controle de Orçamento    ── banco ORCAMENTO (isolado)
-   ├── /indicadores      → Indicadores RMR                  ── banco INDICADORES (isolado)
-   └── /api/...          → API REST
-            │
-            ├── EBS (Oracle E-Business Suite)   — consulta de ativos + login AD
-            ├── ServiceNow (renner.service-now.com) — entrada/saída/encerramento/relatórios
-            └── Correios (API oficial)          — rastreio e comprovantes
+ ├── /                      SPA do portal (login + menu)        → banco PORTAL
+ ├── /tv                    Painel de TV (operação)             → banco PORTAL
+ ├── /tv2                   Controle de Orçamento (React)       → banco ORÇAMENTO (isolado)
+ ├── /controle-orcamento    Execução CAPEX (clone + EBS)        → banco ORÇAMENTO-EXEC (isolado)
+ ├── /indicadores           Indicadores RMR (dark dashboard)    → banco INDICADORES (isolado)
+ └── /api/...               API REST
+        ├── EBS (Oracle E-Business Suite)  — ativos + login AD
+        ├── ServiceNow (renner.service-now.com) — entrada/saída/encerramento/relatórios/indicadores
+        ├── Correios (API oficial)         — rastreio + comprovante
+        └── EBS CAPEX API (suporte.lojasrenner.com.br/ebs/api/capex) — valores de projeto
 ```
+Módulos isolados carregam com try/except no `main.py`: **um erro neles nunca
+derruba o portal**. Cada um tem **banco próprio e separado**.
 
 ---
 
-## 2. Acesso e autenticação
+## 2. Design / identidade visual
 
-Tela de login com **três tipos de acesso** (botões no topo do formulário):
+**Portal (SPA)** — tema escuro configurável em *Parâmetros → Visual* (tabela
+`settings`, chave `visual`). Padrões:
+- Cor primária `#AB4807` (laranja queimado), destaque `#C79105` (âmbar),
+  fundo `#090B0D`, painel `#111419`, texto `#E8E8E8`, fonte **Inter**.
+- Layout: sidebar à esquerda + topbar + área de conteúdo; toasts; modais.
 
-| Botão | `auth_type` | O que faz |
+**Indicadores (/indicadores)** — dashboard executivo **dark** (navy):
+- Fundo `#0A0F1A`, superfície `#121A2A`, texto `#E6EDF7`, acento **`#F97316`**.
+- Paleta categórica validada: `#3B82F6 #0891B2 #22C55E #A855F7 #EC4899 #F59E0B`.
+- Sidebar com **abas** (cada item mostra só a sua seção), KPIs com anel de %,
+  gráficos SVG inline (colunas, linha, ranking), auto-refresh 2 min.
+
+**Controle de Orçamento (/tv2, /controle-orcamento)** — React + Tailwind, tema
+claro; KPIs, donut, barras, curva S; tabela editável.
+
+**⚠️ Regra de CSP (importante para novas telas):** o portal envia
+`Content-Security-Policy: script-src 'self'`. Isso **bloqueia `<script>` inline** —
+todo JS de página tem que estar em **arquivo externo** (`/static/.../app.js`).
+CSS inline é permitido (`style-src 'unsafe-inline'`). Recursos externos só de
+`fonts.googleapis.com`/`fonts.gstatic.com`.
+
+---
+
+## 3. Acesso e autenticação
+
+Login com **três tipos** (botões na tela):
+
+| Botão | Tipo | O que faz |
 |---|---|---|
-| **Logon AD** | `AD` | Valida no **EBS/AD** corporativo (`ebs_service.login`). Cria o usuário no primeiro acesso. |
-| **Logon Rede** | `SSO` | Valida no **loginsso** corporativo (Oracle Access Manager). **Só entra quem um administrador liberou** (lista de permissão por usuário de rede). |
-| **Logon Local** | `LOCAL` | Usuário/senha guardados no próprio portal (hash **bcrypt**). Permite troca de senha pela tela "Minha conta". |
+| **Logon AD** | `AD` | Valida no EBS/AD. Cria o usuário no 1º acesso. |
+| **Logon Rede** | `SSO` | Valida no **loginsso** (Oracle Access Manager). **Só entra quem um admin liberou** (allow-list por usuário de rede). |
+| **Logon Local** | `LOCAL` | Usuário/senha no portal (hash **bcrypt**). |
 
-Existe ainda o tipo interno `SN` (autenticação direta ServiceNow), usado por
-fluxos que precisam de sessão ServiceNow.
-
-### Regras de segurança
-- **Sessão** por cookie assinado (`itsdangerous`), `HttpOnly`, expira em **480 min**
-  (configurável). As sessões ficam em memória do processo (`SESSIONS`).
-- **Bloqueio por tentativas** (Local): 5 senhas erradas ⇒ 15 min bloqueado.
-- **Rate limit**: login `5/min`, API `120/min` (por IP).
-- **Liberação SSO (allow-list)**: usuários de rede nascem *sem* liberação
-  (`allowed=false`) e só entram após um admin liberar em **Parâmetros → Usuários
-  e Permissões**. O admin inicial (`INITIAL_ADMIN_LOGIN`) é sempre liberado.
-- **Sessão ServiceNow**: ao logar por AD/SSO, o portal guarda os cookies do
-  ServiceNow do usuário. Ações de **escrita** (entrada, saída, encerramento)
-  ocorrem **como o usuário logado** — nunca com conta de serviço. Há endpoints
-  para checar (`/api/auth/sn-session`) e refazer (`/api/auth/sn-relogin`) essa
-  sessão sem deslogar do portal.
-
-### Permissões
-Cada usuário tem permissões **por módulo**: `can_view`, `can_create`, `can_edit`,
-`can_export`, `can_admin`. **Administradores** têm acesso total a todos os módulos.
-O menu lateral só mostra os módulos que o usuário pode ver.
+Regras:
+- **Sessão** por cookie assinado (`itsdangerous`), `HttpOnly`, TTL 480 min. Sessões em memória do processo.
+- **Troca de senha obrigatória DESATIVADA** — Logon Local entra direto (troca voluntária em *Parâmetros → Minha conta*).
+- **SSO exige liberação individual** (allow-list) — o "Controle de acesso externo" (block_external) só afeta AD/SN, **não** o SSO.
+- **Bloqueado no SSO fica salvo como pendente** (Permitido=Não) e aparece em *Parâmetros → Usuários e Permissões* para o admin liberar (marcar "Acesso permitido"), ou criar antes via **Novo usuário → Rede/SSO** (entra já liberado; senha é a do AD).
+- **Bloqueio local**: 5 senhas erradas ⇒ 15 min. **Rate limit**: login 5/min, API 120/min.
+- **Permissões por módulo**: `can_view/create/edit/export/admin`. Admin = acesso total; o menu só mostra o permitido.
+- **Ações de escrita no ServiceNow ocorrem como o usuário logado** (cookies SSO da sessão), nunca com conta de serviço.
 
 ---
 
-## 3. Módulos do portal (menu lateral)
+## 4. Módulos do portal (menu lateral)
 
-A SPA tem 9 entradas no menu. Módulos com várias telas usam **sub-abas**.
-
-### 3.1 Bem-vindo
-Página inicial com boas-vindas e atalhos. Sem escrita.
-
-### 3.2 Consulta
-Busca de ativos por qualquer identificador (imobilizado, ativo, etiqueta, série).
-- Busca **em lote** (cola vários identificadores; deduplica; até 1000).
-- Busca **individual**.
-- Cruza com a base local, com o EBS e aplica as **regras de classificação**
-  (categoria/modelo) cadastradas.
-- **Exporta** o resultado em **Excel (.xlsx)**.
-
-Endpoints: `POST /api/consulta`, `GET /api/consulta/single`, `POST /api/consulta/export`.
-
-### 3.3 Recebimento
-O coração do fluxo de entrada de equipamentos. Sub-abas:
-
-| Sub-aba | Função |
+| Módulo | Sub-abas / função |
 |---|---|
-| **Novo Recebimento** | Escaneia/insere identificadores, faz *preview* (busca dados no EBS/base), classifica e grava o ciclo de recebimento. Detecta duplicidade (prefixos CM/YC). |
-| **Base de Recebimentos** | Lista, filtra, edita o ativo do ciclo, atualiza status/local e exclui recebimentos. |
-| **Dashboard** | Indicadores de recebimento (por período, status, categoria). |
-| **Lotes** | Geração e gestão de lotes (numeração automática por prefixo). |
-| **Cadastro de modelos** | Regras de classificação (descrição → categoria/modelo). |
-| **Importar base histórica** | Importa histórico de recebimentos por planilha. |
-| **Base local EBS** | Sobe/atualiza a base local de ativos (fallback do EBS) por upload. |
+| **Bem-vindo** | Início. |
+| **Consulta** | Busca de ativos (imobilizado/ativo/etiqueta/série), em lote (até 1000) e individual; cruza base local + EBS + classificação; exporta **.xlsx**. |
+| **Recebimento** | *Novo Recebimento* (scan/preview/gravação, detecção de duplicidade CM/YC) · *Base de Recebimentos* · *Dashboard* · *Lotes* (numeração automática) · *Cadastro de modelos* (classificação) · *Importar base histórica* · *Base local EBS*. Cada mudança gera **Movimento** (auditoria). |
+| **Identificação** | *Gerar Lote* · *Identificação A4* (PDF) · *Impressão Zebra Livre* (ZPL) · *Impressoras* (cadastro/teste). |
+| **ServiceNow** | *Entrada de estoque* (envia ativos p/ `alm_hardware` via SSO+JSONv2, assíncrono) · *Saída de estoque* (**lote**: cola lista de identificadores, edita por linha destino/status/**corredor-espaço**/obs, flag "aplicar a todos") · *Rastreio - Chamados* · *Relatórios*. |
+| **Correios** | *Rastreios* (individual/lote + comprovante) · *Encerramento* (encerra automaticamente chamados entregues: On Hold→In Progress→Resolved). |
+| **Central de Reparos** | *Registro de Reparo* (tempos, técnico, resultado, **saving** = valor-hora × tempo) · *Tratativa de saldos* · *Dashboard*. |
+| **Status** | Saúde das integrações. |
+| **Parâmetros** | *Visual* (admin) · *Locais* · *Classificações* · *Valor-hora* · *Usuários e Permissões* (admin: cria Local/SSO, libera SSO, define admin) · *Sequências* (admin) · *TV* · *Minha conta*. |
 
-Cada mudança de status/local gera um registro em **Movimentos** (auditoria).
-Endpoints principais: `POST /api/recebimento/scan|preview|bulk-submit`,
-`GET/PUT/DELETE /api/recebimentos...`, `GET /api/recebimentos/dashboard`,
-`POST /api/lotes`, `GET/PUT /api/lotes/sequencias`.
+O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída
+(formulário e upload). **A automação de encerramento de chamados não é afetada.**
 
-### 3.4 Identificação (etiquetagem)
-Impressão de etiquetas e caixas. Sub-abas:
+---
 
-| Sub-aba | Função |
-|---|---|
-| **Gerar Lote** | Gera etiquetas em lote a partir de ativos/recebimentos, com sequência automática. |
-| **Identificação A4** | Gera PDF A4 para impressão comum (`/api/identificacao/a4.pdf`) ou envio direto. |
-| **Impressão Zebra Livre** | Impressão livre em impressora **Zebra** (ZPL), com *preview*. |
-| **Impressoras** | Cadastro/gestão de impressoras de rede (host/porta) e teste de conexão. |
+## 5. Páginas autônomas (fora do menu)
 
-Endpoints: `.../gerar-lote`, `.../preview-lote`, `.../reimprimir-caixa`,
-`.../zebra-livre`, `.../a4.pdf`, `.../a4.print`, `.../printers`, `.../test-printer`.
+### 5.1 `/tv` — Painel de Operações (TV)
+Dashboard leve (estatísticas, gráficos, últimos recebimentos), auto-atualiza.
+`/tv?demo=1` = dados aleatórios para validação.
 
-### 3.5 ServiceNow
-Integração operacional com o ServiceNow. Sub-abas:
+### 5.2 `/tv2` — Controle de Orçamento de Portfólio (CAPEX/OPEX)
+React, **acesso livre**, banco isolado (`database_orcamento.py`; tabelas
+`budget_projects`, `budget_categories`). Edição manual dos valores.
 
-| Sub-aba | Função |
-|---|---|
-| **Entrada de estoque** | Envia os ativos recebidos para o **`alm_hardware`** do ServiceNow (via SSO + JSONv2), com status de instalação, depreciação e demais campos. Processamento assíncrono (jobs com barra de progresso). |
-| **Saída de estoque** | **Fluxo em lote**: cola-se uma lista de identificadores (vírgula/quebra de linha, sem limite), o sistema busca todos, e cada linha é editável na própria lista (destino/local, status, **corredor/espaço**, observações). Há um *flag* "aplicar a todos" para pré-preencher todas as linhas com o mesmo destino/status/corredor/observação. Grava no ServiceNow (`aisle_space_location`, etc.). |
-| **Rastreio - Chamados** | Lista chamados de Correios e correlaciona com código de rastreio. |
-| **Relatórios** | Relatórios operacionais (tickets por período/prioridade, SLA, TMA) e atualização do painel de TV. |
+### 5.3 `/controle-orcamento` — Execução de CAPEX (clone do /tv2, banco próprio)
+Clone independente (`database_orcamento_exec.py`, tabela `budget_projects` com
+coluna extra `a_realizar` e `locked`). **NÃO** compartilha dados com o /tv2.
+- **Barra de inclusão** no topo: Número (ID que puxa do EBS), Tipo (CAPEX/OPEX),
+  Projeto/Demanda (manual), Categoria, Área.
+- **Puxa da API de CAPEX do EBS** (`/ebs/api/capex/?projetos=...`), mapeando:
+  `saldo_inicial`→Orçamento Aprovado, `comprometido`+`reservados`→Comprometido,
+  `realizado`→Realizado, `saldo_dia`→A Realizar. (`empresa`, `devoluções`,
+  `pct_exec`, `nome_projeto` **não** são puxados.)
+- **Conversão de moeda**: projetos com `empresa` Argentina (ARS) ou Uruguai (UYU)
+  têm valores convertidos para BRL (cotação fixa por env ou ao vivo).
+- **Cadeado por projeto** (`locked`): projeto travado **não** é alterado no
+  "Atualizar (EBS)". Inclusão manual de projetos fora do EBS é permitida.
+- **Autenticação da API**: reutiliza a do módulo *consulta-times* (login EBS →
+  cookies/token), com re-login automático em 401; fallback Basic/token por env.
+- API: `/api/controle-orcamento-exec/{projetos,categorias,incluir,sincronizar}`.
 
-O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída — tanto
-no formulário quanto no fluxo automático de upload. **A automação de encerramento
-de chamados não é afetada por esse fluxo.**
+### 5.4 `/indicadores` — Indicadores RMR (dashboard executivo)
+HTML + `app.js` externo (por causa da CSP). **Banco próprio**
+(`database_indicadores.py`, tabela `indicador_snapshot`: `referencia` YYYY-MM,
+`payload` JSON). **Leitura no ServiceNow pela conta de serviço** (REST, só
+leitura, Aggregate API). **Auto-refresh a cada 2 min** puxando do ServiceNow.
+Menu lateral = **abas** (cada uma mostra só a sua seção).
 
-Endpoints: `POST /api/servicenow/upload` + `GET /jobs/{id}` (entrada),
-`POST /saida/search|search_lote|move`, `GET /saida/locations`,
-`GET /incidents|incidents/count`, `GET /relatorios/tickets|sla|tma`,
-`POST /relatorios/refresh-tv`, `POST /test-login`, `GET /proxy-check`.
+Indicadores:
+1. **Tickets Resolvidos** (por mês) — vêm das **ANS (task_sla)** cujo nome contém **SPARE**, concluídas.
+2. **SLA** (% por mês) — mesmas ANS SPARE de Resolução concluídas (`has_breached`=false = dentro do prazo).
+3. **Abertos por mês** — incidentes por `opened_at` na fila SPARE.
+4. **Top 20 Lojas** e **Top 10 Subcategorias** (incident, agregação por location/subcategory).
+5. **TMA Coletor e SLED** — média de dias entre "Data Bouncing" (`u_data_bouncing`) e a resolução, para incidentes abertos e encerrados no mesmo mês.
 
-### 3.6 Correios
-Rastreamento e encerramento. Sub-abas:
+Endpoints: `GET /api/indicadores/dados`, `POST /api/indicadores/atualizar`,
+`GET /api/indicadores/diag-slas?like=SPARE` (lista os nomes de ANS + contagem —
+diagnóstico para acertar o filtro).
 
-| Sub-aba | Função |
-|---|---|
-| **Rastreios** | Rastreia objetos (individual e **em lote**), mostra eventos e baixa **comprovante de entrega**. |
-| **Encerramento** | **Encerramento automático** de chamados de Correios **entregues**: lista candidatos (chamados On Hold/In Progress com código de rastreio) e, confirmando a entrega pelos Correios, encerra no ServiceNow seguindo a transição exigida (On Hold → In Progress → Resolved) com código e nota-padrão de encerramento. |
+---
 
-Endpoints: `GET /correios/rastrear/{codigo}`, `GET /correios/comprovante/{codigo}`,
-`POST /correios/rastrear-lote`, `POST /correios/test`,
-`GET /encerramento/candidatos`, `POST /encerramento/executar`.
+## 6. Integrações externas
 
-> As **credenciais dos Correios** vêm do **cofre `vcreports_secret`** (servidor
-> novo); há *fallback* para variável de ambiente só na transição.
+**EBS (Oracle E-Business Suite)** — `ebs_service.py`: login AD + consulta de
+ativos. Fallback: base local (`local_assets`).
 
-### 3.7 Central de Reparos
-Registro de reparos e produtividade. Sub-abas:
+**ServiceNow** (`renner.service-now.com`):
+- **Escrita como usuário logado** (SSO/OAM, cookies da sessão) — entrada, saída, encerramento.
+- **Leitura por conta de serviço** (`SIS.ZABBIXDCSN`) — Indicadores, via **GET** na Table/Aggregate API (`/api/now/table` e `/api/now/stats`). **POST não é suportado** por essa API — sempre GET.
+- **Proxy de saída** `SN_PROXY`/`SN_API_PROXY` = **`http://10.115.30.135:8888`** (faz interceptação TLS → `verify=False`). ⚠️ **Não** usar `cache.lojasrenner.com.br:3128` (inacessível do servidor).
+- Tabelas: `alm_hardware`, `incident`, `task_sla`.
 
-| Sub-aba | Função |
-|---|---|
-| **Registro de Reparo** | Registra tempos (triagem, reparo, pesquisa, higienização), técnico, resultado e calcula o **saving** (valor-hora × tempo). Atualiza o status do ciclo conforme o resultado. |
-| **Tratativa de saldos** | Tratamento de saldos/pendências. |
-| **Dashboard Reparos** | Indicadores de reparo e saving. |
+**Correios** — credenciais no **cofre** `vcreports_secret` (`CORREIOS_USUARIO`,
+`CORREIOS_CHAVE`, `CORREIOS_CARTOES`, `CORREIOS_DR`, `CORREIOS_CONTRATO`), com
+fallback para env na transição.
 
-Endpoints: `POST /api/reparos`, `GET /api/reparos/dashboard`.
+**EBS via Oracle direto** — `ebs_oracle.py` (camada de acesso só-leitura ao
+Oracle EBS; `SET TRANSACTION READ ONLY`, timeout, teto de linhas). Credenciais
+no cofre (`ORACLE_EBS_USER/PASS/DSN`, `ORACLE_CLIENT_LIB_DIR`). Consultas ainda
+a configurar. Doc: `docs/EBS_ORACLE_BASE.md`.
 
-### 3.8 Status
-**Status das Integrações**: verifica a saúde das conexões (EBS, ServiceNow,
-Correios, banco) e um resumo geral. Endpoints: `GET /api/status`,
-`GET /api/dashboard/summary`.
+---
 
-### 3.9 Parâmetros
-Administração do sistema. Sub-abas (algumas só para admin):
+## 7. Modelo de dados
 
-| Sub-aba | Admin? | Função |
+**Banco do portal (`database.py`):** `users`, `permissions`, `access_logs`,
+`settings`, `classifications`, `storage_locations`, `assets`, `receipt_cycles`,
+`movements`, `lot_sequences`, `lots`, `repairs`, `local_assets`, `load_history`,
+`printers`.
+
+**Bancos isolados (separados do portal):**
+- `database_orcamento.py` (/tv2): `budget_projects`, `budget_categories`.
+- `database_orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`locked`,`synced_at`), `budget_categories`.
+- `database_indicadores.py` (/indicadores): `indicador_snapshot`.
+
+---
+
+## 8. Parâmetros (variáveis de ambiente)
+
+Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
+
+### Núcleo
+| Variável | Padrão | Uso |
 |---|---|---|
-| **Visual** | sim | Nome do app, cores, fonte, logo, textos de login/rodapé. |
-| **Locais** | não | Cadastro de locais de armazenagem. |
-| **Classificações** | não | Regras descrição → categoria/modelo. |
-| **Valor-hora** | não | Valor-hora usado no cálculo de saving. |
-| **Usuários e Permissões** | sim | Cria usuários (Local/SSO), define permissões por módulo, **libera acesso SSO** (allow-list), ativa/desativa, define admin. |
-| **Sequências** | sim | Sequências de numeração de lotes. |
-| **TV** | não | Configura o painel de TV (título, intervalo, widgets). |
-| **Minha conta** | — | Troca de senha (apenas Logon Local). |
+| `DATABASE_URL` | — (obrigatório) | Banco do portal. PostgreSQL hoje / MySQL (`mysql+pymysql://...`) no servidor novo. |
+| `PORTAL_SESSION_SECRET` | — (obrigatório) | Segredo de assinatura da sessão. |
+| `SESSION_TTL_MINUTES` | 480 | Duração da sessão. |
+| `INITIAL_ADMIN_LOGIN` / `INITIAL_ADMIN_PASSWORD` | "" | Admin inicial. |
+| `HOST` / `PORT` / `WORKERS` | 0.0.0.0 / **8901** / 1 | Servidor. |
+| `UPLOAD_MAX_MB` | 50 | Upload máximo. |
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_API` | 5/minute / 120/minute | Limites. |
+| `SSL_CERTFILE` / `SSL_KEYFILE` | "" | HTTPS direto (opcional). |
+| `DEFAULT_VALOR_HORA` | 150 | Valor-hora do saving. |
 
-Endpoints: `GET/POST/PUT/DELETE /api/parametros/...` (locais, classificacoes,
-valor-hora, config/{key}, visual/logo, permissoes, controle-acesso, usuarios,
-sequencias, base-local/upload).
-
----
-
-## 4. Páginas autônomas (fora do menu)
-
-Acessadas direto pela URL, sem passar pelo menu do portal.
-
-### 4.1 `/tv` — Painel de Operações (TV)
-Dashboard leve para exibir em TV: estatísticas, gráficos (categoria, status) e
-últimos recebimentos. Atualiza sozinho em intervalo configurável.
-- `/tv?demo=1` → preenche com **dados aleatórios** para validação visual.
-- Fonte de dados: banco do portal (`GET /api/tv/dashboard`, `GET /api/tv/dashboard`).
-
-### 4.2 `/tv2` e `/controle-orcamento` — Controle de Orçamento (CAPEX/OPEX)
-Dashboard **React** de acompanhamento de orçamento de portfólio.
-- **Módulo oculto**: não aparece no menu; acesso direto pela URL.
-- **Acesso livre** (sem login), como consulta pública; grava quem alterou
-  (usuário logado ou IP). Escritas passam por rate limit de API.
-- **Banco de dados exclusivo** (`database_orcamento.py`, por padrão SQLite
-  `data/controle_orcamento.db`; MySQL no servidor novo).
-- Tabelas: `budget_projects` (projeto, CAPEX/OPEX, categoria, área, estágio,
-  prioridade, orçamento aprovado/comprometido/realizado, prazo) e
-  `budget_categories`.
-- Assets (`static/controle-orcamento/app.js`) são o **build** de
-  `frontend/controle-orcamento` — versionados no repositório porque o servidor
-  não tem Node.js.
-
-Endpoints: `GET/POST/PATCH/DELETE /api/controle-orcamento/projetos...`,
-`.../categorias...`, `GET /api/controle-orcamento/sessao`.
-
-### 4.3 `/indicadores` — Indicadores RMR
-Painel dos indicadores mensais da apresentação **RMR** da operação SPARE.
-- **Módulo isolado**: código próprio; **banco próprio** (`database_indicadores.py`,
-  tabela `indicador_snapshot` com o JSON de cada mês `YYYY-MM`).
-- **Leitura no ServiceNow pela API REST com a conta de serviço**
-  (`SIS.ZABBIXDCSN`) — somente leitura; usa a **Aggregate API** para contar no
-  servidor. Escrita nunca ocorre aqui.
-- Indicadores calculados:
-  1. **Tickets resolvidos (12 meses) + SLA** — grupo `TI_N2_FLD_RNR_LOJAS_SPARE`,
-     fechados no ano, estado ≠ Cancelado; SLA por `task_sla` (`has_breached`).
-  2. **Top 20 lojas** e **Top 10 subcategorias**.
-  3. **TMA** (Coletor / SLED / PDV) — incidentes dos últimos 12 meses,
-     subcategoria Sled RFID/Sled/Coletor, abertos e fechados no mesmo mês; TMA =
-     dias entre "Data Bouncing" (`u_data_bouncing`, configurável) e a resolução,
-     média por subcategoria.
-- Se qualquer erro ocorrer ao carregar este módulo, **o portal sobe normalmente
-  sem ele** (carregamento isolado, apenas registra no log).
-
-Endpoints: `GET /api/indicadores/dados`, `POST /api/indicadores/atualizar`.
-
----
-
-## 5. Integrações externas
-
-### EBS (Oracle E-Business Suite)
-- `ebs_service.py`: **login AD** e **consulta de ativos** no ERP corporativo.
-- Toda configuração (URLs, timeout, SSL, workers) vem de `config.py` — nada é lido
-  direto do ambiente dentro do serviço.
-- Fallback: **base local** de ativos (tabela `local_assets`) para quando o EBS
-  não responde.
-
-### ServiceNow (`renner.service-now.com`)
-- **Escrita como usuário logado**: login por **SSO/OAM** (`_login_sso`) e reuso dos
-  cookies da sessão do usuário (`_sn_session_from_portal`). Usado em entrada,
-  saída e encerramento.
-- **Leitura por conta de serviço**: API REST (`/api/now/table/...` e Aggregate
-  `/api/now/stats/...`) com `SIS.ZABBIXDCSN`, usada pelos **Indicadores**.
-- **Proxy de saída** `SN_PROXY` (ex.: `http://10.115.30.135:8888`) — faz
-  interceptação TLS (certificado self-signed ⇒ `verify=False`).
-- Tabelas usadas: `alm_hardware` (ativos) e `incident` (chamados), `task_sla`.
-
-### Correios (API oficial)
-- Autenticação com cartão/contrato e **rastreio** de objetos + **comprovante**.
-- Credenciais no **cofre `vcreports_secret`** (`CORREIOS_USUARIO`, `CORREIOS_CHAVE`,
-  `CORREIOS_CARTOES`, `CORREIOS_DR`, `CORREIOS_CONTRATO`), com *fallback* para env.
-
----
-
-## 6. Modelo de dados
-
-### Banco do portal (`database.py`)
-| Tabela | Conteúdo |
-|---|---|
-| `users` | Usuários (login, origem AD/SSO/LOCAL, admin, `allowed`, bloqueio, senha hash). |
-| `permissions` | Permissões por usuário e módulo. |
-| `access_logs` | Log de acessos (sucesso/falha, IP, origem). |
-| `settings` | Configurações chave/valor (visual, TV, valor-hora, controle de acesso). |
-| `classifications` | Regras de classificação (descrição → categoria/modelo). |
-| `storage_locations` | Locais de armazenagem. |
-| `assets` | Ativos (imobilizado, ativo, etiqueta, série, descrição, custo, DPIS…). |
-| `receipt_cycles` | Ciclos de recebimento (status, local, lote, semana ISO, aberto). |
-| `movements` | Auditoria de mudanças de status/local. |
-| `lot_sequences`, `lots` | Numeração e registro de lotes. |
-| `repairs` | Reparos (tempos, técnico, resultado, saving). |
-| `local_assets`, `load_history` | Base local de ativos e histórico de cargas. |
-| `printers` | Impressoras cadastradas (criada pelo módulo Identificação). |
-
-### Banco Controle de Orçamento (`database_orcamento.py`, isolado)
-`budget_projects`, `budget_categories`.
-
-### Banco Indicadores (`database_indicadores.py`, isolado)
-`indicador_snapshot` (`referencia` `YYYY-MM`, `payload` JSON, criado_em/por).
-
----
-
-## 7. Configuração e operação
-
-### Variáveis de ambiente principais (`config.py`)
+### EBS / consulta pública
 | Variável | Uso |
 |---|---|
-| `DATABASE_URL` | Banco do portal (PostgreSQL hoje / MySQL no servidor novo). |
-| `PORTAL_SESSION_SECRET` | Segredo de assinatura de sessão. |
-| `INITIAL_ADMIN_LOGIN` / `..._PASSWORD` | Admin inicial. |
-| `PORT` (8901), `HOST`, `WORKERS` | Servidor. |
-| `SN_PROXY` | Proxy de saída para ServiceNow/Correios. |
-| `SN_API_USER` / `SN_API_PASS` / `SN_API_PROXY` | Conta de serviço p/ Indicadores. |
-| `SN_INDIC_QUEUE`, `SN_TMA_START_FIELD` | Parâmetros dos Indicadores. |
-| `INDICADORES_DATABASE_URL` | Banco isolado dos Indicadores. |
-| `CONTROLE_ORCAMENTO_DATABASE_URL` | Banco isolado do Controle de Orçamento. |
-| `SSL_CERTFILE` / `SSL_KEYFILE` | HTTPS direto (opcional). |
-| `CREDENTIALS_DIRECTORY` | Diretório de credenciais protegidas (EBS público). |
+| `EBS_LOGIN_URL` / `EBS_SEARCH_URL` | Endpoints do EBS. |
+| `VERIFY_SSL` | false | Verificação TLS das chamadas. |
+| `TIMEOUT_SECONDS` / `MAX_WORKERS` | Timeout e paralelismo das consultas. |
+| `CREDENTIALS_DIRECTORY` | Diretório de credenciais protegidas (`ebs_public_username`/`password`) usadas por consulta pública/consulta-times/CAPEX. |
 
-> **Correios**: no servidor novo **não** use env — as credenciais vêm do cofre
-> `vcreports_secret`.
+### ServiceNow (proxy + conta de serviço)
+| Variável | Padrão | Uso |
+|---|---|---|
+| `SN_PROXY` | — | Proxy de saída (escrita como usuário). **`http://10.115.30.135:8888`** |
+| `SN_API_PROXY` | (cai p/ SN_PROXY) | Proxy da leitura por conta de serviço. **Defina explicitamente** `http://10.115.30.135:8888` (senão pode cair no `https_proxy=cache...` e dar timeout). |
+| `SN_API_BASE` | https://renner.service-now.com | Base REST. |
+| `SN_API_USER` / `SN_API_PASS` | "" | Conta de serviço (`SIS.ZABBIXDCSN`) — sem isso os Indicadores não puxam. |
+| `SN_INDIC_QUEUE` | TI_N2_FLD_RNR_LOJAS_SPARE | Grupo/fila do SPARE. |
+| `SN_TMA_START_FIELD` | u_data_bouncing | Campo "Data Bouncing" do TMA. |
+| `SN_SLA_NAME_LIKE` | SPARE | Só ANS cujo NOME contém isto (evita outras filas). Ajuste p/ o nome exato da ANS de Resolução se precisar. |
+| `SN_SLA_STAGE` | completed | Só ANS concluídas (evita falso estouro). |
+| `SN_SLA_EXTRA` | "" | Filtro extra opcional na task_sla. |
+| `SN_SLA_DATE_FIELD` | task.closed_at | Campo de data para alocar a ANS no mês. |
 
-### Subir o serviço
-```bash
-cd /var/www/vcreports/portal-spare
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
-python3 main.py            # ou via systemd (portal_spare.service)
-```
-Na subida, `init_db()` cria as tabelas e grava as configurações padrão.
+### Bancos isolados
+| Variável | Padrão | Uso |
+|---|---|---|
+| `INDICADORES_DATABASE_URL` | sqlite data/indicadores.db | Banco dos Indicadores. |
+| `ORCAMENTO_DATABASE_URL` | sqlite data/controle_orcamento.db | Banco do /tv2. |
+| `ORCAMENTO_EXEC_DATABASE_URL` | sqlite data/controle_orcamento_exec.db | Banco do /controle-orcamento. |
 
-### Migração para o servidor novo
-Ver **`docs/MIGRACAO_SERVIDOR_NOVO.md`** (MySQL/MariaDB, cofre de segredos, cópia
-de dados dos três bancos, proteção do servidor compartilhado).
+### EBS CAPEX API (/controle-orcamento)
+| Variável | Padrão | Uso |
+|---|---|---|
+| `EBS_CAPEX_URL` | https://suporte.lojasrenner.com.br/ebs/api/capex/ | Endpoint. |
+| `EBS_CAPEX_PROXY` | "" | Proxy (interno, normalmente vazio). |
+| `EBS_CAPEX_TIMEOUT` / `EBS_CAPEX_VERIFY` | 30 / false | Timeout / TLS. |
+| `EBS_CAPEX_USER` / `EBS_CAPEX_PASS` | "" | Basic auth (fallback). |
+| `EBS_CAPEX_TOKEN` / `EBS_CAPEX_TOKEN_SCHEME` / `EBS_CAPEX_AUTH_HEADER` | "" / Bearer / Authorization | Token/header (fallback). |
+| `EBS_CAPEX_ARS_BRL` / `EBS_CAPEX_UYU_BRL` | 0 | Cotação (R$ por 1 peso). 0 = tenta ao vivo. |
+| `EBS_CAPEX_FX_URL` / `EBS_CAPEX_FX_PROXY` | awesomeapi / "" | Cotação ao vivo (best-effort). |
+
+### Cofre (`vcreports_secrets`) — não vão em env no servidor novo
+- **Correios**: `CORREIOS_USUARIO`, `CORREIOS_CHAVE`, `CORREIOS_CARTOES`, `CORREIOS_DR`, `CORREIOS_CONTRATO` (função `vcreports_secret`).
+- **Oracle EBS**: `ORACLE_EBS_USER`, `ORACLE_EBS_PASS`, `ORACLE_EBS_DSN`, `ORACLE_CLIENT_LIB_DIR` (função `s`).
 
 ---
 
-## 8. Mapa rápido de rotas
+## 9. Mapa de rotas
 
-**Páginas:** `/` (portal) · `/tv` · `/tv2` · `/controle-orcamento` · `/indicadores`
+**Páginas:** `/` · `/tv` · `/tv2` · `/controle-orcamento` · `/indicadores`
 
 **API (prefixos):**
 - `/api/auth/*` — login, logout, sessão, troca de senha, sessão ServiceNow.
 - `/api/consulta*` — consulta de ativos.
-- `/api/recebimento*`, `/api/recebimentos*`, `/api/lotes*` — recebimento e lotes.
+- `/api/recebimento* · /recebimentos* · /lotes*` — recebimento e lotes.
 - `/api/identificacao/*` — etiquetas e impressoras.
-- `/api/servicenow/*` — entrada, saída, incidentes, relatórios, Correios,
-  encerramento.
+- `/api/servicenow/*` — entrada, saída (search/search_lote/move), incidentes, relatórios, Correios, encerramento.
 - `/api/reparos*` — reparos e dashboard.
 - `/api/parametros/*` — administração.
-- `/api/status`, `/api/dashboard/summary`, `/api/tv/dashboard` — status e TV.
-- `/api/controle-orcamento/*`, `/api/indicadores/*` — módulos isolados.
+- `/api/status · /dashboard/summary · /tv/dashboard` — status e TV.
+- `/api/controle-orcamento/*` (/tv2) · `/api/controle-orcamento-exec/*` (/controle-orcamento) · `/api/indicadores/*` — módulos isolados.
 - `/api/public-assets/*` — consulta pública de ativos EBS (sem login).
 
 ---
 
-## 9. Documentos relacionados
+## 10. Operação e deploy
 
+**Rodar:**
+```bash
+cd <caminho>            # /opt/portal-spare-v2 (atual) ou /var/www/vcreports/portal-spare (novo)
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python3 main.py         # init_db cria as tabelas; ou via systemd portal_spare.service
+```
+
+**Deploy (servidor atual):** via **git bundle** do `main`
+(`git fetch <bundle> main && git reset --hard FETCH_HEAD`) — o `git` pessoal e o
+GitHub podem estar bloqueados; o **build do React já vem versionado** (não precisa
+Node). Rodar o git **sem** `https_proxy` malformado (`env -u https_proxy ...`).
+Mudança só de arquivo estático → basta substituir o arquivo (sem restart).
+Mudança de `.py`/config → **reiniciar o serviço**.
+
+**Migração para o servidor novo:** MySQL/MariaDB (3 schemas separados), cofre
+`vcreports_secret`, cópia de dados via `scripts/migrar_pg_para_mysql.py`. Doc:
+`docs/MIGRACAO_SERVIDOR_NOVO.md`.
+
+**Gotchas conhecidos (importantes):**
+- **Proxy ServiceNow**: use `http://10.115.30.135:8888` (defina `SN_API_PROXY` no env do serviço; o `cache.lojasrenner.com.br` dá timeout).
+- **API do ServiceNow**: só **GET** (POST → "Method not Supported").
+- **CSP**: `script-src 'self'` → JS de página **sempre em arquivo externo**.
+- **Bundle/git**: senha do proxy corporativo tem `@` (quebra a URL do git) → rode git com `env -u https_proxy ...` (bundle local não precisa de proxy).
+
+---
+
+## 11. Documentos relacionados
 | Arquivo | Assunto |
 |---|---|
-| `docs/MIGRACAO_SERVIDOR_NOVO.md` | Migração para o servidor novo (MySQL + cofre). |
-| `docs/CORREIOS_SERVICENOW.md` | Detalhes da integração Correios/ServiceNow. |
+| `docs/MIGRACAO_SERVIDOR_NOVO.md` | Migração p/ o servidor novo (MySQL + cofre). |
+| `docs/EBS_ORACLE_BASE.md` | Camada de acesso Oracle EBS + catálogo de tabelas padrão. |
+| `docs/CORREIOS_SERVICENOW.md` | Integração Correios/ServiceNow. |
 | `docs/CONTROLE_ORCAMENTO.md` | Módulo Controle de Orçamento. |
-| `docs/MIGRACAO_CONTROLE_ORCAMENTO.md` | Migração do Controle de Orçamento. |
-| `docs/MIGRACAO.md` | Notas gerais de migração. |
+| `docs/DOCUMENTACAO_SISTEMA.html` | Versão HTML navegável desta documentação. |
