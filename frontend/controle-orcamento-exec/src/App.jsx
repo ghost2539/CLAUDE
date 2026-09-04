@@ -316,7 +316,8 @@ function DonutChart({ data, colors }) {
         )}
       </div>
       <ul className="flex-1 space-y-1.5 text-xs">
-        {data.map((d) => (
+        {slices.length === 0 && <li className="text-gray-400">Sem categorias com valor</li>}
+        {slices.map((d) => (
           <li key={d.name} className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-sm shrink-0" style={{ background: colors[d.name] }} />
             <span className="text-gray-700 truncate">{d.name}</span>
@@ -676,8 +677,15 @@ export default function App() {
   }, [categorias, derived]);
   const coresCategoria = useMemo(() => {
     const m = {};
-    categorias.forEach((c) => { m[c.nome] = c.cor || COR_CATEGORIA_PADRAO; });
-    nomesCategoria.forEach((n) => { if (!m[n]) m[n] = COR_CATEGORIA_PADRAO; });
+    // Categorias sem cor real (ou na cor padrão cinza) recebem uma cor da
+    // paleta por índice, para o gráfico não ficar todo cinza.
+    let i = 0;
+    const proxima = () => PALETA_CATEGORIAS[i++ % PALETA_CATEGORIAS.length];
+    categorias.forEach((c) => {
+      const cor = (c.cor || "").toLowerCase();
+      m[c.nome] = (!cor || cor === COR_CATEGORIA_PADRAO) ? proxima() : c.cor;
+    });
+    nomesCategoria.forEach((n) => { if (!m[n]) m[n] = proxima(); });
     return m;
   }, [categorias, nomesCategoria]);
   const usosCategoria = useMemo(() => {
