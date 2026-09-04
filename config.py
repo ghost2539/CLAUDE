@@ -80,6 +80,15 @@ class Settings:
     EBS_CAPEX_PROXY: str = os.getenv("EBS_CAPEX_PROXY", "")
     EBS_CAPEX_TIMEOUT: int = int(os.getenv("EBS_CAPEX_TIMEOUT", "30"))
     EBS_CAPEX_VERIFY: bool = os.getenv("EBS_CAPEX_VERIFY", "false").lower() == "true"
+    # Autenticação da API de CAPEX (a API exige credencial em chamadas de servidor).
+    # Opção A — Basic auth (usuário/senha):
+    EBS_CAPEX_USER: str = os.getenv("EBS_CAPEX_USER", "")
+    EBS_CAPEX_PASS: str = os.getenv("EBS_CAPEX_PASS", "")
+    # Opção B — token/header (ex.: Bearer). Se EBS_CAPEX_TOKEN estiver definido,
+    # é enviado como  "<EBS_CAPEX_TOKEN_SCHEME> <token>"  no header indicado.
+    EBS_CAPEX_TOKEN: str = os.getenv("EBS_CAPEX_TOKEN", "")
+    EBS_CAPEX_TOKEN_SCHEME: str = os.getenv("EBS_CAPEX_TOKEN_SCHEME", "Bearer")
+    EBS_CAPEX_AUTH_HEADER: str = os.getenv("EBS_CAPEX_AUTH_HEADER", "Authorization")
 
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
