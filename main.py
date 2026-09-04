@@ -98,6 +98,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Controle de Orçamento — Execução CAPEX em /controle-orcamento ───
+    # Clone independente do /tv2, com banco próprio e integração à API de
+    # CAPEX do EBS. Carregamento isolado (nunca derruba o portal).
+    try:
+        from routers.controle_orcamento_exec import router as controle_orcamento_exec_router
+        app.include_router(controle_orcamento_exec_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("controle_orcamento_exec").error(
+            "Módulo Controle de Orçamento/Execução (/controle-orcamento) NÃO carregado: %s",
+            exc, exc_info=True,
+        )
+
     # ── Indicadores (RMR) em /indicadores (código e banco próprios) ─────
     # Carregamento isolado: qualquer erro (arquivo, dependência, banco) é
     # apenas registrado no log e o portal sobe normalmente sem ele.
