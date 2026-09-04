@@ -141,6 +141,14 @@
             $("#ch-lojas").innerHTML = '<div class="empty">Sem dados.</div>';
             $("#ch-subs").innerHTML = '<div class="empty">Sem dados.</div>';
         }
+        var ab = d.aberturas;
+        if (ab && ab.por_mes) {
+            colChart($("#ch-aberturas"), ab.por_mes.filter(function (m) { return m.total > 0; })
+                .map(function (m) { return { l: mesLbl(m.mes), v: m.total }; }), { color: C[5] });
+        } else if ($("#ch-aberturas")) {
+            $("#ch-aberturas").innerHTML = '<div class="empty">Sem dados de aberturas.</div>';
+        }
+
         if (tma && tma.tma) {
             colChart($("#ch-tma"), tma.tma.map(function (t) { return { l: t.categoria, v: t.dias }; }),
                 { color: C[5], fmt: function (v) { return v + " d"; } });
