@@ -55,6 +55,11 @@ EBS_CAPEX_URL = getattr(_cfg, "EBS_CAPEX_URL", "") or "https://suporte.lojasrenn
 EBS_CAPEX_PROXY = getattr(_cfg, "EBS_CAPEX_PROXY", "") or ""
 EBS_CAPEX_TIMEOUT = int(getattr(_cfg, "EBS_CAPEX_TIMEOUT", 0) or 30)
 EBS_CAPEX_VERIFY = bool(getattr(_cfg, "EBS_CAPEX_VERIFY", False))
+EBS_CAPEX_USER = getattr(_cfg, "EBS_CAPEX_USER", "") or ""
+EBS_CAPEX_PASS = getattr(_cfg, "EBS_CAPEX_PASS", "") or ""
+EBS_CAPEX_TOKEN = getattr(_cfg, "EBS_CAPEX_TOKEN", "") or ""
+EBS_CAPEX_TOKEN_SCHEME = getattr(_cfg, "EBS_CAPEX_TOKEN_SCHEME", "") or "Bearer"
+EBS_CAPEX_AUTH_HEADER = getattr(_cfg, "EBS_CAPEX_AUTH_HEADER", "") or "Authorization"
 
 
 # ── Página ────────────────────────────────────────────────────────
@@ -380,13 +385,59 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
 
     params = {"projetos": ",".join(numeros)}
     proxies = {"http": EBS_CAPEX_PROXY, "https": EBS_CAPEX_PROXY} if EBS_CAPEX_PROXY else None
-    try:
-        r = _req.get(
+    base_headers = {"Accept": "application/json"}
+
+    def _get(session, headers=None, auth=None):
+        return session.get(
             EBS_CAPEX_URL, params=params, timeout=EBS_CAPEX_TIMEOUT,
             verify=EBS_CAPEX_VERIFY, proxies=proxies,
+            headers=headers or base_headers, auth=auth,
         )
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"Falha ao acessar a API de CAPEX: {exc}")
+
+    r = None
+    ultimo_erro = None
+
+    # 1) MESMA autenticação do consulta-times: login no EBS (cookies/token) e
+    #    reuso da sessão. Re-autentica uma vez se a sessão expirou (401/403).
+    try:
+        from routers.public_assets import _auth as _ct_auth
+        import ebs_service
+        auth = _ct_auth()
+        r = _get(ebs_service._build_session(auth))
+        if r.status_code in (401, 403):
+            r = _get(ebs_service._build_session(_ct_auth(force=True)))
+    except Exception as exc:  # noqa: BLE001 — segue para credencial própria/fallback
+        ultimo_erro = exc
+        r = None
+
+    # 2) Fallback: credencial própria da API (Basic ou token), se configurada,
+    #    ou requisição simples.
+    if r is None or r.status_code in (401, 403):
+        try:
+            with _req.Session() as session:
+                headers = dict(base_headers)
+                auth = None
+                if EBS_CAPEX_TOKEN:
+                    headers[EBS_CAPEX_AUTH_HEADER] = f"{EBS_CAPEX_TOKEN_SCHEME} {EBS_CAPEX_TOKEN}".strip()
+                elif EBS_CAPEX_USER:
+                    auth = (EBS_CAPEX_USER, EBS_CAPEX_PASS)
+                r2 = _get(session, headers, auth)
+            # usa o fallback só se ele for melhor que o resultado anterior
+            if r is None or r2.status_code == 200:
+                r = r2
+        except Exception as exc:  # noqa: BLE001
+            if r is None:
+                raise ValueError(f"Falha ao acessar a API de CAPEX: {exc}")
+
+    if r is None:
+        raise ValueError(f"Falha ao acessar a API de CAPEX: {ultimo_erro}")
+    if r.status_code in (401, 403):
+        www = r.headers.get("WWW-Authenticate", "")
+        raise ValueError(
+            f"API de CAPEX retornou HTTP {r.status_code} (não autorizado)."
+            + (f" Esquema exigido: {www}." if www else "")
+            + " Confirme se as credenciais de acesso ao EBS (as mesmas do consulta-times) estão configuradas."
+        )
     if r.status_code != 200:
         raise ValueError(f"API de CAPEX retornou HTTP {r.status_code}.")
     try:
