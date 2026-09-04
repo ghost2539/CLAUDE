@@ -152,17 +152,48 @@ def _sn_login(username: str, password: str):
     return cookies
 
 
+class _LoginFailed(Exception):
+    """Falha controlada de login. `pendente=True` marca casos em que o usuário
+    autenticou na rede mas não está liberado — registramos como pendente para
+    o admin poder liberar depois."""
+    def __init__(self, detail: str, pendente: bool = False):
+        super().__init__(detail)
+        self.detail = detail
+        self.pendente = pendente
+
+
+def _registrar_falha(login: str, source: str, detail: str, ip: str, pendente: bool) -> None:
+    """Registra a tentativa falha em transação PRÓPRIA (não é revertida junto
+    com o login). Se `pendente`, garante o usuário na base como allowed=False,
+    para aparecer em Parâmetros e poder ser liberado pelo admin."""
+    try:
+        with SessionLocal.begin() as s:
+            s.add(AccessLog(
+                login=login, auth_source=source, success=False,
+                ip=ip, detail=detail[:500],
+            ))
+            if pendente:
+                u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
+                if not u:
+                    s.add(User(
+                        login=login, display_name=login, auth_source=source,
+                        active=True, is_admin=False, allowed=False,
+                    ))
+    except Exception:  # noqa: BLE001 — registro de falha nunca derruba o login
+        log.exception("Falha ao registrar tentativa de acesso de %s", login)
+
+
 @router.post("/login")
 def auth_login(body: LoginIn, req: Request):
     check_rate_limit(req, "login")
 
     login = body.username
     source = body.auth_type
-    detail = ""
 
-    with SessionLocal.begin() as s:
-        u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
-        try:
+    try:
+        with SessionLocal.begin() as s:
+            u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
+
             if source == "SN":
                 sn_cookies = _sn_login(login, body.password)
                 ebs_auth = None
@@ -178,15 +209,15 @@ def auth_login(body: LoginIn, req: Request):
             else:
                 # Local authentication
                 if not u or not u.active:
-                    raise ValueError("Usuário local inválido ou inativo.")
+                    raise _LoginFailed("Usuário local inválido ou inativo.")
                 if u.locked_until and u.locked_until > utcnow():
-                    raise ValueError("Usuário temporariamente bloqueado.")
+                    raise _LoginFailed("Usuário temporariamente bloqueado.")
                 if not verify_password(body.password, u.password_hash):
                     u.failed_attempts += 1
                     if u.failed_attempts >= 5:
                         u.locked_until = utcnow() + timedelta(minutes=15)
                         u.failed_attempts = 0
-                    raise ValueError("Usuário ou senha inválidos.")
+                    raise _LoginFailed("Usuário ou senha inválidos.")
                 ebs_auth = None
                 sn_cookies = None
 
@@ -207,21 +238,20 @@ def auth_login(body: LoginIn, req: Request):
                 s.flush()
 
             if not u.active:
-                raise ValueError("Usuário inativo.")
+                raise _LoginFailed("Usuário inativo.")
 
             # Check external access control
             if source == "SSO":
                 # SSO sempre exige liberação prévia (só usuários permitidos entram).
                 if not u.allowed and login.lower() != _cfg.INITIAL_ADMIN_LOGIN.lower():
-                    raise ValueError(
+                    raise _LoginFailed(
                         "Acesso ainda não liberado. Solicite a um administrador "
-                        "a liberação do seu usuário de rede."
-                    )
+                        "a liberação do seu usuário de rede.", pendente=True)
             elif source in ("SN", "AD"):
                 ac_row = s.get(Setting, "access_control")
                 block_external = (ac_row.value if ac_row else {}).get("block_external", False)
                 if block_external and not u.allowed:
-                    raise ValueError("Acesso negado. Usuário não autorizado.")
+                    raise _LoginFailed("Acesso negado. Usuário não autorizado.", pendente=True)
 
             # Ensure initial admin keeps admin flag
             if login == _cfg.INITIAL_ADMIN_LOGIN:
@@ -259,16 +289,14 @@ def auth_login(body: LoginIn, req: Request):
             set_session_cookie(resp, cookie_value)
             return resp
 
-        except Exception as e:
-            detail = str(e)
-            s.add(AccessLog(
-                login=login,
-                auth_source=source,
-                success=False,
-                ip=client_ip(req),
-                detail=detail[:500],
-            ))
-            raise HTTPException(401, detail)
+    except _LoginFailed as e:
+        _registrar_falha(login, source, e.detail, client_ip(req), e.pendente)
+        raise HTTPException(401, e.detail)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — falha de credencial externa etc.
+        _registrar_falha(login, source, str(e), client_ip(req), pendente=False)
+        raise HTTPException(401, str(e))
 
 
 @router.get("/me")
