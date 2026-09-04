@@ -234,6 +234,16 @@ const Icon = {
       <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   ),
+  lock: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  ),
+  lockOpen: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-2" />
+    </svg>
+  ),
   back: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
       <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
@@ -987,7 +997,7 @@ export default function App() {
                 {visiveis.map((p) => {
                   const st = STATUS_ESTILO[p.status];
                   return (
-                    <tr key={p.id} className="border-t border-gray-100 hover:bg-blue-50/30">
+                    <tr key={p.id} className={"border-t border-gray-100 " + (p.bloqueado ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-blue-50/30")}>
                       <td className="td">
                         <input className="cell-input font-medium text-gray-600 w-[96px]" value={p.codigo} onChange={(e) => handleUpdateProject(p.id, "codigo", e.target.value)} />
                       </td>
@@ -1039,6 +1049,12 @@ export default function App() {
                       </td>
                       <td className="td">
                         <div className="flex items-center justify-center gap-1">
+                          <button
+                            title={p.bloqueado ? "Bloqueado para o Atualizar (EBS) — clique para liberar" : "Bloquear: não alterar no Atualizar (EBS)"}
+                            onClick={() => handleUpdateProject(p.id, "bloqueado", !p.bloqueado)}
+                            className={"p-1 rounded " + (p.bloqueado ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-400 hover:text-amber-600 hover:bg-amber-50")}>
+                            {p.bloqueado ? Icon.lock : Icon.lockOpen}
+                          </button>
                           <button title="Duplicar" onClick={() => handleDuplicateProject(p.id)} className="p-1 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50">{Icon.copy}</button>
                           <button title="Excluir" onClick={() => handleDeleteProject(p.id)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>
                         </div>
