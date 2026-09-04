@@ -23,8 +23,8 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger, Date, DateTime, Integer, Numeric, String, create_engine, event,
-    func, select,
+    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, create_engine,
+    event, func, select,
 )
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -150,6 +150,7 @@ class BudgetProject(Base):
     committed: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)         # comprometido + reservados
     realized: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)          # realizado
     a_realizar: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)        # saldo_dia (pode ser negativo)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)                  # se True, "Atualizar (EBS)" NÃO altera
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -211,6 +212,8 @@ def _ensure_coluna_a_realizar() -> None:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN a_realizar NUMERIC(18,2) DEFAULT 0"))
         if "synced_at" not in cols:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN synced_at TIMESTAMP NULL"))
+        if "locked" not in cols:
+            conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN locked BOOLEAN DEFAULT 0"))
 
 
 def criar_tabelas() -> None:

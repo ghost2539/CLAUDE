@@ -172,6 +172,7 @@ class ProjetoIn(BaseModel):
     orcamento: Optional[Decimal] = None
     comprometido: Optional[Decimal] = None
     realizado: Optional[Decimal] = None
+    bloqueado: Optional[bool] = None
     vencimento: Optional[date] = None
 
     @field_validator("codigo", mode="before")
@@ -263,14 +264,14 @@ _CAMPOS = {
     "codigo": "code", "nome": "name", "tipo": "kind", "categoria": "category",
     "area": "area", "estagio": "stage", "prioridade": "priority",
     "orcamento": "approved_budget", "comprometido": "committed",
-    "realizado": "realized", "vencimento": "due_date",
+    "realizado": "realized", "bloqueado": "locked", "vencimento": "due_date",
 }
 
 _PADRAO = {
     "codigo": "", "nome": "Novo projeto", "tipo": "CAPEX", "categoria": "Outros",
     "area": "", "estagio": "Planejamento", "prioridade": "Média",
     "orcamento": Decimal("0"), "comprometido": Decimal("0"),
-    "realizado": Decimal("0"), "vencimento": None,
+    "realizado": Decimal("0"), "bloqueado": False, "vencimento": None,
 }
 
 
@@ -288,6 +289,7 @@ def _dict(p: BudgetProject) -> dict:
         "comprometido": float(p.committed or 0),
         "realizado": float(p.realized or 0),
         "a_realizar": float(p.a_realizar or 0),
+        "bloqueado": bool(p.locked),
         "vencimento": p.due_date.isoformat() if p.due_date else "",
         "ordem": p.sort_order,
         "sincronizado_em": p.synced_at.isoformat() if p.synced_at else None,
@@ -640,11 +642,15 @@ def sincronizar(req: Request):
     autor = _autor(req)
     rates = _fx_rates()
     atualizados = 0
+    bloqueados = 0
     nao_encontrados: list[str] = []
     avisos_fx: list[str] = []
     with SessionLocal.begin() as s:
         rows = s.scalars(_ordem_projetos()).all()
         for p in rows:
+            if p.locked:
+                bloqueados += 1
+                continue  # projeto travado: não é alterado pelo EBS
             linha = ebs.get((p.code or "").strip())
             if linha:
                 av = _aplicar_ebs(p, linha, rates)
@@ -655,10 +661,12 @@ def sincronizar(req: Request):
             elif p.code:
                 nao_encontrados.append(p.code)
     partes = []
+    if bloqueados:
+        partes.append(f"{bloqueados} projeto(s) bloqueado(s) não alterado(s)")
     if nao_encontrados:
         partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
     partes.extend(avisos_fx)
-    return {"atualizados": atualizados, "aviso": " · ".join(partes)}
+    return {"atualizados": atualizados, "bloqueados": bloqueados, "aviso": " · ".join(partes)}
 
 
 @router.post("/api/controle-orcamento-exec/projetos", status_code=201)
