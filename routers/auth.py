@@ -104,7 +104,8 @@ def _user_payload(u: User, perms: dict) -> dict:
         "role": "ADMIN" if u.is_admin else "USUÁRIO",
         "is_admin": u.is_admin,
         "auth_source": u.auth_source,
-        "must_change_password": u.must_change_password,
+        # Troca de senha obrigatória desativada: nunca força a troca no acesso.
+        "must_change_password": False,
         "permissions": (
             ["admin"] if u.is_admin
             else [k for k, v in perms.items() if v.get("can_view")]

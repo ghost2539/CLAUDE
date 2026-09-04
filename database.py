@@ -351,7 +351,7 @@ def init_db() -> None:
                 is_admin=True,
                 active=True,
                 password_hash=hash_password(password) if password else None,
-                must_change_password=bool(password),
+                must_change_password=False,
             )
             s.add(u)
         else:

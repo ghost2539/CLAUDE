@@ -455,11 +455,11 @@ def user_create(body: UserCreateIn, req: Request):
             raise HTTPException(409, "Usuário já existe.")
 
         if body.auth_source == "LOCAL":
-            # Usuário local: sempre gera senha temporária e obriga a troca
-            # no primeiro acesso. Ignora qualquer senha enviada pela tela.
+            # Usuário local: gera uma senha temporária para o admin repassar.
+            # A troca obrigatória no primeiro acesso foi desativada.
             senha_temporaria = _gerar_senha_temporaria()
             pwd_hash = hash_password(senha_temporaria)
-            must_change = True
+            must_change = False
         else:
             # AD/SN: autenticação externa, sem senha local.
             pwd_hash = None
