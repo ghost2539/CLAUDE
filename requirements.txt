@@ -6,6 +6,9 @@ psycopg[binary]>=3.1,<4
 # 'cryptography' é exigido pelo auth caching_sha2_password do MySQL 8.
 PyMySQL>=1.1,<2
 cryptography>=42
+# Driver Oracle (EBS) — usado só pelo módulo ebs_oracle.py (leitura no EBSPRD).
+# Modo thick usa o Instant Client (ORACLE_CLIENT_LIB_DIR); sem ele cai para thin.
+oracledb>=2.0,<4
 python-multipart>=0.0.9
 requests>=2.31
 pandas>=2.2
