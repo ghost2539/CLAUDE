@@ -67,6 +67,20 @@ class Settings:
     # interno varia por instância; ajuste se necessário.
     SN_TMA_START_FIELD: str = os.getenv("SN_TMA_START_FIELD", "u_data_bouncing")
 
+    # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
+    # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
+    ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
+        "ORCAMENTO_EXEC_DATABASE_URL",
+        f"sqlite:///{(ROOT / 'data' / 'controle_orcamento_exec.db').as_posix()}",
+    )
+    # API de CAPEX do EBS (preenche os valores dos projetos).
+    EBS_CAPEX_URL: str = os.getenv(
+        "EBS_CAPEX_URL", "https://suporte.lojasrenner.com.br/ebs/api/capex/"
+    )
+    EBS_CAPEX_PROXY: str = os.getenv("EBS_CAPEX_PROXY", "")
+    EBS_CAPEX_TIMEOUT: int = int(os.getenv("EBS_CAPEX_TIMEOUT", "30"))
+    EBS_CAPEX_VERIFY: bool = os.getenv("EBS_CAPEX_VERIFY", "false").lower() == "true"
+
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio"

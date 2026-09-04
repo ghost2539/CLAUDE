@@ -1,20 +1,21 @@
-"""Controle de Orçamento de Portfólio (CAPEX/OPEX) — módulo oculto.
+"""Controle de Orçamento — Execução CAPEX (clone independente do /tv2).
 
-Serve o dashboard React em ``/tv2`` e a API REST usada por ele.
-O módulo faz parte do sistema mas NÃO aparece no menu do portal (não está em
-``Settings.MODULES`` nem na sidebar de ``static/index.html``): o acesso é feito
-diretamente pela URL ``http://<ip-do-servidor>:<porta>/tv2``
-(``/controle-orcamento`` redireciona para lá).
+Servido em ``/controle-orcamento`` (e ``/controle-orçamento``), com banco
+PRÓPRIO e SEPARADO (``database_orcamento_exec.py``). NÃO compartilha dados nem
+código de estado com o /tv2.
 
-Acesso: livre (sem login), como a consulta pública. Se houver sessão ativa,
-o usuário é registrado em ``updated_by``; caso contrário registra-se o IP.
-As gravações passam pelo rate limit de API por IP.
+Novidade em relação ao /tv2: barra de inclusão de projetos no topo (Número,
+Tipo, Projeto/Demanda, Categoria, Área) e integração com a API de CAPEX do EBS
+(``suporte.lojasrenner.com.br/ebs/api/capex/?projetos=...``), que preenche os
+valores financeiros:
 
-Os projetos ficam em um banco EXCLUSIVO deste módulo (``database_orcamento.py``,
-por padrão SQLite em ``data/controle_orcamento.db``), sem tocar no banco do portal.
-Os assets (``static/controle-orcamento/app.js`` e ``app.css``) são gerados a
-partir de ``frontend/controle-orcamento`` (``npm run build``) e versionados no
-repositório, pois o servidor não possui Node.js.
+  saldo_inicial            → Orçamento Aprovado
+  comprometido+reservados  → Comprometido
+  realizado                → Realizado (Acum.)
+  saldo_dia                → A Realizar
+  (empresa, devolucoes, pct_exec, nome_projeto: NÃO são puxados)
+
+Acesso livre (sem login), como o /tv2. As gravações passam pelo rate limit.
 """
 from __future__ import annotations
 
@@ -33,35 +34,37 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 
 from config import get_settings
-from database_orcamento import BudgetCategory, BudgetProject, SessionLocal, ensure_db
+from database_orcamento_exec import (
+    BudgetCategory, BudgetProject, SessionLocal, ensure_db, utcnow,
+)
 from security import check_rate_limit, client_ip, get_session
 
 _cfg = get_settings()
-_DIR = _cfg.STATIC / "controle-orcamento"
-_log = logging.getLogger("controle_orcamento")
+_DIR = _cfg.STATIC / "controle-orcamento-exec"
+_log = logging.getLogger("controle_orcamento_exec")
 
-router = APIRouter(tags=["Controle de Orçamento"], include_in_schema=False)
-
-# Nenhuma inicialização em tempo de import: a tabela do banco separado é
-# criada na primeira requisição à API (ver _com_banco / ensure_db).
+router = APIRouter(tags=["Controle de Orçamento (Execução)"], include_in_schema=False)
 
 TIPOS = ("CAPEX", "OPEX")
-# Categorias: cadastradas pelo usuário (tabela budget_categories)
 ESTAGIOS = ("Planejamento", "Aprovação", "Em Execução", "Concluído")
 PRIORIDADES = ("Alta", "Média", "Baixa")
-_MAX_VALOR = Decimal("9999999999999.99")  # limite do Numeric(18, 2)
+_MAX_VALOR = Decimal("9999999999999.99")
+
+# ── Config da API de CAPEX do EBS (com padrões; ajustáveis por env) ──
+EBS_CAPEX_URL = getattr(_cfg, "EBS_CAPEX_URL", "") or "https://suporte.lojasrenner.com.br/ebs/api/capex/"
+EBS_CAPEX_PROXY = getattr(_cfg, "EBS_CAPEX_PROXY", "") or ""
+EBS_CAPEX_TIMEOUT = int(getattr(_cfg, "EBS_CAPEX_TIMEOUT", 0) or 30)
+EBS_CAPEX_VERIFY = bool(getattr(_cfg, "EBS_CAPEX_VERIFY", False))
 
 
 # ── Página ────────────────────────────────────────────────────────
-
 @lru_cache
 def _asset_version() -> str:
-    """Hash curto dos assets compilados, usado para cache-busting."""
     h = hashlib.sha256()
     for name in ("app.js", "app.css"):
-        path = _DIR / name
-        if path.exists():
-            h.update(path.read_bytes())
+        p = _DIR / name
+        if p.exists():
+            h.update(p.read_bytes())
     return h.hexdigest()[:10]
 
 
@@ -70,22 +73,22 @@ def _page() -> HTMLResponse:
     return HTMLResponse(html.replace("{{v}}", _asset_version()))
 
 
-@router.get("/tv2", response_class=HTMLResponse)
-def tv2():
-    """Página do módulo — acesso livre, sem autenticação."""
+@router.get("/controle-orcamento", response_class=HTMLResponse)
+def pagina():
     return _page()
 
 
-@router.get("/tv2/", response_class=HTMLResponse)
-def tv2_slash():
+@router.get("/controle-orcamento/", response_class=HTMLResponse)
+def pagina_slash():
     return _page()
 
-# Obs.: /controle-orcamento agora é servido pelo módulo separado
-# routers/controle_orcamento_exec.py (dashboard de Execução CAPEX, banco próprio).
+
+@router.get("/controle-orçamento", response_class=HTMLResponse)
+def pagina_acento():
+    return _page()
 
 
 # ── Validação ─────────────────────────────────────────────────────
-
 def _texto(v: Any, limite: int) -> str:
     return str(v if v is not None else "").strip()[:limite]
 
@@ -101,6 +104,21 @@ def _valor(v: Any) -> Decimal:
         raise ValueError("Valores não podem ser negativos.")
     if d > _MAX_VALOR:
         raise ValueError("Valor acima do limite permitido.")
+    return d
+
+
+def _valor_signed(v: Any) -> Decimal:
+    """Como _valor, mas aceita negativo (ex.: saldo_dia)."""
+    if v is None or v == "":
+        return Decimal("0")
+    try:
+        d = Decimal(str(v)).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+    if d > _MAX_VALOR:
+        d = _MAX_VALOR
+    if d < -_MAX_VALOR:
+        d = -_MAX_VALOR
     return d
 
 
@@ -123,8 +141,7 @@ def _data(v: Any) -> Optional[date]:
 
 
 class ProjetoIn(BaseModel):
-    """Campos editáveis de um projeto. Todos opcionais: no PATCH só os
-    enviados são alterados; no POST os ausentes recebem o padrão."""
+    """Campos editáveis pela tabela. a_realizar NÃO entra aqui: vem do EBS."""
     model_config = ConfigDict(extra="forbid")
 
     codigo: Optional[str] = None
@@ -162,7 +179,6 @@ class ProjetoIn(BaseModel):
     @field_validator("categoria", mode="before")
     @classmethod
     def _v_categoria(cls, v):
-        # existência verificada no banco (categorias são cadastráveis)
         return None if v is None else _texto(v, 60)
 
     @field_validator("estagio", mode="before")
@@ -186,33 +202,57 @@ class ProjetoIn(BaseModel):
         return _data(v)
 
 
-# Mapeamento campo da API → coluna do modelo
+class IncluirIn(BaseModel):
+    """Barra de inclusão: Número (puxa do EBS), Tipo, Projeto/Demanda,
+    Categoria, Área. O nome (Projeto/Demanda) é MANUAL — não vem do EBS."""
+    model_config = ConfigDict(extra="forbid")
+    numero: str
+    tipo: str = "CAPEX"
+    projeto_demanda: str = ""
+    categoria: str = ""
+    area: str = ""
+
+    @field_validator("numero", mode="before")
+    @classmethod
+    def _v_numero(cls, v):
+        v = _texto(v, 200)
+        if not v:
+            raise ValueError("Informe o número do projeto.")
+        return v
+
+    @field_validator("tipo", mode="before")
+    @classmethod
+    def _v_tipo(cls, v):
+        return _opcao(v or "CAPEX", TIPOS, "Tipo")
+
+    @field_validator("projeto_demanda", mode="before")
+    @classmethod
+    def _v_dem(cls, v):
+        return _texto(v, 300)
+
+    @field_validator("categoria", mode="before")
+    @classmethod
+    def _v_cat(cls, v):
+        return _texto(v, 60)
+
+    @field_validator("area", mode="before")
+    @classmethod
+    def _v_area(cls, v):
+        return _texto(v, 120)
+
+
 _CAMPOS = {
-    "codigo": "code",
-    "nome": "name",
-    "tipo": "kind",
-    "categoria": "category",
-    "area": "area",
-    "estagio": "stage",
-    "prioridade": "priority",
-    "orcamento": "approved_budget",
-    "comprometido": "committed",
-    "realizado": "realized",
-    "vencimento": "due_date",
+    "codigo": "code", "nome": "name", "tipo": "kind", "categoria": "category",
+    "area": "area", "estagio": "stage", "prioridade": "priority",
+    "orcamento": "approved_budget", "comprometido": "committed",
+    "realizado": "realized", "vencimento": "due_date",
 }
 
 _PADRAO = {
-    "codigo": "",
-    "nome": "Novo projeto",
-    "tipo": "CAPEX",
-    "categoria": "Outros",
-    "area": "",
-    "estagio": "Planejamento",
-    "prioridade": "Média",
-    "orcamento": Decimal("0"),
-    "comprometido": Decimal("0"),
-    "realizado": Decimal("0"),
-    "vencimento": None,
+    "codigo": "", "nome": "Novo projeto", "tipo": "CAPEX", "categoria": "Outros",
+    "area": "", "estagio": "Planejamento", "prioridade": "Média",
+    "orcamento": Decimal("0"), "comprometido": Decimal("0"),
+    "realizado": Decimal("0"), "vencimento": None,
 }
 
 
@@ -229,8 +269,10 @@ def _dict(p: BudgetProject) -> dict:
         "orcamento": float(p.approved_budget or 0),
         "comprometido": float(p.committed or 0),
         "realizado": float(p.realized or 0),
+        "a_realizar": float(p.a_realizar or 0),
         "vencimento": p.due_date.isoformat() if p.due_date else "",
         "ordem": p.sort_order,
+        "sincronizado_em": p.synced_at.isoformat() if p.synced_at else None,
         "atualizado_em": p.updated_at.isoformat() if p.updated_at else None,
         "atualizado_por": p.updated_by,
     }
@@ -238,6 +280,15 @@ def _dict(p: BudgetProject) -> dict:
 
 def _categoria_existe(s, nome: str) -> bool:
     return bool(s.scalar(select(BudgetCategory.id).where(BudgetCategory.name == nome)))
+
+
+def _garantir_categoria(s, nome: str) -> None:
+    """Cria a categoria se ainda não existir (a barra de inclusão é rápida)."""
+    nome = (nome or "").strip()
+    if not nome or _categoria_existe(s, nome):
+        return
+    proximo = (s.scalar(select(func.max(BudgetCategory.sort_order))) or 0) + 1
+    s.add(BudgetCategory(name=nome[:60], color="#9ca3af", sort_order=proximo))
 
 
 def _checar_categoria(s, dados: dict) -> None:
@@ -298,8 +349,6 @@ def _ordem_projetos():
 
 
 def _com_banco(fn):
-    """Converte falhas de conexão do banco do módulo em 503 (sem stack trace),
-    mantendo o restante do portal alheio a este banco."""
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
@@ -307,24 +356,75 @@ def _com_banco(fn):
             return fn(*args, **kwargs)
         except HTTPException:
             raise
-        except Exception as exc:  # noqa: BLE001 — isolar o módulo do restante do portal
-            _log.error("Banco do Controle de Orçamento indisponível: %s", exc, exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            _log.error("Banco do Controle de Orçamento (Execução) indisponível: %s", exc, exc_info=True)
             raise HTTPException(503, "Banco de dados do módulo indisponível. Tente novamente mais tarde.")
     return wrapper
 
 
-# ── API ───────────────────────────────────────────────────────────
+# ── Integração EBS (API de CAPEX) ─────────────────────────────────
+def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
+    """Consulta a API de CAPEX do EBS e devolve {numero: linha_json}.
 
-@router.get("/api/controle-orcamento/sessao")
+    Levanta ValueError com mensagem amigável em caso de falha de rede/HTTP.
+    """
+    numeros = [n.strip() for n in numeros if n and n.strip()]
+    if not numeros:
+        return {}
+    try:
+        import requests as _req
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        raise ValueError("Pacote 'requests' não instalado no servidor.")
+
+    params = {"projetos": ",".join(numeros)}
+    proxies = {"http": EBS_CAPEX_PROXY, "https": EBS_CAPEX_PROXY} if EBS_CAPEX_PROXY else None
+    try:
+        r = _req.get(
+            EBS_CAPEX_URL, params=params, timeout=EBS_CAPEX_TIMEOUT,
+            verify=EBS_CAPEX_VERIFY, proxies=proxies,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Falha ao acessar a API de CAPEX: {exc}")
+    if r.status_code != 200:
+        raise ValueError(f"API de CAPEX retornou HTTP {r.status_code}.")
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        raise ValueError("API de CAPEX retornou resposta não-JSON.")
+    out: dict[str, dict] = {}
+    for linha in (data.get("projetos") or []):
+        chave = str(linha.get("nro_projeto") or "").strip()
+        if chave:
+            out[chave] = linha
+    return out
+
+
+def _aplicar_ebs(p: BudgetProject, linha: dict) -> None:
+    """Preenche os campos financeiros do projeto a partir da linha do EBS.
+    NÃO altera nome/tipo/categoria/área (esses são definidos pelo usuário)."""
+    saldo_inicial = _valor(linha.get("saldo_inicial"))
+    comprometido = _valor(linha.get("comprometido"))
+    reservados = _valor(linha.get("reservados"))
+    realizado = _valor(linha.get("realizado"))
+    p.approved_budget = saldo_inicial
+    p.committed = (comprometido + reservados).quantize(Decimal("0.01"))
+    p.realized = realizado
+    p.a_realizar = _valor_signed(linha.get("saldo_dia"))
+    p.synced_at = utcnow()
+
+
+# ── API ───────────────────────────────────────────────────────────
+@router.get("/api/controle-orcamento-exec/sessao")
 def sessao(req: Request):
-    """Usuário logado no portal, se houver. Sempre 200 (a tela é pública)."""
     sd = get_session(req, required=False)
     if not sd:
         return {"usuario": None}
     return {"usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")}}
 
 
-@router.get("/api/controle-orcamento/projetos")
+@router.get("/api/controle-orcamento-exec/projetos")
 @_com_banco
 def listar_projetos():
     with SessionLocal() as s:
@@ -340,7 +440,88 @@ def listar_projetos():
         }
 
 
-@router.post("/api/controle-orcamento/projetos", status_code=201)
+@router.post("/api/controle-orcamento-exec/incluir", status_code=201)
+@_com_banco
+def incluir(body: IncluirIn, req: Request):
+    """Inclui um ou mais projetos (número separado por vírgula) e já puxa os
+    valores do EBS. O Projeto/Demanda é o informado aqui (não vem do EBS)."""
+    check_rate_limit(req, "api")
+    numeros = [n.strip() for n in body.numero.split(",") if n.strip()]
+    if not numeros:
+        raise HTTPException(422, "Informe ao menos um número de projeto.")
+
+    # Consulta o EBS (não-fatal: se falhar, inclui com zeros e avisa)
+    ebs: dict[str, dict] = {}
+    aviso = ""
+    try:
+        ebs = _ebs_capex(numeros)
+    except ValueError as exc:
+        aviso = str(exc)
+
+    autor = _autor(req)
+    criados: list[dict] = []
+    nao_encontrados: list[str] = []
+    with SessionLocal.begin() as s:
+        _garantir_categoria(s, body.categoria)
+        base_ordem = (s.scalar(select(func.max(BudgetProject.sort_order))) or 0)
+        for i, numero in enumerate(numeros, start=1):
+            p = BudgetProject(
+                code=numero[:40],
+                name=body.projeto_demanda,
+                kind=body.tipo,
+                category=body.categoria or "Outros",
+                area=body.area,
+                sort_order=base_ordem + i,
+                updated_by=autor,
+            )
+            linha = ebs.get(numero)
+            if linha:
+                _aplicar_ebs(p, linha)
+            else:
+                if not aviso:
+                    nao_encontrados.append(numero)
+            s.add(p)
+            s.flush()
+            criados.append(_dict(p))
+
+    if nao_encontrados and not aviso:
+        aviso = "Não encontrado(s) no EBS: " + ", ".join(nao_encontrados)
+    return {"projetos": criados, "aviso": aviso}
+
+
+@router.post("/api/controle-orcamento-exec/sincronizar")
+@_com_banco
+def sincronizar(req: Request):
+    """Atualiza os valores financeiros de TODOS os projetos a partir do EBS."""
+    check_rate_limit(req, "api")
+    with SessionLocal() as s:
+        rows = s.scalars(_ordem_projetos()).all()
+        codigos = [p.code.strip() for p in rows if p.code and p.code.strip()]
+    if not codigos:
+        return {"atualizados": 0, "aviso": "Nenhum projeto com número para sincronizar."}
+    try:
+        ebs = _ebs_capex(codigos)
+    except ValueError as exc:
+        raise HTTPException(502, str(exc))
+
+    autor = _autor(req)
+    atualizados = 0
+    nao_encontrados: list[str] = []
+    with SessionLocal.begin() as s:
+        rows = s.scalars(_ordem_projetos()).all()
+        for p in rows:
+            linha = ebs.get((p.code or "").strip())
+            if linha:
+                _aplicar_ebs(p, linha)
+                p.updated_by = autor
+                atualizados += 1
+            elif p.code:
+                nao_encontrados.append(p.code)
+    aviso = ("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados)) if nao_encontrados else ""
+    return {"atualizados": atualizados, "aviso": aviso}
+
+
+@router.post("/api/controle-orcamento-exec/projetos", status_code=201)
 @_com_banco
 def criar_projeto(body: ProjetoIn, req: Request):
     check_rate_limit(req, "api")
@@ -356,7 +537,7 @@ def criar_projeto(body: ProjetoIn, req: Request):
         return _dict(p)
 
 
-@router.patch("/api/controle-orcamento/projetos/{projeto_id}")
+@router.patch("/api/controle-orcamento-exec/projetos/{projeto_id}")
 @_com_banco
 def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
     check_rate_limit(req, "api")
@@ -368,7 +549,7 @@ def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
         _checar_categoria(s, dados)
         for campo, valor in dados.items():
             if campo == "vencimento":
-                p.due_date = valor  # None limpa a data
+                p.due_date = valor
             elif valor is not None:
                 setattr(p, _CAMPOS[campo], valor)
         p.updated_by = _autor(req)
@@ -376,7 +557,7 @@ def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
         return _dict(p)
 
 
-@router.delete("/api/controle-orcamento/projetos/{projeto_id}")
+@router.delete("/api/controle-orcamento-exec/projetos/{projeto_id}")
 @_com_banco
 def excluir_projeto(projeto_id: int, req: Request):
     check_rate_limit(req, "api")
@@ -388,10 +569,9 @@ def excluir_projeto(projeto_id: int, req: Request):
     return {"ok": True}
 
 
-@router.post("/api/controle-orcamento/projetos/{projeto_id}/duplicar", status_code=201)
+@router.post("/api/controle-orcamento-exec/projetos/{projeto_id}/duplicar", status_code=201)
 @_com_banco
 def duplicar_projeto(projeto_id: int, req: Request):
-    """Cria uma cópia logo após o projeto original (mesmo sort_order)."""
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         orig = s.get(BudgetProject, projeto_id)
@@ -403,7 +583,7 @@ def duplicar_projeto(projeto_id: int, req: Request):
             code=(orig.code + "-C")[:40] if orig.code else "",
         )
         for coluna in ("name", "kind", "category", "area", "stage", "priority",
-                       "approved_budget", "committed", "realized", "due_date"):
+                       "approved_budget", "committed", "realized", "a_realizar", "due_date"):
             setattr(copia, coluna, getattr(orig, coluna))
         s.add(copia)
         s.flush()
@@ -411,15 +591,14 @@ def duplicar_projeto(projeto_id: int, req: Request):
 
 
 # ── API: categorias ───────────────────────────────────────────────
-
-@router.get("/api/controle-orcamento/categorias")
+@router.get("/api/controle-orcamento-exec/categorias")
 @_com_banco
 def listar_categorias():
     with SessionLocal() as s:
         return {"categorias": _listar_categorias(s)}
 
 
-@router.post("/api/controle-orcamento/categorias", status_code=201)
+@router.post("/api/controle-orcamento-exec/categorias", status_code=201)
 @_com_banco
 def criar_categoria(body: CategoriaIn, req: Request):
     check_rate_limit(req, "api")
@@ -435,10 +614,9 @@ def criar_categoria(body: CategoriaIn, req: Request):
         return _cat_dict(c)
 
 
-@router.patch("/api/controle-orcamento/categorias/{categoria_id}")
+@router.patch("/api/controle-orcamento-exec/categorias/{categoria_id}")
 @_com_banco
 def atualizar_categoria(categoria_id: int, body: CategoriaIn, req: Request):
-    """Renomear propaga o novo nome aos projetos que usam a categoria."""
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         c = s.get(BudgetCategory, categoria_id)
@@ -457,7 +635,7 @@ def atualizar_categoria(categoria_id: int, body: CategoriaIn, req: Request):
         return _cat_dict(c)
 
 
-@router.delete("/api/controle-orcamento/categorias/{categoria_id}")
+@router.delete("/api/controle-orcamento-exec/categorias/{categoria_id}")
 @_com_banco
 def excluir_categoria(categoria_id: int, req: Request):
     check_rate_limit(req, "api")
@@ -467,6 +645,6 @@ def excluir_categoria(categoria_id: int, req: Request):
             raise HTTPException(404, "Categoria não encontrada.")
         em_uso = s.scalar(select(func.count()).select_from(BudgetProject).where(BudgetProject.category == c.name)) or 0
         if em_uso:
-            raise HTTPException(409, f"A categoria {c.name!r} está em uso por {em_uso} projeto(s). Altere a categoria desses projetos antes de excluir.")
+            raise HTTPException(409, f"A categoria {c.name!r} está em uso por {em_uso} projeto(s).")
         s.delete(c)
     return {"ok": True}
