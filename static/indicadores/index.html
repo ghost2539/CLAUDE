@@ -7,245 +7,161 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <style>
         :root{
-            --bg:#f4f5f7; --surface:#fff; --ink:#1f2733; --muted:#6b7280; --border:#e6e8eb;
-            --navy:#0f2138;
-            --c1:#2563EB; --c2:#D97706; --c3:#059669; --c4:#7C3AED; --c5:#DB2777; --c6:#0891B2;
-            --good:#16A34A; --bad:#DC2626;
+            --bg:#0A0F1A; --surface:#121A2A; --surface2:#0F1728; --panel:#16213480;
+            --ink:#E6EDF7; --ink2:#C4D0E2; --muted:#8A98AE; --faint:#5C6B82;
+            --border:#1F2C42; --border2:#2A3A55;
+            --accent:#F97316; --accent2:#FB923C;
+            --c1:#3B82F6; --c2:#0891B2; --c3:#22C55E; --c4:#A855F7; --c5:#EC4899; --c6:#F59E0B;
+            --good:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+            --grid:#22314A;
         }
         *{box-sizing:border-box}
         html,body{margin:0}
         body{background:var(--bg);color:var(--ink);
-            font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-        .topbar{background:var(--navy);color:#fff;height:60px;display:flex;align-items:center;gap:14px;padding:0 24px}
-        .topbar .logo{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;
-            background:linear-gradient(135deg,var(--c1),var(--c6));font-size:18px}
-        .topbar h1{font-size:19px;margin:0;font-weight:700}
-        .topbar .spacer{flex:1}
-        .ctrl{display:flex;align-items:center;gap:10px}
-        .ctrl select,.ctrl button{height:38px;border-radius:8px;border:1px solid rgba(255,255,255,.25);
-            background:rgba(255,255,255,.10);color:#fff;font-size:14px;padding:0 12px;cursor:pointer}
-        .ctrl button.primary{background:var(--c1);border-color:var(--c1);font-weight:600}
-        .wrap{padding:22px 24px 40px;max-width:1500px;margin:0 auto}
-        .status{font-size:13px;color:var(--muted);margin-bottom:14px}
-        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
-        .kpi{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--c1);
-            border-radius:14px;padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-        .kpi .lbl{color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px}
-        .kpi .val{font-size:30px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
-        .kpi.k2{border-left-color:var(--c3)} .kpi.k3{border-left-color:var(--c2)} .kpi.k4{border-left-color:var(--c4)}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-        .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
-            padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04);margin-bottom:16px}
-        .card h2{margin:0 0 12px;font-size:16px;font-weight:600}
-        .card .sub{color:var(--muted);font-size:12.5px;font-weight:400}
-        .empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
-        .err{color:var(--bad);font-size:13px;margin-top:6px}
+            font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px}
+        .app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+
+        /* Sidebar */
+        .side{background:var(--surface2);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+        .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
+        .brand .mk{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent2));font-size:16px;font-weight:800;color:#1A1206}
+        .brand .tt{font-weight:800;letter-spacing:.02em;font-size:14px}
+        .brand .st{font-size:10.5px;color:var(--muted);font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+        .nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:500;border-left:3px solid transparent}
+        .nav a:hover{background:#182339;color:var(--ink2)}
+        .nav a.active{background:#182742;color:#fff;border-left-color:var(--accent)}
+        .nav .dot{width:8px;height:8px;border-radius:3px;flex:none}
+        .side .foot{margin-top:auto;font-size:11px;color:var(--faint);padding:10px 8px;border-top:1px solid var(--border);line-height:1.5}
+        .side .foot b{color:var(--ink2);font-weight:600}
+
+        /* Topbar */
+        .top{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:linear-gradient(180deg,var(--bg),rgba(10,15,26,.92));z-index:20;backdrop-filter:blur(6px)}
+        .top h1{font-size:18px;margin:0;font-weight:800;letter-spacing:-.01em}
+        .top .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+        .top .spacer{flex:1}
+        .refresh-ind{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+        .refresh-ind .live{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(34,197,94,.5);animation:pulse 2s infinite}
+        .refresh-ind.paused .live{background:var(--faint);animation:none}
+        @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 7px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+        select,button{font:inherit}
+        .sel,.btn{height:36px;border-radius:9px;border:1px solid var(--border2);background:#16223A;color:var(--ink);font-size:13px;padding:0 12px;cursor:pointer}
+        .btn.primary{background:var(--accent);border-color:var(--accent);color:#1A1206;font-weight:700}
+        .btn.primary:hover{background:var(--accent2)}
+        .btn.ghost{background:transparent}
+        .btn:disabled{opacity:.55;cursor:default}
+
+        .wrap{padding:20px 22px 40px;max-width:1600px}
+        .statusbar{font-size:12.5px;color:var(--muted);margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+        .statusbar .err{color:var(--bad)}
+        .chip{display:inline-flex;align-items:center;gap:6px;background:#16223A;border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11.5px;color:var(--ink2)}
+
+        /* KPIs */
+        .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:18px}
+        @media(max-width:1400px){.kpis{grid-template-columns:repeat(3,1fr)}}
+        @media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+        .kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 16px;position:relative;overflow:hidden}
+        .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--k,var(--c1))}
+        .kpi .lbl{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+        .kpi .val{font-size:26px;font-weight:800;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1}
+        .kpi .hint{font-size:11px;color:var(--faint);margin-top:6px}
+        .kpi .ring{position:absolute;right:12px;top:12px}
+
+        /* Cards / charts */
+        .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .grid3{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+        @media(max-width:1000px){.grid2,.grid3{grid-template-columns:1fr}}
+        .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 18px;margin-bottom:16px}
+        .card h2{margin:0 0 2px;font-size:15px;font-weight:700}
+        .card .sub{color:var(--muted);font-size:12px;font-weight:400;margin-bottom:10px}
+        .empty{color:var(--faint);font-size:13px;padding:30px 0;text-align:center}
         svg{max-width:100%;height:auto;display:block}
-        .bar-row{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px}
-        .bar-row .nm{width:150px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .bar-row .track{flex:1;background:#eef0f3;border-radius:5px;height:18px;overflow:hidden}
-        .bar-row .fill{height:100%;border-radius:5px}
-        .bar-row .qt{width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
-        @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}
+        .hbar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+        .hbar .nm{width:160px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
+        .hbar .track{flex:1;background:#0E1728;border:1px solid var(--border);border-radius:6px;height:18px;overflow:hidden}
+        .hbar .fill{height:100%;border-radius:5px 0 0 5px}
+        .hbar .qt{width:46px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+        .rank{max-height:360px;overflow:auto}
+        .rank::-webkit-scrollbar{width:8px}.rank::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
     </style>
 </head>
 <body>
-    <div class="topbar">
-        <div class="logo">📊</div>
-        <h1>Indicadores SPARE — RMR</h1>
-        <div class="spacer"></div>
-        <div class="ctrl">
-            <select id="ind-ref"></select>
-            <button id="ind-refresh" class="primary">Atualizar do ServiceNow</button>
+<div class="app">
+    <!-- Sidebar -->
+    <aside class="side">
+        <div class="brand">
+            <div class="mk">SP</div>
+            <div><div class="tt">SPARE</div><div class="st">Indicadores</div></div>
+        </div>
+        <nav class="nav" id="nav">
+            <a href="#sec-kpi" class="active"><span class="dot" style="background:var(--accent)"></span> Visão Geral</a>
+            <a href="#sec-tickets"><span class="dot" style="background:var(--c1)"></span> Tickets</a>
+            <a href="#sec-sla"><span class="dot" style="background:var(--c3)"></span> SLA</a>
+            <a href="#sec-lojas"><span class="dot" style="background:var(--c2)"></span> Top Lojas</a>
+            <a href="#sec-subs"><span class="dot" style="background:var(--c4)"></span> Subcategorias</a>
+            <a href="#sec-tma"><span class="dot" style="background:var(--c6)"></span> TMA</a>
+        </nav>
+        <div class="foot" id="side-foot">
+            Fila: <b id="foot-queue">—</b><br>
+            Referência: <b id="foot-ref">—</b><br>
+            Gerado: <b id="foot-gerado">—</b>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <div>
+        <div class="top">
+            <div>
+                <h1>Indicadores SPARE — RMR</h1>
+                <div class="sub">Painel executivo · atualização automática do ServiceNow</div>
+            </div>
+            <div class="spacer"></div>
+            <div class="refresh-ind" id="refresh-ind" title="Atualização automática">
+                <span class="live"></span><span id="refresh-txt">auto 2 min</span>
+            </div>
+            <select class="sel" id="ind-ref" title="Mês de referência"></select>
+            <button class="btn ghost" id="ind-auto" title="Ligar/desligar atualização automática">⏸ Pausar</button>
+            <button class="btn primary" id="ind-refresh">↻ Atualizar do ServiceNow</button>
+        </div>
+
+        <div class="wrap">
+            <div class="statusbar" id="ind-status">Carregando…</div>
+
+            <section id="sec-kpi"><div class="kpis" id="ind-kpis"></div></section>
+
+            <div class="grid2">
+                <section id="sec-tickets" class="card">
+                    <h2>Tickets Resolvidos</h2>
+                    <div class="sub">por mês — ano vigente</div>
+                    <div id="ch-tickets"></div>
+                </section>
+                <section id="sec-sla" class="card">
+                    <h2>Resolução dentro do SLA</h2>
+                    <div class="sub">% por mês</div>
+                    <div id="ch-sla"></div>
+                </section>
+            </div>
+
+            <div class="grid2">
+                <section id="sec-lojas" class="card">
+                    <h2>Top 20 Lojas</h2>
+                    <div class="sub">volume de incidentes</div>
+                    <div class="rank" id="ch-lojas"></div>
+                </section>
+                <section id="sec-subs" class="card">
+                    <h2>Top 10 Subcategorias</h2>
+                    <div class="sub">volume de incidentes</div>
+                    <div class="rank" id="ch-subs"></div>
+                </section>
+            </div>
+
+            <section id="sec-tma" class="card">
+                <h2>TMA — Coletor e SLED</h2>
+                <div class="sub">tempo médio em dias (abertos e encerrados no mês)</div>
+                <div id="ch-tma"></div>
+            </section>
         </div>
     </div>
-
-    <div class="wrap">
-        <div class="status" id="ind-status">Carregando…</div>
-
-        <div class="kpis" id="ind-kpis"></div>
-
-        <div class="card">
-            <h2>Tickets Resolvidos <span class="sub">— por mês (ano vigente)</span></h2>
-            <div id="ch-tickets"></div>
-        </div>
-
-        <div class="card">
-            <h2>Resolução dentro do SLA <span class="sub">— % por mês</span></h2>
-            <div id="ch-sla"></div>
-        </div>
-
-        <div class="grid">
-            <div class="card">
-                <h2>Top 20 Lojas <span class="sub">— em incidentes</span></h2>
-                <div id="ch-lojas"></div>
-            </div>
-            <div class="card">
-                <h2>Top 10 Subcategorias</h2>
-                <div id="ch-subs"></div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>TMA Coletor e SLED <span class="sub">— tempo médio em dias (abertos e encerrados no mês)</span></h2>
-            <div id="ch-tma"></div>
-        </div>
-    </div>
-
-    <script>
-    (function(){
-        var PALETTE=['#2563EB','#D97706','#059669','#7C3AED','#DB2777','#0891B2'];
-        var $=function(s){return document.querySelector(s);};
-        var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
-            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
-        var mesLbl=function(m){var p=String(m||'').split('-');var n=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-            return p[1]?n[parseInt(p[1],10)]:m;};
-
-        // Gráfico de colunas (labels no topo)
-        function colChart(el, data, opts){
-            opts=opts||{}; var color=opts.color||PALETTE[0];
-            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
-            var W=Math.max(560,data.length*70), H=260, pad=34, bw=Math.min(46,(W-pad*2)/data.length-14);
-            var max=Math.max.apply(null,data.map(function(d){return d.v;}))||1;
-            var g='';
-            data.forEach(function(d,i){
-                var x=pad+i*((W-pad*2)/data.length)+((W-pad*2)/data.length-bw)/2;
-                var h=Math.round((H-pad-24)*(d.v/max));
-                var y=H-pad-h;
-                g+='<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+Math.max(h,1)+'" rx="4" fill="'+color+'"></rect>';
-                g+='<text x="'+(x+bw/2)+'" y="'+(y-6)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1f2733">'+(opts.fmt?opts.fmt(d.v):d.v)+'</text>';
-                g+='<text x="'+(x+bw/2)+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#6b7280">'+esc(d.l)+'</text>';
-            });
-            el.innerHTML='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" width="'+W+'">'+
-                '<line x1="'+pad+'" y1="'+(H-pad)+'" x2="'+(W-pad)+'" y2="'+(H-pad)+'" stroke="#e6e8eb"></line>'+g+'</svg></div>';
-        }
-
-        // Linha (0-100 %)
-        function lineChart(el, data, opts){
-            opts=opts||{}; var color=opts.color||PALETTE[2];
-            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
-            var W=Math.max(560,data.length*70), H=240, pad=34;
-            var max=100, plotW=W-pad*2, plotH=H-pad-24;
-            function X(i){return pad+ (data.length<=1?plotW/2 : i*(plotW/(data.length-1)));}
-            function Y(v){return H-pad-(plotH*(v/max));}
-            var pts=data.map(function(d,i){return X(i)+','+Y(d.v);}).join(' ');
-            var g='';
-            [0,25,50,75,100].forEach(function(gl){
-                g+='<line x1="'+pad+'" y1="'+Y(gl)+'" x2="'+(W-pad)+'" y2="'+Y(gl)+'" stroke="#f0f1f3"></line>'+
-                   '<text x="'+(pad-6)+'" y="'+(Y(gl)+4)+'" text-anchor="end" font-size="10" fill="#9aa1ab">'+gl+'</text>';
-            });
-            g+='<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2.5"></polyline>';
-            data.forEach(function(d,i){
-                g+='<circle cx="'+X(i)+'" cy="'+Y(d.v)+'" r="4" fill="'+color+'"></circle>';
-                g+='<text x="'+X(i)+'" y="'+(Y(d.v)-9)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#1f2733">'+d.v+'%</text>';
-                g+='<text x="'+X(i)+'" y="'+(H-pad+16)+'" text-anchor="middle" font-size="11" fill="#6b7280">'+esc(d.l)+'</text>';
-            });
-            el.innerHTML='<div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" width="'+W+'">'+g+'</svg></div>';
-        }
-
-        // Barras horizontais (ranking)
-        function hbar(el, data, color){
-            if(!data.length){el.innerHTML='<div class="empty">Sem dados.</div>';return;}
-            var max=Math.max.apply(null,data.map(function(d){return d.v;}))||1;
-            el.innerHTML=data.map(function(d,i){
-                var pct=Math.round(d.v/max*100);
-                return '<div class="bar-row"><span class="nm" title="'+esc(d.l)+'">'+esc(d.l)+'</span>'+
-                    '<span class="track"><span class="fill" style="width:'+pct+'%;background:'+(color||PALETTE[0])+'"></span></span>'+
-                    '<span class="qt">'+d.v+'</span></div>';
-            }).join('');
-        }
-
-        function kpi(cls,lbl,val){
-            return '<div class="kpi '+cls+'"><div class="lbl">'+esc(lbl)+'</div><div class="val">'+esc(val)+'</div></div>';
-        }
-
-        function render(snap){
-            if(!snap||!snap.dados){
-                $('#ind-status').textContent='Nenhum dado calculado ainda. Clique em "Atualizar do ServiceNow".';
-                $('#ind-kpis').innerHTML=''; return;
-            }
-            var d=snap.dados;
-            var ts=d.tickets_sla, top=d.top, tma=d.tma;
-
-            var kpis='';
-            if(ts){
-                kpis+=kpi('','Tickets resolvidos (ano)', ts.tickets_total);
-                kpis+=kpi('k2','SLA dentro do prazo', (ts.sla_compliance_pct||0)+'%');
-            }
-            if(tma&&tma.tma){
-                tma.tma.forEach(function(t,i){
-                    kpis+=kpi(i===0?'k3':'k4','TMA '+t.categoria+' (dias)', t.dias);
-                });
-            }
-            $('#ind-kpis').innerHTML=kpis;
-
-            // Tickets por mês
-            if(ts){
-                colChart($('#ch-tickets'), ts.tickets_por_mes.filter(function(m){return m.total>0;})
-                    .map(function(m){return {l:mesLbl(m.mes),v:m.total};}), {color:PALETTE[0]});
-                lineChart($('#ch-sla'), ts.sla_por_mes.filter(function(m){return m.total>0;})
-                    .map(function(m){return {l:mesLbl(m.mes),v:m.pct};}), {color:PALETTE[2]});
-            } else {
-                $('#ch-tickets').innerHTML='<div class="empty">Sem dados de tickets/SLA.</div>';
-                $('#ch-sla').innerHTML='';
-            }
-
-            if(top){
-                hbar($('#ch-lojas'), top.top_lojas.map(function(x){return {l:x.loja,v:x.total};}), PALETTE[0]);
-                hbar($('#ch-subs'), top.top_subcategorias.map(function(x){return {l:x.subcategoria,v:x.total};}), PALETTE[3]);
-            } else {
-                $('#ch-lojas').innerHTML='<div class="empty">Sem dados.</div>';
-                $('#ch-subs').innerHTML='<div class="empty">Sem dados.</div>';
-            }
-
-            if(tma&&tma.tma){
-                colChart($('#ch-tma'), tma.tma.map(function(t){return {l:t.categoria,v:t.dias};}),
-                    {color:PALETTE[1], fmt:function(v){return v+'d';}});
-            } else {
-                $('#ch-tma').innerHTML='<div class="empty">Sem dados de TMA.</div>';
-            }
-
-            var qi=[];
-            if(d.erros){for(var k in d.erros){if(d.erros[k])qi.push(k+': '+d.erros[k]);}}
-            $('#ind-status').innerHTML='Referência <strong>'+esc(snap.referencia)+'</strong> · gerado em '+
-                esc((d.gerado_em||'').replace('T',' ').slice(0,16))+
-                (qi.length?'<div class="err">Falhas: '+esc(qi.join(' | '))+'</div>':'');
-        }
-
-        function fillRefs(refs, atual){
-            var sel=$('#ind-ref');
-            if(!refs||!refs.length){sel.innerHTML='<option>—</option>';return;}
-            sel.innerHTML=refs.map(function(r){return '<option value="'+r+'"'+(r===atual?' selected':'')+'>'+r+'</option>';}).join('');
-        }
-
-        function load(ref){
-            $('#ind-status').textContent='Carregando…';
-            fetch('/api/indicadores/dados'+(ref?('?referencia='+encodeURIComponent(ref)):''))
-                .then(function(r){return r.json();})
-                .then(function(d){
-                    fillRefs(d.referencias, d.snapshot&&d.snapshot.referencia);
-                    render(d.snapshot);
-                })
-                .catch(function(e){$('#ind-status').innerHTML='<span class="err">Erro ao carregar: '+esc(e.message)+'</span>';});
-        }
-
-        $('#ind-ref').addEventListener('change',function(){load(this.value);});
-
-        $('#ind-refresh').addEventListener('click',function(){
-            var btn=this; btn.disabled=true; var txt=btn.textContent; btn.textContent='Atualizando…';
-            $('#ind-status').textContent='Consultando o ServiceNow (pode levar alguns segundos)…';
-            fetch('/api/indicadores/atualizar',{method:'POST'})
-                .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
-                .then(function(res){
-                    if(!res.ok){throw new Error((res.j&&res.j.detail)||'Falha na atualização.');}
-                    load(res.j.referencia);
-                })
-                .catch(function(e){$('#ind-status').innerHTML='<span class="err">'+esc(e.message)+'</span>';})
-                .then(function(){btn.disabled=false;btn.textContent=txt;});
-        });
-
-        load('');
-    })();
-    </script>
+</div>
+<script src="/static/indicadores/app.js?v=20260904"></script>
 </body>
 </html>
