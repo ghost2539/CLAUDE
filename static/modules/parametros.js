@@ -416,7 +416,7 @@ async function renderPermissions(c, S) {
             '<label style="display:block;font-size:.85rem;margin-bottom:4px">Tipo de acesso</label>' +
             '<select id="pm-utype" class="form-control">' +
                 '<option value="LOCAL">Local (senha gerada no portal)</option>' +
-                '<option value="SSO">Rede / SSO (senha do AD)</option>' +
+                '<option value="SSO">Rede / AD (senha do AD)</option>' +
             '</select>';
         f.appendChild(tipoWrap);
 
