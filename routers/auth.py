@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select, func
 
-import ebs_service
 from config import get_settings
 from database import (
     SessionLocal, User, Permission, AccessLog, Setting,
@@ -48,8 +47,8 @@ class LoginIn(BaseModel):
     @classmethod
     def normalize_auth_type(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD", "SN", "SSO"):
-            raise ValueError("auth_type deve ser LOCAL, AD, SN ou SSO.")
+        if v not in ("LOCAL", "SN", "SSO"):
+            raise ValueError("auth_type deve ser LOCAL, SN ou SSO.")
         return v
 
 
@@ -203,9 +202,6 @@ def auth_login(body: LoginIn, req: Request):
                 # Só entra quem foi previamente liberado por um administrador.
                 sn_cookies = _sn_login(login, body.password)
                 ebs_auth = None
-            elif source == "AD":
-                ebs_auth = ebs_service.login(login, body.password)
-                sn_cookies = None
             else:
                 # Local authentication
                 if not u or not u.active:
@@ -247,7 +243,7 @@ def auth_login(body: LoginIn, req: Request):
                     raise _LoginFailed(
                         "Acesso ainda não liberado. Solicite a um administrador "
                         "a liberação do seu usuário de rede.", pendente=True)
-            elif source in ("SN", "AD"):
+            elif source == "SN":
                 ac_row = s.get(Setting, "access_control")
                 block_external = (ac_row.value if ac_row else {}).get("block_external", False)
                 if block_external and not u.allowed:
