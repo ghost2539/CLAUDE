@@ -325,96 +325,78 @@ def _build_a4_pdf(texto1: str, texto2: str, texto3: str) -> bytes:
     - Logo 5S (image1.png) no canto inferior direito
     """
     try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
+        from reportlab.lib.pagesizes import A4, landscape
         from reportlab.pdfgen import canvas as canv
     except ImportError:
         raise HTTPException(501, "reportlab não está instalado no servidor.")
 
     import os
 
+    # A4 PAISAGEM (o modelo é 4:3 landscape). Replica proporcionalmente o
+    # template PPTX (10 x 7,5 pol): borda, logo RENNER (topo-esq.), 3 textos
+    # centralizados, Qualidade (rodapé-esq.) e 5S (rodapé-dir.).
     buf = io.BytesIO()
-    c = canv.Canvas(buf, pagesize=A4)
-    w, h = A4  # 595.27 x 841.89 points
-    margin = 20 * mm
+    W, H = landscape(A4)  # ~841.89 x 595.27 points
+    c = canv.Canvas(buf, pagesize=(W, H))
 
-    # ── Borda preta espessa (3pt) ──
-    c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(3)
-    c.rect(margin, margin, w - 2 * margin, h - 2 * margin, stroke=1, fill=0)
+    # Escala do template (pontos): 10 x 7,5 pol → página A4 paisagem
+    TPL_W, TPL_H = 10.0 * 72, 7.5 * 72
+    sx, sy = W / TPL_W, H / TPL_H
 
-    # ── Caminhos das imagens (assets do servidor) ──
+    def _box(x_in, y_in, w_in, h_in):
+        """(x,y,w,h) em pontos, origem inferior-esquerda, a partir de coords
+        do template em polegadas com origem superior-esquerda."""
+        w = w_in * 72 * sx
+        h = h_in * 72 * sy
+        x = x_in * 72 * sx
+        y = H - (y_in + h_in) * 72 * sy
+        return x, y, w, h
+
+    def _img(path, x_in, y_in, w_in, h_in, anchor):
+        if os.path.isfile(path):
+            x, y, w, h = _box(x_in, y_in, w_in, h_in)
+            try:
+                c.drawImage(path, x, y, width=w, height=h,
+                            preserveAspectRatio=True, anchor=anchor, mask="auto")
+            except Exception:
+                pass
+
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(base, "static", "identificacao", "assets")
     img_logo = os.path.join(assets, "logo_renner.png")
     img_qual = os.path.join(assets, "programa_qualidade.png")
     img_5s = os.path.join(assets, "programa_5s.png")
 
-    # ── Logo RENNER — canto superior esquerdo ──
-    logo_w = 55 * mm
-    logo_h = 18 * mm
-    logo_x = margin + 8 * mm
-    logo_y = h - margin - logo_h - 8 * mm
-    if os.path.isfile(img_logo):
-        try:
-            c.drawImage(
-                img_logo, logo_x, logo_y, width=logo_w, height=logo_h,
-                preserveAspectRatio=True, anchor="nw", mask="auto",
-            )
-        except Exception:
-            pass
+    # ── Borda (Retângulo 5 do template: 0.06,0.29 · 9.88x6.93) ──
+    bx, by, bw, bh = _box(0.06, 0.29, 9.88, 6.93)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(3)
+    c.rect(bx, by, bw, bh, stroke=1, fill=0)
 
-    # ── 3 campos de texto grandes centralizados ──
-    cx = w / 2
+    # ── Logos (posições/tamanhos exatos do template) ──
+    _img(img_logo, 0.27, 0.42, 3.76, 1.11, "nw")   # RENNER — topo-esq.
+    _img(img_qual, 0.27, 5.94, 2.00, 1.18, "sw")   # Qualidade — rodapé-esq.
+    _img(img_5s,   7.97, 5.26, 1.97, 1.85, "se")   # 5S — rodapé-dir.
+
+    # ── 3 textos centralizados (caixas full-width, fonte 80 com auto-ajuste) ──
     font_name = "Helvetica-Bold"
-
-    text_y1 = h * 0.58
-    text_y2 = h * 0.45
-    text_y3 = h * 0.32
-
-    for txt, ty in [(texto1, text_y1), (texto2, text_y2), (texto3, text_y3)]:
+    box_h = 1.57
+    campos = [(texto1, 2.03), (texto2, 3.28), (texto3, 4.59)]
+    max_w = (9.21 * 72 * sx) - 10
+    cx = W / 2
+    for txt, y_in in campos:
         if not txt:
             continue
-        txt_upper = txt.upper()
-        tl = len(txt_upper)
-        fs = 80 if tl <= 8 else 68 if tl <= 12 else 56 if tl <= 18 else 44 if tl <= 25 else 34
-        max_w = w - 2 * margin - 20 * mm
-        while fs > 14:
-            tw = c.stringWidth(txt_upper, font_name, fs)
-            if tw <= max_w:
-                break
+        t = txt.upper()
+        fs = 80 * sy
+        while fs > 14 and c.stringWidth(t, font_name, fs) > max_w:
             fs -= 2
+        top = H - (y_in * 72 * sy)
+        bot = H - ((y_in + box_h) * 72 * sy)
+        baseline = (top + bot) / 2 - fs * 0.35
         c.setFont(font_name, fs)
         c.setFillColorRGB(0, 0, 0)
-        c.drawCentredString(cx, ty, txt_upper)
-
-    # ── Logo Programa Qualidade — canto inferior esquerdo ──
-    qual_w = 50 * mm
-    qual_h = 22 * mm
-    qual_x = margin + 8 * mm
-    qual_y = margin + 8 * mm
-    if os.path.isfile(img_qual):
-        try:
-            c.drawImage(
-                img_qual, qual_x, qual_y, width=qual_w, height=qual_h,
-                preserveAspectRatio=True, anchor="sw", mask="auto",
-            )
-        except Exception:
-            pass
-
-    # ── Logo 5S — canto inferior direito ──
-    s5_w = 35 * mm
-    s5_h = 35 * mm
-    s5_x = w - margin - s5_w - 8 * mm
-    s5_y = margin + 5 * mm
-    if os.path.isfile(img_5s):
-        try:
-            c.drawImage(
-                img_5s, s5_x, s5_y, width=s5_w, height=s5_h,
-                preserveAspectRatio=True, anchor="sw", mask="auto",
-            )
-        except Exception:
-            pass
+        c.drawCentredString(cx, baseline, t)
 
     c.save()
     buf.seek(0)
