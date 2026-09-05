@@ -73,6 +73,41 @@ CURRENCY_MAP = {
     "ARS": "ARS",
 }
 
+# Conversão do nome da empresa do EBS para o nome no ServiceNow (core_company).
+# Ex.: CAMIC_FIS → Camicado. Ajustável via env SN_COMPANY_MAP="A=B;C=D".
+COMPANY_ALIASES = {
+    "CAMIC_FIS": "Camicado", "CAMICADO": "Camicado", "CAMIC": "Camicado",
+    "YOUCOM": "Youcom", "YOU_FIS": "Youcom", "YCM_FIS": "Youcom",
+    "ASHUA": "Ashua", "ASHUA_FIS": "Ashua",
+    "RENNER": "Renner Brasil", "RENNER_FIS": "Renner Brasil", "LR_FIS": "Renner Brasil",
+}
+try:
+    for _par in (os.getenv("SN_COMPANY_MAP", "") or "").split(";"):
+        if "=" in _par:
+            _k, _v = _par.split("=", 1)
+            if _k.strip():
+                COMPANY_ALIASES[_k.strip().upper()] = _v.strip()
+except Exception:  # noqa: BLE001
+    pass
+
+
+def _normaliza_company(v: str) -> str:
+    s = (v or "").strip()
+    if not s:
+        return s
+    u = s.upper()
+    if u in COMPANY_ALIASES:
+        return COMPANY_ALIASES[u]
+    if "CAMIC" in u:
+        return "Camicado"
+    if "YOU" in u or "YCM" in u:
+        return "Youcom"
+    if "ASHUA" in u:
+        return "Ashua"
+    if "RENNER" in u or u.startswith("LR"):
+        return "Renner Brasil"
+    return s
+
 # ── Job tracking (in-memory) ─────────────────────────────────────
 _jobs: dict[str, dict] = {}
 
@@ -88,9 +123,10 @@ def _cleanup_old_jobs():
 
 class UploadIn(BaseModel):
     cycle_ids: list[int] = []
-    origem: str = "selecao"          # selecao | status | lista
+    origem: str = "selecao"          # selecao | status | lista | itens
     status: str = ""                 # para origem=status
     identificadores: list[str] = []  # para origem=lista (consulta EBS)
+    itens: list[dict] = []           # para origem=itens (linhas já consultadas)
     usuario: str = ""
     senha: str = ""
     stockroom: str = "SPARE - CD324"
@@ -550,7 +586,8 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
             job["results"].append(result_entry)
             continue
 
-        company_id = _lookup_reference(session, "company", asset.get("company", ""), cache, BS)
+        company_nome = _normaliza_company(asset.get("company", ""))
+        company_id = _lookup_reference(session, "company", company_nome, cache, BS)
 
         # Campos de subida (aplicados tanto na inclusão quanto na atualização):
         # o ativo está conosco, então stockroom/company/aisle/status/depreciação
@@ -869,7 +906,24 @@ def start_upload(body: UploadIn, req: Request):
     origem = (body.origem or "selecao").lower()
     assets_data: list[dict] = []
 
-    if origem == "lista":
+    if origem == "itens":
+        # Linhas já consultadas/selecionadas na pré-visualização.
+        for it in (body.itens or []):
+            assets_data.append({
+                "serial_number": it.get("serial_number", ""),
+                "tag_number": it.get("tag_number", ""),
+                "asset_number": it.get("asset_number", ""),
+                "model": it.get("model", ""),
+                "category": it.get("category", ""),
+                "company": it.get("company", ""),
+                "description": it.get("description", ""),
+                "cost": str(it.get("cost") or ""),
+                "dpis": it.get("dpis", "") or "",
+                "acquisition_date": it.get("acquisition_date", "") or "",
+            })
+        if not assets_data:
+            raise HTTPException(400, "Nenhum ativo selecionado.")
+    elif origem == "lista":
         # Consulta o EBS pelos identificadores e converte via cadastro de
         # modelos (classificação). Sem cadastro, o ativo sobe sem modelo/
         # categoria e o relatório orienta a regularizar.
@@ -1196,6 +1250,101 @@ def _hardware_records(session, itens: list) -> list[dict]:
                 "serial_number": str(_plain(r.get("serial_number"))).strip(),
             })
     return out
+
+
+class EntradaPreviewIn(BaseModel):
+    origem: str = "status"           # status | lista
+    status: str = ""
+    identificadores: list[str] = []
+
+
+@router.post("/entrada/preview")
+def entrada_preview(body: EntradaPreviewIn, req: Request):
+    """Carrega os ativos para conferência ANTES de subir. Retorna as linhas já
+    convertidas (modelo/categoria/company) e se já existem no ServiceNow."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+    origem = (body.origem or "status").lower()
+    rows: list[dict] = []
+
+    if origem == "lista":
+        from routers.consulta import _query_assets, QueryIn
+        from routers.helpers import apply_class
+        ids = [str(x).strip() for x in (body.identificadores or []) if str(x).strip()]
+        if not ids:
+            raise HTTPException(400, "Informe ao menos um ativo na lista.")
+        try:
+            res = _query_assets(QueryIn(identificadores=ids), req)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, "Falha ao consultar o EBS: %s" % exc)
+        with SessionLocal() as s:
+            for r in res.get("resultados", []):
+                if r.get("encontrado"):
+                    r = apply_class(s, r)
+                    rows.append({
+                        "encontrado": True,
+                        "serial_number": r.get("numero_serie", ""),
+                        "tag_number": r.get("etiqueta", ""),
+                        "asset_number": r.get("ativo") or r.get("imobilizado", ""),
+                        "model": r.get("modelo", ""),
+                        "category": r.get("categoria", ""),
+                        "company": _normaliza_company(r.get("empresa", "")),
+                        "description": r.get("descricao", ""),
+                        "cost": str(r.get("custo_asset") or ""),
+                        "dpis": r.get("dpis", "") or "",
+                        "acquisition_date": "",
+                    })
+                else:
+                    rows.append({"encontrado": False, "tag_number": r.get("pesquisado", ""),
+                                 "serial_number": "", "model": "", "category": "",
+                                 "company": "", "description": ""})
+    elif origem == "status":
+        st = (body.status or "").strip()
+        if not st:
+            raise HTTPException(400, "Selecione o status.")
+        alvo = st.upper()
+        with SessionLocal() as s:
+            for c in s.scalars(select(ReceiptCycle)).all():
+                if not c.asset:
+                    continue
+                stt = (c.status or "").strip().upper()
+                if stt in ("REMOVIDO", "REMOVIDOS"):
+                    continue
+                if alvo != "__TODOS__" and stt != alvo:
+                    continue
+                a = c.asset
+                rows.append({
+                    "encontrado": True,
+                    "cycle_id": c.id,
+                    "serial_number": a.serial_number or "",
+                    "tag_number": a.tag_number or "",
+                    "asset_number": a.asset_number or a.asset_id or "",
+                    "model": a.model or "",
+                    "category": a.category or "",
+                    "company": _normaliza_company(a.company or ""),
+                    "description": a.description or "",
+                    "cost": str(a.cost) if a.cost else "",
+                    "dpis": a.dpis.isoformat() if a.dpis else "",
+                    "acquisition_date": a.acquisition_date.isoformat() if a.acquisition_date else "",
+                })
+    else:
+        raise HTTPException(400, "Origem inválida.")
+
+    # Marca quais já existem no ServiceNow (por asset_tag/serial).
+    from types import SimpleNamespace
+    itens = [SimpleNamespace(asset_tag=r.get("tag_number", ""), serial_number=r.get("serial_number", ""))
+             for r in rows if r.get("encontrado")]
+    tags_ok, ser_ok = set(), set()
+    try:
+        tags_ok, ser_ok = _hardware_existentes(session, itens)
+    except Exception:  # noqa: BLE001
+        pass
+    for r in rows:
+        t = str(r.get("tag_number") or "").strip().upper()
+        s2 = str(r.get("serial_number") or "").strip().upper()
+        r["existe_sn"] = bool((t and t in tags_ok) or (s2 and s2 in ser_ok))
+
+    return {"rows": rows, "total": len(rows)}
 
 
 @router.get("/resolve-check")
