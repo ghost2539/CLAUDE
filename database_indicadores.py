@@ -66,6 +66,13 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def localnow() -> datetime:
+    """Hora LOCAL do servidor (sem tz). Usada nos carimbos exibidos na tela —
+    o SQLite não preserva fuso e o navegador interpretaria o UTC como local,
+    mostrando o horário adiantado. Gravando local, a tela exibe a hora certa."""
+    return datetime.now()
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -130,7 +137,7 @@ def salvar_config(dados: dict, atualizado_por: str = "") -> None:
             row = Config(chave=_CFG_KEY)
             s.add(row)
         row.payload = json.dumps(dados, ensure_ascii=False)
-        row.atualizado_em = utcnow()
+        row.atualizado_em = localnow()
         row.atualizado_por = atualizado_por or ""
 
 
@@ -142,7 +149,7 @@ def salvar_snapshot(referencia: str, dados: dict, criado_por: str = "") -> None:
             row = Snapshot(referencia=referencia)
             s.add(row)
         row.payload = json.dumps(dados, ensure_ascii=False)
-        row.criado_em = utcnow()
+        row.criado_em = localnow()
         row.criado_por = criado_por or ""
 
 

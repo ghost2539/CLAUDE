@@ -103,6 +103,9 @@ class Settings:
     # Subcategorias (usadas com LIKE, robusto a variações de valor/rotulo).
     SN_SUB_SLED_LIKE: str = os.getenv("SN_SUB_SLED_LIKE", "sled")
     SN_SUB_COLETOR_LIKE: str = os.getenv("SN_SUB_COLETOR_LIKE", "coletor")
+    # Recalcula os indicadores em segundo plano a cada N minutos (0 desliga).
+    # A tela relê o snapshot a cada 2 min, então 2 mantém o painel sempre atual.
+    SN_INDIC_REFRESH_MIN: int = int(os.getenv("SN_INDIC_REFRESH_MIN", "2") or 2)
 
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.

@@ -116,8 +116,9 @@ def create_app() -> FastAPI:
     try:
         import database_indicadores as _db_indic
         _db_indic.init_db()
-        from routers.indicadores import router as indicadores_router
+        from routers.indicadores import router as indicadores_router, start_scheduler
         app.include_router(indicadores_router)
+        start_scheduler()  # recálculo periódico em segundo plano (SN_INDIC_REFRESH_MIN)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("indicadores").error(
             "Módulo Indicadores (/indicadores) NÃO carregado (portal segue sem ele): %s",
