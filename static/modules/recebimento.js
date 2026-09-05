@@ -506,6 +506,12 @@ async function renderBase(c, S) {
                 return col;
             });
             cols.push({
+                key: '_sn', label: 'Localizado no SN?', html: true,
+                render: function (_, row) {
+                    return '<span id="sn-exist-' + row.id + '" class="badge badge-default">…</span>';
+                }
+            });
+            cols.push({
                 key: '_actions', label: 'Ações',
                 render: function (_, row) {
                     var w = S.el('div', { className: 'btn-row' });
@@ -537,8 +543,34 @@ async function renderBase(c, S) {
             var out = document.getElementById('bf-out');
             out.innerHTML = '';
             out.appendChild(S.table(cols, d.registros));
+            _verificarSN(d.registros);
         } catch (e) {
             S.toast(e.message, 'error');
+        }
+    }
+
+    // Consulta o ServiceNow (alm_hardware) e preenche a coluna "Localizado no SN?".
+    async function _verificarSN(registros) {
+        if (!registros || !registros.length) return;
+        var itens = registros.map(function (r) {
+            return { id: r.id, asset_tag: r.etiqueta || '', serial_number: r.numero_serie || '' };
+        });
+        try {
+            var d = await S.api('/servicenow/hardware-exists', {
+                method: 'POST', body: { itens: itens }
+            });
+            (d.resultados || []).forEach(function (x) {
+                var el = document.getElementById('sn-exist-' + x.id);
+                if (!el) return;
+                el.textContent = x.existe ? 'True' : 'False';
+                el.className = 'badge ' + (x.existe ? 'badge-success' : 'badge-danger');
+            });
+        } catch (e) {
+            registros.forEach(function (r) {
+                var el = document.getElementById('sn-exist-' + r.id);
+                if (el) { el.textContent = '—'; el.className = 'badge badge-default';
+                    el.title = 'Sessão ServiceNow indisponível'; }
+            });
         }
     }
 
