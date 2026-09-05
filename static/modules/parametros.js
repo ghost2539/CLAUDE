@@ -17,11 +17,12 @@ window.SPARE_MODULES.parametros = {
             ['valor-hora',      'Valor-hora'],
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
+            ['config-modulos',  'Configuração Módulos'],
             ['tv',              'TV'],
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias'];
+        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -39,6 +40,7 @@ window.SPARE_MODULES.parametros = {
             'valor-hora':   renderHourly,
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
+            'config-modulos': renderConfigModulos,
             tv:             renderTV,
             conta:          renderAccount
         };
@@ -61,6 +63,93 @@ function _pField(label, id, value, type) {
         '<input id="' + id + '" type="' + (type || 'text') + '" class="form-control" ' +
         'value="' + S.esc(value || '') + '">';
     return d;
+}
+
+/* ── Configuração Módulos (admin) ───────────────────────────────────
+   Reúne as configurações de bases dos módulos que antes ficavam em abas
+   soltas (Recebimento). Visível apenas para ADMIN. */
+function renderConfigModulos(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Configuração Módulos</h1>' +
+        '<p class="text-muted">Configurações administrativas das bases dos módulos.</p>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — Importar base histórica</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted">Aceita CSV ou XLSX com identificador, data, empresa, ' +
+                    'categoria, modelo, status, local e lote.</p>' +
+                '<form id="cm-hist-form">' +
+                    '<input name="file" type="file" class="form-control" required>' +
+                    '<button class="btn btn-primary mt-2">Importar</button>' +
+                '</form>' +
+                '<div id="cm-hist-result" class="mt-2"></div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — Base local EBS</div>' +
+            '<div class="card-body">' +
+                '<form id="cm-local-form">' +
+                    '<div class="form-grid cols-2">' +
+                        '<div class="form-group"><label>Empresa</label>' +
+                            '<select name="company" class="form-control">' +
+                                '<option>RENNER</option>' +
+                                '<option>YOUCOM</option>' +
+                                '<option>CAMICADO</option>' +
+                            '</select>' +
+                        '</div>' +
+                        '<div class="form-group"><label>Modo</label>' +
+                            '<select name="mode" class="form-control">' +
+                                '<option>SUBSTITUIR</option>' +
+                                '<option>INCREMENTAR</option>' +
+                            '</select>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="form-group mt-2">' +
+                        '<label>Arquivo CSV/XLSX</label>' +
+                        '<input name="file" type="file" class="form-control" required>' +
+                    '</div>' +
+                    '<button class="btn btn-primary mt-2">Importar</button>' +
+                '</form>' +
+                '<div id="cm-local-result" class="mt-2"></div>' +
+            '</div>' +
+        '</div>';
+
+    document.getElementById('cm-hist-form').onsubmit = async function (e) {
+        e.preventDefault();
+        try {
+            S.loading(true);
+            var d = await S.api('/recebimentos/import-historico', {
+                method: 'POST',
+                body: new FormData(e.target)
+            });
+            document.getElementById('cm-hist-result').innerHTML =
+                '<div class="alert alert-success">' +
+                d.importados + ' importados; ' + d.rejeitados + ' rejeitados.</div>';
+        } catch (x) {
+            S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
+
+    document.getElementById('cm-local-form').onsubmit = async function (e) {
+        e.preventDefault();
+        try {
+            S.loading(true);
+            var d = await S.api('/parametros/base-local/upload', {
+                method: 'POST',
+                body: new FormData(e.target)
+            });
+            document.getElementById('cm-local-result').innerHTML =
+                '<div class="alert alert-success">' +
+                d.validos + ' válidos; ' + d.rejeitados + ' rejeitados.</div>';
+        } catch (x) {
+            S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
 }
 
 /* ── Visual ─────────────────────────────────────────────────────── */
