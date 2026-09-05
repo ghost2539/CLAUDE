@@ -153,6 +153,13 @@ class Settings:
     SMTP_REMETENTE: str = os.getenv("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
     ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
 
+    # ── Orçamento do SPARE (CAPEX da área) — módulo isolado ─────────────
+    # Banco PRÓPRIO, separado do /controle-orcamento e do portal.
+    ORCAMENTO_SPARE_DATABASE_URL: str = os.getenv(
+        "ORCAMENTO_SPARE_DATABASE_URL",
+        _sqlite("orcamento_spare"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
@@ -189,7 +196,8 @@ class Settings:
     # do portal — é a tela /controle-orcamento, liberada individualmente.
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
-        "identificacao", "servicenow", "rastreio", "orcamento"
+        "identificacao", "servicenow", "rastreio", "orcamento",
+        "orcamento_spare"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

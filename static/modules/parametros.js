@@ -1019,13 +1019,15 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento'];
+        'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
+        'orcamento_spare'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         identificacao: 'Identificação', servicenow: 'ServiceNow', rastreio: 'Correios',
         reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
-        // Tela fora da sidebar, liberada usuário a usuário: /controle-orcamento
-        orcamento: 'Controle de Orçamento'
+        // Telas fora da sidebar, liberadas usuário a usuário
+        orcamento: 'Controle de Orçamento',        // /controle-orcamento
+        orcamento_spare: 'Orçamento SPARE'         // CAPEX da área
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];

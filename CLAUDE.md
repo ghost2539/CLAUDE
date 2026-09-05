@@ -29,6 +29,9 @@ normativo.
 3. **Sistema externo novo** → cliente em `integracoes/`.
 4. **Nada gravado em disco fora de `data/`.**
 5. **Nada que exija login pode morar em `static/`** — ali é público.
+   As telas de TV (`/cockpit-spare`, `/dash-*`) são a exceção deliberada:
+   são públicas, e por isso os endpoints `/api/cockpit/*` só devolvem
+   agregado — nunca dado de colaborador, chamado, série ou loja isolada.
 6. **Serviço systemd e instalador** → `deploy/`.
 7. **Módulo novo carrega isolado** em `main.py` (bloco `try/except` próprio):
    falha de um módulo nunca derruba o portal.
