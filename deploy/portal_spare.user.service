@@ -1,0 +1,31 @@
+# Portal SPARE como serviço de USUÁRIO (sem root).
+#
+# Instalar:
+#   mkdir -p ~/.config/systemd/user
+#   sed "s|__APP__|$HOME/portal-spare|g" deploy/portal_spare.user.service \
+#       > ~/.config/systemd/user/portal-spare.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now portal-spare.service
+#
+# Para o serviço continuar no ar depois do logout, um administrador precisa
+# habilitar o "lingering" uma única vez:
+#   sudo loginctl enable-linger $USER
+# Sem isso, use deploy/portal.sh (nohup), que não depende de systemd.
+
+[Unit]
+Description=Portal de Operacoes SPARE (usuario)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP__
+EnvironmentFile=%h/.config/portal-spare/environment
+ExecStart=__APP__/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
+Restart=on-failure
+RestartSec=5
+# Endurecimento possível sem root:
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

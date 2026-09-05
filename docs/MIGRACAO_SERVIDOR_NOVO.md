@@ -1,268 +1,281 @@
-# Migração para o servidor novo (MySQL + cofre de segredos)
+# Migração para o servidor novo — passo a passo
 
-Objetivo: subir o Portal SPARE no servidor novo **sem impacto na funcionalidade**,
-com três mudanças:
+Cenário deste roteiro: **instalação sem root**, código vindo **direto do
+GitHub**, tudo num **processo só na porta 8901**.
 
-1. **Correios** — credenciais vêm do **cofre** (`vcreports_secret`), não de
-   variáveis de ambiente/arquivo.
-2. **Banco** — **MySQL** no servidor novo, **preservando os mesmos dados**.
-3. **Proteção** — como várias pessoas têm acesso ao servidor, o código e os
-   segredos ficam restritos (permissões de arquivo + segredos no cofre).
+Nada aqui é destrutivo no servidor antigo — ele continua no ar o tempo todo.
+A virada só acontece quando você trocar o endereço que as pessoas usam.
 
-> Toda mudança de código é **retrocompatível**: no servidor atual (env + PostgreSQL)
-> continua funcionando igual; a troca é só de configuração no servidor novo.
-
----
-
-## 0. Pré-requisitos no servidor novo
-
-- Python 3.11+ e `pip`.
-- **MySQL 8** acessível, com um banco e um usuário criados (ver passo 3).
-- Módulo **`vcreports_secrets`** disponível no ambiente Python (o time de
-  segurança fornece/instala) e os segredos dos Correios já cadastrados nele.
-- Sem `sudo` por enquanto → use serviço de usuário (`systemctl --user`) ou
-  execução direta; quando tiver `sudo`, promova para serviço do sistema.
-
----
-
-## 1. Colocar o código
-
-O caminho do sistema no servidor novo é **`/var/www/vcreports/portal-spare`**.
-
-### Opção A — clonar do GitHub (recomendado)
-
-O código completo está no branch **`main`** do repositório. Como o repositório é
-privado, use um **Personal Access Token** (GitHub → Settings → Developer settings
-→ Tokens, escopo `repo`) embutido na URL:
-
-```bash
-git clone \
-  "https://<SEU_USUARIO>:<SEU_TOKEN>@github.com/ghost2539/CLAUDE.git" \
-  /var/www/vcreports/portal-spare
-```
-
-Se o git não sair direto (mesmo com `curl` funcionando), configure o proxy:
-
-```bash
-cd /var/www/vcreports/portal-spare
-git config http.proxy http://10.115.30.135:8888
-git config http.sslVerify false   # só se o proxy usa certificado self-signed
-```
-
-Depois do clone, remova o token do `.git/config` (fica gravado na URL):
-
-```bash
-git remote set-url origin https://github.com/ghost2539/CLAUDE.git
-```
-
-**Atualizar depois** (quando houver mudanças novas no GitHub):
-
-```bash
-cd /var/www/vcreports/portal-spare
-git fetch origin
-git reset --hard origin/main      # descarta alterações locais NÃO commitadas
-```
-
-> O `.env`/arquivo de ambiente e os segredos **não** vêm no git — só o código.
-
-### Opção B — bundle (se não houver acesso ao GitHub)
-
-Traga o bundle e restaure em `/var/www/vcreports/portal-spare`.
-
-### Instalar dependências (qualquer opção)
-
-```bash
-cd /var/www/vcreports/portal-spare
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt      # já inclui PyMySQL + cryptography
-```
-
----
-
-## 2. Correios pelo cofre (sem env)
-
-O código agora lê as credenciais assim (com fallback para env só na transição):
-
-```python
-from vcreports_secrets import vcreports_secret
-user = vcreports_secret('CORREIOS_USUARIO')   # idem CORREIOS_CHAVE, CORREIOS_CARTOES...
-```
-
-**No servidor novo, NÃO** defina `CORREIOS_USUARIO/CHAVE/CARTOES` no arquivo de
-ambiente. Cadastre-os **no cofre** (com o time de segurança):
-
-- `CORREIOS_USUARIO`
-- `CORREIOS_CHAVE`
-- `CORREIOS_CARTOES` (separados por vírgula)
-- `CORREIOS_DR` (ex.: 64) e `CORREIOS_CONTRATO` (se usar contrato)
-
-Teste depois de subir: menu **Correios → testar**, ou o endpoint
-`/api/servicenow/correios/test`.
-
----
-
-## 3. Criar os bancos MySQL/MariaDB
-
-> O servidor usa **MariaDB** (o comando `mysql` abre o MariaDB). O driver
-> `mysql+pymysql://` funciona igual — nada muda no código.
-
-**Tudo em MySQL**: crie os TRÊS schemas (portal + os dois módulos isolados),
-todos separados entre si, e um usuário:
-
-```sql
-CREATE DATABASE portal              CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE indicadores         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE controle_orcamento  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE USER 'portal'@'%' IDENTIFIED BY 'SENHA_FORTE';
-GRANT ALL PRIVILEGES ON portal.*             TO 'portal'@'%';
-GRANT ALL PRIVILEGES ON indicadores.*        TO 'portal'@'%';
-GRANT ALL PRIVILEGES ON controle_orcamento.* TO 'portal'@'%';
-FLUSH PRIVILEGES;
-```
-
----
-
-## 4. Configurar o ambiente do app
-
-No arquivo de ambiente do serviço (ou `export` antes de rodar), aponte para o
-MySQL. **Sem** as credenciais dos Correios (essas vão no cofre):
-
-```
-DATABASE_URL=mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/portal
-PORTAL_SESSION_SECRET=<uma_chave_aleatoria_longa>
-INITIAL_ADMIN_LOGIN=<seu_login>
-
-# Integrações (iguais às de hoje)
-SN_PROXY=http://10.115.30.135:8888
-SN_API_USER=SIS.ZABBIXDCSN
-SN_API_PASS=<senha da conta de serviço>     # (ou também via cofre, se preferir)
-# SN_API_PROXY não precisa: cai para SN_PROXY automaticamente
-
-# Módulos isolados — TUDO em MySQL (schemas separados):
-INDICADORES_DATABASE_URL=mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/indicadores
-CONTROLE_ORCAMENTO_DATABASE_URL=mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/controle_orcamento
-```
-
----
-
-## 5. Criar o schema no MySQL (o app faz sozinho)
-
-Suba o app uma vez apontando para o MySQL — o `init_db()` cria todas as tabelas
-(vazias):
-
-```bash
-. .venv/bin/activate
-python3 main.py          # sobe; confirme que iniciou sem erro; depois pare (Ctrl+C)
-```
-
-(ou pelo serviço de usuário — ver passo 8). As tabelas agora existem no MySQL.
-
----
-
-## 6. Copiar os DADOS (PostgreSQL → MySQL)
-
-Com as tabelas já criadas, copie as linhas do banco atual para o novo. O script
-é **idempotente** (limpa o destino e recopia) e ajusta o AUTO_INCREMENT:
-
-```bash
-. .venv/bin/activate
-python3 scripts/migrar_pg_para_mysql.py \
-  "postgresql+psycopg://USUARIO:SENHA@HOST_ANTIGO:5432/NOME_BD_ANTIGO" \
-  "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/portal"
-```
-
-Ele imprime linha a linha quantos registros copiou por tabela. Rode a partir de
-uma máquina que **enxergue os dois bancos** (o novo servidor, se ele alcançar o
-PostgreSQL antigo; senão, de um ponto intermediário).
-
-**Tudo em MySQL — migre também os módulos isolados** (se hoje estão em SQLite,
-a origem é o arquivo `.db`):
-
-```bash
-# Controle de Orçamento (origem SQLite atual -> MySQL)
-python3 scripts/migrar_pg_para_mysql.py \
-  "sqlite:////var/www/vcreports/portal-spare/data/controle_orcamento.db" \
-  "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/controle_orcamento"
-
-# Indicadores (só se já tiver snapshots que queira preservar)
-python3 scripts/migrar_pg_para_mysql.py \
-  "sqlite:////var/www/vcreports/portal-spare/data/indicadores.db" \
-  "mysql+pymysql://portal:SENHA_FORTE@HOST_MYSQL:3306/indicadores"
-```
-
-O script é genérico (origem PostgreSQL **ou** SQLite → destino MySQL); antes de
-cada um, suba o app apontando as URLs para o MySQL para o schema ser criado.
-
----
-
-## 7. Validar (antes de virar a chave)
-
-```sql
--- comparar contagens no antigo (PG) e novo (MySQL)
-SELECT COUNT(*) FROM users;
-SELECT COUNT(*) FROM receipt_cycles;   -- e as demais principais
-```
-
-E funcional:
-- Login (AD/SSO/local) funciona.
-- Uma consulta e uma tela de ServiceNow abrem.
-- **Correios → testar** retorna OK (confirma que o cofre está entregando as credenciais).
-
----
-
-## 8. Rodar como serviço
-
-**Com sudo (quando liberar) — serviço do sistema:**
-```bash
-sudo cp deploy/portal_spare.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now portal_spare.service
-```
-
-**Sem sudo agora — serviço de usuário:**
-```bash
-mkdir -p ~/.config/systemd/user
-cp deploy/portal_spare.service ~/.config/systemd/user/portal_spare.service   # ajuste ExecStart/venv
-systemctl --user daemon-reload
-systemctl --user enable --now portal_spare.service
-loginctl enable-linger "$USER"   # mantém rodando após logout
-```
-
----
-
-## 9. Proteger (servidor compartilhado)
-
-Como várias pessoas têm acesso:
-
-```bash
-chmod -R o-rwx /var/www/vcreports/portal-spare       # ninguém "outros" lê o código
-# (idealmente dono = usuário do serviço; grupo restrito)
-```
-
-- **Segredos dos Correios**: só no cofre (`vcreports_secret`) — nunca em env,
-  `.env` ou no código.
-- Não deixe senha em histórico de shell (use formas interativas).
-- O arquivo de ambiente do serviço deve ser `chmod 600`.
-
----
-
-## 10. Rollback
-
-Nada é destruído no servidor antigo. Se algo falhar:
-- Mantenha o servidor atual (PG) no ar até validar 100% o novo.
-- Vire o DNS/uso para o novo só depois do passo 7 ok.
-- Para voltar: reaponte os usuários para o servidor antigo (que segue intacto).
-
----
-
-## Resumo do que mudou no código
-
-| Item | Antes | Depois |
+| | Servidor **antigo** | Servidor **novo** |
 |---|---|---|
-| Credenciais Correios | `os.environ` | `vcreports_secret(...)` (fallback env) |
-| Driver de banco | PostgreSQL (`psycopg`) | + MySQL (`PyMySQL`) — escolhido pela `DATABASE_URL` |
-| Migração de dados | — | `scripts/migrar_pg_para_mysql.py` |
+| O que fazer | gerar o pacote de dados e copiar | clonar, instalar, restaurar, subir |
+| Fica fora do ar? | não | — |
+| Precisa de root? | não | não |
 
-Schema é 100% compatível com MySQL (tipos genéricos do SQLAlchemy); nenhuma
-tela precisa mudar.
+---
+
+## PARTE 1 — No servidor ANTIGO
+
+### 1.1 Atualizar o código (para ter os scripts novos)
+
+```bash
+cd /opt/portal-spare-v2
+env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
+    git pull --ff-only origin main
+```
+
+> O `env -u ...` é necessário porque o proxy corporativo quebra o `git` nesta
+> rede. Vale para todo comando git no servidor.
+
+### 1.2 Gerar o pacote com TUDO
+
+```bash
+bash scripts/backup.sh
+```
+
+Sai um arquivo assim, com Postgres + todos os SQLite + uploads + dados de
+referência + o arquivo de ambiente + o commit que está em produção:
+
+```
+~/backups-portal-spare/portal-spare-AAAAMMDD-HHMMSS.tar.gz
+```
+
+Confira o tamanho — se vier com poucos KB, algo não entrou:
+
+```bash
+bash scripts/backup.sh --listar
+```
+
+Se aparecer `[AVISO] pg_dump indisponível`, o Postgres **não** foi incluído.
+Nesse caso gere o dump à parte, no servidor que tenha o cliente instalado:
+
+```bash
+set -a; . /etc/portal_operacoes_spare/environment; set +a
+pg_dump -Fc --no-owner --dbname="$DATABASE_URL" -f ~/portal_postgres.dump
+```
+
+### 1.3 Copiar para o servidor novo
+
+```bash
+scp ~/backups-portal-spare/portal-spare-*.tar.gz* SEU_USUARIO@SERVIDOR_NOVO:~/
+```
+
+Sem rota direta entre os dois, baixe para a sua máquina e suba de lá. O
+`.sha256` que acompanha serve para provar que o arquivo chegou inteiro.
+
+**Pronto. O servidor antigo não precisa de mais nada** — e segue no ar.
+
+---
+
+## PARTE 2 — No servidor NOVO
+
+### 2.1 Conferir os pré-requisitos
+
+```bash
+python3 --version          # precisa ser 3.10 ou maior
+python3 -m venv --help     # se falhar, falta o pacote python3-venv
+git --version
+```
+
+Faltando algum, é o único momento em que você precisa de alguém com root.
+
+### 2.2 Trazer o código do GitHub
+
+```bash
+cd ~
+env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
+    git clone https://github.com/ghost2539/CLAUDE.git portal-spare
+cd ~/portal-spare
+```
+
+Repositório privado pede autenticação. Use um **token** (Personal Access
+Token do GitHub, escopo `repo`):
+
+```bash
+env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
+    git clone https://SEU_USUARIO:SEU_TOKEN@github.com/ghost2539/CLAUDE.git portal-spare
+```
+
+> O token fica gravado em `.git/config`. Depois do clone, tire-o de lá:
+> `git remote set-url origin https://github.com/ghost2539/CLAUDE.git`
+> e configure `git config --global credential.helper store` quando for
+> precisar de novo.
+
+### 2.3 Instalar
+
+```bash
+bash deploy/instalar_usuario.sh
+```
+
+O script cria o venv, instala as dependências, cria `data/db/` e
+`data/uploads/`, gera o arquivo de ambiente com um `PORTAL_SESSION_SECRET`
+novo e **confere se a aplicação carrega**, mostrando o número de rotas.
+
+Nada é escrito fora da sua pasta pessoal e do diretório do projeto.
+
+### 2.4 Ajustar o ambiente
+
+```bash
+nano ~/.config/portal-spare/environment
+```
+
+O mínimo para o teste subir:
+
+```ini
+INITIAL_ADMIN_LOGIN=SEU_LOGIN_DE_REDE      # sem isso ninguém libera ninguém
+```
+
+E o banco principal — escolha um dos dois:
+
+```ini
+# (A) TESTE rápido, sem servidor de banco: já vem assim
+DATABASE_URL=sqlite:////home/SEU_USUARIO/portal-spare/data/db/portal.db
+
+# (B) PRODUÇÃO, com Postgres
+DATABASE_URL=postgresql+psycopg2://usuario:senha@host:5432/portal_spare
+```
+
+O arquivo nasce com permissão `600` (só você lê). Mantenha assim — tem senha
+dentro.
+
+### 2.5 Restaurar os dados do servidor antigo
+
+```bash
+bash scripts/restaurar.sh ~/portal-spare-AAAAMMDD-HHMMSS.tar.gz
+```
+
+O que ele faz:
+
+- confere o checksum antes de mexer em qualquer coisa;
+- restaura o **Postgres** com `pg_restore`, se o destino for Postgres e o
+  cliente existir (se o destino for SQLite, ele **pula** e guarda o dump em
+  `~/portal_postgres.dump` para você restaurar depois);
+- copia os **SQLite** para `data/db/`, renomeando o que já existia para
+  `*.anterior-<data>` — nada é sobrescrito sem cópia;
+- copia **uploads** e **dados de referência**, inclusive do layout antigo
+  (`static/data` → `data/referencias`);
+- salva o ambiente antigo em `~/environment-do-servidor-antigo.txt` **sem**
+  sobrescrever o novo, para você comparar linha a linha.
+
+Ele se recusa a rodar com o portal no ar — restaurar SQLite com a aplicação
+escrevendo corrompe o arquivo.
+
+### 2.6 Subir
+
+```bash
+deploy/portal.sh start
+deploy/portal.sh status
+```
+
+Acesse: `http://SERVIDOR_NOVO:8901`
+
+Deu errado? O log diz o porquê:
+
+```bash
+deploy/portal.sh logs
+```
+
+### 2.7 Conferir tela por tela
+
+| Endereço | O que confirmar |
+|---|---|
+| `/` | login pelo Logon AD entra |
+| `/consulta-times` | consulta de ativos responde |
+| `/controle-orcamento` | pede login e respeita a permissão |
+| `/indicadores` | painel abre |
+| `/cockpit-spare` e `/dash-*` | abrem sem login |
+| Parâmetros → Monitoramento | disco, memória e bancos OK |
+| Parâmetros → Acessos & Alertas | tentativas aparecem |
+
+---
+
+## PARTE 3 — Manter no ar
+
+### Atualizar depois de um commit novo
+
+```bash
+cd ~/portal-spare
+deploy/portal.sh atualizar
+```
+
+Faz `git pull`, atualiza as dependências e reinicia. Se o `git pull` falhar,
+ele para e **não reinicia** — o que estava no ar continua no ar.
+
+### Voltar atrás
+
+```bash
+deploy/portal.sh stop
+env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY git fetch origin
+git checkout <commit-que-funcionava>
+deploy/portal.sh start
+```
+
+O commit que estava em produção está no `VERSAO.txt` de dentro do pacote de
+backup.
+
+### Sobreviver ao logout
+
+Sem root, o processo do `deploy/portal.sh` morre quando a sessão encerra em
+servidores configurados para matar processos de usuário. Duas saídas:
+
+1. **`systemctl --user`** (preferível) — instruções no cabeçalho de
+   `deploy/portal_spare.user.service`. Para o serviço continuar depois do
+   logout, alguém com root roda **uma vez**:
+   `sudo loginctl enable-linger SEU_USUARIO`
+2. **`nohup`** (o que o `portal.sh` já faz) — sobrevive na maioria dos casos,
+   mas não é garantido sem o lingering.
+
+### Backup automático
+
+```bash
+crontab -e
+```
+
+```cron
+0 2 * * * cd $HOME/portal-spare && PORTAL_APP_DIR=$HOME/portal-spare \
+  PORTAL_ENVFILE=$HOME/.config/portal-spare/environment \
+  bash scripts/backup.sh >> $HOME/backup-portal.log 2>&1
+```
+
+---
+
+## Anexo — quando houver HTTPS e subpath
+
+O destino final é `https://suporte.lojasrenner.com.br/portal-spare`, com o
+portal atrás de um proxy reverso. Duas coisas mudam quando chegar lá, e
+**ainda não estão feitas**:
+
+1. `root_path` no uvicorn e o cookie de sessão com `path=/portal-spare`;
+2. `SESSION_COOKIE_SECURE` explícito, para o cookie só trafegar em HTTPS.
+
+O proxy precisa repassar `X-Forwarded-For` (o portal usa para registrar o IP
+nas tentativas de acesso) e `X-Forwarded-Proto`.
+
+## Anexo — MySQL no lugar do Postgres
+
+O portal fala com o banco por SQLAlchemy, então MySQL funciona trocando a
+URL e instalando o driver:
+
+```bash
+venv/bin/pip install pymysql
+```
+
+```ini
+DATABASE_URL=mysql+pymysql://portal:SENHA@HOST_MYSQL:3306/portal_spare
+```
+
+A carga dos dados não é `pg_restore` nesse caso: use
+`scripts/migrar_pg_para_mysql.py`, que lê do Postgres e escreve no MySQL.
+
+## Anexo — cofre de segredos
+
+No servidor onde o módulo `vcreports_secrets` estiver disponível, as senhas
+saem do arquivo de ambiente e passam a vir do cofre. O portal já procura o
+cofre primeiro e só cai para o ambiente/store cifrado quando ele não existe —
+não é preciso mudar código, só cadastrar as chaves:
+
+| Chave no cofre | Para quê |
+|---|---|
+| `CORREIOS_USUARIO`, `CORREIOS_CHAVE` | rastreio dos Correios |
+| `SN_AUTOMACAO_USUARIO`, `SN_AUTOMACAO_SENHA` | automação de encerramento |
+| `SMTP_USUARIO`, `SMTP_SENHA` | alertas por e-mail |

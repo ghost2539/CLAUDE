@@ -1,13 +1,17 @@
 # Estrutura do repositório
 
 Regra que organiza tudo o que está aqui: **cada pasta tem um papel só**.
-Rota não conhece driver de banco, banco não conhece HTTP, integração externa
-não conhece nem um nem outro, e o que roda como serviço separado mora em
-`apps/`. A raiz guarda apenas o ponto de entrada e a configuração.
+Rota não conhece driver de banco, banco não conhece HTTP, e integração
+externa não conhece nem um nem outro. A raiz guarda apenas o ponto de
+entrada e a configuração.
+
+**Tudo roda num processo só**, na porta 8901: o servidor novo não tem root,
+então manter vários serviços não é opção. Telas que antes eram aplicativos
+separados (Consulta de Ativos dos times, na 8502) viraram router do portal.
 
 ```
 main.py                  Ponto de entrada do portal (uvicorn main:app)
-config.py                Configuração central — lida por tudo, inclusive apps/ e scripts/
+config.py                Configuração central — lida por tudo, inclusive scripts/
 requirements.txt         Dependências do portal
 .env.example             Modelo das variáveis de ambiente
 
@@ -28,20 +32,17 @@ routers/                 As APIs do portal — uma por área funcional
   identificacao · servicenow · correios · encerramento · rastreio (tv)
   indicadores · automacoes · monitoramento
   controle_orcamento_exec · orcamento_spare · public_assets · helpers
-  cockpit (telas de TV)
+  consulta_times · cockpit (telas de TV)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_service.py         API REST do EBS
   ebs_oracle.py          Consultas diretas na base Oracle do EBS
   ebs_logged.py          Raspagem autenticada do EBS
 
-apps/                    Aplicativos com serviço PRÓPRIO, fora do portal
-  controle_orcamento.py  Controle de Orçamento isolado (porta 8902)
-  consulta_times/        Consulta de Ativos para os times (porta 8502)
-
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css · modules/*.js
   controle-orcamento-exec/ · indicadores/ · identificacao/ · cockpit/
+  consulta-times/
 
 frontend/                Fontes React dos painéis; o build sai em static/
 
@@ -51,12 +52,15 @@ data/                    TUDO que é gravado em disco (fora do repositório)
   referencias/           Cadastros de apoio versionados (ex.: locations_sn.json)
 
 deploy/                  Instalação e serviços systemd
-  portal_spare.service · controle_orcamento.service · consulta_times.service
-  install.sh · controle_orcamento_instalar.sh · generate-cert.sh
-  requirements-controle-orcamento.txt
+  portal_spare.service        serviço de sistema (com root)
+  portal_spare.user.service   serviço de usuário (systemctl --user)
+  portal.sh                   controle sem root: start/stop/status/atualizar
+  instalar_usuario.sh         instalação sem root, direto do GitHub
+  install.sh · generate-cert.sh
 
 scripts/                 Utilitários de operação
   backup.sh              Backup total (Postgres + SQLite + env + uploads)
+  restaurar.sh           Restauração do pacote no servidor novo
   migrar_pg_para_mysql.py
 
 docs/                    Documentação

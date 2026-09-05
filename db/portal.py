@@ -25,6 +25,13 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+# Chave primária: BIGINT no Postgres (produção) e INTEGER no SQLite. O SQLite
+# só autoincrementa uma coluna INTEGER PRIMARY KEY — com BIGINT o insert falha
+# com "NOT NULL constraint failed". A variante deixa o mesmo modelo servir aos
+# dois bancos, sem mudar nada em produção.
+_PK = BigInteger().with_variant(Integer, "sqlite")
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -50,7 +57,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(180), default="")
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -73,7 +80,7 @@ class User(Base):
 
 class Permission(Base):
     __tablename__ = "permissions"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
@@ -88,7 +95,7 @@ class Permission(Base):
 
 class AccessLog(Base):
     __tablename__ = "access_logs"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     login: Mapped[str] = mapped_column(String(80))
     auth_source: Mapped[str] = mapped_column(String(12))
     success: Mapped[bool] = mapped_column(Boolean)
@@ -111,7 +118,7 @@ class Setting(Base):
 
 class Classification(Base):
     __tablename__ = "classifications"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     description_pattern: Mapped[str] = mapped_column(String(500), index=True)
     company: Mapped[str] = mapped_column(String(40), default="")
     category: Mapped[str] = mapped_column(String(120))
@@ -127,7 +134,7 @@ class Classification(Base):
 
 class StorageLocation(Base):
     __tablename__ = "storage_locations"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     description: Mapped[str] = mapped_column(String(500), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -135,7 +142,7 @@ class StorageLocation(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     company: Mapped[str] = mapped_column(String(40), default="")
     book_type_code: Mapped[str] = mapped_column(String(80), default="")
     asset_id: Mapped[str] = mapped_column(String(120), default="", index=True)
@@ -161,7 +168,7 @@ class Asset(Base):
 
 class ReceiptCycle(Base):
     __tablename__ = "receipt_cycles"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), index=True)
     cycle_number: Mapped[int] = mapped_column(Integer)
     received_date: Mapped[date] = mapped_column(
@@ -193,7 +200,7 @@ class ReceiptCycle(Base):
 
 class Movement(Base):
     __tablename__ = "movements"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), index=True)
     cycle_id: Mapped[int] = mapped_column(
         ForeignKey("receipt_cycles.id"), index=True
@@ -220,7 +227,7 @@ class LotSequence(Base):
 
 class Lot(Base):
     __tablename__ = "lots"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     number: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     prefix: Mapped[str] = mapped_column(String(30))
     created_by: Mapped[str] = mapped_column(String(80))
@@ -231,7 +238,7 @@ class Lot(Base):
 
 class Repair(Base):
     __tablename__ = "repairs"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), index=True)
     cycle_id: Mapped[int] = mapped_column(
         ForeignKey("receipt_cycles.id"), index=True
@@ -255,7 +262,7 @@ class Repair(Base):
 
 class LocalAsset(Base):
     __tablename__ = "local_assets"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     company: Mapped[str] = mapped_column(String(40), index=True)
     branch: Mapped[str] = mapped_column(String(80), default="")
     asset_number: Mapped[str] = mapped_column(String(120), default="", index=True)
@@ -272,7 +279,7 @@ class LocalAsset(Base):
 
 class LoadHistory(Base):
     __tablename__ = "load_history"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
     company: Mapped[str] = mapped_column(String(40))
     filename: Mapped[str] = mapped_column(String(255))
     mode: Mapped[str] = mapped_column(String(30))
