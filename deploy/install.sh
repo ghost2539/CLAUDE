@@ -8,10 +8,15 @@ PORT=8901
  
 echo "=== Portal de Operações SPARE v2 — Instalação ==="
  
-if ss -tlnp | grep -q ":${PORT} "; then
-    echo "ERRO: Porta ${PORT} já está em uso."
-    exit 1
-fi
+# Sem pipe: com `pipefail`, o `grep -q` sai no primeiro acerto, o `ss` leva
+# SIGPIPE e a checagem inverteria o resultado — dizendo que a porta está
+# livre justamente quando ela está ocupada.
+PORTAS="$(ss -tln 2>/dev/null || true)"
+case "$PORTAS" in
+    *":${PORT} "*)
+        echo "ERRO: Porta ${PORT} já está em uso."
+        exit 1 ;;
+esac
  
 if ! id "$SERVICE_USER" &>/dev/null; then
     useradd --system --shell /usr/sbin/nologin --home-dir "$INSTALL_DIR" "$SERVICE_USER"
