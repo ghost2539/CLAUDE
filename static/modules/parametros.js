@@ -617,6 +617,12 @@ async function renderAcessos(c, S) {
         '<div class="card mb-3"><div class="card-header">Usuários aguardando liberação</div>' +
             '<div class="card-body" id="ac-pendentes"></div></div>' +
 
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Controle de Orçamento — trilha de acesso</span>' +
+            '<button id="ac-orc-refresh" class="btn btn-sm btn-secondary">Atualizar</button>' +
+            '</div><div class="card-body" id="ac-orcamento"></div></div>' +
+
         '<div class="card"><div class="card-header">Alertas por e-mail</div>' +
             '<div class="card-body" id="ac-alertas">' +
             '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>';
@@ -770,11 +776,37 @@ async function renderAcessos(c, S) {
         }
     }
 
+    async function loadOrcamento() {
+        var host = document.getElementById('ac-orcamento');
+        try {
+            var d = await S.api('/controle-orcamento-exec/acessos?limit=200');
+            if (!(d.acessos || []).length) {
+                host.innerHTML = '<p class="text-muted">Nenhum acesso registrado ainda.</p>';
+                return;
+            }
+            host.innerHTML = '';
+            host.appendChild(S.table([
+                { key: 'quando', label: 'Quando', render: function (v) {
+                    return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
+                { key: 'usuario', label: 'Usuário' },
+                { key: 'acao', label: 'Ação', html: true, render: function (v) {
+                    var cor = v === 'negado' ? '#dc2626'
+                            : (v === 'abrir' ? '#6b7280' : '#2563eb');
+                    return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
+                { key: 'ip', label: 'IP' },
+                { key: 'detalhe', label: 'Detalhe' }
+            ], d.acessos));
+        } catch (e) {
+            host.innerHTML = '<p class="text-muted">Trilha indisponível: ' + S.esc(e.message) + '</p>';
+        }
+    }
+
+    document.getElementById('ac-orc-refresh').onclick = loadOrcamento;
     document.getElementById('ac-refresh').onclick = loadAcessos;
     document.getElementById('ac-tipo').onchange = loadAcessos;
     document.getElementById('ac-dias').onchange = loadAcessos;
 
-    loadAcessos(); loadAlertas();
+    loadAcessos(); loadAlertas(); loadOrcamento();
 }
 
 /* ── Visual ─────────────────────────────────────────────────────── */
@@ -987,11 +1019,13 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'rastreio', 'reparos', 'status', 'parametros'];
+        'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         identificacao: 'Identificação', servicenow: 'ServiceNow', rastreio: 'Correios',
-        reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros'
+        reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
+        // Tela fora da sidebar, liberada usuário a usuário: /controle-orcamento
+        orcamento: 'Controle de Orçamento'
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];

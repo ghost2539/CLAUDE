@@ -34,11 +34,6 @@ class Settings:
     UPLOAD: Path = ROOT / "data" / "uploads"
 
     DATABASE_URL: str = os.environ["DATABASE_URL"]
-    # Banco EXCLUSIVO do módulo Controle de Orçamento (/tv2), separado do portal
-    ORCAMENTO_DATABASE_URL: str = os.getenv(
-        "CONTROLE_ORCAMENTO_DATABASE_URL",
-        _sqlite("controle_orcamento"),
-    )
     SESSION_SECRET: str = os.environ["PORTAL_SESSION_SECRET"]
     SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
 
@@ -159,7 +154,7 @@ class Settings:
     ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
 
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
-    # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
+    # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
         "ORCAMENTO_EXEC_DATABASE_URL",
         _sqlite("controle_orcamento_exec"),
@@ -190,9 +185,11 @@ class Settings:
     )
     EBS_CAPEX_FX_PROXY: str = os.getenv("EBS_CAPEX_FX_PROXY", "")
 
+    # Módulos com permissão por usuário. "orcamento" não aparece na sidebar
+    # do portal — é a tela /controle-orcamento, liberada individualmente.
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
-        "identificacao", "servicenow", "rastreio"
+        "identificacao", "servicenow", "rastreio", "orcamento"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

@@ -124,7 +124,6 @@ def _bancos() -> list[dict]:
     """Tamanho e acessibilidade de cada banco (SQLite por arquivo; Postgres por ping)."""
     saida = []
     arquivos = {
-        "Orçamento (/tv2)": getattr(_cfg, "ORCAMENTO_DATABASE_URL", ""),
         "Execução CAPEX": getattr(_cfg, "ORCAMENTO_EXEC_DATABASE_URL", ""),
         "Indicadores": getattr(_cfg, "INDICADORES_DATABASE_URL", ""),
         "Automações": getattr(_cfg, "AUTOMACOES_DATABASE_URL", ""),

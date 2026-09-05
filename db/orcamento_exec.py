@@ -1,13 +1,13 @@
 """Banco de dados EXCLUSIVO do módulo "Controle de Orçamento — Execução CAPEX".
 
-Clone independente de ``db/orcamento.py`` (que serve o /tv2). Usa um
+Banco do Controle de Orçamento (execução CAPEX). Usa um
 engine/sessão próprios e um arquivo/banco SEPARADO, para que este dashboard e o
-/tv2 NUNCA compartilhem dados.
+o portal NUNCA compartilhem dados.
 
 Por padrão os dados ficam em ``data/controle_orcamento_exec.db`` (SQLite). Para
 outro banco (ex.: MySQL no servidor novo), defina ``ORCAMENTO_EXEC_DATABASE_URL``.
 
-Diferença de modelo em relação ao /tv2: há a coluna ``a_realizar`` (recebe o
+O modelo tem a coluna ``a_realizar`` (recebe o
 ``saldo_dia`` vindo da API de CAPEX do EBS).
 
 Regra de isolamento: nada é criado em tempo de import — engine, conexão e
@@ -169,6 +169,54 @@ class BudgetCategory(Base):
     color: Mapped[str] = mapped_column(String(9), default="#9ca3af")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Acesso(Base):
+    """Trilha de acesso da tela: quem abriu e quem alterou o quê.
+
+    Fica no banco do próprio módulo — a tela tem permissão exclusiva e o
+    registro de quem viu a informação faz parte dela, não do portal.
+    """
+    __tablename__ = "budget_acessos"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    usuario: Mapped[str] = mapped_column(String(120), default="", index=True)
+    ip: Mapped[str] = mapped_column(String(80), default="")
+    acao: Mapped[str] = mapped_column(String(40), default="")      # abrir | consultar | incluir | alterar | excluir | sincronizar | negado
+    detalhe: Mapped[str] = mapped_column(String(400), default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "quando": self.quando.isoformat() if self.quando else None,
+            "usuario": self.usuario, "ip": self.ip,
+            "acao": self.acao, "detalhe": self.detalhe,
+        }
+
+
+def registrar_acesso(usuario: str, ip: str, acao: str, detalhe: str = "") -> None:
+    """Grava uma linha na trilha. Nunca levanta: auditoria não bloqueia a tela."""
+    try:
+        with SessionLocal.begin() as s:
+            s.add(Acesso(usuario=(usuario or "")[:120], ip=(ip or "")[:80],
+                         acao=(acao or "")[:40], detalhe=(detalhe or "")[:400]))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Falha ao registrar acesso do Controle de Orçamento: %s", exc)
+
+
+def listar_acessos(limit: int = 300, usuario: str = "", acao: str = "") -> list[dict]:
+    try:
+        with SessionLocal() as s:
+            stmt = select(Acesso).order_by(Acesso.id.desc())
+            if usuario:
+                stmt = stmt.where(Acesso.usuario == usuario)
+            if acao:
+                stmt = stmt.where(Acesso.acao == acao)
+            return [r.to_dict() for r in s.scalars(stmt.limit(max(1, min(limit, 2000)))).all()]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # Só categorias iniciais (para o seletor não nascer vazio). SEM projetos de

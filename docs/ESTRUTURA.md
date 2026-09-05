@@ -20,14 +20,13 @@ db/                      Camada de dados — um módulo por banco, todos isolado
   indicadores.py         Snapshots do painel de indicadores
   automacoes.py          Regras, logs e configuração das automações
   monitoramento.py       Eventos de saúde/falha e configuração de alertas
-  orcamento.py           Controle de Orçamento de portfólio (/tv2)
   orcamento_exec.py      Controle de Orçamento — execução CAPEX
 
 routers/                 As APIs do portal — uma por área funcional
   auth · consulta · recebimento · reparos · status · parametros
   identificacao · servicenow · correios · encerramento · rastreio (tv)
   indicadores · automacoes · monitoramento
-  controle_orcamento · controle_orcamento_exec · public_assets · helpers
+  controle_orcamento_exec · public_assets · helpers
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_service.py         API REST do EBS
@@ -40,7 +39,7 @@ apps/                    Aplicativos com serviço PRÓPRIO, fora do portal
 
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css · modules/*.js
-  controle-orcamento/ · controle-orcamento-exec/ · indicadores/ · identificacao/
+  controle-orcamento-exec/ · indicadores/ · identificacao/
 
 frontend/                Fontes React dos painéis; o build sai em static/
 
@@ -56,7 +55,7 @@ deploy/                  Instalação e serviços systemd
 
 scripts/                 Utilitários de operação
   backup.sh              Backup total (Postgres + SQLite + env + uploads)
-  controle_orcamento_dados.py · migrar_pg_para_mysql.py
+  migrar_pg_para_mysql.py
 
 docs/                    Documentação
 ```
@@ -69,7 +68,6 @@ docs/                    Documentação
 | Indicadores | `data/db/indicadores.db` | `INDICADORES_DATABASE_URL` |
 | Automações | `data/db/automacoes.db` | `AUTOMACOES_DATABASE_URL` |
 | Monitoramento | `data/db/monitoramento.db` | `MONITORAMENTO_DATABASE_URL` |
-| Controle de Orçamento (/tv2) | `data/db/controle_orcamento.db` | `CONTROLE_ORCAMENTO_DATABASE_URL` |
 | Controle de Orçamento — CAPEX | `data/db/controle_orcamento_exec.db` | `ORCAMENTO_EXEC_DATABASE_URL` |
 
 Nenhum módulo isolado escreve no banco do portal, e vice-versa. Toda URL sai
@@ -98,11 +96,16 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/reparos` | reparos | `/api/automacoes` | automacoes |
 | `/api/status` | status | `/api/monitor` | monitoramento |
 | `/api/parametros` | parametros | `/api/public-assets` | public_assets |
-| `/api/lotes` `/api/dashboard` `/api/tv` | tv / helpers | `/api/controle-orcamento[-exec]` | controle_orcamento[_exec] |
+| `/api/lotes` `/api/dashboard` | helpers | `/api/controle-orcamento-exec` | controle_orcamento_exec |
 
-As páginas que não são API (`/`, `/tv`, `/tv2`, `/indicadores`,
-`/controle-orcamento`) são servidas pelos seus próprios routers, com o
-HTML em `static/`.
+As páginas que não são API (`/`, `/indicadores`, `/controle-orcamento`) são
+servidas pelos seus próprios routers, com o HTML em `static/`.
+
+`/controle-orcamento` tem **permissão exclusiva**: exige sessão do portal e
+o módulo `orcamento` liberado para o usuário (`view` para ler, `create` para
+incluir, `edit` para alterar/excluir/sincronizar, `admin` para a trilha de
+acesso). Cada abertura de tela e cada gravação ficam registradas na tabela
+`budget_acessos`, consultável em Parâmetros → Acessos & Alertas.
 
 ## Regras para não voltar a misturar
 

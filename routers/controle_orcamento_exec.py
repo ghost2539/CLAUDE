@@ -1,10 +1,9 @@
-"""Controle de Orçamento — Execução CAPEX (clone independente do /tv2).
+"""Controle de Orçamento — Execução CAPEX.
 
 Servido em ``/controle-orcamento`` (e ``/controle-orçamento``), com banco
-PRÓPRIO e SEPARADO (``db/orcamento_exec.py``). NÃO compartilha dados nem
-código de estado com o /tv2.
+PRÓPRIO e SEPARADO (``db/orcamento_exec.py``).
 
-Novidade em relação ao /tv2: barra de inclusão de projetos no topo (Número,
+Barra de inclusão de projetos no topo (Número,
 Tipo, Projeto/Demanda, Categoria, Área) e integração com a API de CAPEX do EBS
 (``suporte.lojasrenner.com.br/ebs/api/capex/?projetos=...``), que preenche os
 valores financeiros:
@@ -15,7 +14,12 @@ valores financeiros:
   saldo_dia                → A Realizar
   (empresa, devolucoes, pct_exec, nome_projeto: NÃO são puxados)
 
-Acesso livre (sem login), como o /tv2. As gravações passam pelo rate limit.
+ACESSO CONTROLADO: exige sessão do portal e permissão do módulo
+``orcamento`` — liberada usuário a usuário em Parâmetros → Usuários e
+Permissões. Leitura pede ``view``; inclusão, ``create``; alteração, exclusão
+e sincronização, ``edit``; a trilha de acesso, ``admin``. Toda abertura de
+tela e toda gravação ficam registradas em ``budget_acessos``, no banco do
+próprio módulo. As gravações continuam passando pelo rate limit.
 """
 from __future__ import annotations
 
@@ -29,15 +33,18 @@ from functools import lru_cache
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 
 from config import get_settings
 from db.orcamento_exec import (
     BudgetCategory, BudgetProject, SessionLocal, ensure_db, utcnow,
+    listar_acessos, registrar_acesso,
 )
-from core.security import check_rate_limit, client_ip, get_session
+from core.security import (
+    check_rate_limit, client_ip, get_session, require_permission,
+)
 
 _cfg = get_settings()
 _DIR = _cfg.STATIC / "controle-orcamento-exec"
@@ -91,19 +98,65 @@ def _page() -> HTMLResponse:
     return HTMLResponse(html.replace("{{v}}", _asset_version()))
 
 
-@router.get("/controle-orcamento", response_class=HTMLResponse)
-def pagina():
+# ── Controle de acesso ────────────────────────────────────────────
+# A tela tem permissão PRÓPRIA (módulo "orcamento"): quem não foi liberado
+# não vê a informação, mesmo tendo acesso ao resto do portal.
+MODULO = "orcamento"
+
+_SEM_PERMISSAO = """<!doctype html><meta charset="utf-8">
+<title>Controle de Orçamento</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#1f2937;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.c{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px 32px;
+max-width:460px;box-shadow:0 1px 3px rgba(0,0,0,.08)}h1{font-size:18px;margin:0 0 10px}
+p{margin:0 0 8px;line-height:1.5}a{color:#2563eb}</style>
+<div class="c"><h1>Acesso não liberado</h1>
+<p>Seu usuário está autenticado, mas não tem permissão para o Controle de
+Orçamento.</p><p>Solicite a liberação a um administrador do portal.</p>
+<p><a href="/">Voltar ao portal</a></p></div>"""
+
+
+def _acesso_pagina(req: Request):
+    """Sessão + permissão de leitura. Sem sessão vai para o login do portal;
+    com sessão e sem permissão, mostra a página de acesso não liberado."""
+    sd = get_session(req, required=False)
+    if not sd:
+        return RedirectResponse("/", status_code=302)
+    try:
+        ensure_db()   # a trilha de acesso vive no banco do módulo
+    except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
+        pass
+    try:
+        require_permission(req, MODULO, "view")
+    except HTTPException:
+        registrar_acesso(sd.get("username", ""), client_ip(req), "negado",
+                         "sem permissão do módulo orcamento")
+        return HTMLResponse(_SEM_PERMISSAO, status_code=403)
+    registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
     return _page()
+
+
+def _exigir(req: Request, acao: str, registro: str = "", detalhe: str = "") -> dict:
+    """Permissão de API + trilha de acesso da operação."""
+    sd = require_permission(req, MODULO, acao)
+    if registro:
+        registrar_acesso(sd.get("username", ""), client_ip(req), registro, detalhe)
+    return sd
+
+
+@router.get("/controle-orcamento", response_class=HTMLResponse)
+def pagina(req: Request):
+    return _acesso_pagina(req)
 
 
 @router.get("/controle-orcamento/", response_class=HTMLResponse)
-def pagina_slash():
-    return _page()
+def pagina_slash(req: Request):
+    return _acesso_pagina(req)
 
 
 @router.get("/controle-orçamento", response_class=HTMLResponse)
-def pagina_acento():
-    return _page()
+def pagina_acento(req: Request):
+    return _acesso_pagina(req)
 
 
 # ── Validação ─────────────────────────────────────────────────────
@@ -553,9 +606,18 @@ def sessao(req: Request):
     return {"usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")}}
 
 
+@router.get("/api/controle-orcamento-exec/acessos")
+@_com_banco
+def acessos(req: Request, limit: int = 300, usuario: str = "", acao: str = ""):
+    """Trilha de acesso da tela — quem abriu e quem alterou o quê."""
+    _exigir(req, "admin")
+    return {"acessos": listar_acessos(limit=limit, usuario=usuario, acao=acao)}
+
+
 @router.get("/api/controle-orcamento-exec/projetos")
 @_com_banco
-def listar_projetos():
+def listar_projetos(req: Request):
+    _exigir(req, "view")
     with SessionLocal() as s:
         rows = s.scalars(_ordem_projetos()).all()
         return {
@@ -574,6 +636,7 @@ def listar_projetos():
 def incluir(body: IncluirIn, req: Request):
     """Inclui um ou mais projetos (número separado por vírgula) e já puxa os
     valores do EBS. O Projeto/Demanda é o informado aqui (não vem do EBS)."""
+    _exigir(req, "create", "incluir", f"projeto(s) {body.numero}")
     check_rate_limit(req, "api")
     numeros = [n.strip() for n in body.numero.split(",") if n.strip()]
     if not numeros:
@@ -628,6 +691,7 @@ def incluir(body: IncluirIn, req: Request):
 @_com_banco
 def sincronizar(req: Request):
     """Atualiza os valores financeiros de TODOS os projetos a partir do EBS."""
+    _exigir(req, "edit", "sincronizar", "sincronização com o EBS")
     check_rate_limit(req, "api")
     with SessionLocal() as s:
         rows = s.scalars(_ordem_projetos()).all()
@@ -672,6 +736,7 @@ def sincronizar(req: Request):
 @router.post("/api/controle-orcamento-exec/projetos", status_code=201)
 @_com_banco
 def criar_projeto(body: ProjetoIn, req: Request):
+    _exigir(req, "create", "incluir", f"projeto {body.numero or body.nome or ''}")
     check_rate_limit(req, "api")
     dados = body.model_dump(exclude_none=True)
     with SessionLocal.begin() as s:
@@ -688,6 +753,7 @@ def criar_projeto(body: ProjetoIn, req: Request):
 @router.patch("/api/controle-orcamento-exec/projetos/{projeto_id}")
 @_com_banco
 def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
+    _exigir(req, "edit", "alterar", f"projeto id {projeto_id}")
     check_rate_limit(req, "api")
     dados = body.model_dump(exclude_unset=True)
     with SessionLocal.begin() as s:
@@ -708,6 +774,7 @@ def atualizar_projeto(projeto_id: int, body: ProjetoIn, req: Request):
 @router.delete("/api/controle-orcamento-exec/projetos/{projeto_id}")
 @_com_banco
 def excluir_projeto(projeto_id: int, req: Request):
+    _exigir(req, "edit", "excluir", f"projeto id {projeto_id}")
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         p = s.get(BudgetProject, projeto_id)
@@ -720,6 +787,7 @@ def excluir_projeto(projeto_id: int, req: Request):
 @router.post("/api/controle-orcamento-exec/projetos/{projeto_id}/duplicar", status_code=201)
 @_com_banco
 def duplicar_projeto(projeto_id: int, req: Request):
+    _exigir(req, "create", "incluir", f"duplicar projeto id {projeto_id}")
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         orig = s.get(BudgetProject, projeto_id)
@@ -741,7 +809,8 @@ def duplicar_projeto(projeto_id: int, req: Request):
 # ── API: categorias ───────────────────────────────────────────────
 @router.get("/api/controle-orcamento-exec/categorias")
 @_com_banco
-def listar_categorias():
+def listar_categorias(req: Request):
+    _exigir(req, "view")
     with SessionLocal() as s:
         return {"categorias": _listar_categorias(s)}
 
@@ -749,6 +818,7 @@ def listar_categorias():
 @router.post("/api/controle-orcamento-exec/categorias", status_code=201)
 @_com_banco
 def criar_categoria(body: CategoriaIn, req: Request):
+    _exigir(req, "create", "incluir", f"categoria {body.nome}")
     check_rate_limit(req, "api")
     if not body.nome:
         raise HTTPException(422, "Nome da categoria obrigatório.")
@@ -765,6 +835,7 @@ def criar_categoria(body: CategoriaIn, req: Request):
 @router.patch("/api/controle-orcamento-exec/categorias/{categoria_id}")
 @_com_banco
 def atualizar_categoria(categoria_id: int, body: CategoriaIn, req: Request):
+    _exigir(req, "edit", "alterar", f"categoria id {categoria_id}")
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         c = s.get(BudgetCategory, categoria_id)
@@ -786,6 +857,7 @@ def atualizar_categoria(categoria_id: int, body: CategoriaIn, req: Request):
 @router.delete("/api/controle-orcamento-exec/categorias/{categoria_id}")
 @_com_banco
 def excluir_categoria(categoria_id: int, req: Request):
+    _exigir(req, "edit", "excluir", f"categoria id {categoria_id}")
     check_rate_limit(req, "api")
     with SessionLocal.begin() as s:
         c = s.get(BudgetCategory, categoria_id)

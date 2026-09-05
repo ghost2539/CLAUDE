@@ -58,7 +58,7 @@ else
   aviso "pg_dump indisponível ou DATABASE_URL vazio — Postgres NÃO incluído"
 fi
 
-# ── 2. SQLite (orçamento /tv2, execução CAPEX, indicadores, automações) ─────
+# ── 2. SQLite (execução CAPEX, indicadores, automações, monitoramento) ──────
 echo "-- SQLite"
 mkdir -p "$STAGE/sqlite"
 copiado=0
