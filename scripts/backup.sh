@@ -55,6 +55,9 @@ url_para_pg_dump() {
   printf '%s' "$1" | sed -E 's|^postgres(ql)?\+[a-z0-9_]+://|postgresql://|; s|^postgres://|postgresql://|'
 }
 
+PG_ESPERADO=0   # o portal usa Postgres e o dump precisa entrar no pacote
+PG_OK=0         # o dump entrou
+
 if [ -z "${DATABASE_URL:-}" ]; then
   aviso "DATABASE_URL vazio — Postgres NÃO incluído"
 elif [[ "$DATABASE_URL" == sqlite* ]]; then
@@ -62,10 +65,12 @@ elif [[ "$DATABASE_URL" == sqlite* ]]; then
 elif ! command -v pg_dump >/dev/null 2>&1; then
   aviso "pg_dump não instalado — Postgres NÃO incluído (instale postgresql-client)"
 else
+  PG_ESPERADO=1
   PG_URL="$(url_para_pg_dump "$DATABASE_URL")"
   echo "-- Postgres (pg_dump)"
   if pg_dump -Fc --no-owner --dbname="$PG_URL" -f "$STAGE/portal_postgres.dump" 2>"$STAGE/pg_dump.err"; then
     rm -f "$STAGE/pg_dump.err"
+    PG_OK=1
     echo "   $(du -h "$STAGE/portal_postgres.dump" | cut -f1)"
   else
     # O erro precisa aparecer AGORA: escondido dentro do pacote, passa batido
@@ -125,8 +130,11 @@ rm -rf "$WORK"
 find "$DEST" -name 'portal-spare-*.tar.gz*' -type f -mtime +"$RET_DAYS" -delete 2>/dev/null
 
 echo "== Concluído: $PKG ($(du -h "$PKG" | cut -f1)) — avisos: $ERROS =="
-if [ -n "${DATABASE_URL:-}" ] && [[ "$DATABASE_URL" != sqlite* ]] \
-   && ! tar -tzf "$PKG" 2>/dev/null | grep -q 'portal_postgres.dump'; then
+# Conferência pela flag do passo 1, e não relendo o pacote: `tar | grep -q`
+# fazia o grep sair no primeiro acerto, o tar levar SIGPIPE e o `pipefail`
+# tratar isso como falha — o aviso disparava justamente quando o dump era
+# grande e vinha no começo da listagem.
+if [ "$PG_ESPERADO" = 1 ] && [ "$PG_OK" != 1 ]; then
   echo
   echo "  ATENÇÃO: este pacote NÃO tem o banco do portal (Postgres)."
   echo "           Não serve para migrar sozinho. Resolva o erro acima e refaça."
