@@ -310,13 +310,15 @@ def _backlog_por_mes(meses: list[dict], C: dict) -> list[dict]:
     e devolveria o backlog inteiro em todo mês)."""
     field = C["backlog_date_field"]
     q = _inc(f"stateIN{C['state_aberto']}")
-    rows = _sn_rest_get("incident", q, f"number,{field}",
+    rows = _sn_rest_get("incident", q, f"number,opened_at,{field}",
                         display_value="false", limit=6000)
     cont: dict[str, int] = {}
     for r in rows:
-        mes = _mes(_mv(r.get(field)))
+        # Usa a data bouncing; se estiver vazia (ex.: coletores/SLED), cai
+        # para a data de ABERTURA do chamado — assim nada fica de fora.
+        mes = _mes(_mv(r.get(field))) or _mes(_mv(r.get("opened_at")))
         if not mes:
-            continue  # sem data bouncing → não entra em nenhum mês
+            continue
         cont[mes] = cont.get(mes, 0) + 1
     if not cont:
         return []
@@ -486,9 +488,10 @@ def indicadores_diag_backlog(req: Request, field: str = ""):
         raise HTTPException(502, "Falha ao consultar incidentes: %s" % exc)
     total = len(rows)
     com_valor = sum(1 for r in rows if _mv(r.get(campo)))
+    # Distribuição usada no gráfico: data bouncing e, se vazia, data de abertura.
     por_mes: dict[str, int] = {}
     for r in rows:
-        mes = _mes(_mv(r.get(campo))) or "(sem data)"
+        mes = _mes(_mv(r.get(campo))) or _mes(_mv(r.get("opened_at"))) or "(sem data)"
         por_mes[mes] = por_mes.get(mes, 0) + 1
     dist = sorted(por_mes.items(), key=lambda x: x[0])
     exemplos = [{"number": _mv(r.get("number")), "valor": _mv(r.get(campo))}
