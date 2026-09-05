@@ -38,7 +38,12 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 tar -xzf "$PKG" -C "$WORK" || { echo "ERRO ao extrair."; exit 1; }
-SRC="$(find "$WORK" -maxdepth 1 -type d -name 'portal-spare-*' | head -1)"
+# `find | head -1` sob `pipefail` devolve 141 (SIGPIPE); aqui o valor até vem
+# certo, mas o padrão é frágil — melhor não usá-lo.
+SRC=""
+for d in "$WORK"/portal-spare-*; do
+    [ -d "$d" ] && { SRC="$d"; break; }
+done
 [ -d "$SRC" ] || { echo "ERRO: conteúdo inesperado no pacote."; exit 1; }
 
 [ -f "$SRC/VERSAO.txt" ] && { echo "-- Origem do pacote:"; sed 's/^/     /' "$SRC/VERSAO.txt"; }
