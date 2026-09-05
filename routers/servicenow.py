@@ -12,8 +12,8 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
-from database import SessionLocal, Asset, ReceiptCycle, Setting
-from security import require_permission, get_session
+from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
+from core.security import require_permission, get_session
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -1486,7 +1486,10 @@ def saida_locations(req: Request):
     """Retorna lista de lojas/locais do ServiceNow (cmn_location)."""
     require_permission(req, "servicenow", "view")
     import json as _json
-    loc_path = os.path.join(os.path.dirname(__file__), "..", "static", "data", "locations_sn.json")
+    # Cadastro de referência: fica em data/referencias/ (fora de static/,
+    # para não ficar acessível sem login).
+    from config import get_settings
+    loc_path = get_settings().DATA / "referencias" / "locations_sn.json"
     try:
         with open(loc_path, "r", encoding="utf-8") as f:
             return {"locations": _json.load(f)}

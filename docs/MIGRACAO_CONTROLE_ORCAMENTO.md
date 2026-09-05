@@ -46,10 +46,10 @@ arquivo: ele também serve de backup.
 ```bash
 cd /opt/portal-spare-v2
 tar -czf /tmp/controle-orcamento-codigo.tar.gz \
-  controle_orcamento_app.py controle_orcamento.service requirements-controle-orcamento.txt \
+  apps/controle_orcamento.py deploy/controle_orcamento.service deploy/requirements-controle-orcamento.txt \
   config.py security.py database_orcamento.py routers/__init__.py routers/controle_orcamento.py \
   static/controle-orcamento static/favicon.svg scripts/controle_orcamento_dados.py \
-  scripts/controle_orcamento_instalar.sh docs/CONTROLE_ORCAMENTO.md docs/MIGRACAO_CONTROLE_ORCAMENTO.md
+  deploy/controle_orcamento_instalar.sh docs/CONTROLE_ORCAMENTO.md docs/MIGRACAO_CONTROLE_ORCAMENTO.md
 ```
 
 Copie para o servidor novo os arquivos `/tmp/controle-orcamento-codigo.tar.gz`
@@ -120,7 +120,7 @@ comando para apagá-los e importar por cima.
 ```bash
 mkdir -p /tmp/co && tar -xzf /tmp/controle-orcamento-codigo.tar.gz -C /tmp/co
 cd /tmp/co
-sudo bash scripts/controle_orcamento_instalar.sh
+sudo bash deploy/controle_orcamento_instalar.sh
 sudo nano /etc/controle_orcamento/environment     # senha do banco na CONTROLE_ORCAMENTO_DATABASE_URL
 sudo systemctl start controle_orcamento.service
 sudo systemctl status controle_orcamento.service --no-pager

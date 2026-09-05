@@ -3,8 +3,33 @@ import os
 from pathlib import Path
 from functools import lru_cache
 
+_ROOT = Path(__file__).parent
+
+
+def _sqlite(nome: str) -> str:
+    """URL do banco SQLite `nome`, guardado em `data/db/`.
+
+    Instalações anteriores à reorganização mantêm o arquivo em `data/`. Se o
+    arquivo antigo existir e o novo ainda não, ele continua sendo usado — uma
+    atualização nunca aponta o serviço para um banco vazio. Basta mover o
+    arquivo para `data/db/` (com o serviço parado) para adotar o novo lugar.
+    """
+    novo = _ROOT / "data" / "db" / f"{nome}.db"
+    antigo = _ROOT / "data" / f"{nome}.db"
+    escolhido = antigo if (antigo.exists() and not novo.exists()) else novo
+    try:
+        escolhido.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return f"sqlite:///{escolhido.as_posix()}"
+
+
 class Settings:
-    ROOT: Path = Path(__file__).parent
+    ROOT: Path = _ROOT
+    # Todo dado gravado em disco mora sob data/: bancos em data/db/ e
+    # arquivos enviados pelos usuários em data/uploads/.
+    DATA: Path = _ROOT / "data"
+    DB_DIR: Path = _ROOT / "data" / "db"
     STATIC: Path = ROOT / "static"
     UPLOAD: Path = ROOT / "data" / "uploads"
 
@@ -12,7 +37,7 @@ class Settings:
     # Banco EXCLUSIVO do módulo Controle de Orçamento (/tv2), separado do portal
     ORCAMENTO_DATABASE_URL: str = os.getenv(
         "CONTROLE_ORCAMENTO_DATABASE_URL",
-        "sqlite:///" + str(ROOT / "data" / "controle_orcamento.db"),
+        _sqlite("controle_orcamento"),
     )
     SESSION_SECRET: str = os.environ["PORTAL_SESSION_SECRET"]
     SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
@@ -43,7 +68,7 @@ class Settings:
     # Banco próprio, separado do resto do sistema. Default: SQLite local.
     INDICADORES_DATABASE_URL: str = os.getenv(
         "INDICADORES_DATABASE_URL",
-        f"sqlite:///{(ROOT / 'data' / 'indicadores.db').as_posix()}",
+        _sqlite("indicadores"),
     )
     # Conta de serviço do ServiceNow (API REST) — usada só para LEITURA.
     # A senha nunca fica no repositório; vem do ambiente / systemd-creds.
@@ -111,7 +136,7 @@ class Settings:
     # Banco próprio, separado do portal. Default: SQLite local.
     AUTOMACOES_DATABASE_URL: str = os.getenv(
         "AUTOMACOES_DATABASE_URL",
-        f"sqlite:///{(ROOT / 'data' / 'automacoes.db').as_posix()}",
+        _sqlite("automacoes"),
     )
     # Horários (hora local) em que a rotina roda sozinha. CSV de horas.
     AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
@@ -119,7 +144,7 @@ class Settings:
     # ── Monitoramento (saúde e falhas) — módulo isolado ─────────────────
     MONITORAMENTO_DATABASE_URL: str = os.getenv(
         "MONITORAMENTO_DATABASE_URL",
-        f"sqlite:///{(ROOT / 'data' / 'monitoramento.db').as_posix()}",
+        _sqlite("monitoramento"),
     )
 
     # ── Alertas por e-mail (SMTP) ───────────────────────────────────────
@@ -137,7 +162,7 @@ class Settings:
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
         "ORCAMENTO_EXEC_DATABASE_URL",
-        f"sqlite:///{(ROOT / 'data' / 'controle_orcamento_exec.db').as_posix()}",
+        _sqlite("controle_orcamento_exec"),
     )
     # API de CAPEX do EBS (preenche os valores dos projetos).
     EBS_CAPEX_URL: str = os.getenv(
@@ -184,4 +209,5 @@ class Settings:
 def get_settings() -> Settings:
     s = Settings()
     s.UPLOAD.mkdir(parents=True, exist_ok=True)
+    s.DB_DIR.mkdir(parents=True, exist_ok=True)
     return s

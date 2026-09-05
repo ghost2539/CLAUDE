@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Request, HTTPException
 
-from security import require_permission
+from core.security import require_permission
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 

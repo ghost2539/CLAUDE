@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instala o Controle de Orçamento (/tv2) como SERVIÇO PRÓPRIO, isolado do portal.
-# Uso: sudo bash scripts/controle_orcamento_instalar.sh   (executar na pasta do projeto)
+# Uso: sudo bash deploy/controle_orcamento_instalar.sh   (executar na pasta do projeto)
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/controle-orcamento}"
@@ -15,11 +15,15 @@ ROOT_OK=0; [ "$(id -u)" = "0" ] && ROOT_OK=1
 if [ "$ROOT_OK" = 1 ] && ! id "$SERVICE_USER" &>/dev/null; then
     useradd --system --shell /usr/sbin/nologin --home-dir "$INSTALL_DIR" "$SERVICE_USER"
 fi
-mkdir -p "$INSTALL_DIR/routers" "$INSTALL_DIR/static/controle-orcamento" "$INSTALL_DIR/scripts" "$INSTALL_DIR/data" "$CONFIG_DIR"
+mkdir -p "$INSTALL_DIR/routers" "$INSTALL_DIR/core" "$INSTALL_DIR/db" \
+         "$INSTALL_DIR/static/controle-orcamento" "$INSTALL_DIR/scripts" \
+         "$INSTALL_DIR/data/db" "$CONFIG_DIR"
 
 # Apenas os arquivos do módulo (nada do restante do portal)
-cp "$SRC/controle_orcamento_app.py" "$SRC/config.py" "$SRC/security.py" "$SRC/database_orcamento.py" "$INSTALL_DIR/"
-cp "$SRC/requirements-controle-orcamento.txt" "$INSTALL_DIR/"
+cp "$SRC/apps/controle_orcamento.py" "$SRC/config.py" "$INSTALL_DIR/"
+cp "$SRC/core/__init__.py" "$SRC/core/security.py" "$INSTALL_DIR/core/"
+cp "$SRC/db/__init__.py" "$SRC/db/orcamento.py" "$INSTALL_DIR/db/"
+cp "$SRC/deploy/requirements-controle-orcamento.txt" "$INSTALL_DIR/"
 touch "$INSTALL_DIR/routers/__init__.py"
 cp "$SRC/routers/controle_orcamento.py" "$INSTALL_DIR/routers/"
 cp "$SRC/static/controle-orcamento/"* "$INSTALL_DIR/static/controle-orcamento/"
@@ -47,7 +51,7 @@ fi
 chmod 700 "$INSTALL_DIR/data"
 if [ "$ROOT_OK" = 1 ]; then
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    cp "$SRC/controle_orcamento.service" /etc/systemd/system/controle_orcamento.service
+    cp "$SRC/deploy/controle_orcamento.service" /etc/systemd/system/controle_orcamento.service
     systemctl daemon-reload
     systemctl enable controle_orcamento.service
 else

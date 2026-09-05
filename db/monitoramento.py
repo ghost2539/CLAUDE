@@ -24,7 +24,7 @@ _cfg = _config_mod.get_settings()
 _log = logging.getLogger("monitoramento.db")
 
 DATABASE_URL: str = getattr(
-    _cfg, "MONITORAMENTO_DATABASE_URL", "sqlite:///data/monitoramento.db",
+    _cfg, "MONITORAMENTO_DATABASE_URL", _config_mod._sqlite("monitoramento"),
 )
 
 _engine = None

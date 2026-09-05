@@ -9,10 +9,10 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
 from config import get_settings
-from database import (
+from db.portal import (
     SessionLocal, Asset, ReceiptCycle, Repair, Movement, Setting,
 )
-from security import require_permission, check_rate_limit
+from core.security import require_permission, check_rate_limit
 from routers.helpers import find_asset
 
 _cfg = get_settings()

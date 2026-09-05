@@ -62,7 +62,7 @@ fi
 echo "-- SQLite"
 mkdir -p "$STAGE/sqlite"
 copiado=0
-for db in "$APP_DIR"/data/*.db; do
+for db in "$APP_DIR"/data/db/*.db "$APP_DIR"/data/*.db; do
   [ -e "$db" ] || continue
   nome="$(basename "$db")"
   if command -v sqlite3 >/dev/null 2>&1; then
@@ -111,5 +111,5 @@ echo
 echo "RESTAURAR:"
 echo "  tar -xzf $PKG -C /tmp"
 echo "  # Postgres:  pg_restore -d \"\$DATABASE_URL\" --clean --no-owner /tmp/portal-spare-$TS/portal_postgres.dump"
-echo "  # SQLite:    ./portal.sh stop && cp /tmp/portal-spare-$TS/sqlite/*.db $APP_DIR/data/ && ./portal.sh start"
+echo "  # SQLite:    ./portal.sh stop && cp /tmp/portal-spare-$TS/sqlite/*.db $APP_DIR/data/db/ && ./portal.sh start"
 [ "$ERROS" -gt 0 ] && exit 2 || exit 0

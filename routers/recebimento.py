@@ -15,10 +15,10 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select, func, or_
 
 from config import get_settings
-from database import (
+from db.portal import (
     SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot,
 )
-from security import get_session, require_permission, check_rate_limit
+from core.security import get_session, require_permission, check_rate_limit
 from routers.helpers import (
     classify, apply_class, find_asset, upsert_asset, asset_dict, cycle_dict,
     local_search_one,

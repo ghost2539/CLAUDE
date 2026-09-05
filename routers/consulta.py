@@ -5,8 +5,8 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
-from database import SessionLocal, ReceiptCycle
-from security import get_session, require_permission
+from db.portal import SessionLocal, ReceiptCycle
+from core.security import get_session, require_permission
 from routers.helpers import (
     apply_class, find_asset, local_search_one, xlsx_response,
 )
@@ -45,7 +45,7 @@ def _query_assets(body: QueryIn, req: Request) -> dict:
         return {"resultados": [], "encontrados": 0, "nao_encontrados": 0}
 
     with SessionLocal() as s:
-        from modules.logged_ebs_v8 import search_for_user
+        from integracoes.ebs_logged import search_for_user
         rows = search_for_user(sd, qs, s, local_search_one)
         rows = [apply_class(s, r) for r in rows]
 

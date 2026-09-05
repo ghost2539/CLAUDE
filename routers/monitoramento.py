@@ -24,8 +24,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 import config as _config_mod
-import database_monitoramento as db
-from security import require_permission
+import db.monitoramento as db
+from core.security import require_permission
 
 _cfg = _config_mod.get_settings()
 _log = logging.getLogger("monitoramento")
@@ -145,7 +145,7 @@ def _bancos() -> list[dict]:
     # Postgres do portal — ping leve
     try:
         from sqlalchemy import text as _text
-        from database import SessionLocal as _PortalSession
+        from db.portal import SessionLocal as _PortalSession
         t0 = time.time()
         with _PortalSession() as s:
             s.execute(_text("SELECT 1"))
@@ -282,7 +282,7 @@ def acessos(req: Request, dias: int = 30, limit: int = 300, tipo: str = ""):
 
     from datetime import timedelta
     from sqlalchemy import select as _sel
-    from database import SessionLocal as _PortalSession, AccessLog, User
+    from db.portal import SessionLocal as _PortalSession, AccessLog, User
 
     dias = max(1, min(int(dias or 30), 365))
     corte = datetime.now() - timedelta(days=dias)
@@ -346,7 +346,7 @@ def acessos(req: Request, dias: int = 30, limit: int = 300, tipo: str = ""):
 def alertas_get(req: Request):
     """Configuração do canal de alertas (sem devolver a senha do SMTP)."""
     require_permission(req, "parametros", "admin")
-    import notificador
+    import core.notificador as notificador
     return notificador.config_publica()
 
 
@@ -355,7 +355,7 @@ def alertas_put(req: Request, body: dict = Body(...)):
     """Salva a configuração. A senha, quando enviada, é gravada cifrada;
     string vazia mantém a atual e 'senha_limpar' remove a guardada."""
     require_permission(req, "parametros", "admin")
-    import notificador
+    import core.notificador as notificador
 
     dados = {
         "ativo": bool(body.get("ativo")),
@@ -386,7 +386,7 @@ def alertas_put(req: Request, body: dict = Body(...)):
 def alertas_teste(req: Request):
     """Envia um e-mail de teste agora, ignorando o limitador de volume."""
     sd = require_permission(req, "parametros", "admin")
-    import notificador
+    import core.notificador as notificador
     usuario = sd.get("username", "")
     quando = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     ok, detalhe = notificador.enviar(
@@ -456,7 +456,7 @@ class MonitorFalhasMiddleware(BaseHTTPMiddleware):
     def _alertar(alvo: str, detalhe: str, usuario: str) -> None:
         """Alerta por e-mail (só sai se o canal estiver ligado para falhas)."""
         try:
-            from notificador import alertar_falha
+            from core.notificador import alertar_falha
             alertar_falha("api", alvo, detalhe, usuario)
         except Exception:  # noqa: BLE001
             pass
@@ -464,7 +464,7 @@ class MonitorFalhasMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _usuario(request: Request) -> str:
         try:
-            from security import get_session
+            from core.security import get_session
             sd = get_session(request, required=False)
             return (sd or {}).get("username", "") if sd else ""
         except Exception:  # noqa: BLE001
@@ -478,7 +478,7 @@ def registrar_falha(origem: str, alvo: str, detalhe: str, usuario: str = "",
                  usuario=usuario, detalhe=detalhe)
     if severidade == "erro":
         try:
-            from notificador import alertar_falha
+            from core.notificador import alertar_falha
             alertar_falha(origem, alvo, detalhe, usuario)
         except Exception:  # noqa: BLE001
             pass

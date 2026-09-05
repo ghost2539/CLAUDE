@@ -10,6 +10,8 @@ ebs_probe_out/
 tools/ebs_probe_out/
 forms_capture*.jsonl
 
-# Banco SQLite do módulo Controle de Orçamento (/tv2)
-data/controle_orcamento.db*
+# Dados de execução: bancos SQLite e uploads nunca vão para o repositório
+data/db/
+data/uploads/
+data/*.db*
 frontend/**/node_modules/

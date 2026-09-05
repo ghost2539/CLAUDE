@@ -26,7 +26,7 @@ from email.message import EmailMessage
 from email.utils import formataddr, formatdate
 
 import config as _config_mod
-import database_monitoramento as db
+import db.monitoramento as db
 
 _cfg = _config_mod.get_settings()
 _log = logging.getLogger("notificador")

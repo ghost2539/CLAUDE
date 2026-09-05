@@ -215,7 +215,7 @@ E funcional:
 
 **Com sudo (quando liberar) — serviço do sistema:**
 ```bash
-sudo cp portal_spare.service /etc/systemd/system/
+sudo cp deploy/portal_spare.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now portal_spare.service
 ```
@@ -223,7 +223,7 @@ sudo systemctl enable --now portal_spare.service
 **Sem sudo agora — serviço de usuário:**
 ```bash
 mkdir -p ~/.config/systemd/user
-cp portal_spare.service ~/.config/systemd/user/portal_spare.service   # ajuste ExecStart/venv
+cp deploy/portal_spare.service ~/.config/systemd/user/portal_spare.service   # ajuste ExecStart/venv
 systemctl --user daemon-reload
 systemctl --user enable --now portal_spare.service
 loginctl enable-linger "$USER"   # mantém rodando após logout

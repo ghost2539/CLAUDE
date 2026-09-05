@@ -1,7 +1,7 @@
 """Controle de Orçamento — Execução CAPEX (clone independente do /tv2).
 
 Servido em ``/controle-orcamento`` (e ``/controle-orçamento``), com banco
-PRÓPRIO e SEPARADO (``database_orcamento_exec.py``). NÃO compartilha dados nem
+PRÓPRIO e SEPARADO (``db/orcamento_exec.py``). NÃO compartilha dados nem
 código de estado com o /tv2.
 
 Novidade em relação ao /tv2: barra de inclusão de projetos no topo (Número,
@@ -34,10 +34,10 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 
 from config import get_settings
-from database_orcamento_exec import (
+from db.orcamento_exec import (
     BudgetCategory, BudgetProject, SessionLocal, ensure_db, utcnow,
 )
-from security import check_rate_limit, client_ip, get_session
+from core.security import check_rate_limit, client_ip, get_session
 
 _cfg = get_settings()
 _DIR = _cfg.STATIC / "controle-orcamento-exec"
@@ -419,7 +419,7 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
     #    reuso da sessão. Re-autentica uma vez se a sessão expirou (401/403).
     try:
         from routers.public_assets import _auth as _ct_auth
-        import ebs_service
+        import integracoes.ebs_service as ebs_service
         auth = _ct_auth()
         r = _get(ebs_service._build_session(auth))
         if r.status_code in (401, 403):

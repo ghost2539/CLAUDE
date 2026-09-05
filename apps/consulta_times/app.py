@@ -5,7 +5,7 @@ backend and classification rules. Runs independently so other teams
 can query assets without full portal access.
 
 Run from the project root:
-    uvicorn consulta_times.app:app --host 0.0.0.0 --port 8502
+    uvicorn apps.consulta_times.app:app --host 0.0.0.0 --port 8502
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 from config import get_settings
-from database import SessionLocal, init_db
+from db.portal import SessionLocal, init_db
 from routers.helpers import apply_class, local_search_one, xlsx_response
 
 _cfg = get_settings()
@@ -91,11 +91,11 @@ def create_app() -> FastAPI:
         if not qs:
             return {"resultados": [], "encontrados": 0, "nao_encontrados": 0}
 
-        from modules.logged_ebs_v8 import search_for_user
+        from integracoes.ebs_logged import search_for_user
         from routers.public_assets import _auth
 
         auth = _auth()
-        import ebs_service
+        import integracoes.ebs_service as ebs_service
         rows = ebs_service.search_many(auth, qs)
 
         with SessionLocal() as s:
