@@ -126,40 +126,18 @@ function _snRenderUpload(container, S) {
             '</div>' +
         '</div>' +
 
-        // ── Origem: seleção manual da base ──────────────────────────
-        '<div class="card mb-3" id="sn-src-selecao">' +
-            '<div class="card-header">Selecionar Ativos do Recebimento</div>' +
-            '<div class="card-body">' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:.8rem;align-items:end;margin-bottom:1rem">' +
-                    '<div><label>Status</label>' +
-                        '<select id="sn-status" class="form-control"><option value="">Todos</option></select></div>' +
-                    '<div><label>Lote</label>' +
-                        '<input id="sn-lote" class="form-control" placeholder="Filtrar lote"></div>' +
-                    '<div><label>Data início</label>' +
-                        '<input id="sn-di" class="form-control" type="date"></div>' +
-                    '<div><label>Data fim</label>' +
-                        '<input id="sn-df" class="form-control" type="date"></div>' +
-                    '<button class="btn" id="sn-search">Buscar</button>' +
-                '</div>' +
-                '<div style="display:flex;gap:.8rem;margin-bottom:1rem;align-items:center">' +
-                    '<input id="sn-q" class="form-control" placeholder="Buscar série, etiqueta, modelo..." style="flex:1">' +
-                    '<label style="white-space:nowrap;cursor:pointer">' +
-                        '<input type="checkbox" id="sn-check-all" style="margin-right:.4rem">Selecionar todos</label>' +
-                    '<span style="color:var(--text-secondary)">Selecionados: <strong id="sn-sel-count">0</strong></span>' +
-                '</div>' +
-                '<div id="sn-table" style="max-height:400px;overflow:auto">Clique em Buscar para carregar ativos.</div>' +
-            '</div>' +
-        '</div>' +
-
         // ── Origem: base por status ─────────────────────────────────
         '<div class="card mb-3" id="sn-src-status" style="display:none">' +
             '<div class="card-header">Base de recebimento — por status</div>' +
             '<div class="card-body">' +
-                '<label>Status da base a subir</label>' +
-                '<select id="sn-status-base" class="form-control" style="max-width:420px">' +
-                    '<option value="">Selecione…</option></select>' +
+                '<label>Status da base</label>' +
+                '<div style="display:flex;gap:.6rem;align-items:end;flex-wrap:wrap">' +
+                    '<select id="sn-status-base" class="form-control" style="max-width:360px">' +
+                        '<option value="">Selecione…</option></select>' +
+                    '<button class="btn btn-primary" id="sn-status-load">Carregar</button>' +
+                '</div>' +
                 '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
-                    'Todos os ativos da base com o status selecionado serão enviados.</p>' +
+                    'Carregue os ativos do status e selecione quais subir.</p>' +
             '</div>' +
         '</div>' +
 
@@ -170,9 +148,20 @@ function _snRenderUpload(container, S) {
                 '<label>Ativos (um por linha ou separados por vírgula)</label>' +
                 '<textarea id="sn-lista" class="form-control" rows="6" ' +
                     'placeholder="Ex.: 1234567&#10;7654321&#10;ou 1234567, 7654321"></textarea>' +
+                '<div style="margin-top:.6rem">' +
+                    '<button class="btn btn-primary" id="sn-lista-consultar">Consultar EBS</button></div>' +
                 '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
-                    'A conversão (modelo/categoria) usa o cadastro de modelos. Sem cadastro, ' +
-                    'o ativo não sobe e o relatório orienta a regularizar.</p>' +
+                    'A conversão (modelo/categoria) usa o cadastro de modelos. Consulte para conferir ' +
+                    'antes de subir; sem cadastro, o ativo não sobe e o relatório orienta a regularizar.</p>' +
+            '</div>' +
+        '</div>' +
+
+        // ── Pré-visualização (conferir e selecionar antes de subir) ─
+        '<div class="card mb-3" id="sn-preview-card" style="display:none">' +
+            '<div class="card-header">Conferir e selecionar</div>' +
+            '<div class="card-body">' +
+                '<div id="sn-preview-info" style="margin-bottom:.6rem;color:var(--text-secondary)"></div>' +
+                '<div id="sn-preview-table" style="max-height:420px;overflow:auto"></div>' +
             '</div>' +
         '</div>' +
 
@@ -196,10 +185,10 @@ function _snRenderUpload(container, S) {
             '<div class="card-header">Enviar ao ServiceNow</div>' +
             '<div class="card-body">' +
                 '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'O envio usa a sua sessão do ServiceNow (login do portal). ' +
-                    'Não é necessário informar usuário e senha.</p>' +
+                    'Carregue/consulte os ativos acima, selecione e clique em Subir. ' +
+                    'O envio usa a sua sessão do ServiceNow (login do portal).</p>' +
                 '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
-                    'Enviar para ServiceNow</button>' +
+                    'Subir selecionados</button>' +
                 '<div id="sn-login-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
             '</div>' +
         '</div>' +
@@ -244,23 +233,22 @@ function _snRenderUpload(container, S) {
 
     function aplicarOrigem() {
         var o = document.getElementById('sn-origem').value;
-        document.getElementById('sn-src-selecao').style.display = (o === 'selecao') ? '' : 'none';
+        var sel = document.getElementById('sn-src-selecao');
+        if (sel) sel.style.display = (o === 'selecao') ? '' : 'none';
         document.getElementById('sn-src-status').style.display = (o === 'status') ? '' : 'none';
         document.getElementById('sn-src-lista').style.display = (o === 'lista') ? '' : 'none';
+        // limpa a pré-visualização ao trocar de origem
+        document.getElementById('sn-preview-card').style.display = 'none';
+        window._snPreviewRows = [];
     }
     document.getElementById('sn-origem').addEventListener('change', aplicarOrigem);
     aplicarOrigem();
 
-    document.getElementById('sn-search').addEventListener('click', function () { _snSearch(S); });
-    document.getElementById('sn-q').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); _snSearch(S); }
-    });
-    document.getElementById('sn-check-all').addEventListener('change', function () {
-        var cbs = document.querySelectorAll('.sn-cb');
-        var checked = this.checked;
-        cbs.forEach(function (cb) { cb.checked = checked; });
-        _snUpdateCount();
-    });
+    var loadBtn = document.getElementById('sn-status-load');
+    if (loadBtn) loadBtn.addEventListener('click', function () { _snPreview(S, 'status'); });
+    var consBtn = document.getElementById('sn-lista-consultar');
+    if (consBtn) consBtn.addEventListener('click', function () { _snPreview(S, 'lista'); });
+
     document.getElementById('sn-upload').addEventListener('click', function () { _snStartUpload(S); });
     _snLoginBarBind(S);
 }
@@ -343,42 +331,108 @@ function _snGetSelectedIds() {
     return ids;
 }
 
-async function _snStartUpload(S) {
-    var origem = document.getElementById('sn-origem').value;
-    var aisle = document.getElementById('sn-aisle').value.trim();
-    if (!aisle) { S.toast('Informe o Aisle and Space (obrigatório).', 'warning'); return; }
-
-    var body = {
-        origem: origem,
-        stockroom: document.getElementById('sn-stockroom').value,
-        aisle_space: aisle,
-    };
-    var totalPrev = 0;
-
-    if (origem === 'selecao') {
-        var ids = _snGetSelectedIds();
-        if (!ids.length) { S.toast('Selecione ao menos um ativo', 'warning'); return; }
-        body.cycle_ids = ids;
-        totalPrev = ids.length;
-        if (!confirm('Enviar ' + ids.length + ' ativo(s) para o ServiceNow?')) return;
-    } else if (origem === 'status') {
+// Consulta/carrega os ativos (EBS ou base por status) para conferência.
+function _snPreview(S, origem) {
+    var body = { origem: origem };
+    if (origem === 'status') {
         var st = document.getElementById('sn-status-base').value;
-        if (!st) { S.toast('Selecione o status da base.', 'warning'); return; }
+        if (!st) { S.toast('Selecione o status.', 'warning'); return; }
         body.status = st;
-        if (!confirm('Enviar todos os ativos da base com status "' + st + '"?')) return;
-    } else { // lista
+    } else {
         var raw = document.getElementById('sn-lista').value || '';
         var lista = raw.split(/[\n,;]+/).map(function (x) { return x.trim(); })
             .filter(function (x) { return x; });
         if (!lista.length) { S.toast('Informe ao menos um ativo na lista.', 'warning'); return; }
         body.identificadores = lista;
-        totalPrev = lista.length;
-        if (!confirm('Consultar o EBS e enviar ' + lista.length + ' ativo(s)?')) return;
     }
+    var btn = document.getElementById(origem === 'status' ? 'sn-status-load' : 'sn-lista-consultar');
+    btn.disabled = true; var t = btn.textContent; btn.textContent = 'Consultando…';
+    S.api('/servicenow/entrada/preview', { method: 'POST', body: body })
+        .then(function (d) {
+            window._snPreviewRows = d.rows || [];
+            _snRenderPreview(S, window._snPreviewRows);
+        })
+        .catch(function (e) { S.toast(e.message, 'error'); })
+        .finally(function () { btn.disabled = false; btn.textContent = t; });
+}
+
+function _snRenderPreview(S, rows) {
+    var card = document.getElementById('sn-preview-card');
+    var info = document.getElementById('sn-preview-info');
+    var host = document.getElementById('sn-preview-table');
+    card.style.display = '';
+    if (!rows.length) {
+        info.textContent = 'Nenhum ativo retornado.';
+        host.innerHTML = '';
+        return;
+    }
+    var enc = rows.filter(function (r) { return r.encontrado; }).length;
+    var jaSN = rows.filter(function (r) { return r.existe_sn; }).length;
+    info.innerHTML = enc + ' ativo(s) encontrado(s)' +
+        (jaSN ? ' · <strong>' + jaSN + ' já no ServiceNow (serão atualizados)</strong>' : '') +
+        (rows.length - enc ? ' · <span style="color:#dc2626">' + (rows.length - enc) + ' não encontrado(s) no EBS</span>' : '');
+
+    var html = '<table class="data-table" style="min-width:1050px"><thead><tr>' +
+        '<th><input type="checkbox" id="snp-all" checked></th>' +
+        '<th>Asset Tag</th><th>Série</th><th>Modelo</th><th>Categoria</th><th>Company</th>' +
+        '<th>No SN?</th><th>Situação</th></tr></thead><tbody>';
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var ok = !!r.encontrado;
+        var sn = r.existe_sn ? '<span style="color:#2563eb;font-weight:600">Sim (atualiza)</span>'
+            : '<span style="color:#16a34a">Novo</span>';
+        var sit = ok ? '' : '<span style="color:#dc2626">Não encontrado no EBS</span>';
+        html += '<tr>' +
+            '<td><input type="checkbox" class="snp-row" value="' + i + '"' + (ok ? ' checked' : ' disabled') + '></td>' +
+            '<td style="font-weight:600">' + S.esc(r.tag_number || '') + '</td>' +
+            '<td>' + S.esc(r.serial_number || '') + '</td>' +
+            '<td>' + S.esc(r.model || '') + '</td>' +
+            '<td>' + S.esc(r.category || '') + '</td>' +
+            '<td>' + S.esc(r.company || '') + '</td>' +
+            '<td>' + (ok ? sn : '—') + '</td>' +
+            '<td>' + sit + '</td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+    var all = document.getElementById('snp-all');
+    all.addEventListener('change', function () {
+        var v = this.checked;
+        host.querySelectorAll('.snp-row:not([disabled])').forEach(function (cb) { cb.checked = v; });
+    });
+}
+
+async function _snStartUpload(S) {
+    var aisle = document.getElementById('sn-aisle').value.trim();
+    if (!aisle) { S.toast('Informe o Aisle and Space (obrigatório).', 'warning'); return; }
+
+    var rows = window._snPreviewRows || [];
+    if (!rows.length) { S.toast('Carregue/consulte os ativos antes de subir.', 'warning'); return; }
+    var selecionados = [];
+    document.querySelectorAll('#sn-preview-table .snp-row:checked').forEach(function (cb) {
+        selecionados.push(rows[parseInt(cb.value)]);
+    });
+    if (!selecionados.length) { S.toast('Selecione ao menos um ativo.', 'warning'); return; }
+
+    var body = {
+        stockroom: document.getElementById('sn-stockroom').value,
+        aisle_space: aisle,
+    };
+    // Se todos têm cycle_id (origem status/base), sobe por cycle_ids; senão, por itens.
+    var comCycle = selecionados.filter(function (r) { return r.cycle_id; });
+    if (comCycle.length === selecionados.length) {
+        body.origem = 'selecao';
+        body.cycle_ids = comCycle.map(function (r) { return r.cycle_id; });
+    } else {
+        body.origem = 'itens';
+        body.itens = selecionados;
+    }
+
+    if (!confirm('Subir ' + selecionados.length + ' ativo(s) para o ServiceNow?')) return;
 
     document.getElementById('sn-upload').disabled = true;
     document.getElementById('sn-progress-card').style.display = '';
-    document.getElementById('sn-s-total').textContent = totalPrev || '…';
+    document.getElementById('sn-s-total').textContent = selecionados.length;
 
     S.api('/servicenow/upload', { method: 'POST', body: body })
         .then(function (d) {
