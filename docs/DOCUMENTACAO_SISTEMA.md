@@ -18,7 +18,7 @@ chamados), integrando **EBS (Oracle E-Business Suite)**, **ServiceNow** e
 |---|---|
 | Backend | Python 3.11+ · **FastAPI** + Uvicorn |
 | Frontend do portal | **SPA em JavaScript puro** (sem framework), CSS próprio |
-| Controle de Orçamento (/tv2 e /controle-orcamento) | **React** (build gerado com esbuild, versionado) |
+| Controle de Orçamento (/controle-orcamento) | **React** (build gerado com esbuild, versionado) |
 | Indicadores (/indicadores) | HTML + **JS externo** + SVG inline (sem libs) |
 | ORM/Banco | **SQLAlchemy 2** — PostgreSQL (atual) / **MySQL–MariaDB** (servidor novo) |
 | Porta padrão | **8901** |
@@ -31,8 +31,6 @@ chamados), integrando **EBS (Oracle E-Business Suite)**, **ServiceNow** e
 ```
 Navegador
  ├── /                      SPA do portal (login + menu)        → banco PORTAL
- ├── /tv                    Painel de TV (operação)             → banco PORTAL
- ├── /tv2                   Controle de Orçamento (React)       → banco ORÇAMENTO (isolado)
  ├── /controle-orcamento    Execução CAPEX (clone + EBS)        → banco ORÇAMENTO-EXEC (isolado)
  ├── /indicadores           Indicadores RMR (dark dashboard)    → banco INDICADORES (isolado)
  └── /api/...               API REST
@@ -60,7 +58,7 @@ derruba o portal**. Cada um tem **banco próprio e separado**.
 - Sidebar com **abas** (cada item mostra só a sua seção), KPIs com anel de %,
   gráficos SVG inline (colunas, linha, ranking), auto-refresh 2 min.
 
-**Controle de Orçamento (/tv2, /controle-orcamento)** — React + Tailwind, tema
+**Controle de Orçamento (/controle-orcamento)** — React + Tailwind, tema
 claro; KPIs, donut, barras, curva S; tabela editável.
 
 **⚠️ Regra de CSP (importante para novas telas):** o portal envia
@@ -113,17 +111,16 @@ O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída
 
 ## 5. Páginas autônomas (fora do menu)
 
-### 5.1 `/tv` — Painel de Operações (TV)
-Dashboard leve (estatísticas, gráficos, últimos recebimentos), auto-atualiza.
-`/tv?demo=1` = dados aleatórios para validação.
+### 5.1 e 5.2 — removidos em setembro/2026
+O painel `/tv` (e `/api/tv/dashboard`) e o Controle de Orçamento de portfólio
+`/tv2` foram descontinuados. O `/tv2` foi substituído pelo
+`/controle-orcamento`.
 
-### 5.2 `/tv2` — Controle de Orçamento de Portfólio (CAPEX/OPEX)
-React, **acesso livre**, banco isolado (`database_orcamento.py`; tabelas
-`budget_projects`, `budget_categories`). Edição manual dos valores.
-
-### 5.3 `/controle-orcamento` — Execução de CAPEX (clone do /tv2, banco próprio)
-Clone independente (`database_orcamento_exec.py`, tabela `budget_projects` com
-coluna extra `a_realizar` e `locked`). **NÃO** compartilha dados com o /tv2.
+### 5.3 `/controle-orcamento` — Execução de CAPEX
+Banco próprio (`db/orcamento_exec.py`, tabela `budget_projects` com as colunas
+`a_realizar` e `locked`). **Acesso controlado**: exige login do portal e o
+módulo `orcamento` liberado para o usuário; toda abertura e toda gravação
+ficam na trilha `budget_acessos`.
 - **Barra de inclusão** no topo: Número (ID que puxa do EBS), Tipo (CAPEX/OPEX),
   Projeto/Demanda (manual), Categoria, Área.
 - **Puxa da API de CAPEX do EBS** (`/ebs/api/capex/?projetos=...`), mapeando:
@@ -188,8 +185,7 @@ a configurar. Doc: `docs/EBS_ORACLE_BASE.md`.
 `printers`.
 
 **Bancos isolados (separados do portal):**
-- `database_orcamento.py` (/tv2): `budget_projects`, `budget_categories`.
-- `database_orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`locked`,`synced_at`), `budget_categories`.
+- `db/orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`locked`,`synced_at`), `budget_categories`.
 - `database_indicadores.py` (/indicadores): `indicador_snapshot`.
 
 ---
@@ -237,7 +233,6 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 | Variável | Padrão | Uso |
 |---|---|---|
 | `INDICADORES_DATABASE_URL` | sqlite data/indicadores.db | Banco dos Indicadores. |
-| `ORCAMENTO_DATABASE_URL` | sqlite data/controle_orcamento.db | Banco do /tv2. |
 | `ORCAMENTO_EXEC_DATABASE_URL` | sqlite data/controle_orcamento_exec.db | Banco do /controle-orcamento. |
 
 ### EBS CAPEX API (/controle-orcamento)
@@ -259,7 +254,7 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 
 ## 9. Mapa de rotas
 
-**Páginas:** `/` · `/tv` · `/tv2` · `/controle-orcamento` · `/indicadores`
+**Páginas:** `/` · `/controle-orcamento` · `/indicadores`
 
 **API (prefixos):**
 - `/api/auth/*` — login, logout, sessão, troca de senha, sessão ServiceNow.
@@ -269,8 +264,8 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 - `/api/servicenow/*` — entrada, saída (search/search_lote/move), incidentes, relatórios, Correios, encerramento.
 - `/api/reparos*` — reparos e dashboard.
 - `/api/parametros/*` — administração.
-- `/api/status · /dashboard/summary · /tv/dashboard` — status e TV.
-- `/api/controle-orcamento/*` (/tv2) · `/api/controle-orcamento-exec/*` (/controle-orcamento) · `/api/indicadores/*` — módulos isolados.
+- `/api/status · /dashboard/summary` — status e resumo.
+- `/api/controle-orcamento-exec/*` (/controle-orcamento) · `/api/indicadores/*` — módulos isolados.
 - `/api/public-assets/*` — consulta pública de ativos EBS (sem login).
 
 ---

@@ -48,10 +48,6 @@ def create_app() -> FastAPI:
     def index():
         return (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
 
-    @app.get("/tv", response_class=HTMLResponse)
-    def tv():
-        return (_cfg.STATIC / "tv.html").read_text(encoding="utf-8")
-
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
         path = _cfg.STATIC / "favicon.svg"
@@ -66,7 +62,6 @@ def create_app() -> FastAPI:
     from routers.reparos import router as reparos_router
     from routers.parametros import router as parametros_router
     from routers.status import router as status_router
-    from routers.tv import router as tv_router
     from routers.public_assets import router as public_assets_router
     from routers.identificacao import router as identificacao_router
     from routers.servicenow import router as servicenow_router
@@ -79,28 +74,15 @@ def create_app() -> FastAPI:
     app.include_router(reparos_router)
     app.include_router(parametros_router)
     app.include_router(status_router)
-    app.include_router(tv_router)
     app.include_router(public_assets_router)
     app.include_router(identificacao_router)
     app.include_router(servicenow_router)
     app.include_router(correios_router)
     app.include_router(encerramento_router)
 
-    # ── Controle de Orçamento em /tv2 (código e banco próprios) ─────────
-    # Carregamento isolado: qualquer erro (arquivo ausente, dependência,
-    # banco) é apenas registrado no log e o portal sobe normalmente sem ele.
-    try:
-        from routers.controle_orcamento import router as controle_orcamento_router
-        app.include_router(controle_orcamento_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("controle_orcamento").error(
-            "Módulo Controle de Orçamento (/tv2) NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
     # ── Controle de Orçamento — Execução CAPEX em /controle-orcamento ───
-    # Clone independente do /tv2, com banco próprio e integração à API de
-    # CAPEX do EBS. Carregamento isolado (nunca derruba o portal).
+    # Banco próprio e integração à API de CAPEX do EBS. Exige login do portal
+    # e permissão do módulo "orcamento". Carregamento isolado.
     try:
         from routers.controle_orcamento_exec import router as controle_orcamento_exec_router
         app.include_router(controle_orcamento_exec_router)

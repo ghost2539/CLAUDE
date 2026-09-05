@@ -3,7 +3,7 @@
 - LEITURA no ServiceNow pela API REST com a CONTA DE SERVIÇO (somente leitura).
 - Cálculo dos indicadores do RMR conforme especificação da operação SPARE.
 - Armazenamento em banco PRÓPRIO (db.indicadores), separado do portal.
-- Página estática em /indicadores (mesma ideia do /tv2), acessível pela URL.
+- Página estática em /indicadores, acessível pela URL.
 
 Carregado de forma isolada no main.py: qualquer erro aqui NÃO derruba o portal.
 """
