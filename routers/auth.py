@@ -12,11 +12,11 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select, func
 
 from config import get_settings
-from database import (
+from db.portal import (
     SessionLocal, User, Permission, AccessLog, Setting,
     hash_password, verify_password, utcnow,
 )
-from security import (
+from core.security import (
     get_session, client_ip, check_rate_limit,
     create_session, set_session_cookie, delete_session, SESSIONS,
 )
@@ -184,7 +184,7 @@ def _registrar_falha(login: str, source: str, detail: str, ip: str, pendente: bo
     # não tem liberação, dispara o alerta por e-mail. Nada aqui pode interferir
     # no fluxo de login.
     try:
-        import database_monitoramento as _dbmon
+        import db.monitoramento as _dbmon
         _dbmon.registrar(
             severidade="alerta" if pendente else "erro",
             origem="acesso",
@@ -197,7 +197,7 @@ def _registrar_falha(login: str, source: str, detail: str, ip: str, pendente: bo
 
     if pendente:
         try:
-            from notificador import alertar_acesso_negado
+            from core.notificador import alertar_acesso_negado
             alertar_acesso_negado(login, ip, detail, source)
         except Exception:  # noqa: BLE001
             pass

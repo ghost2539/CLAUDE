@@ -7,7 +7,7 @@ from datetime import date, datetime
 from fastapi import APIRouter
 from sqlalchemy import select, func
 
-from database import SessionLocal, ReceiptCycle, Setting
+from db.portal import SessionLocal, ReceiptCycle, Setting
 
 router = APIRouter(prefix="/api", tags=["TV"])
 

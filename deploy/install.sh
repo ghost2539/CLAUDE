@@ -59,7 +59,7 @@ chmod 700 "$INSTALL_DIR/data"
 chown root:root "$CONFIG_DIR/environment"
 chmod 600 "$CONFIG_DIR/environment"
  
-cp "$INSTALL_DIR/portal_spare.service" /etc/systemd/system/portal_spare.service
+cp "$INSTALL_DIR/deploy/portal_spare.service" /etc/systemd/system/portal_spare.service
 systemctl daemon-reload
 systemctl enable portal_spare.service
  

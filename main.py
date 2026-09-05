@@ -9,8 +9,8 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
-from database import init_db
-from security import (
+from db.portal import init_db
+from core.security import (
     SecurityHeadersMiddleware,
     BotProtectionMiddleware,
     MaxBodyMiddleware,
@@ -114,7 +114,7 @@ def create_app() -> FastAPI:
     # Carregamento isolado: qualquer erro (arquivo, dependência, banco) é
     # apenas registrado no log e o portal sobe normalmente sem ele.
     try:
-        import database_indicadores as _db_indic
+        import db.indicadores as _db_indic
         _db_indic.init_db()
         from routers.indicadores import router as indicadores_router, start_scheduler
         app.include_router(indicadores_router)
@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
     # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
     # Aditivo: só observa. Falha aqui nunca derruba o portal.
     try:
-        import database_monitoramento as _db_mon
+        import db.monitoramento as _db_mon
         _db_mon.init_db()
         from routers.monitoramento import (
             router as monitoramento_router, MonitorFalhasMiddleware,
@@ -144,7 +144,7 @@ def create_app() -> FastAPI:
     # ── Automações (encerramento/encaminhamento) — banco próprio ────────
     # Carregamento isolado (nunca derruba o portal).
     try:
-        import database_automacoes as _db_autom
+        import db.automacoes as _db_autom
         _db_autom.init_db()
         from routers.automacoes import router as automacoes_router, start_scheduler as _autom_sched
         app.include_router(automacoes_router)

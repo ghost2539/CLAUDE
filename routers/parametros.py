@@ -16,12 +16,12 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select, func, text
 
 from config import get_settings
-from database import (
+from db.portal import (
     SessionLocal, Setting, Classification, StorageLocation,
     User, Permission, LotSequence, LocalAsset, LoadHistory,
     AccessLog, hash_password,
 )
-from security import get_session, require_permission, client_ip, check_rate_limit
+from core.security import get_session, require_permission, client_ip, check_rate_limit
 from routers.helpers import reapply_classification
 
 _cfg = get_settings()

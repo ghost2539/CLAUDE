@@ -1,6 +1,6 @@
 """Banco de dados EXCLUSIVO do módulo "Controle de Orçamento — Execução CAPEX".
 
-Clone independente de ``database_orcamento.py`` (que serve o /tv2). Usa um
+Clone independente de ``db/orcamento.py`` (que serve o /tv2). Usa um
 engine/sessão próprios e um arquivo/banco SEPARADO, para que este dashboard e o
 /tv2 NUNCA compartilhem dados.
 

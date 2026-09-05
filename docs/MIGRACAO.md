@@ -40,7 +40,7 @@ scp -r portal-spare-v2/ usuario@servidor:/tmp/
 
 # No servidor
 cd /tmp/portal-spare-v2
-sudo bash scripts/install.sh
+sudo bash deploy/install.sh
 ```
 
 ### 2. Configurar o ambiente
@@ -62,7 +62,7 @@ sudo chmod 600 /etc/portal_operacoes_spare/credentials/*
 
 ### 4. (Opcional) HTTPS com certificado autoassinado
 ```bash
-sudo bash scripts/generate-cert.sh portalspare.local
+sudo bash deploy/generate-cert.sh portalspare.local
 # Adicionar ao environment:
 #   SSL_CERTFILE=/etc/portal_operacoes_spare/ssl/portal.crt
 #   SSL_KEYFILE=/etc/portal_operacoes_spare/ssl/portal.key

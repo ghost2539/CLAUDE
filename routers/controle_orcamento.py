@@ -10,7 +10,7 @@ Acesso: livre (sem login), como a consulta pública. Se houver sessão ativa,
 o usuário é registrado em ``updated_by``; caso contrário registra-se o IP.
 As gravações passam pelo rate limit de API por IP.
 
-Os projetos ficam em um banco EXCLUSIVO deste módulo (``database_orcamento.py``,
+Os projetos ficam em um banco EXCLUSIVO deste módulo (``db/orcamento.py``,
 por padrão SQLite em ``data/controle_orcamento.db``), sem tocar no banco do portal.
 Os assets (``static/controle-orcamento/app.js`` e ``app.css``) são gerados a
 partir de ``frontend/controle-orcamento`` (``npm run build``) e versionados no
@@ -33,8 +33,8 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 
 from config import get_settings
-from database_orcamento import BudgetCategory, BudgetProject, SessionLocal, ensure_db
-from security import check_rate_limit, client_ip, get_session
+from db.orcamento import BudgetCategory, BudgetProject, SessionLocal, ensure_db
+from core.security import check_rate_limit, client_ip, get_session
 
 _cfg = get_settings()
 _DIR = _cfg.STATIC / "controle-orcamento"

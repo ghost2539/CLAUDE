@@ -28,8 +28,8 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 import config as _config_mod
-import database_automacoes as db
-from security import require_permission, get_session, SESSIONS
+import db.automacoes as db
+from core.security import require_permission, get_session, SESSIONS
 from routers.servicenow import (
     _sn_session_from_portal, _sn_session_from_cookies, _sn_session_valida,
     _sn_query, _sn_query_all, _sn_update, _extract_tracking_code, _TRACKING_RE,

@@ -13,7 +13,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
-from database import (
+from db.portal import (
     Asset, Classification, LocalAsset, ReceiptCycle, StorageLocation,
 )
 

@@ -14,8 +14,8 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 
 from config import get_settings
-from database import SessionLocal
-from ebs_service import login as ebs_login, search_many as ebs_search_many
+from db.portal import SessionLocal
+from integracoes.ebs_service import login as ebs_login, search_many as ebs_search_many
 
 _cfg = get_settings()
 router = APIRouter(prefix="/api/public-assets", tags=["Consulta pública EBS"])

@@ -10,8 +10,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text, func, or_
 
-from database import SessionLocal, Asset, ReceiptCycle, Movement, Base, engine
-from security import require_permission, check_rate_limit
+from db.portal import SessionLocal, Asset, ReceiptCycle, Movement, Base, engine
+from core.security import require_permission, check_rate_limit
 
 router = APIRouter(prefix="/api/identificacao", tags=["Identificação"])
 
@@ -22,7 +22,7 @@ def _ensure_tables():
     from sqlalchemy import (
         Table, Column, BigInteger, String, Boolean, DateTime, Integer,
     )
-    from database import utcnow
+    from db.portal import utcnow
     meta = Base.metadata
     if "printers" not in meta.tables:
         Table(

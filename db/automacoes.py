@@ -23,7 +23,7 @@ _cfg = _config_mod.get_settings()
 _log = logging.getLogger("automacoes.db")
 
 DATABASE_URL: str = getattr(
-    _cfg, "AUTOMACOES_DATABASE_URL", "sqlite:///data/automacoes.db",
+    _cfg, "AUTOMACOES_DATABASE_URL", _config_mod._sqlite("automacoes"),
 )
 
 _engine = None

@@ -28,7 +28,7 @@ os.environ.setdefault("PORTAL_SESSION_SECRET", secrets.token_urlsafe(32))
 
 from sqlalchemy import func, select  # noqa: E402
 
-from database_orcamento import (  # noqa: E402
+from db.orcamento import (  # noqa: E402
     BudgetCategory, BudgetProject, SessionLocal, criar_tabelas, url_efetiva,
 )
 

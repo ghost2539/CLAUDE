@@ -5,14 +5,15 @@ restante do Portal SPARE. Assim uma atualização do portal nunca afeta esta
 tela, e ela pode ser instalada sozinha em outro servidor.
 
 Execução:
-    python -m uvicorn controle_orcamento_app:app --host 0.0.0.0 --port 8902
+    python -m uvicorn apps.controle_orcamento:app --host 0.0.0.0 --port 8902
+    (no servidor, instalado na raiz de /opt/controle-orcamento: uvicorn controle_orcamento:app)
 
 Variáveis de ambiente (arquivo /etc/controle_orcamento/environment no systemd):
     CONTROLE_ORCAMENTO_DATABASE_URL  URL do banco do módulo (obrigatória em produção;
                                      sem ela usa SQLite em data/controle_orcamento.db)
     UPLOAD_MAX_MB, RATE_LIMIT_API    opcionais (mesmos nomes do portal)
 
-Arquivos necessários (além deste): config.py, security.py, database_orcamento.py,
+Arquivos necessários (além deste): config.py, core/security.py, db/orcamento.py,
 routers/__init__.py, routers/controle_orcamento.py, static/controle-orcamento/*,
 static/favicon.svg.
 """
@@ -31,7 +32,7 @@ from fastapi.responses import FileResponse, RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from config import get_settings  # noqa: E402
-from security import (  # noqa: E402
+from core.security import (  # noqa: E402
     BotProtectionMiddleware, MaxBodyMiddleware, SecurityHeadersMiddleware,
 )
 from routers.controle_orcamento import router  # noqa: E402

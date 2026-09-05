@@ -2,7 +2,7 @@
 
 - LEITURA no ServiceNow pela API REST com a CONTA DE SERVIÇO (somente leitura).
 - Cálculo dos indicadores do RMR conforme especificação da operação SPARE.
-- Armazenamento em banco PRÓPRIO (database_indicadores), separado do portal.
+- Armazenamento em banco PRÓPRIO (db.indicadores), separado do portal.
 - Página estática em /indicadores (mesma ideia do /tv2), acessível pela URL.
 
 Carregado de forma isolada no main.py: qualquer erro aqui NÃO derruba o portal.
@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 import config as _config_mod
-import database_indicadores as db
+import db.indicadores as db
 
 _cfg = _config_mod.get_settings()
 _log = logging.getLogger("indicadores")
@@ -477,7 +477,7 @@ def indicadores_dados(referencia: str = ""):
 def indicadores_get_config(req: Request):
     """Config efetiva + defaults + overrides salvos (para a tela de Parâmetros).
     Somente ADMIN."""
-    from security import require_permission
+    from core.security import require_permission
     require_permission(req, "parametros", "admin")
     try:
         overrides = db.obter_config() or {}
@@ -494,7 +494,7 @@ def indicadores_get_config(req: Request):
 @router.put("/api/indicadores/config")
 def indicadores_put_config(payload: dict, req: Request):
     """Salva overrides da config dos indicadores. Somente ADMIN."""
-    from security import require_permission
+    from core.security import require_permission
     sd = require_permission(req, "parametros", "admin")
     # Aceita só chaves conhecidas; strings limpas.
     limpo = {}
@@ -513,7 +513,7 @@ def indicadores_diag_backlog(req: Request, field: str = ""):
     """Diagnóstico do backlog: mostra, para os incidentes ABERTOS da fila, se o
     campo de data (bouncing) tem valor e a distribuição por mês — para confirmar
     o nome interno correto do campo. Somente ADMIN."""
-    from security import require_permission
+    from core.security import require_permission
     require_permission(req, "parametros", "admin")
     C = _effective_config()
     campo = field or C["backlog_date_field"]

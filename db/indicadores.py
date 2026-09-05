@@ -22,7 +22,7 @@ _log = logging.getLogger("indicadores.db")
 
 DATABASE_URL: str = getattr(
     _cfg, "INDICADORES_DATABASE_URL",
-    "sqlite:///data/indicadores.db",
+    _config_mod._sqlite("indicadores"),
 )
 
 _engine = None

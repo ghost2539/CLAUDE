@@ -16,7 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from security import require_permission
+from core.security import require_permission
 from routers.servicenow import (
     _sn_session_from_portal,
     _sn_query,

@@ -6,8 +6,8 @@ from datetime import date
 from fastapi import APIRouter, Request
 from sqlalchemy import select, func, text
 
-from database import SessionLocal, ReceiptCycle, Repair, LocalAsset, engine
-from security import get_session
+from db.portal import SessionLocal, ReceiptCycle, Repair, LocalAsset, engine
+from core.security import get_session
 
 router = APIRouter(prefix="/api", tags=["Status"])
 
