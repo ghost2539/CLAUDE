@@ -1072,6 +1072,36 @@ def _sn_session_from_portal(req):
     return session
 
 
+def _sn_session_from_cookies(sn_cookies: dict):
+    """Monta uma requests.Session a partir de cookies SN salvos (usada pela
+    rotina automática, fora de um request). Retorna None se sem cookies."""
+    if not sn_cookies:
+        return None
+    _req, _ = _get_http()
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
+    session.cookies.update(sn_cookies)
+    return session
+
+
+def _sn_session_valida(session) -> bool:
+    """Confere se a sessão SN ainda responde (não caiu no login)."""
+    try:
+        url = f"{SERVICENOW_BASE}/sys_user.do?JSONv2&sysparm_action=getRecords&sysparm_record_count=1"
+        r = session.get(url, headers={"Accept": "application/json",
+                                      "X-Requested-With": "XMLHttpRequest"}, timeout=15)
+        final = (r.url or "").lower()
+        return r.status_code == 200 and "login.do" not in final and "/login" not in final
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @router.get("/incidents")
 def list_incidents(
     req: Request,
