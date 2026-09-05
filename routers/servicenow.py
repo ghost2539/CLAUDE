@@ -87,13 +87,15 @@ def _cleanup_old_jobs():
 # ── Pydantic models ──────────────────────────────────────────────
 
 class UploadIn(BaseModel):
-    cycle_ids: list[int]
+    cycle_ids: list[int] = []
+    origem: str = "selecao"          # selecao | status | lista
+    status: str = ""                 # para origem=status
+    identificadores: list[str] = []  # para origem=lista (consulta EBS)
     usuario: str = ""
     senha: str = ""
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
-    cost_currency: str = "BRL"
-    calc_depreciation: bool = True
+    calc_depreciation: bool = True   # sempre calcula; mantido por compatibilidade
 
 
 class TestLoginIn(BaseModel):
@@ -424,49 +426,37 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     job["phase"] = "lookup"
     cache = {}
 
-    # Resolve fixed reference fields once
-    stockroom_id = _lookup_reference(session, "stockroom", params["stockroom"], cache, BS)
+    def _resolve(field: str, value: str):
+        """(sys_id, achou?) — achou=False quando o valor não existe no SN."""
+        value = (value or "").strip()
+        if not value:
+            return "", False
+        rid = _lookup_reference(session, field, value, cache, BS)
+        return rid, bool(rid) and rid != value
+
+    # Referências fixas (iguais para todos os ativos)
+    stockroom_id, stockroom_ok = _resolve("stockroom", params["stockroom"])
     depreciation_id = _lookup_reference(session, "depreciation", params["depreciation"], cache, BS)
+    aisle = (params.get("aisle_space") or "").strip()
 
     state_val = INSTALL_STATUS_MAP.get(params["state"].lower(), params["state"])
     substate_val = SUBSTATUS_MAP.get(params["substate"].lower(), params["substate"])
-    currency_val = CURRENCY_MAP.get(params["cost_currency"], params["cost_currency"])
+    currency_val = CURRENCY_MAP.get("BRL", "BRL")  # sempre BRL
+
+    # Pré-checagem de duplicidade no ServiceNow (uma consulta em blocos).
+    from types import SimpleNamespace
+    itens_dup = [SimpleNamespace(asset_tag=a.get("tag_number", ""),
+                                 serial_number=a.get("serial_number", ""))
+                 for a in assets_data]
+    try:
+        tags_ok, ser_ok = _hardware_existentes(session, itens_dup)
+    except Exception:  # noqa: BLE001 — se falhar, segue sem a pré-checagem
+        tags_ok, ser_ok = set(), set()
 
     job["phase"] = "inserting"
 
     for idx, asset in enumerate(assets_data):
         job["current"] = idx + 1
-
-        # Resolve per-asset reference fields (EBS data)
-        company_id = _lookup_reference(session, "company", asset.get("company", ""), cache, BS)
-        model_id = _lookup_reference(session, "model", asset.get("model", ""), cache, BS)
-        category_id = _lookup_reference(session, "model_category", asset.get("category", ""), cache, BS)
-
-        # Monta record no formato exato da planilha (16 colunas)
-        # Campos do EBS (variam por ativo)
-        record = {
-            "serial_number": asset.get("serial_number", ""),
-            "model": model_id,
-            "asset_tag": asset.get("tag_number", ""),
-            "model_category": category_id,
-            "company": company_id,
-            "stockroom": stockroom_id,
-            "purchase_date": _parse_date(asset.get("dpis") or asset.get("acquisition_date", "")),
-            "depreciation_date": _parse_date_with_time(asset.get("dpis") or asset.get("acquisition_date", "")),
-            "cost": str(asset.get("cost", "")).replace(",", ".") if asset.get("cost") else "",
-        }
-        if params.get("aisle_space"):
-            record["aisle_space_location"] = params["aisle_space"]
-        # Campos fixos (iguais para todos)
-        record["install_status"] = state_val
-        record["substatus"] = substate_val
-        record["cost.currency_type"] = currency_val
-        record["acquisition_method"] = params["acquisition_method"]
-        record["expenditure_type"] = params["expenditure_type"]
-        record["depreciation"] = depreciation_id
-
-        # Remove empty values
-        record = {k: v for k, v in record.items() if v}
 
         result_entry = {
             "idx": idx + 1,
@@ -475,6 +465,66 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
             "empresa": asset.get("company", ""),
         }
 
+        # ── Validações — NÃO sobe o ativo se algo estiver irregular ──────
+        motivos: list[str] = []
+
+        if asset.get("_ebs_nao_encontrado"):
+            job["err_count"] += 1
+            result_entry["status"] = "erro"
+            result_entry["motivos"] = ["Ativo não encontrado no EBS"]
+            result_entry["detail"] = "Ativo não encontrado no EBS"
+            job["results"].append(result_entry)
+            continue
+
+        tag_u = str(asset.get("tag_number") or "").strip().upper()
+        ser_u = str(asset.get("serial_number") or "").strip().upper()
+        if (tag_u and tag_u in tags_ok) or (ser_u and ser_u in ser_ok):
+            motivos.append("Ativo já cadastrado")
+
+        model_id, model_ok = _resolve("model", asset.get("model", ""))
+        if not model_ok:
+            motivos.append("Regularizar Modelo (Não encontrou o modelo no SN)")
+
+        category_id, category_ok = _resolve("model_category", asset.get("category", ""))
+        if not category_ok:
+            motivos.append("Regularizar Categoria de Hardware (Não encontrou a categoria)")
+
+        if not stockroom_ok:
+            motivos.append("Regularizar Stockroom (Não encontrou o estoque)")
+
+        if not aisle:
+            motivos.append("Regularizar Espaço e Corredor (Não encontrou o Aisle and Space)")
+
+        if motivos:
+            job["err_count"] += 1
+            result_entry["status"] = "erro"
+            result_entry["motivos"] = motivos
+            result_entry["detail"] = "; ".join(motivos)
+            job["results"].append(result_entry)
+            continue
+
+        company_id = _lookup_reference(session, "company", asset.get("company", ""), cache, BS)
+
+        record = {
+            "serial_number": asset.get("serial_number", ""),
+            "model": model_id,
+            "asset_tag": asset.get("tag_number", ""),
+            "model_category": category_id,
+            "company": company_id,
+            "stockroom": stockroom_id,
+            "aisle_space_location": aisle,
+            "purchase_date": _parse_date(asset.get("dpis") or asset.get("acquisition_date", "")),
+            "depreciation_date": _parse_date_with_time(asset.get("dpis") or asset.get("acquisition_date", "")),
+            "cost": str(asset.get("cost", "")).replace(",", ".") if asset.get("cost") else "",
+            "install_status": state_val,
+            "substatus": substate_val,
+            "cost.currency_type": currency_val,
+            "acquisition_method": params["acquisition_method"],
+            "expenditure_type": params["expenditure_type"],
+            "depreciation": depreciation_id,
+        }
+        record = {k: v for k, v in record.items() if v}
+
         try:
             ok, sys_id, display = _insert_record(session, record)
             if ok:
@@ -482,8 +532,8 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
                 result_entry["status"] = "ok"
                 result_entry["sys_id"] = sys_id[:20]
                 result_entry["display"] = display
-
-                if params.get("calc_depreciation") and sys_id and sys_id != "N/A":
+                # Sempre calcula depreciação após incluir.
+                if sys_id and sys_id != "N/A":
                     dep_ok = _calculate_depreciation(session, sys_id, BS)
                     result_entry["depreciation"] = "ok" if dep_ok else "falhou"
                     if dep_ok:
@@ -493,10 +543,12 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
             else:
                 job["err_count"] += 1
                 result_entry["status"] = "erro"
+                result_entry["motivos"] = [display]
                 result_entry["detail"] = display
         except Exception as e:
             job["err_count"] += 1
             result_entry["status"] = "erro"
+            result_entry["motivos"] = [str(e)[:200]]
             result_entry["detail"] = str(e)[:200]
 
         job["results"].append(result_entry)
@@ -707,8 +759,9 @@ def start_upload(body: UploadIn, req: Request):
     """Inicia upload de ativos para o ServiceNow em background."""
     sd = require_permission(req, "servicenow", "create")
 
-    if not body.cycle_ids:
-        raise HTTPException(400, "Selecione ao menos um ativo.")
+    # Aisle and Space é obrigatório na entrada de estoque.
+    if not (body.aisle_space or "").strip():
+        raise HTTPException(400, "Informe o Aisle and Space (obrigatório).")
 
     # A autenticação usa a sessão do ServiceNow do próprio login do portal
     # (SSO). Não são mais solicitados usuário/senha nesta tela.
@@ -723,27 +776,77 @@ def start_upload(body: UploadIn, req: Request):
     # Verify dependencies
     _get_http()
 
-    # Load asset data from DB
-    assets_data = []
-    with SessionLocal() as s:
-        for cid in body.cycle_ids:
-            c = s.get(ReceiptCycle, cid)
-            if not c:
-                continue
-            a = c.asset
-            assets_data.append({
-                "cycle_id": c.id,
-                "serial_number": a.serial_number or "",
-                "tag_number": a.tag_number or "",
-                "asset_number": a.asset_number or a.asset_id or "",
-                "model": a.model or "",
-                "category": a.category or "",
-                "company": a.company or "",
-                "description": a.description or "",
-                "cost": str(a.cost) if a.cost else "",
-                "dpis": a.dpis.isoformat() if a.dpis else "",
-                "acquisition_date": a.acquisition_date.isoformat() if a.acquisition_date else "",
-            })
+    def _asset_dict_from_cycle(c) -> dict:
+        a = c.asset
+        return {
+            "cycle_id": c.id,
+            "serial_number": a.serial_number or "",
+            "tag_number": a.tag_number or "",
+            "asset_number": a.asset_number or a.asset_id or "",
+            "model": a.model or "",
+            "category": a.category or "",
+            "company": a.company or "",
+            "description": a.description or "",
+            "cost": str(a.cost) if a.cost else "",
+            "dpis": a.dpis.isoformat() if a.dpis else "",
+            "acquisition_date": a.acquisition_date.isoformat() if a.acquisition_date else "",
+        }
+
+    origem = (body.origem or "selecao").lower()
+    assets_data: list[dict] = []
+
+    if origem == "lista":
+        # Consulta o EBS pelos identificadores e converte via cadastro de
+        # modelos (classificação). Sem cadastro, o ativo sobe sem modelo/
+        # categoria e o relatório orienta a regularizar.
+        from routers.consulta import _query_assets, QueryIn
+        from routers.helpers import apply_class
+        ids = [str(x).strip() for x in (body.identificadores or []) if str(x).strip()]
+        if not ids:
+            raise HTTPException(400, "Informe ao menos um ativo na lista.")
+        try:
+            res = _query_assets(QueryIn(identificadores=ids), req)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, "Falha ao consultar o EBS: %s" % exc)
+        with SessionLocal() as s:
+            for r in res.get("resultados", []):
+                if r.get("encontrado"):
+                    r = apply_class(s, r)
+                    assets_data.append({
+                        "serial_number": r.get("numero_serie", ""),
+                        "tag_number": r.get("etiqueta", ""),
+                        "asset_number": r.get("ativo") or r.get("imobilizado", ""),
+                        "model": r.get("modelo", ""),
+                        "category": r.get("categoria", ""),
+                        "company": r.get("empresa", ""),
+                        "description": r.get("descricao", ""),
+                        "cost": str(r.get("custo_asset") or ""),
+                        "dpis": r.get("dpis", "") or "",
+                        "acquisition_date": "",
+                    })
+                else:
+                    assets_data.append({
+                        "serial_number": "", "tag_number": r.get("pesquisado", ""),
+                        "asset_number": "", "model": "", "category": "",
+                        "company": "", "description": "", "cost": "", "dpis": "",
+                        "acquisition_date": "", "_ebs_nao_encontrado": True,
+                    })
+    elif origem == "status":
+        if not (body.status or "").strip():
+            raise HTTPException(400, "Selecione o status da base de recebimento.")
+        with SessionLocal() as s:
+            rows = s.scalars(
+                select(ReceiptCycle).where(ReceiptCycle.status == body.status.strip())
+            ).all()
+            assets_data = [_asset_dict_from_cycle(c) for c in rows if c.asset]
+    else:  # selecao
+        if not body.cycle_ids:
+            raise HTTPException(400, "Selecione ao menos um ativo.")
+        with SessionLocal() as s:
+            for cid in body.cycle_ids:
+                c = s.get(ReceiptCycle, cid)
+                if c and c.asset:
+                    assets_data.append(_asset_dict_from_cycle(c))
 
     if not assets_data:
         raise HTTPException(400, "Nenhum ativo válido encontrado.")
@@ -772,13 +875,11 @@ def start_upload(body: UploadIn, req: Request):
         "sn_cookies": sn_cookies,
         "stockroom": body.stockroom,
         "aisle_space": body.aisle_space,
-        "cost_currency": body.cost_currency,
         "state": "In stock",
         "substate": "available",
         "acquisition_method": "Purchase",
         "expenditure_type": "Capex",
         "depreciation": "SL 5 Years",
-        "calc_depreciation": body.calc_depreciation,
     }
 
     t = threading.Thread(target=_upload_worker, args=(job_id, assets_data, params), daemon=True)

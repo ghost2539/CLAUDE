@@ -111,9 +111,22 @@ function _snRenderUpload(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Entrada de Estoque</h1>' +
         '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Upload de ativos do recebimento para alm_hardware via SSO.</p>' +
+            'Upload de ativos para alm_hardware via a sua sessão do ServiceNow.</p>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Origem dos ativos</div>' +
+            '<div class="card-body">' +
+                '<label>Como deseja subir os ativos?</label>' +
+                '<select id="sn-origem" class="form-control" style="max-width:420px">' +
+                    '<option value="selecao">Selecionar ativos da base (marcar na lista)</option>' +
+                    '<option value="status">Base de recebimento — por status</option>' +
+                    '<option value="lista">Lista de ativos (consulta o EBS)</option>' +
+                '</select>' +
+            '</div>' +
+        '</div>' +
+
+        // ── Origem: seleção manual da base ──────────────────────────
+        '<div class="card mb-3" id="sn-src-selecao">' +
             '<div class="card-header">Selecionar Ativos do Recebimento</div>' +
             '<div class="card-body">' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:.8rem;align-items:end;margin-bottom:1rem">' +
@@ -137,29 +150,41 @@ function _snRenderUpload(container, S) {
             '</div>' +
         '</div>' +
 
+        // ── Origem: base por status ─────────────────────────────────
+        '<div class="card mb-3" id="sn-src-status" style="display:none">' +
+            '<div class="card-header">Base de recebimento — por status</div>' +
+            '<div class="card-body">' +
+                '<label>Status da base a subir</label>' +
+                '<select id="sn-status-base" class="form-control" style="max-width:420px">' +
+                    '<option value="">Selecione…</option></select>' +
+                '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
+                    'Todos os ativos da base com o status selecionado serão enviados.</p>' +
+            '</div>' +
+        '</div>' +
+
+        // ── Origem: lista via EBS ───────────────────────────────────
+        '<div class="card mb-3" id="sn-src-lista" style="display:none">' +
+            '<div class="card-header">Lista de ativos (consulta o EBS)</div>' +
+            '<div class="card-body">' +
+                '<label>Ativos (um por linha ou separados por vírgula)</label>' +
+                '<textarea id="sn-lista" class="form-control" rows="6" ' +
+                    'placeholder="Ex.: 1234567&#10;7654321&#10;ou 1234567, 7654321"></textarea>' +
+                '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
+                    'A conversão (modelo/categoria) usa o cadastro de modelos. Sem cadastro, ' +
+                    'o ativo não sobe e o relatório orienta a regularizar.</p>' +
+            '</div>' +
+        '</div>' +
+
         '<div class="card mb-3">' +
             '<div class="card-header">Configuração ServiceNow</div>' +
             '<div class="card-body">' +
                 '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'Campos do ativo (serial_number, model, asset_tag, model_category, company, cost, purchased, depreciation_effective_date) ' +
-                    'são preenchidos automaticamente pelo EBS. Os campos abaixo podem ser ajustados conforme necessário.</p>' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem">' +
+                    'Moeda padrão BRL para todos os ativos. A depreciação é sempre calculada após a inclusão.</p>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
                         '<input id="sn-stockroom" class="form-control" value="SPARE - CD324"></div>' +
-                    '<div><label>Aisle and Space</label>' +
-                        '<input id="sn-aisle" class="form-control" placeholder="Opcional"></div>' +
-                    '<div><label>Currency</label>' +
-                        '<select id="sn-currency" class="form-control">' +
-                            '<option value="BRL" selected>BRL - R$</option>' +
-                            '<option value="USD">USD - $</option>' +
-                            '<option value="ARS">ARS - $</option>' +
-                            '<option value="UYU">UYU - $U</option>' +
-                        '</select></div>' +
-                '</div>' +
-                '<div style="margin-top:1rem">' +
-                    '<label style="cursor:pointer">' +
-                        '<input type="checkbox" id="sn-calc-dep" checked style="margin-right:.4rem">' +
-                        'Calcular depreciação após inserir</label>' +
+                    '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
+                        '<input id="sn-aisle" class="form-control" placeholder="Obrigatório"></div>' +
                 '</div>' +
             '</div>' +
         '</div>' +
@@ -200,10 +225,21 @@ function _snRenderUpload(container, S) {
 
     S.api('/servicenow/statuses').then(function (d) {
         var sel = document.getElementById('sn-status');
+        var selBase = document.getElementById('sn-status-base');
         (d.statuses || []).forEach(function (st) {
             sel.innerHTML += '<option value="' + S.esc(st) + '">' + S.esc(st) + '</option>';
+            selBase.innerHTML += '<option value="' + S.esc(st) + '">' + S.esc(st) + '</option>';
         });
     }).catch(function () {});
+
+    function aplicarOrigem() {
+        var o = document.getElementById('sn-origem').value;
+        document.getElementById('sn-src-selecao').style.display = (o === 'selecao') ? '' : 'none';
+        document.getElementById('sn-src-status').style.display = (o === 'status') ? '' : 'none';
+        document.getElementById('sn-src-lista').style.display = (o === 'lista') ? '' : 'none';
+    }
+    document.getElementById('sn-origem').addEventListener('change', aplicarOrigem);
+    aplicarOrigem();
 
     document.getElementById('sn-search').addEventListener('click', function () { _snSearch(S); });
     document.getElementById('sn-q').addEventListener('keydown', function (e) {
@@ -298,22 +334,41 @@ function _snGetSelectedIds() {
 }
 
 async function _snStartUpload(S) {
-    var ids = _snGetSelectedIds();
-    if (!ids.length) { S.toast('Selecione ao menos um ativo', 'warning'); return; }
-
-    if (!confirm('Enviar ' + ids.length + ' ativo(s) para o ServiceNow?')) return;
+    var origem = document.getElementById('sn-origem').value;
+    var aisle = document.getElementById('sn-aisle').value.trim();
+    if (!aisle) { S.toast('Informe o Aisle and Space (obrigatório).', 'warning'); return; }
 
     var body = {
-        cycle_ids: ids,
+        origem: origem,
         stockroom: document.getElementById('sn-stockroom').value,
-        aisle_space: document.getElementById('sn-aisle').value,
-        cost_currency: document.getElementById('sn-currency').value,
-        calc_depreciation: document.getElementById('sn-calc-dep').checked,
+        aisle_space: aisle,
     };
+    var totalPrev = 0;
+
+    if (origem === 'selecao') {
+        var ids = _snGetSelectedIds();
+        if (!ids.length) { S.toast('Selecione ao menos um ativo', 'warning'); return; }
+        body.cycle_ids = ids;
+        totalPrev = ids.length;
+        if (!confirm('Enviar ' + ids.length + ' ativo(s) para o ServiceNow?')) return;
+    } else if (origem === 'status') {
+        var st = document.getElementById('sn-status-base').value;
+        if (!st) { S.toast('Selecione o status da base.', 'warning'); return; }
+        body.status = st;
+        if (!confirm('Enviar todos os ativos da base com status "' + st + '"?')) return;
+    } else { // lista
+        var raw = document.getElementById('sn-lista').value || '';
+        var lista = raw.split(/[\n,;]+/).map(function (x) { return x.trim(); })
+            .filter(function (x) { return x; });
+        if (!lista.length) { S.toast('Informe ao menos um ativo na lista.', 'warning'); return; }
+        body.identificadores = lista;
+        totalPrev = lista.length;
+        if (!confirm('Consultar o EBS e enviar ' + lista.length + ' ativo(s)?')) return;
+    }
 
     document.getElementById('sn-upload').disabled = true;
     document.getElementById('sn-progress-card').style.display = '';
-    document.getElementById('sn-s-total').textContent = ids.length;
+    document.getElementById('sn-s-total').textContent = totalPrev || '…';
 
     S.api('/servicenow/upload', { method: 'POST', body: body })
         .then(function (d) {
@@ -327,6 +382,59 @@ async function _snStartUpload(S) {
 }
 
 var _snPollTimer = null;
+var _snLastResults = [];
+
+// Relatório de erros ao final da subida (com motivos e download CSV).
+function _snRenderErroReport(S, d) {
+    var host = document.getElementById('sn-results');
+    if (!host) return;
+    var erros = (_snLastResults || []).filter(function (r) { return r.status === 'erro'; });
+    var box = document.createElement('div');
+    box.style.cssText = 'margin-top:1rem';
+    if (!erros.length) {
+        box.innerHTML = '<div class="alert alert-success">Concluído sem erros. ' +
+            d.ok_count + ' ativo(s) inserido(s).</div>';
+        host.appendChild(box);
+        return;
+    }
+    var linhas = erros.map(function (r) {
+        var motivos = (r.motivos && r.motivos.length) ? r.motivos.join(' | ') : (r.detail || '');
+        return '<tr><td>' + r.idx + '</td><td>' + S.esc(r.serie || '') + '</td><td>' +
+            S.esc(r.etiqueta || '') + '</td><td style="color:#dc2626">' + S.esc(motivos) + '</td></tr>';
+    }).join('');
+    box.innerHTML =
+        '<div class="alert alert-danger" style="margin-bottom:.6rem">' +
+            '<strong>' + erros.length + ' ativo(s) não foram enviados.</strong> ' +
+            'Regularize os itens abaixo e reenvie.</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">' +
+            '<strong>Relatório de erros</strong>' +
+            '<button class="btn btn-sm" id="sn-erro-csv">Baixar relatório (CSV)</button></div>' +
+        '<div style="max-height:280px;overflow:auto"><table class="data-table"><thead><tr>' +
+            '<th>#</th><th>Série</th><th>Etiqueta</th><th>Motivo(s)</th></tr></thead><tbody>' +
+            linhas + '</tbody></table></div>';
+    host.appendChild(box);
+
+    document.getElementById('sn-erro-csv').addEventListener('click', function () {
+        var rows = [['#', 'Serie', 'Etiqueta', 'Empresa', 'Motivos']];
+        erros.forEach(function (r) {
+            rows.push([r.idx, r.serie || '', r.etiqueta || '', r.empresa || '',
+                (r.motivos && r.motivos.length) ? r.motivos.join(' | ') : (r.detail || '')]);
+        });
+        var csv = rows.map(function (row) {
+            return row.map(function (c) {
+                var s = String(c == null ? '' : c).replace(/"/g, '""');
+                return '"' + s + '"';
+            }).join(';');
+        }).join('\r\n');
+        var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'relatorio_erros_entrada_' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+}
 
 function _snPollJob(S, jobId) {
     if (_snPollTimer) clearInterval(_snPollTimer);
@@ -351,8 +459,9 @@ function _snPollJob(S, jobId) {
             document.getElementById('sn-s-dep').textContent = d.dep_ok + (d.dep_fail > 0 ? ' / ' + d.dep_fail + ' falha' : '');
 
             if (d.results.length) {
+                _snLastResults = d.results;
                 var html = '<table class="data-table"><thead><tr>' +
-                    '<th>#</th><th>Série</th><th>Etiqueta</th><th>Empresa</th><th>Status</th><th>Depreciação</th><th>Detalhe</th>' +
+                    '<th>#</th><th>Série</th><th>Etiqueta</th><th>Empresa</th><th>Status</th><th>Depreciação</th><th>Detalhe / Motivo</th>' +
                     '</tr></thead><tbody>';
                 for (var i = 0; i < d.results.length; i++) {
                     var r = d.results[i];
@@ -363,6 +472,7 @@ function _snPollJob(S, jobId) {
                     if (r.depreciation === 'ok') depBadge = '<span style="color:#16a34a">OK</span>';
                     else if (r.depreciation === 'falhou') depBadge = '<span style="color:#eab308">Falhou</span>';
                     else depBadge = '—';
+                    var detalhe = r.status === 'ok' ? (r.display || '') : (r.detail || '');
                     html += '<tr>' +
                         '<td>' + r.idx + '</td>' +
                         '<td>' + S.esc(r.serie || '') + '</td>' +
@@ -370,8 +480,8 @@ function _snPollJob(S, jobId) {
                         '<td>' + S.esc(r.empresa || '') + '</td>' +
                         '<td>' + statusBadge + '</td>' +
                         '<td>' + depBadge + '</td>' +
-                        '<td style="font-size:.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis">' +
-                            S.esc(r.display || r.detail || '') + '</td>' +
+                        '<td style="font-size:.8rem;color:' + (r.status === 'ok' ? 'inherit' : '#dc2626') + '">' +
+                            S.esc(detalhe) + '</td>' +
                         '</tr>';
                 }
                 html += '</tbody></table>';
@@ -384,6 +494,7 @@ function _snPollJob(S, jobId) {
                 document.getElementById('sn-upload').disabled = false;
                 document.getElementById('sn-bar').style.width = '100%';
                 document.getElementById('sn-pct').textContent = '100%';
+                _snRenderErroReport(S, d);
                 S.toast('Upload concluído: ' + d.ok_count + ' inseridos, ' + d.err_count + ' erros', 'success');
             } else if (d.status === 'error') {
                 clearInterval(_snPollTimer);
