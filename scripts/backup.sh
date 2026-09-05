@@ -47,15 +47,33 @@ else
 fi
 
 # ── 1. Postgres (banco do portal) ───────────────────────────────────────────
-if [ -n "${DATABASE_URL:-}" ] && command -v pg_dump >/dev/null 2>&1; then
-  echo "-- Postgres (pg_dump)"
-  if pg_dump -Fc --no-owner --dbname="$DATABASE_URL" -f "$STAGE/portal_postgres.dump" 2>"$STAGE/pg_dump.err"; then
-    rm -f "$STAGE/pg_dump.err"
-  else
-    aviso "pg_dump falhou — ver pg_dump.err no pacote"
-  fi
+# A URL da aplicação vem no formato do SQLAlchemy (postgresql+psycopg2://...).
+# O pg_dump não entende o sufixo do driver: em vez de reclamar, ele trata a
+# string inteira como NOME de banco e tenta o socket local — falhando com uma
+# mensagem que não tem nada a ver com a causa. Por isso normalizamos aqui.
+url_para_pg_dump() {
+  printf '%s' "$1" | sed -E 's|^postgres(ql)?\+[a-z0-9_]+://|postgresql://|; s|^postgres://|postgresql://|'
+}
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  aviso "DATABASE_URL vazio — Postgres NÃO incluído"
+elif [[ "$DATABASE_URL" == sqlite* ]]; then
+  echo "-- Postgres: não se aplica (o portal está em SQLite)"
+elif ! command -v pg_dump >/dev/null 2>&1; then
+  aviso "pg_dump não instalado — Postgres NÃO incluído (instale postgresql-client)"
 else
-  aviso "pg_dump indisponível ou DATABASE_URL vazio — Postgres NÃO incluído"
+  PG_URL="$(url_para_pg_dump "$DATABASE_URL")"
+  echo "-- Postgres (pg_dump)"
+  if pg_dump -Fc --no-owner --dbname="$PG_URL" -f "$STAGE/portal_postgres.dump" 2>"$STAGE/pg_dump.err"; then
+    rm -f "$STAGE/pg_dump.err"
+    echo "   $(du -h "$STAGE/portal_postgres.dump" | cut -f1)"
+  else
+    # O erro precisa aparecer AGORA: escondido dentro do pacote, passa batido
+    # e o backup vai para a estante sem o banco principal.
+    aviso "pg_dump FALHOU — o banco do portal NÃO está neste pacote:"
+    sed 's/^/          /' "$STAGE/pg_dump.err" | head -8
+    rm -f "$STAGE/portal_postgres.dump"
+  fi
 fi
 
 # ── 2. SQLite (execução CAPEX, indicadores, automações, monitoramento) ──────
@@ -107,6 +125,12 @@ rm -rf "$WORK"
 find "$DEST" -name 'portal-spare-*.tar.gz*' -type f -mtime +"$RET_DAYS" -delete 2>/dev/null
 
 echo "== Concluído: $PKG ($(du -h "$PKG" | cut -f1)) — avisos: $ERROS =="
+if [ -n "${DATABASE_URL:-}" ] && [[ "$DATABASE_URL" != sqlite* ]] \
+   && ! tar -tzf "$PKG" 2>/dev/null | grep -q 'portal_postgres.dump'; then
+  echo
+  echo "  ATENÇÃO: este pacote NÃO tem o banco do portal (Postgres)."
+  echo "           Não serve para migrar sozinho. Resolva o erro acima e refaça."
+fi
 echo
 echo "RESTAURAR:"
 echo "  tar -xzf $PKG -C /tmp"
