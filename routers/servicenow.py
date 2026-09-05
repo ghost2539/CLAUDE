@@ -1204,6 +1204,51 @@ def saida_move(body: SaidaMovIn, req: Request):
     return {"ok": True, "message": "Ativo atualizado com sucesso."}
 
 
+class MovInternaIn(BaseModel):
+    sys_id: str
+    stockroom: str = ""
+    install_status: str = ""
+    aisle_space: str = ""
+    notes: str = ""
+
+
+@router.post("/mov-interna/move")
+def mov_interna_move(body: MovInternaIn, req: Request):
+    """Movimentação interna: troca o estoque (stockroom), status, espaço/corredor
+    e observação de um ativo — sem alterar loja/location."""
+    require_permission(req, "servicenow", "edit")
+    session = _sn_session_from_portal(req)
+
+    if not body.sys_id:
+        raise HTTPException(400, "sys_id obrigatório.")
+    faltando = []
+    if not (body.stockroom or "").strip():
+        faltando.append("Estoque destino")
+    if not (body.install_status or "").strip():
+        faltando.append("Novo Status")
+    if not (body.aisle_space or "").strip():
+        faltando.append("Aisle and Space")
+    if not (body.notes or "").strip():
+        faltando.append("Observações")
+    if faltando:
+        raise HTTPException(400, "Campos obrigatórios: " + ", ".join(faltando) + ".")
+
+    cache = {}
+    _, BS = _get_http()
+    stock_id = _lookup_reference(session, "stockroom", body.stockroom.strip(), cache, BS)
+    if not stock_id or stock_id == body.stockroom.strip():
+        raise HTTPException(400, "Regularizar Stockroom (Não encontrou o estoque '%s')." % body.stockroom)
+
+    update = {
+        "stockroom": stock_id,
+        "install_status": INSTALL_STATUS_MAP.get(body.install_status.lower(), body.install_status),
+        "aisle_space_location": body.aisle_space.strip(),
+        "work_notes": body.notes.strip(),
+    }
+    _sn_update(session, HARDWARE_TABLE, body.sys_id, update)
+    return {"ok": True, "message": "Ativo movimentado com sucesso."}
+
+
 class SaidaSearchLoteIn(BaseModel):
     identificadores: list = []
 

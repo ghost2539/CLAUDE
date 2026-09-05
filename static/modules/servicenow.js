@@ -9,6 +9,7 @@ window.SPARE_MODULES.servicenow = {
         var TAB_LIST = [
             ['entrada',   'Entrada de estoque'],
             ['saida',     'Saída de estoque'],
+            ['movimentacao', 'Movimentação Interna'],
             ['correios',  'Rastreio - Chamados'],
             ['relatorios','Relatórios']
         ];
@@ -18,6 +19,7 @@ window.SPARE_MODULES.servicenow = {
         var handlers = {
             entrada:    _snRenderUpload,
             saida:      _snRenderSaida,
+            movimentacao: _snRenderMovInterna,
             correios:   _snRenderCorreios,
             relatorios: _snRenderRelatorios
         };
@@ -551,19 +553,16 @@ function _snRenderSaida(container, S) {
                             '<input id="sa-store-code" class="form-control" placeholder="Ex: 401"></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
-                        '<div><label>Local (ServiceNow)</label>' +
+                        '<div><label>Local destino (ServiceNow)</label>' +
                             '<select id="sa-location" class="form-control">' +
                                 '<option value="">Informe BU e código da loja</option>' +
                             '</select></div>' +
-                        '<div><label>Novo Status</label>' +
+                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
                             _saStatusSelectHtml('sa-new-status', 'In transit', '') + '</div>' +
                     '</div>' +
-                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
-                        '<div><label>Aisle and Space</label>' +
-                            '<input id="sa-aisle" class="form-control" placeholder="Opcional — ex: A-12"></div>' +
-                        '<div><label>Observações</label>' +
-                            '<input id="sa-notes" class="form-control" placeholder="Opcional"></div>' +
-                    '</div>' +
+                    '<div style="margin-top:.8rem">' +
+                        '<label>Observações <span style="color:#dc2626">*</span> (nº do chamado ou motivo)</label>' +
+                        '<input id="sa-notes" class="form-control" placeholder="Ex.: INC0012345 ou devolução de estoque"></div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
                     '<button class="btn btn-primary" id="sa-search">Buscar ativos</button></div>' +
@@ -689,11 +688,11 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
     var applyAll = document.getElementById('sa-apply-all').checked;
     var locEl = document.getElementById('sa-location');
     var stEl = document.getElementById('sa-new-status');
-    var aiEl = document.getElementById('sa-aisle');
     var noEl = document.getElementById('sa-notes');
+    var codeEl = document.getElementById('sa-store-code');
     var defLoc = applyAll && locEl ? locEl.value : '';
+    var defStore = applyAll && codeEl ? codeEl.value.trim() : '';
     var defStatus = applyAll && stEl ? stEl.value : 'In transit';
-    var defAisle = applyAll && aiEl ? aiEl.value.trim() : '';
     var defNotes = applyAll && noEl ? noEl.value.trim() : '';
 
     var info = document.getElementById('sa-found-info');
@@ -710,10 +709,10 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
         return;
     }
 
-    var html = '<table class="data-table" style="min-width:1150px"><thead><tr>' +
+    var html = '<table class="data-table" style="min-width:1200px"><thead><tr>' +
         '<th><input type="checkbox" id="sa-check-all" checked></th>' +
         '<th>Asset Tag</th><th>Série</th><th>Nome</th><th>Local Atual</th><th>Status Atual</th>' +
-        '<th>Local Destino</th><th>Novo Status</th><th>Aisle/Space</th><th>Obs</th><th>OK</th>' +
+        '<th>Nº Loja</th><th>Local Destino</th><th>Novo Status</th><th>Obs *</th><th>OK</th>' +
         '</tr></thead><tbody>';
 
     for (var i = 0; i < assets.length; i++) {
@@ -725,16 +724,35 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
             '<td>' + S.esc(_saDisp(a.display_name)) + '</td>' +
             '<td>' + S.esc(_saDisp(a.location)) + '</td>' +
             '<td>' + S.esc(_saDisp(a.install_status)) + '</td>' +
-            '<td><input class="form-control sa-row-loc" list="sa-loc-list" ' +
-                'style="min-width:170px" value="' + S.esc(defLoc) + '"></td>' +
+            '<td><input class="form-control sa-row-store" style="min-width:90px" ' +
+                'placeholder="nº loja" value="' + S.esc(defStore) + '"></td>' +
+            '<td class="sa-row-locname" data-loc="' + S.esc(defLoc) + '" ' +
+                'style="min-width:180px;font-size:.85rem">' + S.esc(defLoc || '—') + '</td>' +
             '<td>' + _saStatusSelectHtml('', defStatus, 'sa-row-status') + '</td>' +
-            '<td><input class="form-control sa-row-aisle" style="min-width:90px" value="' + S.esc(defAisle) + '"></td>' +
-            '<td><input class="form-control sa-row-notes" style="min-width:120px" value="' + S.esc(defNotes) + '"></td>' +
+            '<td><input class="form-control sa-row-notes" style="min-width:150px" ' +
+                'placeholder="chamado/motivo" value="' + S.esc(defNotes) + '"></td>' +
             '<td class="sa-row-result"></td>' +
             '</tr>';
     }
     html += '</tbody></table>';
     document.getElementById('sa-table').innerHTML = html;
+
+    // Nº da loja → resolve o nome do Local destino pelo cadastro (locations_sn.json)
+    document.querySelectorAll('#sa-table .sa-row-store').forEach(function (inp) {
+        inp.addEventListener('input', function () {
+            var cell = inp.closest('tr').querySelector('.sa-row-locname');
+            var res = _saResolveStore(inp.value.trim());
+            if (res.name) {
+                cell.textContent = res.name + (res.multiple ? ' (+' + res.multiple + ')' : '');
+                cell.setAttribute('data-loc', res.name);
+                cell.style.color = '';
+            } else {
+                cell.textContent = inp.value.trim() ? 'Loja não encontrada' : '—';
+                cell.setAttribute('data-loc', '');
+                cell.style.color = inp.value.trim() ? '#dc2626' : '';
+            }
+        });
+    });
 
     var chkAll = document.getElementById('sa-check-all');
     if (chkAll) chkAll.addEventListener('change', function () {
@@ -743,6 +761,15 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
     });
 
     document.getElementById('sa-move-all').onclick = function () { _saMoveAll(S); };
+}
+
+// Resolve um número de loja para o nome do local (cadastro locations_sn.json).
+function _saResolveStore(code) {
+    code = (code || '').trim();
+    if (!code) return { name: '', multiple: 0 };
+    var m = (_saLocations || []).filter(function (l) { return String(l.codigo) === code; });
+    if (!m.length) return { name: '', multiple: 0 };
+    return { name: m[0].name, multiple: m.length - 1 };
 }
 
 function _saDisp(v) {
@@ -760,10 +787,16 @@ function _saMoveAll(S) {
     if (!selected.length) { S.toast('Marque ao menos um ativo.', 'warning'); return; }
 
     for (var i = 0; i < selected.length; i++) {
-        var locInput = selected[i].querySelector('.sa-row-loc');
-        if (!locInput.value.trim()) {
-            S.toast('Informe o Local Destino em todas as linhas marcadas.', 'warning');
-            locInput.focus();
+        var locName = selected[i].querySelector('.sa-row-locname').getAttribute('data-loc');
+        if (!locName) {
+            S.toast('Informe um nº de loja válido (Local destino) em todas as linhas marcadas.', 'warning');
+            selected[i].querySelector('.sa-row-store').focus();
+            return;
+        }
+        var obs = selected[i].querySelector('.sa-row-notes').value.trim();
+        if (!obs) {
+            S.toast('Observação é obrigatória (nº do chamado ou motivo) em todas as linhas.', 'warning');
+            selected[i].querySelector('.sa-row-notes').focus();
             return;
         }
     }
@@ -807,8 +840,7 @@ function _saMoveAll(S) {
         var body = {
             sys_id: sysId,
             install_status: row.querySelector('.sa-row-status').value,
-            location: row.querySelector('.sa-row-loc').value.trim(),
-            aisle_space: row.querySelector('.sa-row-aisle').value.trim(),
+            location: row.querySelector('.sa-row-locname').getAttribute('data-loc') || '',
             notes: row.querySelector('.sa-row-notes').value.trim()
         };
 
@@ -825,7 +857,241 @@ function _saMoveAll(S) {
 
 
 /* ================================================================
-   SUB-TAB 3: Chamados correios
+   SUB-TAB 3: Movimentação Interna (entre estoques/espaços)
+   ================================================================ */
+
+var _miStockrooms = ['SPARE - CD324', 'SPARE-ADM15', 'SPARE-CD504'];
+
+function _miStockroomSelectHtml(cls, val) {
+    var h = '<select class="form-control' + (cls ? ' ' + cls : '') + '"><option value="">Selecione…</option>';
+    _miStockrooms.forEach(function (s) {
+        h += '<option value="' + s + '"' + (s === val ? ' selected' : '') + '>' + s + '</option>';
+    });
+    return h + '</select>';
+}
+
+function _snRenderMovInterna(container, S) {
+    container.innerHTML =
+        '<h1 class="page-title">Movimentação Interna</h1>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
+            'Movimenta ativos entre estoques internos, espaços e corredores.</p>' +
+
+        _snLoginBarHtml() +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Buscar Ativos (em lote)</div>' +
+            '<div class="card-body">' +
+                '<label>Identificadores (Asset Tag ou Número de Série)</label>' +
+                '<textarea id="mi-ids" class="form-control" rows="5" ' +
+                    'placeholder="Um por linha ou separados por vírgula."></textarea>' +
+                '<label style="display:flex;align-items:center;gap:.5rem;margin-top:.8rem;cursor:pointer">' +
+                    '<input type="checkbox" id="mi-apply-all"> ' +
+                    'Definir os dados abaixo e aplicá-los a todos os ativos ao buscar' +
+                '</label>' +
+                '<div id="mi-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
+                        '<div><label>Estoque destino <span style="color:#dc2626">*</span></label>' +
+                            _miStockroomSelectHtml('mi-stockroom', 'SPARE - CD324') + '</div>' +
+                        '<div><label>BU</label>' +
+                            '<select id="mi-bu" class="form-control">' +
+                                '<option value="">Selecione...</option>' +
+                                '<option value="Renner Brasil">Renner Brasil</option>' +
+                                '<option value="Youcom">Youcom</option>' +
+                                '<option value="Camicado">Camicado</option>' +
+                                '<option value="Ashua">Ashua</option>' +
+                            '</select></div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
+                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
+                            _saStatusSelectHtml('mi-new-status', 'In stock', '') + '</div>' +
+                        '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
+                            '<input id="mi-aisle" class="form-control" placeholder="Ex.: A-12"></div>' +
+                    '</div>' +
+                    '<div style="margin-top:.8rem">' +
+                        '<label>Observações <span style="color:#dc2626">*</span></label>' +
+                        '<input id="mi-notes" class="form-control" placeholder="Motivo da movimentação"></div>' +
+                '</div>' +
+                '<div style="margin-top:1rem">' +
+                    '<button class="btn btn-primary" id="mi-search">Buscar ativos</button></div>' +
+                '<div id="mi-search-prog" style="margin-top:.5rem"></div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div id="mi-results" style="display:none">' +
+            '<div class="card mb-3">' +
+                '<div class="card-header">Ativos encontrados</div>' +
+                '<div class="card-body">' +
+                    '<div id="mi-found-info" style="margin-bottom:.6rem;color:var(--text-secondary)"></div>' +
+                    '<div id="mi-table" style="max-height:460px;overflow:auto"></div>' +
+                    '<div style="margin-top:1rem">' +
+                        '<button class="btn btn-primary" id="mi-move-all">Confirmar movimentação dos marcados</button>' +
+                    '</div>' +
+                    '<div id="mi-move-prog" style="margin-top:.5rem"></div>' +
+                    '<div id="mi-move-result" style="margin-top:.5rem"></div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    _snLoginBarBind(S);
+
+    document.getElementById('mi-apply-all').addEventListener('change', function () {
+        document.getElementById('mi-defaults').style.display = this.checked ? '' : 'none';
+    });
+    document.getElementById('mi-search').addEventListener('click', function () { _miSearch(S); });
+}
+
+function _miSearch(S) {
+    var raw = document.getElementById('mi-ids').value || '';
+    var ids = raw.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!ids.length) { S.toast('Informe ao menos um identificador.', 'warning'); return; }
+
+    var prog = document.getElementById('mi-search-prog');
+    prog.innerHTML = '<span class="spinner spinner-sm"></span> Buscando ' + ids.length + ' identificador(es)...';
+    document.getElementById('mi-results').style.display = 'none';
+
+    S.api('/servicenow/saida/search_lote', { method: 'POST', body: { identificadores: ids } })
+        .then(function (d) {
+            window._miAssets = d.assets || [];
+            prog.innerHTML = '';
+            document.getElementById('mi-results').style.display = '';
+            _miRenderList(S, window._miAssets, d.nao_encontrados || [], d.solicitados || ids.length);
+        })
+        .catch(function (e) {
+            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+        });
+}
+
+function _miRenderList(S, assets, naoEncontrados, solicitados) {
+    var applyAll = document.getElementById('mi-apply-all').checked;
+    var defStock = applyAll ? document.querySelector('.mi-stockroom').value : 'SPARE - CD324';
+    var defStatus = applyAll ? document.getElementById('mi-new-status').value : 'In stock';
+    var defAisle = applyAll ? document.getElementById('mi-aisle').value.trim() : '';
+    var defNotes = applyAll ? document.getElementById('mi-notes').value.trim() : '';
+
+    var info = document.getElementById('mi-found-info');
+    var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
+    if (naoEncontrados.length) {
+        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+            S.esc(naoEncontrados.join(', ')) + '</span>';
+    }
+    info.innerHTML = msg;
+
+    if (!assets.length) {
+        document.getElementById('mi-table').innerHTML =
+            '<div style="padding:1rem;color:var(--text-secondary)">Nenhum ativo encontrado.</div>';
+        return;
+    }
+
+    var html = '<table class="data-table" style="min-width:1250px"><thead><tr>' +
+        '<th><input type="checkbox" id="mi-check-all" checked></th>' +
+        '<th>Asset Tag</th><th>Série</th><th>Nome</th><th>Local Atual</th><th>Status Atual</th>' +
+        '<th>Estoque Destino *</th><th>Novo Status *</th><th>Aisle/Space *</th><th>Obs *</th><th>OK</th>' +
+        '</tr></thead><tbody>';
+
+    for (var i = 0; i < assets.length; i++) {
+        var a = assets[i];
+        html += '<tr data-idx="' + i + '">' +
+            '<td><input type="checkbox" class="mi-row-inc" checked></td>' +
+            '<td style="font-weight:600">' + S.esc(_saDisp(a.asset_tag)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.serial_number)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.display_name)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.stockroom) || _saDisp(a.location)) + '</td>' +
+            '<td>' + S.esc(_saDisp(a.install_status)) + '</td>' +
+            '<td>' + _miStockroomSelectHtml('mi-row-stock', defStock) + '</td>' +
+            '<td>' + _saStatusSelectHtml('', defStatus, 'mi-row-status') + '</td>' +
+            '<td><input class="form-control mi-row-aisle" style="min-width:110px" value="' + S.esc(defAisle) + '"></td>' +
+            '<td><input class="form-control mi-row-notes" style="min-width:150px" value="' + S.esc(defNotes) + '"></td>' +
+            '<td class="mi-row-result"></td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById('mi-table').innerHTML = html;
+
+    var chkAll = document.getElementById('mi-check-all');
+    if (chkAll) chkAll.addEventListener('change', function () {
+        var v = this.checked;
+        document.querySelectorAll('#mi-table .mi-row-inc').forEach(function (c) { c.checked = v; });
+    });
+    document.getElementById('mi-move-all').onclick = function () { _miMoveAll(S); };
+}
+
+function _miMoveAll(S) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#mi-table tr[data-idx]'));
+    var selected = rows.filter(function (r) {
+        var c = r.querySelector('.mi-row-inc'); return c && c.checked;
+    });
+    if (!selected.length) { S.toast('Marque ao menos um ativo.', 'warning'); return; }
+
+    for (var i = 0; i < selected.length; i++) {
+        var stk = selected[i].querySelector('.mi-row-stock').value;
+        var ai = selected[i].querySelector('.mi-row-aisle').value.trim();
+        var ob = selected[i].querySelector('.mi-row-notes').value.trim();
+        var statAtual = selected[i].children[5].textContent.trim();
+        if (!statAtual) { S.toast('Status atual ausente em uma linha marcada.', 'warning'); return; }
+        if (!stk) { S.toast('Selecione o Estoque destino em todas as linhas.', 'warning'); return; }
+        if (!ai) { S.toast('Aisle and Space é obrigatório em todas as linhas.', 'warning'); return; }
+        if (!ob) { S.toast('Observações é obrigatória em todas as linhas.', 'warning'); return; }
+    }
+
+    if (!confirm('Confirmar movimentação de ' + selected.length + ' ativo(s)?')) return;
+
+    var btn = document.getElementById('mi-move-all');
+    btn.disabled = true;
+    var prog = document.getElementById('mi-move-prog');
+    var result = document.getElementById('mi-move-result');
+    result.innerHTML = '';
+    var total = selected.length, done = 0, ok = 0, fail = 0;
+
+    function setProg() {
+        var pct = Math.round(done / total * 100);
+        prog.innerHTML =
+            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
+            done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
+    }
+    setProg();
+
+    var idx = 0;
+    function next() {
+        if (idx >= selected.length) {
+            btn.disabled = false;
+            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+                'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
+            S.toast('Movimentação concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
+            return;
+        }
+        var row = selected[idx];
+        var aidx = parseInt(row.getAttribute('data-idx'));
+        var asset = window._miAssets[aidx];
+        var sysId = asset.sys_id;
+        if (typeof sysId === 'object') sysId = sysId.value || sysId.display_value;
+        var cell = row.querySelector('.mi-row-result');
+        cell.innerHTML = '<span class="spinner spinner-sm"></span>';
+
+        var body = {
+            sys_id: sysId,
+            stockroom: row.querySelector('.mi-row-stock').value,
+            install_status: row.querySelector('.mi-row-status').value,
+            aisle_space: row.querySelector('.mi-row-aisle').value.trim(),
+            notes: row.querySelector('.mi-row-notes').value.trim()
+        };
+
+        S.api('/servicenow/mov-interna/move', { method: 'POST', body: body })
+            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .catch(function (e) {
+                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                fail++;
+            })
+            .then(function () { done++; idx++; setProg(); next(); });
+    }
+    next();
+}
+
+
+/* ================================================================
+   SUB-TAB 4: Chamados correios
    ================================================================ */
 
 function _snRenderCorreios(container, S) {
