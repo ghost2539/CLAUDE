@@ -9,6 +9,7 @@ Escrita é sempre tolerante a erro: monitoramento nunca pode derrubar o portal.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -92,6 +93,64 @@ class Evento(Base):
             "status_code": self.status_code, "duracao_ms": self.duracao_ms,
             "usuario": self.usuario, "detalhe": self.detalhe,
         }
+
+
+class Config(Base):
+    """Configuração do módulo (chave/valor JSON) — alertas por e-mail etc."""
+    __tablename__ = "monitor_config"
+
+    chave: Mapped[str] = mapped_column(String(40), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+
+
+CFG_ALERTAS = "alertas"
+
+# Padrões do canal de alertas. O destinatário nasce fixo no e-mail do
+# responsável pela área e pode ser ajustado na tela de Parâmetros.
+ALERTAS_PADRAO: dict = {
+    "ativo": False,
+    "host": "",
+    "porta": 25,
+    "seguranca": "none",          # none | starttls | ssl
+    "usuario": "",
+    "senha_algo": "",             # fernet | xor  (a senha nunca é devolvida à tela)
+    "senha_cifrada": "",
+    "remetente": "portal-spare@lojasrenner.com.br",
+    "destinatarios": "raphael.steilein@lojasrenner.com.br",
+    "alerta_acesso_negado": True,  # tentativa com credencial válida e sem liberação
+    "alerta_falhas": False,        # erros de API/integração/automação
+    "intervalo_min": 5,            # janela mínima entre e-mails do mesmo assunto
+    "max_por_hora": 20,
+}
+
+
+def obter_config(chave: str = CFG_ALERTAS) -> dict:
+    base = dict(ALERTAS_PADRAO) if chave == CFG_ALERTAS else {}
+    try:
+        with SessionLocal() as s:
+            row = s.get(Config, chave)
+            if row and row.payload:
+                base.update(json.loads(row.payload))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Falha ao ler config de monitoramento (%s): %s", chave, exc)
+    return base
+
+
+def salvar_config(dados: dict, chave: str = CFG_ALERTAS) -> dict:
+    atual = obter_config(chave)
+    atual.update(dados or {})
+    try:
+        with SessionLocal.begin() as s:
+            row = s.get(Config, chave)
+            if not row:
+                row = Config(chave=chave)
+                s.add(row)
+            row.payload = json.dumps(atual, ensure_ascii=False)
+            row.atualizado_em = localnow()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Falha ao gravar config de monitoramento (%s): %s", chave, exc)
+    return atual
 
 
 def init_db() -> None:

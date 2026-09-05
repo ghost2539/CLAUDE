@@ -180,6 +180,28 @@ def _registrar_falha(login: str, source: str, detail: str, ip: str, pendente: bo
     except Exception:  # noqa: BLE001 — registro de falha nunca derruba o login
         log.exception("Falha ao registrar tentativa de acesso de %s", login)
 
+    # Espelha no Monitoramento e, quando a credencial era válida mas o usuário
+    # não tem liberação, dispara o alerta por e-mail. Nada aqui pode interferir
+    # no fluxo de login.
+    try:
+        import database_monitoramento as _dbmon
+        _dbmon.registrar(
+            severidade="alerta" if pendente else "erro",
+            origem="acesso",
+            alvo="acesso não autorizado" if pendente else "login recusado",
+            usuario=login,
+            detalhe=f"{detail} · autenticação {source} · IP {ip or '—'}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    if pendente:
+        try:
+            from notificador import alertar_acesso_negado
+            alertar_acesso_negado(login, ip, detail, source)
+        except Exception:  # noqa: BLE001
+            pass
+
 
 @router.post("/login")
 def auth_login(body: LoginIn, req: Request):

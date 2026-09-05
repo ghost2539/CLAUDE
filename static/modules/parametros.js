@@ -20,11 +20,13 @@ window.SPARE_MODULES.parametros = {
             ['config-modulos',  'Configuração Módulos'],
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
+            ['acessos',         'Acessos & Alertas'],
             ['tv',              'TV'],
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes', 'monitoramento'];
+        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes',
+                         'monitoramento', 'acessos'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -45,6 +47,7 @@ window.SPARE_MODULES.parametros = {
             'config-modulos': renderConfigModulos,
             automacoes:     renderAutomacoes,
             monitoramento:  renderMonitoramento,
+            acessos:        renderAcessos,
             tv:             renderTV,
             conta:          renderAccount
         };
@@ -585,6 +588,193 @@ async function renderMonitoramento(c, S) {
     };
 
     loadSaude(); loadFalhas();
+}
+
+/* ── Acessos & Alertas (admin) ──────────────────────────────────────
+   Tentativas de acesso negadas (credencial válida sem liberação e bloqueios
+   dentro do portal) e configuração dos alertas por e-mail. */
+async function renderAcessos(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Acessos &amp; Alertas</h1>' +
+        '<p class="text-muted">Tentativas de acesso negadas e envio de alertas por e-mail.</p>' +
+
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Tentativas de acesso</span>' +
+            '<span>' +
+              '<select id="ac-tipo" class="form-control" style="display:inline-block;width:230px;height:32px">' +
+                '<option value="">Todas as tentativas</option>' +
+                '<option value="nao_autorizado" selected>Sem liberação de acesso</option>' +
+                '<option value="credencial">Credencial inválida</option></select> ' +
+              '<select id="ac-dias" class="form-control" style="display:inline-block;width:120px;height:32px">' +
+                '<option value="7">7 dias</option><option value="30" selected>30 dias</option>' +
+                '<option value="90">90 dias</option></select> ' +
+              '<button id="ac-refresh" class="btn btn-sm btn-secondary">Atualizar</button>' +
+            '</span></div>' +
+            '<div class="card-body" id="ac-lista">' +
+            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+
+        '<div class="card mb-3"><div class="card-header">Usuários aguardando liberação</div>' +
+            '<div class="card-body" id="ac-pendentes"></div></div>' +
+
+        '<div class="card"><div class="card-header">Alertas por e-mail</div>' +
+            '<div class="card-body" id="ac-alertas">' +
+            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>';
+
+    async function loadAcessos() {
+        var host = document.getElementById('ac-lista');
+        var p = new URLSearchParams({
+            dias: document.getElementById('ac-dias').value,
+            tipo: document.getElementById('ac-tipo').value,
+            limit: '300'
+        });
+        try {
+            var d = await S.api('/monitor/acessos?' + p);
+            var r = d.resumo || {};
+            var html = '<div class="stats-grid" style="margin-bottom:12px">' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#d97706">' +
+                    (r.nao_autorizado || 0) + '</div><div class="stat-label">Sem liberação</div></div>' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#dc2626">' +
+                    (r.credencial || 0) + '</div><div class="stat-label">Credencial inválida</div></div>' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem">' +
+                    (r.bloqueios_403 || 0) + '</div><div class="stat-label">Bloqueios dentro do portal</div></div>' +
+                '</div>';
+            host.innerHTML = html;
+            var cols = [
+                { key: 'quando', label: 'Quando', render: function (v) {
+                    return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
+                { key: 'login', label: 'Usuário' },
+                { key: 'tipo', label: 'Tipo', html: true, render: function (v) {
+                    var nao = v === 'nao_autorizado';
+                    return '<span style="color:' + (nao ? '#d97706' : '#dc2626') + ';font-weight:600">' +
+                        (nao ? 'Sem liberação' : 'Credencial') + '</span>'; } },
+                { key: 'origem', label: 'Autenticação' },
+                { key: 'ip', label: 'IP' },
+                { key: 'detalhe', label: 'Detalhe' }
+            ];
+            host.appendChild(S.table(cols, d.tentativas || []));
+
+            var ph = document.getElementById('ac-pendentes');
+            ph.innerHTML = '';
+            if (!(d.pendentes || []).length) {
+                ph.innerHTML = '<p class="text-muted">Nenhum usuário aguardando liberação.</p>';
+            } else {
+                ph.appendChild(S.table([
+                    { key: 'login', label: 'Usuário' },
+                    { key: 'nome', label: 'Nome' },
+                    { key: 'origem', label: 'Autenticação' },
+                    { key: 'criado_em', label: 'Primeira tentativa', render: function (v) {
+                        return v ? new Date(v).toLocaleString('pt-BR') : ''; } }
+                ], d.pendentes));
+                ph.insertAdjacentHTML('beforeend',
+                    '<p class="text-muted mt-2">Libere o acesso em ' +
+                    '<b>Parâmetros → Usuários e Permissões</b>.</p>');
+            }
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+        }
+    }
+
+    async function loadAlertas() {
+        var host = document.getElementById('ac-alertas');
+        try {
+            var d = await S.api('/monitor/alertas');
+            var seg = d.seguranca || 'none';
+            function opt(v, r) {
+                return '<option value="' + v + '"' + (seg === v ? ' selected' : '') + '>' + r + '</option>';
+            }
+            host.innerHTML =
+                '<div class="form-grid cols-2">' +
+                    '<div class="form-group"><label>Servidor SMTP</label>' +
+                        '<input id="al-host" class="form-control" value="' + S.esc(d.host || '') + '"></div>' +
+                    '<div class="form-group"><label>Porta</label>' +
+                        '<input id="al-porta" type="number" class="form-control" value="' + (d.porta || 25) + '"></div>' +
+                    '<div class="form-group"><label>Segurança</label>' +
+                        '<select id="al-seg" class="form-control">' +
+                        opt('none', 'Nenhuma') + opt('starttls', 'STARTTLS') + opt('ssl', 'SSL/TLS') +
+                        '</select></div>' +
+                    '<div class="form-group"><label>Usuário (opcional)</label>' +
+                        '<input id="al-user" class="form-control" value="' + S.esc(d.usuario || '') + '"></div>' +
+                    '<div class="form-group"><label>Senha ' +
+                        (d.senha_definida
+                            ? '<span class="text-muted">(guardada — fonte: ' + S.esc(d.senha_fonte) + ')</span>'
+                            : '<span class="text-muted">(não definida)</span>') + '</label>' +
+                        '<input id="al-senha" type="password" class="form-control" ' +
+                        'placeholder="' + (d.senha_definida ? 'deixe em branco para manter' : 'opcional') + '"></div>' +
+                    '<div class="form-group"><label>Remetente</label>' +
+                        '<input id="al-rem" class="form-control" value="' + S.esc(d.remetente || '') + '"></div>' +
+                    '<div class="form-group"><label>Destinatários (separados por vírgula)</label>' +
+                        '<input id="al-dest" class="form-control" value="' + S.esc(d.destinatarios || '') + '"></div>' +
+                    '<div class="form-group"><label>Intervalo mínimo por assunto (min)</label>' +
+                        '<input id="al-int" type="number" class="form-control" value="' + (d.intervalo_min || 0) + '"></div>' +
+                    '<div class="form-group"><label>Máximo de e-mails por hora</label>' +
+                        '<input id="al-max" type="number" class="form-control" value="' + (d.max_por_hora || 20) + '"></div>' +
+                '</div>' +
+                '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' +
+                    '<label><input type="checkbox" id="al-ativo"' + (d.ativo ? ' checked' : '') + '> ' +
+                        'Canal de alertas ativo</label>' +
+                    '<label><input type="checkbox" id="al-acesso"' + (d.alerta_acesso_negado ? ' checked' : '') + '> ' +
+                        'Avisar tentativa de acesso sem liberação</label>' +
+                    '<label><input type="checkbox" id="al-falhas"' + (d.alerta_falhas ? ' checked' : '') + '> ' +
+                        'Avisar falhas de API, integrações e automações</label>' +
+                    (d.senha_definida
+                        ? '<label><input type="checkbox" id="al-limpar"> Remover a senha guardada</label>'
+                        : '') +
+                '</div>' +
+                '<div style="margin-top:12px">' +
+                    '<button id="al-save" class="btn btn-primary">Salvar</button> ' +
+                    '<button id="al-test" class="btn btn-outline" style="margin-left:8px">Enviar e-mail de teste</button>' +
+                '</div>' +
+                '<div id="al-result" class="mt-2"></div>' +
+                '<p class="text-muted mt-2" style="font-size:.8rem">A senha é guardada cifrada no banco de ' +
+                    'monitoramento. Quando existir chave <b>SMTP_SENHA</b> no cofre, ela tem prioridade.</p>';
+
+            document.getElementById('al-save').onclick = async function () {
+                var limpar = document.getElementById('al-limpar');
+                var body = {
+                    ativo: document.getElementById('al-ativo').checked,
+                    host: document.getElementById('al-host').value,
+                    porta: document.getElementById('al-porta').value,
+                    seguranca: document.getElementById('al-seg').value,
+                    usuario: document.getElementById('al-user').value,
+                    senha: document.getElementById('al-senha').value,
+                    senha_limpar: !!(limpar && limpar.checked),
+                    remetente: document.getElementById('al-rem').value,
+                    destinatarios: document.getElementById('al-dest').value,
+                    alerta_acesso_negado: document.getElementById('al-acesso').checked,
+                    alerta_falhas: document.getElementById('al-falhas').checked,
+                    intervalo_min: document.getElementById('al-int').value,
+                    max_por_hora: document.getElementById('al-max').value
+                };
+                try {
+                    await S.api('/monitor/alertas', { method: 'PUT', body: body });
+                    S.toast('Configuração de alertas salva.', 'success');
+                    loadAlertas();
+                } catch (e) { S.toast(e.message, 'error'); }
+            };
+
+            document.getElementById('al-test').onclick = async function () {
+                var b = this, t = b.textContent;
+                b.disabled = true; b.textContent = 'Enviando…';
+                var host2 = document.getElementById('al-result');
+                try {
+                    var r = await S.api('/monitor/alertas/teste', { method: 'POST' });
+                    host2.innerHTML = '<div class="alert alert-' + (r.ok ? 'success' : 'danger') + '">' +
+                        (r.ok ? 'E-mail enviado. ' : 'Não enviado. ') + S.esc(r.detalhe || '') + '</div>';
+                } catch (e) {
+                    host2.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+                } finally { b.disabled = false; b.textContent = t; }
+            };
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+        }
+    }
+
+    document.getElementById('ac-refresh').onclick = loadAcessos;
+    document.getElementById('ac-tipo').onchange = loadAcessos;
+    document.getElementById('ac-dias').onchange = loadAcessos;
+
+    loadAcessos(); loadAlertas();
 }
 
 /* ── Visual ─────────────────────────────────────────────────────── */

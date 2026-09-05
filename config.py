@@ -122,6 +122,17 @@ class Settings:
         f"sqlite:///{(ROOT / 'data' / 'monitoramento.db').as_posix()}",
     )
 
+    # ── Alertas por e-mail (SMTP) ───────────────────────────────────────
+    # Apenas VALORES PADRÃO: a configuração efetiva fica no banco de
+    # monitoramento e é editável em Parâmetros → Monitoramento. A senha só
+    # vem do cofre (SMTP_SENHA) ou do store cifrado — nunca do código.
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "25"))
+    SMTP_SEGURANCA: str = os.getenv("SMTP_SEGURANCA", "none")  # none|starttls|ssl
+    SMTP_USUARIO: str = os.getenv("SMTP_USUARIO", "")
+    SMTP_REMETENTE: str = os.getenv("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
+    ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
