@@ -933,6 +933,74 @@ def count_incidents(
 
 
 # ═══════════════════════════════════════════════════════════════════
+# CHECAGEM DE EXISTÊNCIA NO SERVICENOW (alm_hardware)
+# ═══════════════════════════════════════════════════════════════════
+
+class ExisteItem(BaseModel):
+    id: int | None = None
+    asset_tag: str = ""
+    serial_number: str = ""
+
+
+class ExisteIn(BaseModel):
+    itens: list[ExisteItem] = []
+
+
+def _hardware_existentes(session, itens: list) -> tuple[set, set]:
+    """Consulta alm_hardware e devolve (tags_existentes, seriais_existentes)
+    em MAIÚSCULAS, a partir de uma lista de itens {asset_tag, serial_number}.
+    Consulta em blocos para não estourar a URL."""
+    def _chunks(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
+    tags_ok, ser_ok = set(), set()
+    for grupo in _chunks(itens, 50):
+        tags = [str(getattr(i, "asset_tag", "") or "").strip() for i in grupo]
+        sers = [str(getattr(i, "serial_number", "") or "").strip() for i in grupo]
+        tags = [t for t in tags if t]
+        sers = [s for s in sers if s]
+        partes = []
+        if tags:
+            partes.append("asset_tagIN" + ",".join(tags))
+        if sers:
+            partes.append("serial_numberIN" + ",".join(sers))
+        if not partes:
+            continue
+        q = "^OR".join(partes) if len(partes) == 2 else partes[0]
+        recs = _sn_query(session, HARDWARE_TABLE, q,
+                         "asset_tag,serial_number", limit=200, display_value=False)
+        for r in recs:
+            t = str(r.get("asset_tag") or "").strip().upper()
+            s = str(r.get("serial_number") or "").strip().upper()
+            if t:
+                tags_ok.add(t)
+            if s:
+                ser_ok.add(s)
+    return tags_ok, ser_ok
+
+
+@router.post("/hardware-exists")
+def hardware_exists(body: ExisteIn, req: Request):
+    """Para cada item {asset_tag, serial_number} informa se JÁ existe no
+    ServiceNow (alm_hardware) — por asset_tag OU serial_number. Usado na Base
+    de Recebimentos ('Localizado no SN?') e na validação da Entrada de Estoque."""
+    require_permission(req, "recebimento", "view")
+    session = _sn_session_from_portal(req)
+    itens = body.itens or []
+    if not itens:
+        return {"resultados": []}
+    tags_ok, ser_ok = _hardware_existentes(session, itens)
+    out = []
+    for i in itens:
+        t = str(i.asset_tag or "").strip().upper()
+        s = str(i.serial_number or "").strip().upper()
+        existe = bool((t and t in tags_ok) or (s and s in ser_ok))
+        out.append({"id": i.id, "existe": existe})
+    return {"resultados": out}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # SAÍDA DE ESTOQUE — busca e movimentação de ativos no alm_hardware
 # ═══════════════════════════════════════════════════════════════════
 
