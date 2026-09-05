@@ -32,85 +32,68 @@ window.SPARE_MODULES.servicenow = {
 
 var _snKeepAliveTimer = null;
 
+/* A partir da unificação do login (Logon AD via ServiceNow), a sessão do SN
+   já vem do próprio login do portal. Estas telas não pedem mais usuário/senha:
+   mostram apenas o status da conexão e mantêm a sessão viva (keep-alive). */
+
 function _snLoginBarHtml() {
     return '<div class="card mb-3" id="sn-login-bar">' +
-        '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
-            '<span>Acesso ServiceNow</span>' +
-            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 8px;border-radius:10px;background:#dc262620;color:#dc2626">Desconectado</span>' +
-        '</div>' +
-        '<div class="card-body">' +
-            '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.8rem;align-items:end">' +
-                '<div><label>Usuário</label>' +
-                    '<input id="sn-bar-user" class="form-control" placeholder="Usuário corporativo"></div>' +
-                '<div><label>Senha</label>' +
-                    '<input id="sn-bar-pass" type="password" class="form-control" placeholder="Senha"></div>' +
-                '<button class="btn btn-primary" id="sn-bar-login">Conectar</button>' +
+        '<div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">' +
+            '<div style="font-size:.9rem">' +
+                '<strong>ServiceNow</strong>' +
+                '<span style="color:var(--text-secondary)"> — conectado automaticamente pelo login do portal (Logon AD).</span>' +
+                '<div id="sn-bar-status" style="font-size:.82rem;color:var(--text-secondary);margin-top:.25rem"></div>' +
             '</div>' +
-            '<div id="sn-bar-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
+            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:10px;background:#dc262620;color:#dc2626;white-space:nowrap">Verificando…</span>' +
         '</div>' +
     '</div>';
 }
 
 function _snLoginBarBind(S, onSuccess) {
-    var loginBtn = document.getElementById('sn-bar-login');
-    if (!loginBtn) return;
-
-    _snCheckSession(S);
-
-    loginBtn.addEventListener('click', function () {
-        var user = document.getElementById('sn-bar-user').value.trim();
-        var pass = document.getElementById('sn-bar-pass').value;
-        var st = document.getElementById('sn-bar-status');
-        if (!user || !pass) { S.toast('Informe usuário e senha', 'warning'); return; }
-        st.innerHTML = '<span style="color:var(--text-secondary)">Conectando...</span>';
-        loginBtn.disabled = true;
-        S.api('/servicenow/test-login', { method: 'POST', body: { usuario: user, senha: pass } })
-            .then(function () {
-                st.innerHTML = '<span style="color:#16a34a;font-weight:600">Conectado!</span>';
-                S.toast('ServiceNow conectado!', 'success');
-                _snSetBadge(true);
-                _snStartKeepAlive(S);
-                if (onSuccess) onSuccess();
-            })
-            .catch(function (e) {
-                st.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
-                _snSetBadge(false);
-            })
-            .finally(function () { loginBtn.disabled = false; });
-    });
-
-    document.getElementById('sn-bar-pass').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); loginBtn.click(); }
-    });
+    var bar = document.getElementById('sn-login-bar');
+    if (!bar) return;
+    _snCheckSession(S, onSuccess);
 }
 
 function _snSetBadge(active) {
     var badge = document.getElementById('sn-session-badge');
-    if (!badge) return;
-    if (active) {
-        badge.textContent = 'Conectado';
-        badge.style.background = '#16a34a20';
-        badge.style.color = '#16a34a';
-    } else {
-        badge.textContent = 'Desconectado';
-        badge.style.background = '#dc262620';
-        badge.style.color = '#dc2626';
+    var st = document.getElementById('sn-bar-status');
+    if (badge) {
+        if (active) {
+            badge.textContent = 'Conectado';
+            badge.style.background = '#16a34a20';
+            badge.style.color = '#16a34a';
+        } else {
+            badge.textContent = 'Sessão expirada';
+            badge.style.background = '#dc262620';
+            badge.style.color = '#dc2626';
+        }
+    }
+    if (st) {
+        st.innerHTML = active
+            ? ''
+            : '<span style="color:#dc2626">Sessão do ServiceNow expirou. Saia e entre novamente no portal (Logon AD) para renovar.</span>';
     }
 }
 
-function _snCheckSession(S) {
+function _snCheckSession(S, onSuccess) {
     S.api('/servicenow/session-status')
-        .then(function (d) { _snSetBadge(d.active); if (d.active) _snStartKeepAlive(S); })
+        .then(function (d) {
+            _snSetBadge(d.active);
+            if (d.active) { _snStartKeepAlive(S); if (onSuccess) onSuccess(); }
+        })
         .catch(function () { _snSetBadge(false); });
 }
 
 function _snStartKeepAlive(S) {
     if (_snKeepAliveTimer) return;
+    // Renova a sessão do ServiceNow a cada 5 minutos enquanto a tela estiver
+    // aberta (o endpoint session-status atualiza os cookies no servidor).
     _snKeepAliveTimer = setInterval(function () {
         S.api('/servicenow/session-status')
             .then(function (d) { _snSetBadge(d.active); if (!d.active) _snStopKeepAlive(); })
             .catch(function () {});
-    }, 10 * 60 * 1000);
+    }, 5 * 60 * 1000);
 }
 
 function _snStopKeepAlive() {
@@ -181,18 +164,16 @@ function _snRenderUpload(container, S) {
             '</div>' +
         '</div>' +
 
+        _snLoginBarHtml() +
+
         '<div class="card mb-3">' +
-            '<div class="card-header">Acesso ServiceNow</div>' +
+            '<div class="card-header">Enviar ao ServiceNow</div>' +
             '<div class="card-body">' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:.8rem;align-items:end">' +
-                    '<div><label>Usuário</label>' +
-                        '<input id="sn-usuario" class="form-control" placeholder="Usuário corporativo"></div>' +
-                    '<div><label>Senha</label>' +
-                        '<input id="sn-senha" type="password" class="form-control" placeholder="Senha"></div>' +
-                    '<button class="btn btn-sm" id="sn-test-login">Testar Login</button>' +
-                    '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
-                        'Enviar para ServiceNow</button>' +
-                '</div>' +
+                '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
+                    'O envio usa a sua sessão do ServiceNow (login do portal). ' +
+                    'Não é necessário informar usuário e senha.</p>' +
+                '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
+                    'Enviar para ServiceNow</button>' +
                 '<div id="sn-login-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
             '</div>' +
         '</div>' +
@@ -234,8 +215,8 @@ function _snRenderUpload(container, S) {
         cbs.forEach(function (cb) { cb.checked = checked; });
         _snUpdateCount();
     });
-    document.getElementById('sn-test-login').addEventListener('click', function () { _snTestLogin(S); });
     document.getElementById('sn-upload').addEventListener('click', function () { _snStartUpload(S); });
+    _snLoginBarBind(S);
 }
 
 function _snSearch(S) {
@@ -316,36 +297,14 @@ function _snGetSelectedIds() {
     return ids;
 }
 
-function _snTestLogin(S) {
-    var usuario = document.getElementById('sn-usuario').value.trim();
-    var senha = document.getElementById('sn-senha').value;
-    var statusEl = document.getElementById('sn-login-status');
-    if (!usuario || !senha) { S.toast('Informe usuário e senha', 'warning'); return; }
-    statusEl.innerHTML = '<span style="color:var(--text-secondary)">Testando login...</span>';
-    S.api('/servicenow/test-login', { method: 'POST', body: { usuario: usuario, senha: senha } })
-        .then(function () {
-            statusEl.innerHTML = '<span style="color:#16a34a;font-weight:600">Login OK</span>';
-            S.toast('Login ServiceNow válido!', 'success');
-        })
-        .catch(function (e) {
-            statusEl.innerHTML = '<span style="color:#dc2626;font-weight:600">Falhou: ' + S.esc(e.message) + '</span>';
-        });
-}
-
 async function _snStartUpload(S) {
     var ids = _snGetSelectedIds();
     if (!ids.length) { S.toast('Selecione ao menos um ativo', 'warning'); return; }
-
-    var usuario = document.getElementById('sn-usuario').value.trim();
-    var senha = document.getElementById('sn-senha').value;
-    if (!usuario || !senha) { S.toast('Informe usuário e senha do ServiceNow', 'warning'); return; }
 
     if (!confirm('Enviar ' + ids.length + ' ativo(s) para o ServiceNow?')) return;
 
     var body = {
         cycle_ids: ids,
-        usuario: usuario,
-        senha: senha,
         stockroom: document.getElementById('sn-stockroom').value,
         aisle_space: document.getElementById('sn-aisle').value,
         cost_currency: document.getElementById('sn-currency').value,

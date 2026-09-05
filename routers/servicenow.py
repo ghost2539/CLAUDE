@@ -88,8 +88,8 @@ def _cleanup_old_jobs():
 
 class UploadIn(BaseModel):
     cycle_ids: list[int]
-    usuario: str
-    senha: str
+    usuario: str = ""
+    senha: str = ""
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
     cost_currency: str = "BRL"
@@ -404,18 +404,22 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     })
 
-    # SSO login
+    # Autenticação: preferir a sessão SSO do portal (cookies já validados no
+    # login). Só cai para usuário/senha se, por algum motivo, não houver cookies.
     job["phase"] = "login"
-    try:
-        ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
-    except Exception as e:
-        job["status"] = "error"
-        job["error"] = f"Falha no login SSO: {e}"
-        return
-    if not ok:
-        job["status"] = "error"
-        job["error"] = "Login SSO falhou — verifique usuário e senha."
-        return
+    if params.get("sn_cookies"):
+        session.cookies.update(params["sn_cookies"])
+    else:
+        try:
+            ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
+        except Exception as e:
+            job["status"] = "error"
+            job["error"] = f"Falha no login SSO: {e}"
+            return
+        if not ok:
+            job["status"] = "error"
+            job["error"] = "Login SSO falhou — verifique usuário e senha."
+            return
 
     job["phase"] = "lookup"
     cache = {}
@@ -689,8 +693,15 @@ def start_upload(body: UploadIn, req: Request):
     if not body.cycle_ids:
         raise HTTPException(400, "Selecione ao menos um ativo.")
 
-    if not body.usuario or not body.senha:
-        raise HTTPException(400, "Informe usuário e senha do ServiceNow.")
+    # A autenticação usa a sessão do ServiceNow do próprio login do portal
+    # (SSO). Não são mais solicitados usuário/senha nesta tela.
+    sn_cookies = sd.get("sn_cookies")
+    if not sn_cookies and not (body.usuario and body.senha):
+        raise HTTPException(
+            409,
+            "Sessão ServiceNow não ativa. Saia e entre novamente no portal "
+            "(Logon AD) para renovar o acesso ao ServiceNow.",
+        )
 
     # Verify dependencies
     _get_http()
@@ -741,6 +752,7 @@ def start_upload(body: UploadIn, req: Request):
     params = {
         "usuario": body.usuario,
         "senha": body.senha,
+        "sn_cookies": sn_cookies,
         "stockroom": body.stockroom,
         "aisle_space": body.aisle_space,
         "cost_currency": body.cost_currency,
@@ -792,7 +804,7 @@ def _sn_session_from_portal(req):
     sd = get_session(req)
     sn_cookies = sd.get("sn_cookies")
     if not sn_cookies:
-        raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
+        raise HTTPException(409, "Sessão ServiceNow não ativa. Saia e entre novamente no portal (Logon AD).")
     _req, _ = _get_http()
     session = _req.Session()
     session.verify = False

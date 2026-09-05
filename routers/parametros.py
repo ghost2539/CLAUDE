@@ -22,6 +22,7 @@ from database import (
     AccessLog, hash_password,
 )
 from security import get_session, require_permission, client_ip, check_rate_limit
+from routers.helpers import reapply_classification
 
 _cfg = get_settings()
 MODULES = _cfg.MODULES
@@ -204,14 +205,17 @@ def classification_add(body: ClassificationIn, req: Request):
     require_permission(req, "parametros", "admin")
     check_rate_limit(req)
     with SessionLocal.begin() as s:
-        s.add(Classification(
+        rule = Classification(
             description_pattern=body.padrao_descricao,
             company=body.empresa.strip(),
             category=body.categoria,
             model=body.modelo,
             active=True,
-        ))
-    return {"ok": True}
+        )
+        s.add(rule)
+        s.flush()
+        atualizados = reapply_classification(s, rule)
+    return {"ok": True, "atualizados": atualizados}
 
 
 @router.put("/classificacoes/{id}")
@@ -227,7 +231,9 @@ def classification_edit(id: int, body: ClassificationEditIn, req: Request):
         x.category = body.categoria
         x.model = body.modelo
         x.active = body.ativo
-    return {"ok": True}
+        s.flush()
+        atualizados = reapply_classification(s, x) if x.active else 0
+    return {"ok": True, "atualizados": atualizados}
 
 
 @router.delete("/classificacoes/{id}")

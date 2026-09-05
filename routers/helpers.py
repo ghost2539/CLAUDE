@@ -50,6 +50,36 @@ def apply_class(s: Session, r: dict) -> dict:
     return r
 
 
+def reapply_classification(s: Session, rule: "Classification") -> int:
+    """Re-apply a classification rule to the receiving base (Asset table).
+
+    Finds every Asset whose description matches the rule's pattern (respecting
+    the optional company filter) and recomputes its category/model using the
+    full rule set (longest matching pattern wins). Returns how many assets were
+    updated. Called whenever a model rule is created/edited so the base stays in
+    sync with the registered models.
+    """
+    pattern = (rule.description_pattern or "").strip()
+    if not pattern:
+        return 0
+
+    q = select(Asset).where(func.upper(Asset.description).like(f"%{pattern.upper()}%"))
+    if rule.company:
+        q = q.where(func.upper(Asset.company) == rule.company.upper())
+
+    updated = 0
+    for a in s.scalars(q).all():
+        cat, model, _company = classify(s, a.description or "", a.company or "")
+        if cat == "NÃO CLASSIFICADA":
+            continue
+        if a.category != cat or a.model != model:
+            a.category = cat
+            a.model = model
+            updated += 1
+    s.flush()
+    return updated
+
+
 # ── Asset helpers ─────────────────────────────────────────────────
 
 def find_asset(s: Session, r: dict) -> Asset | None:

@@ -11,9 +11,7 @@ window.SPARE_MODULES.recebimento = {
             ['base',      'Base de Recebimentos'],
             ['dashboard', 'Dashboard'],
             ['lotes',     'Lotes'],
-            ['modelos',   'Cadastro de modelos'],
-            ['historico', 'Importar base histórica'],
-            ['local',     'Base local EBS']
+            ['modelos',   'Cadastro de modelos']
         ];
         sub = sub || 'novo';
         S.tabs(TAB_LIST, sub, 'recebimento');
@@ -23,9 +21,7 @@ window.SPARE_MODULES.recebimento = {
             base:      renderBase,
             dashboard: renderDashboard,
             lotes:     renderLotes,
-            modelos:   renderModelos,
-            historico: renderHistorico,
-            local:     renderLocal
+            modelos:   renderModelos
         };
         (handlers[sub] || renderNovo)(container, S);
     }
@@ -139,16 +135,23 @@ function renderNovo(c, S) {
 
     function openEditModal(item, idx) {
         var f = S.el('div');
+        if (item._manual) {
+            var info = S.el('div', { className: 'alert alert-warning' });
+            info.innerHTML = 'Código <strong>' + S.esc(item.pesquisado || '') + '</strong> não localizado no EBS. ' +
+                'Categoria e Modelo são obrigatórios. Informe pelo menos o Nº de Série ' +
+                '<u>ou</u> o Imobilizado.';
+            f.appendChild(info);
+        }
         var fields = [
-            ['Categoria',   'edit-cat',    item.categoria],
-            ['Modelo',      'edit-model',  item.modelo],
-            ['Empresa',     'edit-company',item.empresa],
-            ['Nº Série',    'edit-serial', item.numero_serie],
-            ['Imobilizado', 'edit-asset',  item.imobilizado]
+            ['Categoria',   'edit-cat',    item.categoria,    true],
+            ['Modelo',      'edit-model',  item.modelo,       true],
+            ['Empresa',     'edit-company',item.empresa,      false],
+            ['Nº Série',    'edit-serial', item.numero_serie, false],
+            ['Imobilizado', 'edit-asset',  item.imobilizado,  false]
         ];
         fields.forEach(function (x) {
             var g = S.el('div', { className: 'form-group' });
-            g.innerHTML = '<label>' + S.esc(x[0]) + '</label>' +
+            g.innerHTML = '<label>' + S.esc(x[0]) + (x[3] ? ' <span style="color:#dc2626">*</span>' : '') + '</label>' +
                 '<input id="' + x[1] + '" class="form-control" value="' + S.esc(x[2] || '') + '">';
             f.appendChild(g);
         });
@@ -157,16 +160,34 @@ function renderNovo(c, S) {
             '<input type="checkbox" id="edit-ready" ' + (item.situacao === 'PRONTO PARA ENVIO' ? 'checked' : '') + '>' +
             ' Pronto para envio</label>';
         f.appendChild(chkGroup);
+        var errEl = S.el('div', { className: 'mt-2', style: 'color:#dc2626;font-size:.85rem' });
+        f.appendChild(errEl);
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
         saveBtn.onclick = function () {
-            item.categoria    = document.getElementById('edit-cat').value.trim() || item.categoria;
-            item.modelo       = document.getElementById('edit-model').value.trim() || item.modelo;
+            var cat    = document.getElementById('edit-cat').value.trim();
+            var modelo = document.getElementById('edit-model').value.trim();
+            var serial = document.getElementById('edit-serial').value.trim();
+            var asset  = document.getElementById('edit-asset').value.trim();
+
+            // Validação: categoria e modelo obrigatórios; ao menos um entre
+            // Nº de série e Imobilizado.
+            if (!cat || cat === 'NÃO CLASSIFICADA') {
+                errEl.textContent = 'Informe a Categoria.'; return;
+            }
+            if (!modelo) { errEl.textContent = 'Informe o Modelo.'; return; }
+            if (!serial && !asset) {
+                errEl.textContent = 'Informe o Nº de Série ou o Imobilizado.'; return;
+            }
+            errEl.textContent = '';
+
+            item.categoria    = cat;
+            item.modelo       = modelo;
             item.empresa      = document.getElementById('edit-company').value.trim() || item.empresa;
-            item.numero_serie = document.getElementById('edit-serial').value.trim();
-            item.imobilizado  = document.getElementById('edit-asset').value.trim() || item.imobilizado;
-            item.ativo        = item.imobilizado;
-            item.asset_id     = item.imobilizado;
+            item.numero_serie = serial;
+            item.imobilizado  = asset;
+            item.ativo        = asset;
+            item.asset_id     = asset;
             var ready = document.getElementById('edit-ready').checked;
             item.situacao = ready ? 'PRONTO PARA ENVIO' : 'EDITADO';
             S.closeModal();
@@ -223,7 +244,29 @@ function renderNovo(c, S) {
                 body: { identificador: v }
             });
             if (!d.encontrado) {
-                fb.innerHTML = '<div class="alert alert-danger">Ativo não encontrado no EBS para "' + S.esc(v) + '".</div>';
+                // Não encontrado no EBS: permitir seguir com cadastro manual.
+                var manual = {
+                    hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                    pesquisado: v,
+                    empresa: '',
+                    imobilizado: '',
+                    ativo: '',
+                    asset_id: '',
+                    etiqueta: v,
+                    numero_serie: '',
+                    descricao: '',
+                    categoria: '',
+                    modelo: '',
+                    fonte: 'MANUAL',
+                    situacao: 'REQUER ATUAÇÃO',
+                    _hasDuplicates: false,
+                    _manual: true
+                };
+                sessionItems.unshift(manual);
+                drawSession();
+                fb.innerHTML = '<div class="alert alert-warning">Ativo não encontrado no EBS para "' + S.esc(v) +
+                    '". Preencha os dados manualmente para incluir.</div>';
+                openEditModal(manual, 0);
             } else if (d.duplicatas) {
                 var first = d.resultados[0];
                 first.hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -694,7 +737,11 @@ async function renderModelos(c, S) {
                     e.onclick = function () { edit(r); };
                     a.onclick = async function () {
                         var x = await S.api('/parametros/classificacoes/' + r.id, { method: 'PUT', body: { padrao_descricao: r.padrao_descricao, empresa: r.empresa, categoria: r.categoria, modelo: r.modelo, ativo: true } });
-                        S.toast('Regra atualizada.', 'success');
+                        var msg = 'Regra aplicada.';
+                        if (x && typeof x.atualizados === 'number') {
+                            msg += ' ' + x.atualizados + ' ativo(s) da base atualizado(s).';
+                        }
+                        S.toast(msg, 'success');
                     };
                     w.append(e, a);
                     return w;
@@ -730,7 +777,11 @@ async function renderModelos(c, S) {
                     }
                 });
                 S.closeModal();
-                S.toast('Regra salva.', 'success');
+                var msg = 'Regra salva.';
+                if (x && typeof x.atualizados === 'number') {
+                    msg += ' ' + x.atualizados + ' ativo(s) da base atualizado(s).';
+                }
+                S.toast(msg, 'success');
                 load();
             } catch (e) {
                 S.toast(e.message, 'error');
@@ -765,89 +816,5 @@ async function renderModelos(c, S) {
 
     load();
 }
-
-/* ── Importar base histórica ────────────────────────────────────── */
-function renderHistorico(c, S) {
-    c.innerHTML =
-        '<h1 class="page-title">Importar base histórica</h1>' +
-        '<div class="card">' +
-            '<div class="card-body">' +
-                '<p class="text-muted">Aceita CSV ou XLSX com identificador, data, empresa, ' +
-                    'categoria, modelo, status, local e lote.</p>' +
-                '<form id="hi-form">' +
-                    '<input name="file" type="file" class="form-control" required>' +
-                    '<button class="btn btn-primary mt-2">Importar</button>' +
-                '</form>' +
-                '<div id="hi-result" class="mt-2"></div>' +
-            '</div>' +
-        '</div>';
-
-    document.getElementById('hi-form').onsubmit = async function (e) {
-        e.preventDefault();
-        try {
-            S.loading(true);
-            var d = await S.api('/recebimentos/import-historico', {
-                method: 'POST',
-                body: new FormData(e.target)
-            });
-            document.getElementById('hi-result').innerHTML =
-                '<div class="alert alert-success">' +
-                d.importados + ' importados; ' + d.rejeitados + ' rejeitados.</div>';
-        } catch (x) {
-            S.toast(x.message, 'error');
-        } finally {
-            S.loading(false);
-        }
-    };
-}
-
-/* ── Base local EBS ─────────────────────────────────────────────── */
-function renderLocal(c, S) {
-    c.innerHTML =
-        '<h1 class="page-title">Base local EBS</h1>' +
-        '<div class="card">' +
-            '<div class="card-body">' +
-                '<form id="local-form">' +
-                    '<div class="form-grid cols-2">' +
-                        '<div class="form-group"><label>Empresa</label>' +
-                            '<select name="company" class="form-control">' +
-                                '<option>RENNER</option>' +
-                                '<option>YOUCOM</option>' +
-                                '<option>CAMICADO</option>' +
-                            '</select>' +
-                        '</div>' +
-                        '<div class="form-group"><label>Modo</label>' +
-                            '<select name="mode" class="form-control">' +
-                                '<option>SUBSTITUIR</option>' +
-                                '<option>INCREMENTAR</option>' +
-                            '</select>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="form-group mt-2">' +
-                        '<label>Arquivo CSV/XLSX</label>' +
-                        '<input name="file" type="file" class="form-control" required>' +
-                    '</div>' +
-                    '<button class="btn btn-primary mt-2">Importar</button>' +
-                '</form>' +
-                '<div id="local-result" class="mt-2"></div>' +
-            '</div>' +
-        '</div>';
-
-    document.getElementById('local-form').onsubmit = async function (e) {
-        e.preventDefault();
-        try {
-            S.loading(true);
-            var d = await S.api('/parametros/base-local/upload', {
-                method: 'POST',
-                body: new FormData(e.target)
-            });
-            document.getElementById('local-result').innerHTML =
-                '<div class="alert alert-success">' +
-                d.validos + ' válidos; ' + d.rejeitados + ' rejeitados.</div>';
-        } catch (x) {
-            S.toast(x.message, 'error');
-        } finally {
-            S.loading(false);
-        }
-    };
-}
+/* As abas "Importar base histórica" e "Base local EBS" foram movidas para
+   Parâmetros → Configuração Módulos (visível apenas para ADMIN). */

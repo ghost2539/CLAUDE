@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import timedelta
 
 log = logging.getLogger(__name__)
 
@@ -47,8 +46,8 @@ class LoginIn(BaseModel):
     @classmethod
     def normalize_auth_type(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "SN", "SSO"):
-            raise ValueError("auth_type deve ser LOCAL, SN ou SSO.")
+        if v not in ("SN", "SSO"):
+            raise ValueError("auth_type deve ser SN ou SSO.")
         return v
 
 
@@ -193,31 +192,14 @@ def auth_login(body: LoginIn, req: Request):
         with SessionLocal.begin() as s:
             u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
 
-            if source == "SN":
-                sn_cookies = _sn_login(login, body.password)
-                ebs_auth = None
-            elif source == "SSO":
-                # Login corporativo via loginsso (Oracle Access Manager).
-                # Valida a credencial de rede; a senha permanece no AD.
-                # Só entra quem foi previamente liberado por um administrador.
-                sn_cookies = _sn_login(login, body.password)
-                ebs_auth = None
-            else:
-                # Local authentication
-                if not u or not u.active:
-                    raise _LoginFailed("Usuário local inválido ou inativo.")
-                if u.locked_until and u.locked_until > utcnow():
-                    raise _LoginFailed("Usuário temporariamente bloqueado.")
-                if not verify_password(body.password, u.password_hash):
-                    u.failed_attempts += 1
-                    if u.failed_attempts >= 5:
-                        u.locked_until = utcnow() + timedelta(minutes=15)
-                        u.failed_attempts = 0
-                    raise _LoginFailed("Usuário ou senha inválidos.")
-                ebs_auth = None
-                sn_cookies = None
+            # Login corporativo via loginsso (Oracle Access Manager).
+            # Valida a credencial de rede; a senha permanece no AD.
+            # Só entra quem foi previamente liberado por um administrador.
+            # (SN é apenas um alias interno da mesma autenticação ServiceNow.)
+            sn_cookies = _sn_login(login, body.password)
+            ebs_auth = None
 
-            # Auto-create user on first SN/AD/SSO login.
+            # Auto-create user on first SN/SSO login.
             # Para SSO, o usuário nasce SEM liberação (allowed=False) e só
             # entra depois que um admin o liberar — exceto o admin inicial.
             if not u:
