@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import calendar
 import logging
+import threading
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
@@ -411,6 +413,41 @@ def _calcular_tudo() -> dict:
             resultado["erros"][chave] = str(exc)
             resultado[chave] = None
     return resultado
+
+
+# ── Agendador em segundo plano ─────────────────────────────────────────
+REFRESH_MIN = getattr(_cfg, "SN_INDIC_REFRESH_MIN", 2) or 0
+_scheduler_started = False
+
+
+def _recalcular_e_salvar() -> None:
+    ref = datetime.now().strftime("%Y-%m")
+    dados = _calcular_tudo()
+    db.salvar_snapshot(ref, dados, criado_por="scheduler")
+    _log.info("Indicadores: snapshot %s atualizado em segundo plano.", ref)
+
+
+def _scheduler_loop() -> None:
+    time.sleep(15)  # deixa o app terminar de subir
+    while True:
+        try:
+            _recalcular_e_salvar()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("Agendador de indicadores falhou: %s", exc, exc_info=True)
+        time.sleep(max(1, REFRESH_MIN) * 60)
+
+
+def start_scheduler() -> None:
+    """Inicia o recálculo periódico dos indicadores (idempotente). Desligado
+    quando SN_INDIC_REFRESH_MIN <= 0."""
+    global _scheduler_started
+    if _scheduler_started or REFRESH_MIN <= 0:
+        return
+    _scheduler_started = True
+    th = threading.Thread(target=_scheduler_loop, daemon=True,
+                          name="indicadores-scheduler")
+    th.start()
+    _log.info("Indicadores: agendador iniciado (a cada %s min).", REFRESH_MIN)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
