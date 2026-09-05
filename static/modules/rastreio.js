@@ -169,10 +169,38 @@
 
         var btn = S.el('button', { className: 'btn btn-outline', textContent: 'Buscar candidatos' });
         body.appendChild(btn);
+        var btnRotina = S.el('button', {
+            className: 'btn btn-primary', textContent: 'Rodar rotina de automação',
+            style: 'margin-left:8px'
+        });
+        body.appendChild(btnRotina);
+        var rotOut = S.el('div', { id: 'enc-rotina-out', style: 'margin-top:12px' });
+        body.appendChild(rotOut);
         var out = S.el('div', { id: 'enc-out', style: 'margin-top:12px' });
         body.appendChild(out);
         card.appendChild(body);
         content.appendChild(card);
+
+        btnRotina.onclick = function () {
+            if (!confirm('Rodar a rotina agora? Ela encerra/encaminha os chamados entregues ' +
+                'conforme as regras (Parâmetros → Automações), com o seu usuário.')) return;
+            btnRotina.disabled = true; var t = btnRotina.textContent; btnRotina.textContent = 'Rodando…';
+            rotOut.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Executando rotina...</div>';
+            S.api('/automacoes/run', { method: 'POST' })
+                .then(function (d) {
+                    var r = d.resumo || {};
+                    rotOut.innerHTML = '<div class="alert alert-success">' +
+                        'Rotina concluída — ' + (r.encerrados || 0) + ' encerrado(s), ' +
+                        (r.encaminhados || 0) + ' encaminhado(s), ' + (r.erros || 0) + ' erro(s). ' +
+                        '(' + (r.analisados || 0) + ' analisados)</div>' +
+                        '<div style="font-size:.85rem;color:var(--text-secondary);margin-top:4px">' +
+                        'Detalhes em Parâmetros → Automações → Logs.</div>';
+                })
+                .catch(function (e) {
+                    rotOut.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+                })
+                .finally(function () { btnRotina.disabled = false; btnRotina.textContent = t; });
+        };
 
         function carregar() {
             btn.disabled = true; btn.textContent = 'Buscando...';

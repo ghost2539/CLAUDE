@@ -125,6 +125,20 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Automações (encerramento/encaminhamento) — banco próprio ────────
+    # Carregamento isolado (nunca derruba o portal).
+    try:
+        import database_automacoes as _db_autom
+        _db_autom.init_db()
+        from routers.automacoes import router as automacoes_router, start_scheduler as _autom_sched
+        app.include_router(automacoes_router)
+        _autom_sched()  # rotina agendada (07/12/16 por padrão)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("automacoes").error(
+            "Módulo Automações NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     return app
 
 

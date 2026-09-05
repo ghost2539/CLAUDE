@@ -107,6 +107,15 @@ class Settings:
     # A tela relê o snapshot a cada 2 min, então 2 mantém o painel sempre atual.
     SN_INDIC_REFRESH_MIN: int = int(os.getenv("SN_INDIC_REFRESH_MIN", "2") or 2)
 
+    # ── Automações (encerramento/encaminhamento) — módulo isolado ───────
+    # Banco próprio, separado do portal. Default: SQLite local.
+    AUTOMACOES_DATABASE_URL: str = os.getenv(
+        "AUTOMACOES_DATABASE_URL",
+        f"sqlite:///{(ROOT / 'data' / 'automacoes.db').as_posix()}",
+    )
+    # Horários (hora local) em que a rotina roda sozinha. CSV de horas.
+    AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

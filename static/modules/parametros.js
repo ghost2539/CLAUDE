@@ -18,11 +18,12 @@ window.SPARE_MODULES.parametros = {
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
+            ['automacoes',      'Automações'],
             ['tv',              'TV'],
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos'];
+        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -41,6 +42,7 @@ window.SPARE_MODULES.parametros = {
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
             'config-modulos': renderConfigModulos,
+            automacoes:     renderAutomacoes,
             tv:             renderTV,
             conta:          renderAccount
         };
@@ -223,6 +225,180 @@ async function _renderIndicadoresConfig(S) {
             S.loading(false);
         }
     };
+}
+
+/* ── Automações (encerramento/encaminhamento) ───────────────────── */
+async function renderAutomacoes(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Automações</h1>' +
+        '<p class="text-muted">Rotina que encerra ou encaminha chamados entregues, ' +
+            'com o seu usuário. Só age quando o último evento do rastreio é ENTREGUE.</p>' +
+        '<div class="card mb-3"><div class="card-header">Configuração da rotina</div>' +
+            '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
+            '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Regras (subcategoria → ação)</span>' +
+            '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button></div>' +
+            '<div class="card-body" id="au-regras"></div></div>' +
+        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Logs</span>' +
+            '<span><input id="au-log-q" class="form-control" placeholder="Buscar chamado/motivo" ' +
+                'style="display:inline-block;width:220px;height:32px"> ' +
+            '<button id="au-log-refresh" class="btn btn-sm btn-secondary">Atualizar</button></span></div>' +
+            '<div class="card-body" id="au-logs"></div></div>';
+
+    // ── Config ──
+    async function loadCfg() {
+        var cfg = await S.api('/automacoes/config');
+        var host = document.getElementById('au-cfg');
+        host.innerHTML =
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
+                    '<input type="checkbox" id="au-enabled"' + (cfg.enabled ? ' checked' : '') + '> ' +
+                    'Rotina automática ligada</label></div>' +
+                '<div class="form-group"><label>Horários (horas, separadas por vírgula)</label>' +
+                    '<input id="au-horarios" class="form-control" value="' + S.esc(cfg.horarios || '7,12,16') + '"></div>' +
+                '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
+                    '<input id="au-tfield" class="form-control" value="' + S.esc(cfg.tracking_field || 'sys_tags') + '">' +
+                    '<small class="text-muted">padrão: sys_tags</small></div>' +
+                '<div class="form-group"><label>Sessão para a rotina</label>' +
+                    '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' +
+                    (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva — ligue estando logado') +
+                    (cfg.ultima_execucao ? ('<br>Última execução: ' + S.esc(cfg.ultima_execucao)) : '') +
+                    '</div></div>' +
+            '</div>' +
+            '<div class="mt-2"><button id="au-cfg-save" class="btn btn-primary">Salvar configuração</button> ' +
+            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Rodar agora</button>' +
+            '<span id="au-cfg-msg" class="text-muted" style="margin-left:10px"></span></div>';
+
+        document.getElementById('au-cfg-save').onclick = async function () {
+            try {
+                await S.api('/automacoes/config', { method: 'PUT', body: {
+                    enabled: document.getElementById('au-enabled').checked,
+                    horarios: document.getElementById('au-horarios').value.trim(),
+                    tracking_field: document.getElementById('au-tfield').value.trim()
+                }});
+                document.getElementById('au-cfg-msg').textContent = 'Configuração salva. Sessão do seu login capturada para a rotina.';
+                S.toast('Configuração salva.', 'success');
+                loadCfg();
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        document.getElementById('au-run').onclick = async function () {
+            if (!confirm('Rodar a rotina agora com o seu usuário?')) return;
+            var b = this; b.disabled = true; var t = b.textContent; b.textContent = 'Rodando…';
+            try {
+                var d = await S.api('/automacoes/run', { method: 'POST' });
+                var r = d.resumo || {};
+                S.toast('Rotina: ' + (r.encerrados || 0) + ' encerrado(s), ' + (r.encaminhados || 0) +
+                    ' encaminhado(s), ' + (r.erros || 0) + ' erro(s).', 'success');
+                loadLogs();
+            } catch (e) { S.toast(e.message, 'error'); }
+            finally { b.disabled = false; b.textContent = t; }
+        };
+    }
+
+    // ── Regras ──
+    async function loadRegras() {
+        var d = await S.api('/automacoes/regras');
+        var cols = [
+            { key: 'nome', label: 'Nome' },
+            { key: 'acao', label: 'Ação' },
+            { key: 'fila_destino', label: 'Fila destino' },
+            { key: 'ativo', label: 'Ativa', render: function (v) { return v ? 'Sim' : 'Não'; } },
+            { key: 'a', label: '', render: function (_, r) {
+                var w = S.el('div', { className: 'btn-row' });
+                var e = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                var x = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                e.onclick = function () { editRegra(r); };
+                x.onclick = function () {
+                    if (!confirm('Excluir a regra "' + (r.nome || '') + '"?')) return;
+                    S.api('/automacoes/regras/' + r.id, { method: 'DELETE' })
+                        .then(function () { S.toast('Regra excluída.', 'success'); loadRegras(); })
+                        .catch(function (er) { S.toast(er.message, 'error'); });
+                };
+                w.append(e, x);
+                return w;
+            }}
+        ];
+        var host = document.getElementById('au-regras');
+        host.innerHTML = '';
+        host.appendChild(S.table(cols, d.regras));
+    }
+
+    function editRegra(r) {
+        r = r || {};
+        var f = S.el('div');
+        f.innerHTML =
+            '<div class="form-group"><label>Nome</label>' +
+                '<input id="ar-nome" class="form-control" value="' + S.esc(r.nome || '') + '"></div>' +
+            '<div class="form-group"><label>Subcategorias (uma por linha ou separadas por ;)</label>' +
+                '<textarea id="ar-subs" class="form-control" rows="4">' + S.esc(r.subcategorias || '') + '</textarea></div>' +
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label>Ação</label>' +
+                    '<select id="ar-acao" class="form-control">' +
+                        '<option value="encerrar"' + (r.acao !== 'encaminhar' ? ' selected' : '') + '>Encerrar</option>' +
+                        '<option value="encaminhar"' + (r.acao === 'encaminhar' ? ' selected' : '') + '>Encaminhar p/ fila</option>' +
+                    '</select></div>' +
+                '<div class="form-group"><label>Fila destino (se encaminhar)</label>' +
+                    '<input id="ar-fila" class="form-control" value="' + S.esc(r.fila_destino || '') + '"></div>' +
+            '</div>' +
+            '<div class="form-group"><label>Mensagem (apontamento/close notes)</label>' +
+                '<textarea id="ar-msg" class="form-control" rows="6">' + S.esc(r.mensagem || '') + '</textarea></div>' +
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label>Ordem</label>' +
+                    '<input id="ar-ordem" type="number" class="form-control" value="' + S.esc(r.ordem != null ? r.ordem : 100) + '"></div>' +
+                '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:26px">' +
+                    '<input type="checkbox" id="ar-ativo"' + (r.ativo !== false ? ' checked' : '') + '> Ativa</label></div>' +
+            '</div>';
+        var save = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        save.onclick = async function () {
+            var body = {
+                nome: document.getElementById('ar-nome').value.trim(),
+                subcategorias: document.getElementById('ar-subs').value,
+                acao: document.getElementById('ar-acao').value,
+                fila_destino: document.getElementById('ar-fila').value.trim(),
+                mensagem: document.getElementById('ar-msg').value,
+                ordem: parseInt(document.getElementById('ar-ordem').value) || 100,
+                ativo: document.getElementById('ar-ativo').checked
+            };
+            try {
+                await S.api('/automacoes/regras' + (r.id ? '/' + r.id : ''), {
+                    method: r.id ? 'PUT' : 'POST', body: body
+                });
+                S.closeModal(); S.toast('Regra salva.', 'success'); loadRegras();
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        S.openModal(r.id ? 'Editar regra' : 'Nova regra', f, [save]);
+    }
+
+    // ── Logs ──
+    async function loadLogs() {
+        var q = document.getElementById('au-log-q').value.trim();
+        var d = await S.api('/automacoes/logs?limit=500' + (q ? '&q=' + encodeURIComponent(q) : ''));
+        var cols = [
+            { key: 'executado_em', label: 'Quando', render: function (v) {
+                return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
+            { key: 'origem', label: 'Origem' },
+            { key: 'usuario', label: 'Usuário' },
+            { key: 'number', label: 'Chamado' },
+            { key: 'subcategoria', label: 'Subcat.' },
+            { key: 'acao', label: 'Ação' },
+            { key: 'fila_destino', label: 'Fila destino' },
+            { key: 'resultado', label: 'Resultado', html: true, render: function (v) { return S.badge(v); } },
+            { key: 'detalhe', label: 'Detalhe' }
+        ];
+        var host = document.getElementById('au-logs');
+        host.innerHTML = '';
+        host.appendChild(S.table(cols, d.logs));
+    }
+
+    document.getElementById('au-regra-add').onclick = function () { editRegra(); };
+    document.getElementById('au-log-refresh').onclick = loadLogs;
+    document.getElementById('au-log-q').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') loadLogs();
+    });
+
+    loadCfg(); loadRegras(); loadLogs();
 }
 
 /* ── Visual ─────────────────────────────────────────────────────── */
