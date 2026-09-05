@@ -222,9 +222,27 @@
         $('#app-wrapper').hidden = true;
     }
 
+    // Keep-alive global do ServiceNow: enquanto o portal estiver logado, mantém
+    // a sessão do SN viva em segundo plano (o login do portal já autentica no
+    // SN). Roda independente da tela aberta.
+    var _snKeepAlive = null;
+    function startSnKeepAlive() {
+        if (_snKeepAlive) return;
+        var ping = function () {
+            fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
+                .catch(function () {});
+        };
+        ping();
+        _snKeepAlive = setInterval(ping, 3 * 60 * 1000);   // 3 min
+    }
+    function stopSnKeepAlive() {
+        if (_snKeepAlive) { clearInterval(_snKeepAlive); _snKeepAlive = null; }
+    }
+
     function showApp() {
         $('#login-screen').hidden = true;
         $('#app-wrapper').hidden = false;
+        startSnKeepAlive();
         buildMenu();
         var name = state.user.display_name || state.user.username;
         $('#topbar-user-name').textContent = name;
@@ -514,6 +532,7 @@
 
         // Logout
         $('#logout-btn').onclick = async function () {
+            stopSnKeepAlive();
             await api('/auth/logout', { method: 'POST' }).catch(function () {});
             showLogin();
         };

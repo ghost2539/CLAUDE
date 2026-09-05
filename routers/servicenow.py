@@ -676,13 +676,30 @@ def sn_session_status(req: Request):
         r = sess.get(url, headers={
             "Accept": "application/json",
             "X-Requested-With": "XMLHttpRequest",
-        }, timeout=15)
-        if r.status_code == 200 and "login" not in r.url.lower() and "json" in r.headers.get("Content-Type", ""):
+        }, timeout=15, allow_redirects=True)
+        # A sessão está viva enquanto NÃO for redirecionada para a tela de
+        # login do SSO. Não exigimos content-type JSON: alguns endpoints
+        # válidos respondem text/html mesmo autenticados — isso causava o
+        # falso "sessão expirada" enquanto as consultas funcionavam.
+        final = (r.url or "").lower()
+        redirecionou_login = (
+            "login.do" in final or "ssologin" in final
+            or "/login" in final or "oauth" in final
+        )
+        expirado = (
+            r.status_code in (401, 403)
+            or redirecionou_login
+            or bool(r.history and any(h.status_code in (301, 302, 303, 307) for h in r.history)
+                    and redirecionou_login)
+        )
+        if not expirado:
             sd["sn_cookies"] = dict(sess.cookies)
             return {"active": True}
         return {"active": False, "reason": "expired"}
     except Exception:
-        return {"active": False, "reason": "error"}
+        # Erro de rede/timeout não significa sessão expirada — não derruba o
+        # badge à toa; mantém como "desconhecido" (tratado como ativo na UI).
+        return {"active": True, "reason": "probe_error"}
 
 
 @router.post("/upload")
