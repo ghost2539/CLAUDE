@@ -90,7 +90,7 @@ class Settings:
     SN_RESOLVED_DATE_FIELD: str = os.getenv("SN_RESOLVED_DATE_FIELD", "closed_at")
     # Data usada para alocar o BACKLOG no mês ("data bouncing"); cai para
     # opened_at se o campo não existir na instância.
-    SN_BACKLOG_DATE_FIELD: str = os.getenv("SN_BACKLOG_DATE_FIELD", "opened_at")
+    SN_BACKLOG_DATE_FIELD: str = os.getenv("SN_BACKLOG_DATE_FIELD", "u_data_bouncing")
     # Campo agrupador de "Abertos por status" (padrão: state; troque por um
     # campo custom de estágio, ex.: u_status_spare, se houver).
     SN_STATUS_FIELD: str = os.getenv("SN_STATUS_FIELD", "state")
@@ -98,8 +98,8 @@ class Settings:
     SN_BU_FIELD: str = os.getenv("SN_BU_FIELD", "company")
     # Fragmento de query (encoded) para "Priorizados" — campo custom
     # "It will be prioritized? = Yes". Sem um valor válido, o KPI fica oculto
-    # para não exibir número errado. Ex.: "u_will_be_prioritized=true".
-    SN_PRIORITIZED_QUERY: str = os.getenv("SN_PRIORITIZED_QUERY", "")
+    # para não exibir número errado.
+    SN_PRIORITIZED_QUERY: str = os.getenv("SN_PRIORITIZED_QUERY", "u_prioritized=true")
     # Subcategorias (usadas com LIKE, robusto a variações de valor/rotulo).
     SN_SUB_SLED_LIKE: str = os.getenv("SN_SUB_SLED_LIKE", "sled")
     SN_SUB_COLETOR_LIKE: str = os.getenv("SN_SUB_COLETOR_LIKE", "coletor")

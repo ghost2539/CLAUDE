@@ -113,7 +113,19 @@ function renderConfigModulos(c, S) {
                 '</form>' +
                 '<div id="cm-local-result" class="mt-2"></div>' +
             '</div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Indicadores — filtros do ServiceNow</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted">Ajusta as consultas do painel de Indicadores. ' +
+                    'Estados do incident são numéricos: 1 Novo · 2 Em andamento · 3 Em espera · ' +
+                    '6 Resolvido · 7 Encerrado · 8 Cancelado.</p>' +
+                '<div id="cm-ind-form"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+            '</div>' +
         '</div>';
+
+    _renderIndicadoresConfig(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -146,6 +158,67 @@ function renderConfigModulos(c, S) {
                 d.validos + ' válidos; ' + d.rejeitados + ' rejeitados.</div>';
         } catch (x) {
             S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
+}
+
+/* Editor da config dos Indicadores (dentro de Configuração Módulos). */
+var _IND_CAMPOS = [
+    ['state_aberto',        'Estados "Aberto" (Backlog / Localidade / Status / Priorizados)', 'ex.: 1,2,3'],
+    ['state_atendimento',   'Estados "AG. Atendimento"', 'ex.: 1,2'],
+    ['state_resolvido',     'Estados "Tratado/Resolvido"', 'ex.: 6,7'],
+    ['state_cancelado',     'Estado "Cancelado"', 'ex.: 8'],
+    ['resolved_date_field', 'Campo de data — Tratado por mês', 'ex.: closed_at'],
+    ['backlog_date_field',  'Campo de data — Backlog por mês', 'ex.: u_data_bouncing'],
+    ['status_field',        'Campo agrupador — "Abertos por status"', 'ex.: state ou u_stage_spare'],
+    ['bu_field',            'Campo BU / empresa', 'ex.: company'],
+    ['prioritized_query',   'Query "Priorizados" (encoded)', 'ex.: u_prioritized=true'],
+    ['sub_sled_like',       'Subcategoria SLED (LIKE)', 'ex.: sled'],
+    ['sub_coletor_like',    'Subcategoria Coletor (LIKE)', 'ex.: coletor']
+];
+
+async function _renderIndicadoresConfig(S) {
+    var host = document.getElementById('cm-ind-form');
+    if (!host) return;
+    var cfg;
+    try {
+        cfg = await S.api('/indicadores/config');
+    } catch (e) {
+        host.innerHTML = '<div class="alert alert-danger">Não foi possível carregar a config dos indicadores: ' +
+            S.esc(e.message) + '</div>';
+        return;
+    }
+    var ef = cfg.efetiva || {}, def = cfg.defaults || {};
+    var html = '<div class="form-grid cols-2">';
+    _IND_CAMPOS.forEach(function (f) {
+        var key = f[0], label = f[1], ph = f[2];
+        var val = ef[key] != null ? ef[key] : '';
+        html += '<div class="form-group">' +
+            '<label>' + S.esc(label) + '</label>' +
+            '<input id="ind-' + key + '" class="form-control" value="' + S.esc(val) + '" placeholder="' + S.esc(ph) + '">' +
+            '<small class="text-muted">padrão: ' + S.esc(def[key] || '(vazio)') + '</small>' +
+            '</div>';
+    });
+    html += '</div>' +
+        '<div class="mt-2"><button id="ind-save" class="btn btn-primary">Salvar filtros dos indicadores</button>' +
+        '<span id="ind-save-msg" class="text-muted" style="margin-left:10px"></span></div>';
+    host.innerHTML = html;
+
+    document.getElementById('ind-save').onclick = async function () {
+        var payload = {};
+        _IND_CAMPOS.forEach(function (f) {
+            payload[f[0]] = document.getElementById('ind-' + f[0]).value.trim();
+        });
+        try {
+            S.loading(true);
+            await S.api('/indicadores/config', { method: 'PUT', body: payload });
+            document.getElementById('ind-save-msg').textContent =
+                'Salvo. Abra os Indicadores e clique em Atualizar para recalcular.';
+            S.toast('Filtros dos indicadores salvos.', 'success');
+        } catch (e) {
+            S.toast(e.message, 'error');
         } finally {
             S.loading(false);
         }

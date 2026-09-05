@@ -92,9 +92,46 @@ class Snapshot(Base):
         }
 
 
+class Config(Base):
+    """Configuração dos indicadores editável pela UI (sobrescreve os defaults
+    do config.py). Guardada como um único registro JSON."""
+    __tablename__ = "indicador_config"
+
+    chave: Mapped[str] = mapped_column(String(40), primary_key=True)  # "indicadores"
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    atualizado_por: Mapped[str] = mapped_column(String(120), default="")
+
+
 def init_db() -> None:
     """Cria as tabelas se não existirem (chamado no startup, tolerante a erro)."""
     Base.metadata.create_all(get_engine())
+
+
+_CFG_KEY = "indicadores"
+
+
+def obter_config() -> dict:
+    """Retorna o dict de overrides salvos (vazio se nunca configurado)."""
+    with SessionLocal() as s:
+        row = s.get(Config, _CFG_KEY)
+        if not row:
+            return {}
+        try:
+            return json.loads(row.payload) or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+
+def salvar_config(dados: dict, atualizado_por: str = "") -> None:
+    with SessionLocal.begin() as s:
+        row = s.get(Config, _CFG_KEY)
+        if row is None:
+            row = Config(chave=_CFG_KEY)
+            s.add(row)
+        row.payload = json.dumps(dados, ensure_ascii=False)
+        row.atualizado_em = utcnow()
+        row.atualizado_por = atualizado_por or ""
 
 
 def salvar_snapshot(referencia: str, dados: dict, criado_por: str = "") -> None:

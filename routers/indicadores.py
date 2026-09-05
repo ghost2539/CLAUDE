@@ -56,6 +56,36 @@ def _inc(extra: str) -> str:
     return f"assignment_group.name={QUEUE}^{extra}"
 
 
+# ── Configuração efetiva (defaults do config.py + overrides do banco) ────
+# Campos editáveis pela UI (Parâmetros → Configuração Módulos → Indicadores).
+_CONFIG_DEFAULTS = {
+    "state_aberto": ST_ABERTO,
+    "state_atendimento": ST_ATEND,
+    "state_resolvido": ST_RESOLV,
+    "state_cancelado": ST_CANCEL,
+    "resolved_date_field": RESOLVED_DATE,
+    "backlog_date_field": BACKLOG_DATE,
+    "status_field": STATUS_FIELD,
+    "bu_field": BU_FIELD,
+    "prioritized_query": PRIORITIZED_Q,
+    "sub_sled_like": SUB_SLED,
+    "sub_coletor_like": SUB_COLETOR,
+}
+
+
+def _effective_config() -> dict:
+    """Defaults sobrescritos pelo que estiver salvo no banco (UI)."""
+    cfg = dict(_CONFIG_DEFAULTS)
+    try:
+        overrides = db.obter_config() or {}
+    except Exception:  # noqa: BLE001
+        overrides = {}
+    for k, v in overrides.items():
+        if k in cfg and v not in (None, ""):
+            cfg[k] = str(v).strip()
+    return cfg
+
+
 def _sla_base_query() -> str:
     """Filtro base das ANS: só as que têm SPARE no nome (não outras filas),
     concluídas, mais eventual filtro extra (ex.: só Resolução)."""
@@ -213,13 +243,13 @@ def _conta(table: str, query: str) -> int:
 
 
 # ── KPIs (cartões) ─────────────────────────────────────────────────────
-def _kpis() -> dict:
-    backlog = _conta("incident", _inc(f"stateIN{ST_ABERTO}"))
+def _kpis(C: dict) -> dict:
+    backlog = _conta("incident", _inc(f"stateIN{C['state_aberto']}"))
     ritms = _conta("task", f"assignment_group.name={QUEUE}^numberSTARTSWITHRITM^active=true")
-    ag_atend = _conta("incident", _inc(f"stateIN{ST_ATEND}"))
+    ag_atend = _conta("incident", _inc(f"stateIN{C['state_atendimento']}"))
     priorizados = None
-    if PRIORITIZED_Q:
-        priorizados = _conta("incident", _inc(f"stateIN{ST_ABERTO}^{PRIORITIZED_Q}"))
+    if C.get("prioritized_query"):
+        priorizados = _conta("incident", _inc(f"stateIN{C['state_aberto']}^{C['prioritized_query']}"))
     return {
         "backlog": backlog,
         "ritms": ritms,
@@ -229,11 +259,12 @@ def _kpis() -> dict:
 
 
 # ── Séries mensais (12 meses) ──────────────────────────────────────────
-def _tratado_por_mes(meses: list[dict]) -> list[dict]:
+def _tratado_por_mes(meses: list[dict], C: dict) -> list[dict]:
     """Tickets tratados/resolvidos por mês (incident resolvido/encerrado)."""
     out = []
     for m in meses:
-        q = _inc(f"stateIN{ST_RESOLV}^{RESOLVED_DATE}>={m['ini']}^{RESOLVED_DATE}<={m['fim']}")
+        q = _inc(f"stateIN{C['state_resolvido']}"
+                 f"^{C['resolved_date_field']}>={m['ini']}^{C['resolved_date_field']}<={m['fim']}")
         out.append({"mes": m["key"], "total": _conta("incident", q)})
     return out
 
@@ -263,20 +294,21 @@ def _sla_por_mes(meses: list[dict]) -> dict:
     }
 
 
-def _backlog_por_mes(meses: list[dict]) -> list[dict]:
+def _backlog_por_mes(meses: list[dict], C: dict) -> list[dict]:
     """Backlog (incidentes abertos) por mês pela data de referência."""
     out = []
     for m in meses:
-        q = _inc(f"stateIN{ST_ABERTO}^{BACKLOG_DATE}>={m['ini']}^{BACKLOG_DATE}<={m['fim']}")
+        q = _inc(f"stateIN{C['state_aberto']}"
+                 f"^{C['backlog_date_field']}>={m['ini']}^{C['backlog_date_field']}<={m['fim']}")
         out.append({"mes": m["key"], "total": _conta("incident", q)})
     return out
 
 
-def _por_mes_sub(meses: list[dict], like: str) -> list[dict]:
+def _por_mes_sub(meses: list[dict], like: str, C: dict) -> list[dict]:
     """Abertos por mês por subcategoria (LIKE), state != cancelado."""
     out = []
     for m in meses:
-        q = _inc(f"state!={ST_CANCEL}^subcategoryLIKE{like}"
+        q = _inc(f"state!={C['state_cancelado']}^subcategoryLIKE{like}"
                  f"^opened_at>={m['ini']}^opened_at<={m['fim']}")
         out.append({"mes": m["key"], "total": _conta("incident", q)})
     return out
@@ -294,54 +326,57 @@ def _grupo(table: str, query: str, group_by: str) -> list[dict]:
     return out
 
 
-def _abertos_por_status() -> list[dict]:
-    q = _inc(f"stateIN{ST_ABERTO}")
-    dv = "false" if STATUS_FIELD == "state" else "true"
+def _abertos_por_status(C: dict) -> list[dict]:
+    q = _inc(f"stateIN{C['state_aberto']}")
+    campo = C["status_field"]
+    dv = "false" if campo == "state" else "true"
     try:
-        pares = _sn_stats("incident", q, group_by=STATUS_FIELD, display_value=dv)
+        pares = _sn_stats("incident", q, group_by=campo, display_value=dv)
     except Exception:
         pares = []
     out = []
     for n, c in pares:
         nome = str(n).strip()
-        if STATUS_FIELD == "state":
+        if campo == "state":
             nome = STATE_LABELS.get(nome, nome or "(vazio)")
         out.append({"nome": nome or "(vazio)", "total": c})
     out.sort(key=lambda x: x["total"], reverse=True)
     return out
 
 
-def _por_localidade() -> list[dict]:
-    return _grupo("incident", _inc(f"stateIN{ST_ABERTO}"), "location")[:25]
+def _por_localidade(C: dict) -> list[dict]:
+    return _grupo("incident", _inc(f"stateIN{C['state_aberto']}"), "location")[:25]
 
 
-def _por_bu() -> list[dict]:
-    return _grupo("incident", _inc(f"stateIN{ST_ABERTO}"), BU_FIELD)[:10]
+def _por_bu(C: dict) -> list[dict]:
+    return _grupo("incident", _inc(f"stateIN{C['state_aberto']}"), C["bu_field"])[:10]
 
 
-def _por_subcategoria() -> list[dict]:
-    return _grupo("incident", _inc(f"stateIN{ST_ABERTO}"), "subcategory")[:10]
+def _por_subcategoria(C: dict) -> list[dict]:
+    return _grupo("incident", _inc(f"stateIN{C['state_aberto']}"), "subcategory")[:10]
 
 
 # ── Cálculo completo ───────────────────────────────────────────────────
 def _calcular_tudo() -> dict:
     meses = _ultimos_12_meses()
+    C = _effective_config()
     resultado: dict = {
         "gerado_em": datetime.now().isoformat(),
         "meses": [m["key"] for m in meses],
+        "config_usada": C,
         "erros": {},
     }
     for chave, fn in (
-        ("kpis", _kpis),
-        ("tratado_por_mes", lambda: _tratado_por_mes(meses)),
+        ("kpis", lambda: _kpis(C)),
+        ("tratado_por_mes", lambda: _tratado_por_mes(meses, C)),
         ("sla", lambda: _sla_por_mes(meses)),
-        ("backlog_por_mes", lambda: _backlog_por_mes(meses)),
-        ("abertos_por_status", _abertos_por_status),
-        ("por_localidade", _por_localidade),
-        ("por_bu", _por_bu),
-        ("por_subcategoria", _por_subcategoria),
-        ("sled_por_mes", lambda: _por_mes_sub(meses, SUB_SLED)),
-        ("coletor_por_mes", lambda: _por_mes_sub(meses, SUB_COLETOR)),
+        ("backlog_por_mes", lambda: _backlog_por_mes(meses, C)),
+        ("abertos_por_status", lambda: _abertos_por_status(C)),
+        ("por_localidade", lambda: _por_localidade(C)),
+        ("por_bu", lambda: _por_bu(C)),
+        ("por_subcategoria", lambda: _por_subcategoria(C)),
+        ("sled_por_mes", lambda: _por_mes_sub(meses, C["sub_sled_like"], C)),
+        ("coletor_por_mes", lambda: _por_mes_sub(meses, C["sub_coletor_like"], C)),
     ):
         try:
             resultado[chave] = fn()
@@ -373,6 +408,41 @@ def indicadores_dados(referencia: str = ""):
         "referencias": db.listar_referencias(),
         "config": {"queue": QUEUE, "campo_tma": TMA_START},
     }
+
+
+@router.get("/api/indicadores/config")
+def indicadores_get_config(req: Request):
+    """Config efetiva + defaults + overrides salvos (para a tela de Parâmetros).
+    Somente ADMIN."""
+    from security import require_permission
+    require_permission(req, "parametros", "admin")
+    try:
+        overrides = db.obter_config() or {}
+    except Exception:  # noqa: BLE001
+        overrides = {}
+    return {
+        "efetiva": _effective_config(),
+        "defaults": _CONFIG_DEFAULTS,
+        "overrides": overrides,
+        "campos": list(_CONFIG_DEFAULTS.keys()),
+    }
+
+
+@router.put("/api/indicadores/config")
+def indicadores_put_config(payload: dict, req: Request):
+    """Salva overrides da config dos indicadores. Somente ADMIN."""
+    from security import require_permission
+    sd = require_permission(req, "parametros", "admin")
+    # Aceita só chaves conhecidas; strings limpas.
+    limpo = {}
+    for k in _CONFIG_DEFAULTS:
+        if k in payload and payload[k] is not None:
+            limpo[k] = str(payload[k]).strip()
+    try:
+        db.salvar_config(limpo, atualizado_por=sd.get("username", ""))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, "Falha ao salvar config: %s" % exc)
+    return {"ok": True, "efetiva": _effective_config()}
 
 
 @router.get("/api/indicadores/diag-slas")
