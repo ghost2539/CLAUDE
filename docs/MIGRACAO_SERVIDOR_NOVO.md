@@ -46,8 +46,21 @@ Confira o tamanho — se vier com poucos KB, algo não entrou:
 bash scripts/backup.sh --listar
 ```
 
-Se aparecer `[AVISO] pg_dump indisponível`, o Postgres **não** foi incluído.
-Nesse caso gere o dump à parte, no servidor que tenha o cliente instalado:
+O script agora mostra o erro do `pg_dump` na hora e, no fim, avisa em
+destaque se o pacote saiu **sem** o banco do portal. Um pacote sem o Postgres
+não serve para migrar.
+
+Se o `pg_dump` falhar, os motivos usuais são:
+
+| Mensagem | Causa | O que fazer |
+|---|---|---|
+| `connection to server on socket ".s.PGSQL.5432" failed` | a URL não foi entendida e ele tentou o banco local | atualize o código: o script normaliza `postgresql+psycopg2://` sozinho |
+| `server version X; pg_dump version Y` | cliente mais antigo que o servidor | instale o `postgresql-client` da mesma versão do servidor |
+| `password authentication failed` | credencial errada no `DATABASE_URL` | confira o `environment` |
+| `pg_dump: command not found` | cliente não instalado | `sudo apt install postgresql-client` |
+
+Se não der para instalar o cliente nesse servidor, gere o dump de outra
+máquina que alcance o banco:
 
 ```bash
 set -a; . /etc/portal_operacoes_spare/environment; set +a

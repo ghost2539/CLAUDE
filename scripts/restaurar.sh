@@ -54,8 +54,11 @@ if [ -f "$SRC/portal_postgres.dump" ]; then
         cp -p "$SRC/portal_postgres.dump" "$HOME/" 2>/dev/null && \
             echo "   Cópia salva em $HOME/portal_postgres.dump"
     elif command -v pg_restore >/dev/null 2>&1; then
+        # Mesmo cuidado do backup.sh: o pg_restore não entende o sufixo de
+        # driver do SQLAlchemy e, sem normalizar, tenta o socket local.
+        PG_URL="$(printf '%s' "$DATABASE_URL" | sed -E 's|^postgres(ql)?\+[a-z0-9_]+://|postgresql://|; s|^postgres://|postgresql://|')"
         echo "-- Postgres (pg_restore --clean)"
-        pg_restore -d "$DATABASE_URL" --clean --if-exists --no-owner \
+        pg_restore -d "$PG_URL" --clean --if-exists --no-owner \
             "$SRC/portal_postgres.dump" 2>"$WORK/pg.err" \
             && echo "   OK" \
             || { echo "   AVISO: pg_restore reportou erros:"; sed 's/^/     /' "$WORK/pg.err" | head -20; }
