@@ -116,6 +116,12 @@ class Settings:
     # Horários (hora local) em que a rotina roda sozinha. CSV de horas.
     AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
 
+    # ── Monitoramento (saúde e falhas) — módulo isolado ─────────────────
+    MONITORAMENTO_DATABASE_URL: str = os.getenv(
+        "MONITORAMENTO_DATABASE_URL",
+        f"sqlite:///{(ROOT / 'data' / 'monitoramento.db').as_posix()}",
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

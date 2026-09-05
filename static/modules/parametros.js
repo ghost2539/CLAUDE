@@ -19,11 +19,12 @@ window.SPARE_MODULES.parametros = {
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
             ['automacoes',      'Automações'],
+            ['monitoramento',   'Monitoramento'],
             ['tv',              'TV'],
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes'];
+        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes', 'monitoramento'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -43,6 +44,7 @@ window.SPARE_MODULES.parametros = {
             sequencias:     renderSequences,
             'config-modulos': renderConfigModulos,
             automacoes:     renderAutomacoes,
+            monitoramento:  renderMonitoramento,
             tv:             renderTV,
             conta:          renderAccount
         };
@@ -439,6 +441,150 @@ async function renderAutomacoes(c, S) {
     });
 
     loadCfg(); loadRegras(); loadLogs();
+}
+
+/* ── Monitoramento (saúde e falhas) ─────────────────────────────── */
+async function renderMonitoramento(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Monitoramento</h1>' +
+        '<p class="text-muted">Saúde do servidor e dos serviços, e registro de falhas de API, ' +
+            'integrações e automações.</p>' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Saúde</span>' +
+            '<span><button id="mo-refresh" class="btn btn-sm btn-secondary">Atualizar</button> ' +
+            '<button id="mo-checar" class="btn btn-sm btn-primary" style="margin-left:6px">Checar integrações</button></span>' +
+            '</div><div class="card-body" id="mo-saude">' +
+            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+        '<div class="card mb-3" id="mo-check-card" style="display:none">' +
+            '<div class="card-header">Resultado da checagem</div>' +
+            '<div class="card-body" id="mo-check"></div></div>' +
+        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Falhas registradas</span>' +
+            '<span>' +
+              '<select id="mo-sev" class="form-control" style="display:inline-block;width:130px;height:32px">' +
+                '<option value="">Todas</option><option value="erro">Erros</option>' +
+                '<option value="alerta">Alertas</option><option value="ok">OK</option></select> ' +
+              '<select id="mo-org" class="form-control" style="display:inline-block;width:150px;height:32px">' +
+                '<option value="">Toda origem</option><option value="api">API</option>' +
+                '<option value="integracao">Integração</option><option value="automacao">Automação</option></select> ' +
+              '<input id="mo-q" class="form-control" placeholder="Buscar" style="display:inline-block;width:170px;height:32px"> ' +
+              '<button id="mo-falhas-refresh" class="btn btn-sm btn-secondary">Filtrar</button>' +
+            '</span></div>' +
+            '<div class="card-body" id="mo-falhas"></div></div>';
+
+    function barra(pct, alerta, critico) {
+        var cor = pct >= critico ? '#dc2626' : (pct >= alerta ? '#d97706' : '#16a34a');
+        return '<div style="background:var(--bg-input,#eee);border-radius:6px;height:8px;overflow:hidden;margin-top:6px">' +
+            '<div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + cor + '"></div></div>';
+    }
+    function tile(titulo, valor, sub, extra) {
+        return '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem">' + valor + '</div>' +
+            '<div class="stat-label">' + S.esc(titulo) + '</div>' +
+            (sub ? '<div class="text-muted" style="font-size:.78rem;margin-top:2px">' + sub + '</div>' : '') +
+            (extra || '') + '</div>';
+    }
+
+    async function loadSaude() {
+        var host = document.getElementById('mo-saude');
+        try {
+            var d = await S.api('/monitor/saude');
+            var sv = d.servidor || {}, mem = sv.memoria || {}, dk = sv.disco || {},
+                cg = sv.carga || {}, up = sv.uptime || {}, ap = d.aplicacao || {},
+                lim = d.limiares || {}, f = d.falhas || {};
+            var mapa = { ok: ['#16a34a', 'Tudo certo'], alerta: ['#d97706', 'Atenção'], critico: ['#dc2626', 'Crítico'] };
+            var st = mapa[d.status] || mapa.ok;
+            var html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+                '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + st[0] + '"></span>' +
+                '<strong style="color:' + st[0] + '">' + st[1] + '</strong>' +
+                '<span class="text-muted" style="font-size:.85rem">· atualizado ' +
+                new Date(d.gerado_em).toLocaleString('pt-BR') + '</span></div>';
+            html += '<div class="stats-grid">' +
+                tile('Memória', mem.pct_usado + '%', mem.usado_mb + ' / ' + mem.total_mb + ' MB',
+                     barra(mem.pct_usado, lim.mem_alerta, lim.mem_critico)) +
+                tile('Disco', dk.pct_usado + '%', dk.usado_gb + ' / ' + dk.total_gb + ' GB (livre ' + dk.livre_gb + ' GB)',
+                     barra(dk.pct_usado, lim.disco_alerta, lim.disco_critico)) +
+                tile('Carga (1 min)', cg.load1, cg.cpus + ' CPU(s) · ' + cg.pct_load1 + '%') +
+                tile('Uptime', up.aplicacao || '—', 'servidor: ' + (up.servidor || '—')) +
+                tile('Processo', (ap.memoria_mb || 0) + ' MB', 'PID ' + (ap.pid || '—')) +
+                tile('Falhas (' + (f.horas || 24) + 'h)', f.erros || 0,
+                     (f.alertas || 0) + ' alerta(s)') +
+                '</div>';
+            html += '<div style="margin-top:14px;font-weight:600;font-size:.9rem">Bancos de dados</div>' +
+                '<div class="tw" style="overflow-x:auto;margin-top:6px"><table class="data-table"><thead><tr>' +
+                '<th>Banco</th><th>Tipo</th><th>Status</th><th>Tamanho</th><th>Detalhe</th></tr></thead><tbody>';
+            (d.bancos || []).forEach(function (b) {
+                html += '<tr><td><b>' + S.esc(b.nome) + '</b></td><td>' + S.esc(b.tipo) + '</td>' +
+                    '<td>' + (b.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
+                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + (b.tamanho_mb ? b.tamanho_mb + ' MB' : '—') + '</td>' +
+                    '<td style="font-size:.8rem;color:var(--text-secondary)">' + S.esc(b.detalhe || '') + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+            host.innerHTML = html;
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+        }
+    }
+
+    async function loadFalhas() {
+        var host = document.getElementById('mo-falhas');
+        var p = new URLSearchParams({
+            limit: '300',
+            severidade: document.getElementById('mo-sev').value,
+            origem: document.getElementById('mo-org').value,
+            q: document.getElementById('mo-q').value.trim()
+        });
+        try {
+            var d = await S.api('/monitor/falhas?' + p);
+            var cols = [
+                { key: 'quando', label: 'Quando', render: function (v) {
+                    return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
+                { key: 'severidade', label: 'Sev.', html: true, render: function (v) {
+                    var cor = v === 'erro' ? '#dc2626' : (v === 'alerta' ? '#d97706' : '#16a34a');
+                    return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
+                { key: 'origem', label: 'Origem' },
+                { key: 'alvo', label: 'Alvo' },
+                { key: 'status_code', label: 'HTTP', render: function (v) { return v || ''; } },
+                { key: 'duracao_ms', label: 'ms', render: function (v) { return v || ''; } },
+                { key: 'usuario', label: 'Usuário' },
+                { key: 'detalhe', label: 'Detalhe' }
+            ];
+            host.innerHTML = '';
+            host.appendChild(S.table(cols, d.eventos));
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+        }
+    }
+
+    document.getElementById('mo-refresh').onclick = loadSaude;
+    document.getElementById('mo-falhas-refresh').onclick = loadFalhas;
+    document.getElementById('mo-q').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') loadFalhas();
+    });
+    document.getElementById('mo-checar').onclick = async function () {
+        var b = this; b.disabled = true; var t = b.textContent; b.textContent = 'Checando…';
+        var card = document.getElementById('mo-check-card');
+        var host = document.getElementById('mo-check');
+        card.style.display = '';
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Testando integrações…</div>';
+        try {
+            var d = await S.api('/monitor/checar', { method: 'POST' });
+            var html = '<table class="data-table"><thead><tr><th>Serviço</th><th>Status</th><th>Tempo</th><th>Detalhe</th></tr></thead><tbody>';
+            (d.resultados || []).forEach(function (r) {
+                html += '<tr><td><b>' + S.esc(r.servico) + '</b></td>' +
+                    '<td>' + (r.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
+                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + r.ms + ' ms</td>' +
+                    '<td style="font-size:.8rem">' + S.esc(r.detalhe || '') + '</td></tr>';
+            });
+            host.innerHTML = html + '</tbody></table>';
+            loadSaude(); loadFalhas();
+        } catch (e) {
+            host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+        } finally { b.disabled = false; b.textContent = t; }
+    };
+
+    loadSaude(); loadFalhas();
 }
 
 /* ── Visual ─────────────────────────────────────────────────────── */

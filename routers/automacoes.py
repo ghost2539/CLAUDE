@@ -165,6 +165,15 @@ def _login_fresh():
     return None, usuario
 
 
+def _monitor(alvo: str, detalhe: str, usuario: str = "", severidade: str = "erro") -> None:
+    """Reporta ao módulo de Monitoramento (silencioso se ele não estiver ativo)."""
+    try:
+        from routers.monitoramento import registrar_falha
+        registrar_falha("automacao", alvo, detalhe, usuario, severidade)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _norm(s: str) -> str:
     return (s or "").strip().lower().replace("_", " ")
 
@@ -300,6 +309,7 @@ def _rodar(session, origem: str, usuario: str) -> dict:
                        subcategoria=subcat, acao=acao, fila_origem=queue,
                        fila_destino=regra.get("fila_destino", ""), resultado="erro",
                        detalhe=str(exc)[:400])
+            _monitor(f"automacao/{acao}/{number}", str(exc)[:400], usuario)
 
     return resumo
 
@@ -492,12 +502,15 @@ def _scheduler_loop() -> None:
                                    sys_id="", subcategoria="", acao="ignorado",
                                    fila_origem="", fila_destino="", resultado="adiado",
                                    detalhe="Sem sessão do ServiceNow válida no horário.")
+                        _monitor("automacao/agendador", "Execução adiada: sem sessão "
+                                 "do ServiceNow válida no horário.", usuario or "", "alerta")
                     else:
                         resumo = _rodar(session, origem="agendador", usuario=usuario or "")
                         db.salvar_config({"ultima_execucao": agora.strftime("%d/%m/%Y %H:%M")})
                         _log.info("Automação (agendador): %s", resumo)
         except Exception as exc:  # noqa: BLE001
             _log.error("Agendador de automações falhou: %s", exc, exc_info=True)
+            _monitor("automacao/agendador", str(exc)[:400])
         time.sleep(30)
 
 

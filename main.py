@@ -125,6 +125,22 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
+    # Aditivo: só observa. Falha aqui nunca derruba o portal.
+    try:
+        import database_monitoramento as _db_mon
+        _db_mon.init_db()
+        from routers.monitoramento import (
+            router as monitoramento_router, MonitorFalhasMiddleware,
+        )
+        app.include_router(monitoramento_router)
+        app.add_middleware(MonitorFalhasMiddleware)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("monitoramento").error(
+            "Módulo Monitoramento NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Automações (encerramento/encaminhamento) — banco próprio ────────
     # Carregamento isolado (nunca derruba o portal).
     try:
