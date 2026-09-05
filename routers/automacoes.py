@@ -15,7 +15,10 @@ Carregado de forma isolada no main.py: erro aqui não derruba o portal.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
+import os
 import re
 import threading
 import time
@@ -30,6 +33,7 @@ from security import require_permission, get_session, SESSIONS
 from routers.servicenow import (
     _sn_session_from_portal, _sn_session_from_cookies, _sn_session_valida,
     _sn_query, _sn_query_all, _sn_update, _extract_tracking_code, _TRACKING_RE,
+    _get_http, _login_sso, SN_PROXY,
     INCIDENT_TABLE, DEFAULT_QUEUE,
 )
 from routers.encerramento import FIELDS as ENC_FIELDS, _estado_canonico, CLOSE_CODE, _display
@@ -42,6 +46,123 @@ router = APIRouter(prefix="/api/automacoes", tags=["Automações"])
 
 # Códigos de evento dos Correios que representam ENTREGUE ao destinatário.
 _DELIVERED_CODES = {"BDE", "BDI"}
+
+
+# ── Credencial para a rotina 100% automática ────────────────────────────
+# Preferência: cofre (vcreports_secret) no servidor novo. Enquanto não há
+# cofre, guardamos a senha CRIPTOGRAFADA no banco de automações (chave
+# derivada do SESSION_SECRET). Nunca em texto puro.
+def _secret(nome: str, default: str = "") -> str:
+    try:
+        from vcreports_secrets import vcreports_secret  # type: ignore
+        v = vcreports_secret(nome)
+        if v:
+            return str(v)
+    except Exception:  # noqa: BLE001
+        pass
+    return os.environ.get(nome, default)
+
+
+DEFAULT_COFRE_USER_KEY = "SN_AUTOMACAO_USUARIO"
+DEFAULT_COFRE_PASS_KEY = "SN_AUTOMACAO_SENHA"
+
+
+def _cofre_keys() -> tuple[str, str]:
+    cfg = db.obter_config()
+    return (cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY,
+            cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY)
+
+
+def _cofre_disponivel() -> bool:
+    uk, pk = _cofre_keys()
+    return bool(_secret(uk) and _secret(pk))
+
+
+def _fernet():
+    try:
+        from cryptography.fernet import Fernet  # type: ignore
+        key = base64.urlsafe_b64encode(hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest())
+        return Fernet(key)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _xor(txt: str) -> str:
+    k = hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest()
+    b = txt.encode("utf-8")
+    out = bytes(c ^ k[i % len(k)] for i, c in enumerate(b))
+    return base64.b64encode(out).decode()
+
+
+def _xor_dec(blob: str) -> str:
+    k = hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest()
+    b = base64.b64decode(blob.encode())
+    return bytes(c ^ k[i % len(k)] for i, c in enumerate(b)).decode("utf-8", "ignore")
+
+
+def _encrypt(txt: str) -> tuple[str, str]:
+    f = _fernet()
+    if f:
+        return "fernet", f.encrypt(txt.encode()).decode()
+    return "xor", _xor(txt)
+
+
+def _decrypt(algo: str, blob: str) -> str:
+    if not blob:
+        return ""
+    if algo == "fernet":
+        f = _fernet()
+        if not f:
+            return ""
+        try:
+            return f.decrypt(blob.encode()).decode()
+        except Exception:  # noqa: BLE001
+            return ""
+    if algo == "xor":
+        try:
+            return _xor_dec(blob)
+        except Exception:  # noqa: BLE001
+            return ""
+    return ""
+
+
+def _creds_para_login() -> tuple[str, str, str]:
+    """(usuario, senha, fonte) — cofre tem prioridade; senão o store cifrado."""
+    uk, pk = _cofre_keys()
+    u = _secret(uk)
+    p = _secret(pk)
+    if u and p:
+        return u, p, "cofre"
+    cfg = db.obter_config()
+    if cfg.get("cred_user") and cfg.get("cred_blob"):
+        senha = _decrypt(cfg.get("cred_algo", "fernet"), cfg.get("cred_blob", ""))
+        if senha:
+            return cfg["cred_user"], senha, "store"
+    return "", "", ""
+
+
+def _login_fresh():
+    """Faz login SSO fresco com a credencial (cofre/store) e devolve a sessão."""
+    usuario, senha, fonte = _creds_para_login()
+    if not usuario or not senha:
+        return None, ""
+    _req, BS = _get_http()
+    s = _req.Session()
+    s.verify = False
+    if SN_PROXY:
+        s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+    try:
+        ok = _login_sso(s, usuario, senha, _req, BS)
+    except Exception:  # noqa: BLE001
+        return None, usuario
+    if ok:
+        try:
+            db.salvar_config({"sn_cookies": dict(s.cookies), "usuario": usuario})
+        except Exception:  # noqa: BLE001
+            pass
+        return s, usuario
+    return None, usuario
 
 
 def _norm(s: str) -> str:
@@ -239,6 +360,12 @@ def config_get(req: Request):
         "usuario": cfg.get("usuario", ""),
         "tem_sessao": bool(cfg.get("sn_cookies")),
         "ultima_execucao": cfg.get("ultima_execucao", ""),
+        # 100% automático:
+        "cofre_disponivel": _cofre_disponivel(),
+        "cofre_user_key": cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY,
+        "cofre_pass_key": cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY,
+        "tem_credencial": bool(cfg.get("cred_user") and cfg.get("cred_blob")),
+        "credencial_usuario": cfg.get("cred_user", ""),
     }
 
 
@@ -246,6 +373,11 @@ class ConfigIn(BaseModel):
     enabled: bool = False
     horarios: str = ""
     tracking_field: str = ""
+    cred_user: str = ""
+    cred_senha: str = ""
+    limpar_credencial: bool = False
+    cofre_user_key: str = ""
+    cofre_pass_key: str = ""
 
 
 @router.put("/config")
@@ -256,10 +388,25 @@ def config_put(body: ConfigIn, req: Request):
         dados["horarios"] = body.horarios.strip()
     if body.tracking_field.strip():
         dados["tracking_field"] = body.tracking_field.strip()
+    if body.cofre_user_key.strip():
+        dados["cofre_user_key"] = body.cofre_user_key.strip()
+    if body.cofre_pass_key.strip():
+        dados["cofre_pass_key"] = body.cofre_pass_key.strip()
     # Captura a sessão SN do usuário que ativou, para a rotina rodar como ele.
     if sd.get("sn_cookies"):
         dados["sn_cookies"] = sd["sn_cookies"]
         dados["usuario"] = sd.get("username", "")
+    # Credencial para automação 100% (guardada CRIPTOGRAFADA; no servidor novo,
+    # prefira o cofre: SN_AUTOMACAO_USUARIO / SN_AUTOMACAO_SENHA).
+    if body.limpar_credencial:
+        dados["cred_user"] = ""
+        dados["cred_blob"] = ""
+        dados["cred_algo"] = ""
+    elif body.cred_senha.strip():
+        algo, blob = _encrypt(body.cred_senha)
+        dados["cred_user"] = (body.cred_user.strip() or sd.get("username", ""))
+        dados["cred_algo"] = algo
+        dados["cred_blob"] = blob
     db.salvar_config(dados)
     return {"ok": True}
 
@@ -321,6 +468,10 @@ def _sessao_para_rotina():
             except Exception:  # noqa: BLE001
                 pass
             return s, sd.get("username", usuario)
+    # Último recurso: login SSO fresco com a credencial do cofre/store (100%).
+    s, u = _login_fresh()
+    if s:
+        return s, (u or usuario)
     return None, usuario
 
 
