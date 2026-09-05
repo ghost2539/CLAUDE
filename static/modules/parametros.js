@@ -251,11 +251,16 @@ async function renderAutomacoes(c, S) {
     async function loadCfg() {
         var cfg = await S.api('/automacoes/config');
         var host = document.getElementById('au-cfg');
+        var modo100 = cfg.cofre_disponivel
+            ? '<span style="color:#16a34a;font-weight:600">Cofre disponível</span> — a rotina roda 100% automática.'
+            : (cfg.tem_credencial
+                ? '<span style="color:#16a34a;font-weight:600">Credencial salva</span> (usuário ' + S.esc(cfg.credencial_usuario || '') + ') — roda 100% automática.'
+                : '<span style="color:#d97706;font-weight:600">Sem credencial</span> — a rotina só roda quando há sessão sua ativa.');
         host.innerHTML =
             '<div class="form-grid cols-2">' +
                 '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
                     '<input type="checkbox" id="au-enabled"' + (cfg.enabled ? ' checked' : '') + '> ' +
-                    'Rotina automática ligada</label></div>' +
+                    '<strong>Rotina automática ' + (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</strong></label></div>' +
                 '<div class="form-group"><label>Horários (horas, separadas por vírgula)</label>' +
                     '<input id="au-horarios" class="form-control" value="' + S.esc(cfg.horarios || '7,12,16') + '"></div>' +
                 '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
@@ -263,12 +268,32 @@ async function renderAutomacoes(c, S) {
                     '<small class="text-muted">padrão: sys_tags</small></div>' +
                 '<div class="form-group"><label>Sessão para a rotina</label>' +
                     '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' +
-                    (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva — ligue estando logado') +
+                    (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
                     (cfg.ultima_execucao ? ('<br>Última execução: ' + S.esc(cfg.ultima_execucao)) : '') +
                     '</div></div>' +
             '</div>' +
+            '<hr style="border-color:var(--border-color);margin:14px 0">' +
+            '<div style="font-weight:600;margin-bottom:4px">Automação 100% (sem depender de login)</div>' +
+            '<div style="font-size:.85rem;margin-bottom:8px">' + modo100 + '</div>' +
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label>Chave do usuário no cofre</label>' +
+                    '<input id="au-cofre-user-key" class="form-control" value="' + S.esc(cfg.cofre_user_key || 'SN_AUTOMACAO_USUARIO') + '"></div>' +
+                '<div class="form-group"><label>Chave da senha no cofre</label>' +
+                    '<input id="au-cofre-pass-key" class="form-control" value="' + S.esc(cfg.cofre_pass_key || 'SN_AUTOMACAO_SENHA') + '"></div>' +
+            '</div>' +
+            '<div style="font-size:.8rem;color:var(--text-secondary);margin-bottom:8px">' +
+                'No servidor novo, grave a credencial no cofre com essas chaves — ela tem prioridade. ' +
+                'Enquanto o cofre não existir, informe abaixo para guardar criptografado.</div>' +
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label>Usuário (AD) para a automação</label>' +
+                    '<input id="au-cred-user" class="form-control" value="' + S.esc(cfg.credencial_usuario || '') + '" placeholder="seu usuário de rede"></div>' +
+                '<div class="form-group"><label>Senha (AD)</label>' +
+                    '<input id="au-cred-senha" type="password" class="form-control" placeholder="' +
+                    (cfg.tem_credencial ? '•••••• (salva)' : 'informe para guardar') + '"></div>' +
+            '</div>' +
             '<div class="mt-2"><button id="au-cfg-save" class="btn btn-primary">Salvar configuração</button> ' +
-            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Rodar agora</button>' +
+            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Rodar agora</button> ' +
+            (cfg.tem_credencial ? '<button id="au-cred-clear" class="btn btn-danger" style="margin-left:8px">Remover credencial salva</button>' : '') +
             '<span id="au-cfg-msg" class="text-muted" style="margin-left:10px"></span></div>';
 
         document.getElementById('au-cfg-save').onclick = async function () {
@@ -276,11 +301,26 @@ async function renderAutomacoes(c, S) {
                 await S.api('/automacoes/config', { method: 'PUT', body: {
                     enabled: document.getElementById('au-enabled').checked,
                     horarios: document.getElementById('au-horarios').value.trim(),
-                    tracking_field: document.getElementById('au-tfield').value.trim()
+                    tracking_field: document.getElementById('au-tfield').value.trim(),
+                    cofre_user_key: document.getElementById('au-cofre-user-key').value.trim(),
+                    cofre_pass_key: document.getElementById('au-cofre-pass-key').value.trim(),
+                    cred_user: document.getElementById('au-cred-user').value.trim(),
+                    cred_senha: document.getElementById('au-cred-senha').value
                 }});
-                document.getElementById('au-cfg-msg').textContent = 'Configuração salva. Sessão do seu login capturada para a rotina.';
+                document.getElementById('au-cfg-msg').textContent = 'Configuração salva.';
                 S.toast('Configuração salva.', 'success');
                 loadCfg();
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        var clearBtn = document.getElementById('au-cred-clear');
+        if (clearBtn) clearBtn.onclick = async function () {
+            if (!confirm('Remover a credencial salva da automação?')) return;
+            try {
+                await S.api('/automacoes/config', { method: 'PUT', body: {
+                    enabled: document.getElementById('au-enabled').checked,
+                    limpar_credencial: true
+                }});
+                S.toast('Credencial removida.', 'success'); loadCfg();
             } catch (e) { S.toast(e.message, 'error'); }
         };
         document.getElementById('au-run').onclick = async function () {
