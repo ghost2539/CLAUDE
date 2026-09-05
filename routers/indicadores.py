@@ -294,14 +294,38 @@ def _sla_por_mes(meses: list[dict]) -> dict:
     }
 
 
+def _iter_meses(inicio: str, fim: str) -> list[str]:
+    """Lista contínua de 'YYYY-MM' de inicio até fim (inclusive)."""
+    ya, ma = int(inicio[:4]), int(inicio[5:7])
+    yb, mb = int(fim[:4]), int(fim[5:7])
+    a, b = ya * 12 + (ma - 1), yb * 12 + (mb - 1)
+    return [f"{i // 12}-{i % 12 + 1:02d}" for i in range(a, b + 1)]
+
+
 def _backlog_por_mes(meses: list[dict], C: dict) -> list[dict]:
-    """Backlog (incidentes abertos) por mês pela data de referência."""
-    out = []
-    for m in meses:
-        q = _inc(f"stateIN{C['state_aberto']}"
-                 f"^{C['backlog_date_field']}>={m['ini']}^{C['backlog_date_field']}<={m['fim']}")
-        out.append({"mes": m["key"], "total": _conta("incident", q)})
-    return out
+    """Backlog (incidentes ABERTOS) agrupado pelo MÊS da data de referência
+    (data bouncing). Busca as linhas e agrupa em Python — assim só aparecem
+    meses que realmente têm registros com data preenchida, e um campo de data
+    inválido não faz a contagem 'vazar' (o ServiceNow ignora condição inválida
+    e devolveria o backlog inteiro em todo mês)."""
+    field = C["backlog_date_field"]
+    q = _inc(f"stateIN{C['state_aberto']}")
+    rows = _sn_rest_get("incident", q, f"number,{field}",
+                        display_value="false", limit=6000)
+    cont: dict[str, int] = {}
+    for r in rows:
+        mes = _mes(_mv(r.get(field)))
+        if not mes:
+            continue  # sem data bouncing → não entra em nenhum mês
+        cont[mes] = cont.get(mes, 0) + 1
+    if not cont:
+        return []
+    chaves = sorted(cont.keys())
+    # eixo contínuo do 1º mês com dado até o mês atual; no máx. 12 meses.
+    fim = datetime.now().strftime("%Y-%m")
+    todos = _iter_meses(chaves[0], max(chaves[-1], fim))
+    todos = todos[-12:]
+    return [{"mes": k, "total": cont.get(k, 0)} for k in todos]
 
 
 def _por_mes_sub(meses: list[dict], like: str, C: dict) -> list[dict]:
@@ -443,6 +467,41 @@ def indicadores_put_config(payload: dict, req: Request):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, "Falha ao salvar config: %s" % exc)
     return {"ok": True, "efetiva": _effective_config()}
+
+
+@router.get("/api/indicadores/diag-backlog")
+def indicadores_diag_backlog(req: Request, field: str = ""):
+    """Diagnóstico do backlog: mostra, para os incidentes ABERTOS da fila, se o
+    campo de data (bouncing) tem valor e a distribuição por mês — para confirmar
+    o nome interno correto do campo. Somente ADMIN."""
+    from security import require_permission
+    require_permission(req, "parametros", "admin")
+    C = _effective_config()
+    campo = field or C["backlog_date_field"]
+    q = _inc(f"stateIN{C['state_aberto']}")
+    try:
+        rows = _sn_rest_get("incident", q, f"number,opened_at,{campo}",
+                            display_value="false", limit=6000)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, "Falha ao consultar incidentes: %s" % exc)
+    total = len(rows)
+    com_valor = sum(1 for r in rows if _mv(r.get(campo)))
+    por_mes: dict[str, int] = {}
+    for r in rows:
+        mes = _mes(_mv(r.get(campo))) or "(sem data)"
+        por_mes[mes] = por_mes.get(mes, 0) + 1
+    dist = sorted(por_mes.items(), key=lambda x: x[0])
+    exemplos = [{"number": _mv(r.get("number")), "valor": _mv(r.get(campo))}
+                for r in rows[:5]]
+    return {
+        "campo_testado": campo,
+        "backlog_total_aberto": total,
+        "com_valor_no_campo": com_valor,
+        "sem_valor_no_campo": total - com_valor,
+        "campo_parece_valido": com_valor > 0,
+        "por_mes": [{"mes": m, "total": c} for m, c in dist],
+        "exemplos": exemplos,
+    }
 
 
 @router.get("/api/indicadores/diag-slas")
