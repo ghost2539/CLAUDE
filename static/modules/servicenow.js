@@ -120,9 +120,8 @@ function _snRenderUpload(container, S) {
             '<div class="card-body">' +
                 '<label>Como deseja subir os ativos?</label>' +
                 '<select id="sn-origem" class="form-control" style="max-width:420px">' +
-                    '<option value="selecao">Selecionar ativos da base (marcar na lista)</option>' +
-                    '<option value="status">Base de recebimento — por status</option>' +
-                    '<option value="lista">Lista de ativos (consulta o EBS)</option>' +
+                    '<option value="status">Base de recebimentos (por status)</option>' +
+                    '<option value="lista">Lista de ativos</option>' +
                 '</select>' +
             '</div>' +
         '</div>' +
@@ -225,11 +224,20 @@ function _snRenderUpload(container, S) {
             '</div>' +
         '</div>';
 
+    // Filtro da aba de seleção (mantido, oculto) — todos os status.
     S.api('/servicenow/statuses').then(function (d) {
         var sel = document.getElementById('sn-status');
-        var selBase = document.getElementById('sn-status-base');
-        (d.statuses || []).forEach(function (st) {
+        if (sel) (d.statuses || []).forEach(function (st) {
             sel.innerHTML += '<option value="' + S.esc(st) + '">' + S.esc(st) + '</option>';
+        });
+    }).catch(function () {});
+    // Origem por status — sem 'Removido' + opção "Todos (exceto Removidos)".
+    S.api('/servicenow/statuses?sem_removido=true').then(function (d) {
+        var selBase = document.getElementById('sn-status-base');
+        if (!selBase) return;
+        selBase.innerHTML = '<option value="">Selecione…</option>' +
+            '<option value="__TODOS__">Todos (exceto Removidos)</option>';
+        (d.statuses || []).forEach(function (st) {
             selBase.innerHTML += '<option value="' + S.esc(st) + '">' + S.esc(st) + '</option>';
         });
     }).catch(function () {});

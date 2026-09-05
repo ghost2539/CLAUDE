@@ -233,6 +233,56 @@ def _lookup_reference(session, field, display_value, cache, BS):
     return display_value
 
 
+def _lookup_ref_field(session, table, name_field, value, like=False):
+    """Busca 1 registro de uma tabela de referência por um campo de nome.
+    Retorna o sys_id ou ''. Case-insensitive (padrão do ServiceNow)."""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    op = "LIKE" if like else "="
+    q = f"{name_field}{op}{value}"
+    try:
+        recs = _sn_query(session, table, q, "sys_id," + name_field, limit=1, display_value=False)
+    except Exception:  # noqa: BLE001
+        return ""
+    if recs:
+        sid = recs[0].get("sys_id", "")
+        return sid.get("value", "") if isinstance(sid, dict) else (sid or "")
+    return ""
+
+
+# Campos de nome candidatos por tipo de referência. O 'model' costuma ser
+# exibido por display_name (não 'name'), o que causava "modelo não encontrado"
+# mesmo existindo no SN.
+_REF_NAME_CANDIDATES = {
+    "model": ["display_name", "name"],
+    "model_category": ["name"],
+    "stockroom": ["name"],
+    "company": ["name"],
+}
+
+
+def _resolve_ref(session, field, value):
+    """(sys_id, achou?) robusto para model/model_category/stockroom/company.
+    Tenta correspondência exata (em vários campos de nome) e, por fim, LIKE."""
+    value = (value or "").strip()
+    if not value:
+        return "", False
+    table = REFERENCE_TABLE_MAP.get(field)
+    if not table:
+        return value, True
+    campos = _REF_NAME_CANDIDATES.get(field, [REFERENCE_NAME_FIELD.get(field, "name")])
+    for nf in campos:
+        sid = _lookup_ref_field(session, table, nf, value, like=False)
+        if sid:
+            return sid, True
+    # fallback tolerante (contém) — só se a exata falhar
+    sid = _lookup_ref_field(session, table, campos[0], value, like=True)
+    if sid:
+        return sid, True
+    return "", False
+
+
 def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_value=True):
     """Query ServiceNow via JSONv2 API (works with SSO cookies).
     Returns list of records."""
@@ -426,16 +476,8 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     job["phase"] = "lookup"
     cache = {}
 
-    def _resolve(field: str, value: str):
-        """(sys_id, achou?) — achou=False quando o valor não existe no SN."""
-        value = (value or "").strip()
-        if not value:
-            return "", False
-        rid = _lookup_reference(session, field, value, cache, BS)
-        return rid, bool(rid) and rid != value
-
     # Referências fixas (iguais para todos os ativos)
-    stockroom_id, stockroom_ok = _resolve("stockroom", params["stockroom"])
+    stockroom_id, stockroom_ok = _resolve_ref(session, "stockroom", params["stockroom"])
     depreciation_id = _lookup_reference(session, "depreciation", params["depreciation"], cache, BS)
     aisle = (params.get("aisle_space") or "").strip()
 
@@ -443,15 +485,21 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     substate_val = SUBSTATUS_MAP.get(params["substate"].lower(), params["substate"])
     currency_val = CURRENCY_MAP.get("BRL", "BRL")  # sempre BRL
 
-    # Pré-checagem de duplicidade no ServiceNow (uma consulta em blocos).
+    # Pré-carrega os registros JÁ existentes no ServiceNow (para ATUALIZAR em
+    # vez de inserir). Mapas por asset_tag e por serial (maiúsculas).
     from types import SimpleNamespace
     itens_dup = [SimpleNamespace(asset_tag=a.get("tag_number", ""),
                                  serial_number=a.get("serial_number", ""))
                  for a in assets_data]
+    por_tag, por_ser = {}, {}
     try:
-        tags_ok, ser_ok = _hardware_existentes(session, itens_dup)
-    except Exception:  # noqa: BLE001 — se falhar, segue sem a pré-checagem
-        tags_ok, ser_ok = set(), set()
+        for rec in _hardware_records(session, itens_dup):
+            if rec.get("asset_tag"):
+                por_tag[rec["asset_tag"].upper()] = rec
+            if rec.get("serial_number"):
+                por_ser[rec["serial_number"].upper()] = rec
+    except Exception:  # noqa: BLE001 — se falhar, segue tratando todos como novos
+        pass
 
     job["phase"] = "inserting"
 
@@ -465,7 +513,7 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
             "empresa": asset.get("company", ""),
         }
 
-        # ── Validações — NÃO sobe o ativo se algo estiver irregular ──────
+        # ── Validações — NÃO sobe/atualiza o ativo se algo estiver irregular ─
         motivos: list[str] = []
 
         if asset.get("_ebs_nao_encontrado"):
@@ -478,14 +526,13 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
 
         tag_u = str(asset.get("tag_number") or "").strip().upper()
         ser_u = str(asset.get("serial_number") or "").strip().upper()
-        if (tag_u and tag_u in tags_ok) or (ser_u and ser_u in ser_ok):
-            motivos.append("Ativo já cadastrado")
+        existente = (por_tag.get(tag_u) if tag_u else None) or (por_ser.get(ser_u) if ser_u else None)
 
-        model_id, model_ok = _resolve("model", asset.get("model", ""))
+        model_id, model_ok = _resolve_ref(session, "model", asset.get("model", ""))
         if not model_ok:
             motivos.append("Regularizar Modelo (Não encontrou o modelo no SN)")
 
-        category_id, category_ok = _resolve("model_category", asset.get("category", ""))
+        category_id, category_ok = _resolve_ref(session, "model_category", asset.get("category", ""))
         if not category_ok:
             motivos.append("Regularizar Categoria de Hardware (Não encontrou a categoria)")
 
@@ -505,46 +552,66 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
 
         company_id = _lookup_reference(session, "company", asset.get("company", ""), cache, BS)
 
-        record = {
-            "serial_number": asset.get("serial_number", ""),
+        # Campos de subida (aplicados tanto na inclusão quanto na atualização):
+        # o ativo está conosco, então stockroom/company/aisle/status/depreciação
+        # passam a refletir os dados de subida.
+        payload = {
             "model": model_id,
-            "asset_tag": asset.get("tag_number", ""),
             "model_category": category_id,
             "company": company_id,
             "stockroom": stockroom_id,
             "aisle_space_location": aisle,
+            "install_status": state_val,
+            "substatus": substate_val,
+            "depreciation": depreciation_id,
             "purchase_date": _parse_date(asset.get("dpis") or asset.get("acquisition_date", "")),
             "depreciation_date": _parse_date_with_time(asset.get("dpis") or asset.get("acquisition_date", "")),
             "cost": str(asset.get("cost", "")).replace(",", ".") if asset.get("cost") else "",
-            "install_status": state_val,
-            "substatus": substate_val,
             "cost.currency_type": currency_val,
             "acquisition_method": params["acquisition_method"],
             "expenditure_type": params["expenditure_type"],
-            "depreciation": depreciation_id,
         }
-        record = {k: v for k, v in record.items() if v}
 
         try:
-            ok, sys_id, display = _insert_record(session, record)
-            if ok:
+            if existente:
+                # ── ATUALIZA o registro existente ───────────────────────
+                sys_id = existente["sys_id"]
+                update = {k: v for k, v in payload.items() if v}
+                # Completa/corrige identificadores divergentes ou ausentes.
+                if asset.get("asset_tag") or asset.get("tag_number"):
+                    update["asset_tag"] = asset.get("tag_number", "") or existente.get("asset_tag", "")
+                if asset.get("serial_number"):
+                    update["serial_number"] = asset.get("serial_number", "")
+                _sn_update(session, HARDWARE_TABLE, sys_id, update)
                 job["ok_count"] += 1
                 result_entry["status"] = "ok"
-                result_entry["sys_id"] = sys_id[:20]
-                result_entry["display"] = display
-                # Sempre calcula depreciação após incluir.
-                if sys_id and sys_id != "N/A":
+                result_entry["sys_id"] = str(sys_id)[:20]
+                result_entry["display"] = "Atualizado (já existia no SN)"
+                if sys_id:
                     dep_ok = _calculate_depreciation(session, sys_id, BS)
                     result_entry["depreciation"] = "ok" if dep_ok else "falhou"
-                    if dep_ok:
-                        job["dep_ok"] += 1
-                    else:
-                        job["dep_fail"] += 1
+                    job["dep_ok" if dep_ok else "dep_fail"] += 1
             else:
-                job["err_count"] += 1
-                result_entry["status"] = "erro"
-                result_entry["motivos"] = [display]
-                result_entry["detail"] = display
+                # ── INSERE novo registro ────────────────────────────────
+                record = dict(payload)
+                record["serial_number"] = asset.get("serial_number", "")
+                record["asset_tag"] = asset.get("tag_number", "")
+                record = {k: v for k, v in record.items() if v}
+                ok, sys_id, display = _insert_record(session, record)
+                if ok:
+                    job["ok_count"] += 1
+                    result_entry["status"] = "ok"
+                    result_entry["sys_id"] = sys_id[:20]
+                    result_entry["display"] = display
+                    if sys_id and sys_id != "N/A":
+                        dep_ok = _calculate_depreciation(session, sys_id, BS)
+                        result_entry["depreciation"] = "ok" if dep_ok else "falhou"
+                        job["dep_ok" if dep_ok else "dep_fail"] += 1
+                else:
+                    job["err_count"] += 1
+                    result_entry["status"] = "erro"
+                    result_entry["motivos"] = [display]
+                    result_entry["detail"] = display
         except Exception as e:
             job["err_count"] += 1
             result_entry["status"] = "erro"
@@ -631,16 +698,23 @@ def list_for_upload(
 
 
 @router.get("/statuses")
-def list_statuses(req: Request):
-    """Lista status distintos dos recebimentos para filtro."""
+def list_statuses(req: Request, sem_removido: bool = False):
+    """Lista status distintos dos recebimentos. Deduplica variações de caixa/
+    espaço e, com sem_removido=true, oculta os status 'Removido'."""
     require_permission(req, "servicenow", "view")
     with SessionLocal() as s:
-        rows = s.execute(
-            select(ReceiptCycle.status)
-            .distinct()
-            .order_by(ReceiptCycle.status)
-        ).scalars().all()
-        return {"statuses": [r for r in rows if r]}
+        rows = s.execute(select(ReceiptCycle.status).distinct()).scalars().all()
+    vistos: dict[str, str] = {}
+    for r in rows:
+        if not r:
+            continue
+        limpo = r.strip()
+        norm = limpo.upper()
+        if sem_removido and norm in ("REMOVIDO", "REMOVIDOS"):
+            continue
+        if norm and norm not in vistos:
+            vistos[norm] = limpo
+    return {"statuses": sorted(vistos.values(), key=lambda x: x.upper())}
 
 
 @router.post("/test-login")
@@ -832,13 +906,21 @@ def start_upload(body: UploadIn, req: Request):
                         "acquisition_date": "", "_ebs_nao_encontrado": True,
                     })
     elif origem == "status":
-        if not (body.status or "").strip():
+        st = (body.status or "").strip()
+        if not st:
             raise HTTPException(400, "Selecione o status da base de recebimento.")
+        alvo = st.upper()
         with SessionLocal() as s:
-            rows = s.scalars(
-                select(ReceiptCycle).where(ReceiptCycle.status == body.status.strip())
-            ).all()
-            assets_data = [_asset_dict_from_cycle(c) for c in rows if c.asset]
+            rows = s.scalars(select(ReceiptCycle)).all()
+            for c in rows:
+                if not c.asset:
+                    continue
+                stt = (c.status or "").strip().upper()
+                if stt in ("REMOVIDO", "REMOVIDOS"):
+                    continue  # nunca sobe removidos
+                if alvo != "__TODOS__" and stt != alvo:
+                    continue
+                assets_data.append(_asset_dict_from_cycle(c))
     else:  # selecao
         if not body.cycle_ids:
             raise HTTPException(400, "Selecione ao menos um ativo.")
@@ -1079,6 +1161,63 @@ def _hardware_existentes(session, itens: list) -> tuple[set, set]:
             if s:
                 ser_ok.add(s)
     return tags_ok, ser_ok
+
+
+def _hardware_records(session, itens: list) -> list[dict]:
+    """Busca no alm_hardware os registros que casam por asset_tag/serial de uma
+    lista de itens. Retorna dicts com sys_id, asset_tag, serial_number."""
+    def _chunks(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
+    def _plain(v):
+        return v.get("value", "") if isinstance(v, dict) else (v or "")
+
+    out = []
+    for grupo in _chunks(itens, 50):
+        tags = [str(getattr(i, "asset_tag", "") or "").strip() for i in grupo]
+        sers = [str(getattr(i, "serial_number", "") or "").strip() for i in grupo]
+        tags = [t for t in tags if t]
+        sers = [s for s in sers if s]
+        partes = []
+        if tags:
+            partes.append("asset_tagIN" + ",".join(tags))
+        if sers:
+            partes.append("serial_numberIN" + ",".join(sers))
+        if not partes:
+            continue
+        q = "^OR".join(partes) if len(partes) == 2 else partes[0]
+        recs = _sn_query(session, HARDWARE_TABLE, q,
+                         "sys_id,asset_tag,serial_number", limit=200, display_value=False)
+        for r in recs:
+            out.append({
+                "sys_id": _plain(r.get("sys_id")),
+                "asset_tag": str(_plain(r.get("asset_tag"))).strip(),
+                "serial_number": str(_plain(r.get("serial_number"))).strip(),
+            })
+    return out
+
+
+@router.get("/resolve-check")
+def resolve_check(req: Request, field: str, value: str):
+    """Diagnóstico: mostra como o SN resolve um valor de referência
+    (model, model_category, stockroom, company). Ajuda a achar por que um
+    modelo existente não é encontrado. Somente para conferência."""
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+    table = REFERENCE_TABLE_MAP.get(field)
+    if not table:
+        raise HTTPException(400, "field inválido. Use model, model_category, stockroom ou company.")
+    campos = _REF_NAME_CANDIDATES.get(field, [REFERENCE_NAME_FIELD.get(field, "name")])
+    tentativas = []
+    for nf in campos:
+        sid = _lookup_ref_field(session, table, nf, value, like=False)
+        tentativas.append({"campo": nf, "operador": "=", "achou": bool(sid), "sys_id": sid})
+    like_sid = _lookup_ref_field(session, table, campos[0], value, like=True)
+    tentativas.append({"campo": campos[0], "operador": "LIKE", "achou": bool(like_sid), "sys_id": like_sid})
+    sid, ok = _resolve_ref(session, field, value)
+    return {"field": field, "value": value, "tabela": table,
+            "tentativas": tentativas, "resolvido": ok, "sys_id": sid}
 
 
 @router.post("/hardware-exists")
