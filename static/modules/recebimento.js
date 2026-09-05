@@ -265,8 +265,7 @@ function renderNovo(c, S) {
                 sessionItems.unshift(manual);
                 drawSession();
                 fb.innerHTML = '<div class="alert alert-warning">Ativo não encontrado no EBS para "' + S.esc(v) +
-                    '". Preencha os dados manualmente para incluir.</div>';
-                openEditModal(manual, 0);
+                    '". Adicionado à sessão como "REQUER ATUAÇÃO" — edite para incluir.</div>';
             } else if (d.duplicatas) {
                 var first = d.resultados[0];
                 first.hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
