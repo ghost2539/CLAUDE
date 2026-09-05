@@ -79,11 +79,18 @@ def _cofre_disponivel() -> bool:
 
 
 def _fernet():
+    """Fernet quando a lib estiver sã; None quando faltar ou estiver quebrada.
+
+    O import de `cryptography` pode falhar com PanicException (binding Rust),
+    que não é `Exception` — daí a captura ampla, preservando só interrupção
+    e término do processo. Sem cripto, o fallback XOR assume."""
     try:
         from cryptography.fernet import Fernet  # type: ignore
         key = base64.urlsafe_b64encode(hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest())
         return Fernet(key)
-    except Exception:  # noqa: BLE001
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:  # noqa: BLE001
         return None
 
 

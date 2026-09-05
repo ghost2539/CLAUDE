@@ -5,6 +5,8 @@
   (ServiceNow, EBS, Correios) — checadas sob demanda.
 - FALHAS: 5xx e exceções de API (via middleware), falhas de integração e
   de automações, tudo em banco isolado e consultável.
+- ACESSOS: tentativas negadas (credencial de rede válida sem liberação e
+  bloqueios 403 dentro do portal), com alerta opcional por e-mail.
 
 Módulo isolado e aditivo: nada aqui altera fluxo existente, e toda escrita é
 tolerante a erro.
@@ -17,7 +19,7 @@ import shutil
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -259,6 +261,149 @@ def limpar(req: Request, dias: int = 90):
     return {"ok": True, "removidos": db.limpar_antigos(dias)}
 
 
+# ── Acessos não autorizados ─────────────────────────────────────────────
+def _classificar(detalhe: str) -> str:
+    """'nao_autorizado' quando a credencial valeu mas faltou liberação."""
+    d = (detalhe or "").lower()
+    if "não liberado" in d or "nao liberado" in d or "não autorizado" in d \
+            or "nao autorizado" in d:
+        return "nao_autorizado"
+    return "credencial"
+
+
+@router.get("/acessos")
+def acessos(req: Request, dias: int = 30, limit: int = 300, tipo: str = ""):
+    """Tentativas de acesso negadas + usuários aguardando liberação.
+
+    `tipo`: vazio (todas), 'nao_autorizado' (credencial válida sem liberação)
+    ou 'credencial' (credencial inválida / erro de autenticação).
+    """
+    require_permission(req, "parametros", "admin")
+
+    from datetime import timedelta
+    from sqlalchemy import select as _sel
+    from database import SessionLocal as _PortalSession, AccessLog, User
+
+    dias = max(1, min(int(dias or 30), 365))
+    corte = datetime.now() - timedelta(days=dias)
+    tentativas: list[dict] = []
+    pendentes: list[dict] = []
+    try:
+        with _PortalSession() as s:
+            rows = s.scalars(
+                _sel(AccessLog)
+                .where(AccessLog.success.is_(False))
+                .where(AccessLog.created_at >= corte)
+                .order_by(AccessLog.id.desc())
+                .limit(2000)
+            ).all()
+            for r in rows:
+                t = _classificar(r.detail)
+                if tipo and t != tipo:
+                    continue
+                tentativas.append({
+                    "id": r.id,
+                    "quando": r.created_at.isoformat() if r.created_at else None,
+                    "login": r.login, "origem": r.auth_source, "ip": r.ip,
+                    "tipo": t, "detalhe": r.detail,
+                })
+                if len(tentativas) >= max(1, min(int(limit or 300), 2000)):
+                    break
+
+            for u in s.scalars(
+                _sel(User).where(User.allowed.is_(False)).order_by(User.id.desc()).limit(200)
+            ).all():
+                pendentes.append({
+                    "login": u.login, "nome": u.display_name,
+                    "origem": u.auth_source, "ativo": bool(u.active),
+                    "criado_em": u.created_at.isoformat() if u.created_at else None,
+                })
+    except Exception as exc:  # noqa: BLE001
+        return {"erro": str(exc)[:300], "tentativas": [], "pendentes": [],
+                "resumo": {"nao_autorizado": 0, "credencial": 0, "bloqueios_403": 0}}
+
+    bloqueios = 0
+    try:
+        bloqueios = len([e for e in db.listar(limit=2000, origem="acesso")
+                         if e.get("status_code") == 403])
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "dias": dias,
+        "tentativas": tentativas,
+        "pendentes": pendentes,
+        "resumo": {
+            "nao_autorizado": len([t for t in tentativas if t["tipo"] == "nao_autorizado"]),
+            "credencial": len([t for t in tentativas if t["tipo"] == "credencial"]),
+            "bloqueios_403": bloqueios,
+        },
+    }
+
+
+# ── Alertas por e-mail ──────────────────────────────────────────────────
+@router.get("/alertas")
+def alertas_get(req: Request):
+    """Configuração do canal de alertas (sem devolver a senha do SMTP)."""
+    require_permission(req, "parametros", "admin")
+    import notificador
+    return notificador.config_publica()
+
+
+@router.put("/alertas")
+def alertas_put(req: Request, body: dict = Body(...)):
+    """Salva a configuração. A senha, quando enviada, é gravada cifrada;
+    string vazia mantém a atual e 'senha_limpar' remove a guardada."""
+    require_permission(req, "parametros", "admin")
+    import notificador
+
+    dados = {
+        "ativo": bool(body.get("ativo")),
+        "host": (body.get("host") or "").strip(),
+        "porta": int(body.get("porta") or 25),
+        "seguranca": (body.get("seguranca") or "none").lower(),
+        "usuario": (body.get("usuario") or "").strip(),
+        "remetente": (body.get("remetente") or "").strip(),
+        "destinatarios": (body.get("destinatarios") or "").strip(),
+        "alerta_acesso_negado": bool(body.get("alerta_acesso_negado")),
+        "alerta_falhas": bool(body.get("alerta_falhas")),
+        "intervalo_min": max(0, int(body.get("intervalo_min") or 0)),
+        "max_por_hora": max(1, int(body.get("max_por_hora") or 20)),
+    }
+    if body.get("senha_limpar"):
+        dados["senha_algo"] = ""
+        dados["senha_cifrada"] = ""
+    elif (body.get("senha") or "").strip():
+        algo, blob = notificador.cifrar(body["senha"].strip())
+        dados["senha_algo"] = algo
+        dados["senha_cifrada"] = blob
+
+    db.salvar_config(dados)
+    return notificador.config_publica()
+
+
+@router.post("/alertas/teste")
+def alertas_teste(req: Request):
+    """Envia um e-mail de teste agora, ignorando o limitador de volume."""
+    sd = require_permission(req, "parametros", "admin")
+    import notificador
+    usuario = sd.get("username", "")
+    quando = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    ok, detalhe = notificador.enviar(
+        "[SPARE] Teste de alerta",
+        f"Teste de envio disparado por {usuario} em {quando}.\n"
+        "Se você recebeu esta mensagem, o canal de alertas está funcionando.",
+        f'<div style="font-family:Segoe UI,Arial,sans-serif">'
+        f"<h2 style='font-size:17px'>Teste de alerta — Portal SPARE</h2>"
+        f"<p>Disparado por <b>{usuario}</b> em {quando}.</p>"
+        f"<p>Se você recebeu esta mensagem, o canal de alertas está funcionando.</p></div>",
+        ignorar_limite=True,
+    )
+    db.registrar(severidade="ok" if ok else "erro", origem="alerta", alvo="e-mail (teste)",
+                 usuario=usuario, detalhe=detalhe)
+    return {"ok": ok, "detalhe": detalhe}
+
+
 # ── Middleware de captura de falhas ─────────────────────────────────────
 class MonitorFalhasMiddleware(BaseHTTPMiddleware):
     """Registra 5xx e exceções não tratadas. Nunca altera a resposta em caso
@@ -280,20 +425,41 @@ class MonitorFalhasMiddleware(BaseHTTPMiddleware):
                              status_code=500, duracao_ms=int((time.time() - t0) * 1000),
                              usuario=self._usuario(request),
                              detalhe=f"{type(exc).__name__}: {exc}")
+                self._alertar(caminho, f"{type(exc).__name__}: {exc}",
+                              self._usuario(request))
             except Exception:  # noqa: BLE001
                 pass
             raise
 
         try:
-            if response.status_code >= 500:
+            if response.status_code == 403:
+                # Usuário autenticado tentando um módulo/ação sem permissão.
+                db.registrar(severidade="alerta", origem="acesso",
+                             alvo=caminho, status_code=403,
+                             duracao_ms=int((time.time() - t0) * 1000),
+                             usuario=self._usuario(request),
+                             detalhe=f"acesso bloqueado em {request.method} {caminho}")
+            elif response.status_code >= 500:
                 db.registrar(severidade="erro", origem="api", alvo=caminho,
                              status_code=response.status_code,
                              duracao_ms=int((time.time() - t0) * 1000),
                              usuario=self._usuario(request),
                              detalhe=f"HTTP {response.status_code} em {request.method} {caminho}")
+                self._alertar(caminho,
+                              f"HTTP {response.status_code} em {request.method} {caminho}",
+                              self._usuario(request))
         except Exception:  # noqa: BLE001
             pass
         return response
+
+    @staticmethod
+    def _alertar(alvo: str, detalhe: str, usuario: str) -> None:
+        """Alerta por e-mail (só sai se o canal estiver ligado para falhas)."""
+        try:
+            from notificador import alertar_falha
+            alertar_falha("api", alvo, detalhe, usuario)
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _usuario(request: Request) -> str:
@@ -310,3 +476,9 @@ def registrar_falha(origem: str, alvo: str, detalhe: str, usuario: str = "",
     """Atalho para outros módulos registrarem uma falha no monitoramento."""
     db.registrar(severidade=severidade, origem=origem, alvo=alvo,
                  usuario=usuario, detalhe=detalhe)
+    if severidade == "erro":
+        try:
+            from notificador import alertar_falha
+            alertar_falha(origem, alvo, detalhe, usuario)
+        except Exception:  # noqa: BLE001
+            pass
