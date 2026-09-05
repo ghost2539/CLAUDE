@@ -1,0 +1,102 @@
+/* Telas de TV — leitura à distância: tipo grande, fundo escuro, sem interação.
+   Paleta validada contra a superfície #111A2B (banda de luminosidade, piso de
+   croma, separação para daltonismo e contraste). */
+:root{
+    --bg:#0A0F1A; --surface:#111A2B; --surface2:#0E1626; --card2:#16223A;
+    --border:#22304A;
+    --ink:#EAF1FB; --ink2:#C4D0E2; --muted:#8A98AE;
+
+    /* Estado — sempre acompanhados de rótulo, nunca só cor */
+    --bom:#22C55E; --atencao:#F59E0B; --grave:#FB923C; --critico:#EF4444;
+
+    /* Categóricas, em ordem fixa (nunca cicladas) */
+    --s1:#3B82F6; --s2:#D97706; --s3:#A855F7;
+    --s4:#16A34A; --s5:#0891B2; --s6:#DB2777;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+    /* Escala fluida: a mesma página serve monitor e TV de 55" */
+    font-size:clamp(15px,1.05vw,22px);
+    -webkit-font-smoothing:antialiased;
+}
+
+/* ── Cabeçalho ─────────────────────────────────────────────── */
+.topo{
+    display:flex; align-items:center; gap:1.2rem; flex-wrap:wrap;
+    padding:1rem 1.6rem; border-bottom:1px solid var(--border);
+    background:var(--surface2);
+}
+.topo h1{margin:0; font-size:1.9em; font-weight:700; letter-spacing:-.01em}
+.topo .sub{color:var(--ink2); font-size:1em}
+.topo .dir{margin-left:auto; display:flex; align-items:center; gap:1.2rem}
+.relogio{font-size:2.1em; font-weight:700; font-variant-numeric:tabular-nums}
+.carimbo{color:var(--muted); font-size:.85em; text-align:right; line-height:1.35}
+
+.pulso{
+    display:inline-block; width:.62em; height:.62em; border-radius:50%;
+    background:var(--bom); margin-right:.45em; vertical-align:middle;
+}
+.pulso.off{background:var(--critico)}
+
+/* ── Corpo ─────────────────────────────────────────────────── */
+main{padding:1.4rem 1.6rem 2.2rem; display:flex; flex-direction:column; gap:1.6rem}
+
+.bloco > h2{
+    margin:0 0 .7rem; font-size:1.05em; font-weight:700; color:var(--ink2);
+    text-transform:uppercase; letter-spacing:.09em;
+}
+
+/* ── KPIs ──────────────────────────────────────────────────── */
+.kpis{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))}
+.kpi{
+    background:var(--surface); border:1px solid var(--border); border-radius:.8rem;
+    padding:1.1rem 1.3rem; border-left:.32rem solid var(--muted);
+}
+.kpi .rotulo{color:var(--ink2); font-size:.95em; font-weight:600}
+.kpi .valor{
+    font-size:3.2em; font-weight:700; line-height:1.05; margin:.15rem 0 0;
+    font-variant-numeric:tabular-nums; letter-spacing:-.02em;
+}
+.kpi .sub{color:var(--muted); font-size:.9em; margin-top:.2rem}
+.kpi .estado{font-size:.85em; font-weight:700; margin-top:.45rem; letter-spacing:.03em}
+
+.kpi.bom{border-left-color:var(--bom)}          .kpi.bom .estado{color:var(--bom)}
+.kpi.atencao{border-left-color:var(--atencao)}  .kpi.atencao .estado{color:var(--atencao)}
+.kpi.grave{border-left-color:var(--grave)}      .kpi.grave .estado{color:var(--grave)}
+.kpi.critico{border-left-color:var(--critico)}  .kpi.critico .estado{color:var(--critico)}
+
+/* ── Barras ────────────────────────────────────────────────── */
+.barras{display:flex; flex-direction:column; gap:.62rem}
+.barra{display:grid; grid-template-columns:minmax(9rem,15%) 1fr auto; align-items:center; gap:.9rem}
+.barra .nome{color:var(--ink2); font-size:1em; font-weight:600;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.barra .trilho{background:var(--surface2); border-radius:.28rem; height:1.5rem; overflow:hidden}
+.barra .marca{height:100%; border-radius:0 .28rem .28rem 0; min-width:.2rem}
+.barra .num{font-size:1.25em; font-weight:700; font-variant-numeric:tabular-nums;
+    min-width:5rem; text-align:right}
+
+/* ── Tabela ────────────────────────────────────────────────── */
+.tabela-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:.7rem}
+table{border-collapse:collapse; width:100%; font-size:1.02em}
+th,td{padding:.62rem .95rem; text-align:left; border-bottom:1px solid var(--border);
+    white-space:nowrap}
+th{background:var(--surface2); color:var(--ink2); font-size:.85em;
+    text-transform:uppercase; letter-spacing:.07em}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:nth-child(even){background:rgba(255,255,255,.022)}
+th.num,td.num{text-align:right}
+td.num{font-variant-numeric:tabular-nums; font-weight:600}
+
+/* ── Estados da página ─────────────────────────────────────── */
+.aviso{
+    background:var(--surface); border:1px dashed var(--border); border-radius:.8rem;
+    padding:2.6rem 2rem; text-align:center; color:var(--ink2);
+}
+.aviso strong{display:block; font-size:1.5em; color:var(--ink); margin-bottom:.5rem}
+.aviso p{margin:.3rem 0; color:var(--muted)}
+.texto{background:var(--surface); border:1px solid var(--border);
+    border-radius:.8rem; padding:1.2rem 1.4rem; color:var(--ink2); line-height:1.6}

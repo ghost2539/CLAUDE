@@ -504,7 +504,10 @@ def indicadores_put_config(payload: dict, req: Request):
     try:
         db.salvar_config(limpo, atualizado_por=sd.get("username", ""))
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(500, "Falha ao salvar config: %s" % exc)
+        # Sem eco da exceção: a mensagem interna pode citar caminho de arquivo
+        # ou string de conexão. O detalhe fica no log do servidor.
+        _log.error("Falha ao salvar config de indicadores: %s", exc, exc_info=True)
+        raise HTTPException(500, "Falha ao salvar a configuração.")
     return {"ok": True, "efetiva": _effective_config()}
 
 

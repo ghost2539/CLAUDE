@@ -107,6 +107,31 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Telas de TV (cockpit e dashboards) — públicas, só agregado ──────
+    # Sem login por decisão de produto: ficam em painel na parede. Os
+    # endpoints não devolvem nada individualizado (ver routers/cockpit.py).
+    try:
+        from routers.cockpit import router as cockpit_router
+        app.include_router(cockpit_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("cockpit").error(
+            "Módulo Cockpit/TV NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Orçamento do SPARE (CAPEX da área) — banco próprio ──────────────
+    # Acesso pelo módulo de permissão "orcamento_spare".
+    try:
+        import db.orcamento_spare as _db_orc_spare
+        _db_orc_spare.init_db()
+        from routers.orcamento_spare import router as orcamento_spare_router
+        app.include_router(orcamento_spare_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("orcamento_spare").error(
+            "Módulo Orçamento SPARE NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
     # Aditivo: só observa. Falha aqui nunca derruba o portal.
     try:

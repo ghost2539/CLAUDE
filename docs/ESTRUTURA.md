@@ -21,12 +21,14 @@ db/                      Camada de dados — um módulo por banco, todos isolado
   automacoes.py          Regras, logs e configuração das automações
   monitoramento.py       Eventos de saúde/falha e configuração de alertas
   orcamento_exec.py      Controle de Orçamento — execução CAPEX
+  orcamento_spare.py     Orçamento do SPARE (CAPEX da área)
 
 routers/                 As APIs do portal — uma por área funcional
   auth · consulta · recebimento · reparos · status · parametros
   identificacao · servicenow · correios · encerramento · rastreio (tv)
   indicadores · automacoes · monitoramento
-  controle_orcamento_exec · public_assets · helpers
+  controle_orcamento_exec · orcamento_spare · public_assets · helpers
+  cockpit (telas de TV)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_service.py         API REST do EBS
@@ -39,7 +41,7 @@ apps/                    Aplicativos com serviço PRÓPRIO, fora do portal
 
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css · modules/*.js
-  controle-orcamento-exec/ · indicadores/ · identificacao/
+  controle-orcamento-exec/ · indicadores/ · identificacao/ · cockpit/
 
 frontend/                Fontes React dos painéis; o build sai em static/
 
@@ -69,6 +71,7 @@ docs/                    Documentação
 | Automações | `data/db/automacoes.db` | `AUTOMACOES_DATABASE_URL` |
 | Monitoramento | `data/db/monitoramento.db` | `MONITORAMENTO_DATABASE_URL` |
 | Controle de Orçamento — CAPEX | `data/db/controle_orcamento_exec.db` | `ORCAMENTO_EXEC_DATABASE_URL` |
+| Orçamento do SPARE | `data/db/orcamento_spare.db` | `ORCAMENTO_SPARE_DATABASE_URL` |
 
 Nenhum módulo isolado escreve no banco do portal, e vice-versa. Toda URL sai
 de `config.py`; nenhum módulo monta caminho por conta própria.
@@ -97,6 +100,7 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/status` | status | `/api/monitor` | monitoramento |
 | `/api/parametros` | parametros | `/api/public-assets` | public_assets |
 | `/api/lotes` `/api/dashboard` | helpers | `/api/controle-orcamento-exec` | controle_orcamento_exec |
+| `/api/orcamento-spare` | orcamento_spare | `/api/cockpit` | cockpit (público) |
 
 As páginas que não são API (`/`, `/indicadores`, `/controle-orcamento`) são
 servidas pelos seus próprios routers, com o HTML em `static/`.
@@ -106,6 +110,21 @@ o módulo `orcamento` liberado para o usuário (`view` para ler, `create` para
 incluir, `edit` para alterar/excluir/sincronizar, `admin` para a trilha de
 acesso). Cada abertura de tela e cada gravação ficam registradas na tabela
 `budget_acessos`, consultável em Parâmetros → Acessos & Alertas.
+
+`/api/orcamento-spare` segue o mesmo desenho, com o módulo `orcamento_spare`.
+
+## Telas de TV (públicas)
+
+`/cockpit-spare`, `/dash-recebimento`, `/dash-centralreparos` e
+`/dash-estoques` ficam em painel na parede e **não pedem login**. Em troca,
+vale a regra inversa das demais telas: os endpoints `/api/cockpit/*` só
+podem devolver **agregado** — nada de nome de colaborador, número de
+chamado, série, imobilizado, loja isolada ou valor por projeto.
+
+As quatro páginas usam o mesmo renderizador (`static/cockpit/cockpit.js`):
+o servidor devolve uma lista de blocos (`kpis`, `barras`, `tabela`, `texto`)
+e a página desenha. Indicador novo = consulta nova no router; a página não
+muda.
 
 ## Regras para não voltar a misturar
 
