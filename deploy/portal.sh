@@ -77,6 +77,8 @@ restart)
     ;;
 
 status)
+    # Lê o ambiente só para saber a porta; sem ele o status mentiria.
+    [ -r "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
     if rodando; then
         pid="$(cat "$PIDFILE")"
         echo "NO AR — PID $pid"
