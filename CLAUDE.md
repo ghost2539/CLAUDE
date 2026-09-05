@@ -13,7 +13,6 @@ normativo.
 | `db/` | um módulo por banco | rota, regra de negócio |
 | `routers/` | as APIs e páginas do portal | driver de banco, cliente externo cru |
 | `integracoes/` | clientes de sistemas externos | rota, banco |
-| `apps/` | aplicativos com systemd próprio | código do portal |
 | `deploy/` | units systemd, instaladores, certificado | script de operação do dia a dia |
 | `scripts/` | operação (backup, migração, carga) | código da aplicação |
 | `static/` | front-end **público** | qualquer coisa que exija login |
@@ -35,6 +34,9 @@ normativo.
 6. **Serviço systemd e instalador** → `deploy/`.
 7. **Módulo novo carrega isolado** em `main.py` (bloco `try/except` próprio):
    falha de um módulo nunca derruba o portal.
+8. **Um processo só, uma porta só (8901).** Sem root no servidor, cada
+   serviço a mais é um problema a mais: tela nova é router do portal, nunca
+   aplicativo com systemd próprio.
 
 ## Segurança
 

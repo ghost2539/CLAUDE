@@ -4,7 +4,7 @@
 (function () {
     'use strict';
 
-    var API = '/consulta-times/api';
+    var API = '/api/consulta-times';
 
     // ── DOM helpers ────────────────────────────────────────────────
     function $(sel) { return document.querySelector(sel); }

@@ -80,7 +80,7 @@ done
 
 # ── 3. Arquivos críticos ────────────────────────────────────────────────────
 echo "-- Arquivos (uploads, dados estáticos)"
-for dir in "data/uploads" "static/data"; do
+for dir in "data/uploads" "data/referencias"; do
   if [ -d "$APP_DIR/$dir" ]; then
     mkdir -p "$STAGE/arquivos/$(dirname "$dir")"
     cp -a "$APP_DIR/$dir" "$STAGE/arquivos/$dir" 2>/dev/null || aviso "falha ao copiar $dir"

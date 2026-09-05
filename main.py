@@ -66,6 +66,7 @@ def create_app() -> FastAPI:
     from routers.identificacao import router as identificacao_router
     from routers.servicenow import router as servicenow_router
     from routers.correios import router as correios_router
+    from routers.consulta_times import router as consulta_times_router
     from routers.encerramento import router as encerramento_router
 
     app.include_router(auth_router)
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(identificacao_router)
     app.include_router(servicenow_router)
     app.include_router(correios_router)
+    app.include_router(consulta_times_router)
     app.include_router(encerramento_router)
 
     # ── Controle de Orçamento — Execução CAPEX em /controle-orcamento ───
