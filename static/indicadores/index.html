@@ -7,190 +7,178 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <style>
         :root{
-            --bg:#0A0F1A; --surface:#121A2A; --surface2:#0F1728;
-            --ink:#E6EDF7; --ink2:#C4D0E2; --muted:#8A98AE; --faint:#5C6B82;
-            --border:#1F2C42; --border2:#2A3A55;
+            --bg:#0A0F1A; --surface:#111A2B; --surface2:#0E1626; --card2:#16223A;
+            --ink:#EAF1FB; --ink2:#C4D0E2; --muted:#8A98AE; --faint:#5C6B82;
+            --border:#1E2C44; --border2:#2A3A55;
             --accent:#F97316; --accent2:#FB923C;
-            --c1:#3B82F6; --c2:#0891B2; --c3:#22C55E; --c4:#A855F7; --c5:#EC4899; --c6:#F59E0B;
-            --good:#22C55E; --warn:#F59E0B; --bad:#EF4444; --grid:#22314A;
+            --c1:#3B82F6; --c2:#06B6D4; --c3:#22C55E; --c4:#A855F7; --c5:#EC4899; --c6:#F59E0B;
+            --good:#22C55E; --warn:#F59E0B; --bad:#EF4444; --grid:#1F2E47;
         }
         *{box-sizing:border-box}
         html,body{margin:0}
         body{background:var(--bg);color:var(--ink);
-            font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px}
-        .app{display:grid;grid-template-columns:216px 1fr;min-height:100vh}
-
-        /* Sidebar */
-        .side{background:var(--surface2);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
-        .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
-        .brand .mk{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent2));font-size:15px;font-weight:800;color:#1A1206}
-        .brand .tt{font-weight:800;letter-spacing:.02em;font-size:14px}
-        .brand .st{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.14em;text-transform:uppercase}
-        .nav button{width:100%;text-align:left;display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:9px;color:var(--muted);
-            background:transparent;border:0;border-left:3px solid transparent;font:inherit;font-size:13.5px;font-weight:500;cursor:pointer}
-        .nav button:hover{background:#182339;color:var(--ink2)}
-        .nav button.active{background:#182742;color:#fff;border-left-color:var(--accent)}
-        .nav .dot{width:8px;height:8px;border-radius:3px;flex:none}
-        .side .foot{margin-top:auto;font-size:11px;color:var(--faint);padding:10px 8px;border-top:1px solid var(--border);line-height:1.6}
-        .side .foot b{color:var(--ink2);font-weight:600}
+            font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+            -webkit-font-smoothing:antialiased;font-size:14px}
+        a{color:inherit}
+        svg{max-width:100%;display:block}
 
         /* Topbar */
-        .top{display:flex;align-items:center;gap:12px;padding:15px 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,15,26,.94);z-index:20;backdrop-filter:blur(6px)}
-        .top h1{font-size:17px;margin:0;font-weight:800;letter-spacing:-.01em}
-        .top .sub{font-size:11px;color:var(--muted);margin-top:2px}
-        .top .spacer{flex:1}
-        .live-pill{display:inline-flex;align-items:center;gap:7px;background:#122032;border:1px solid var(--border2);border-radius:20px;padding:5px 11px;font-size:12px;color:var(--ink2)}
-        .live-pill .live{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(34,197,94,.5);animation:pulse 2s infinite}
-        .live-pill.paused .live{background:var(--faint);animation:none}
+        .top{display:flex;align-items:center;gap:14px;padding:14px 22px;
+            border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30;
+            background:rgba(10,15,26,.92);backdrop-filter:blur(8px);flex-wrap:wrap}
+        .brand{display:flex;align-items:center;gap:11px}
+        .brand .mk{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+            background:linear-gradient(135deg,var(--accent),var(--accent2));
+            font-size:15px;font-weight:800;color:#1A1206}
+        .brand h1{font-size:16px;margin:0;font-weight:800;letter-spacing:-.01em}
+        .brand .sub{font-size:11px;color:var(--muted);margin-top:1px}
+        .spacer{flex:1 1 40px}
+        .tabs{display:flex;gap:6px;background:var(--surface2);border:1px solid var(--border);
+            border-radius:11px;padding:4px}
+        .tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-weight:600;
+            font-size:13px;padding:8px 15px;border-radius:8px;cursor:pointer;white-space:nowrap}
+        .tabs button.active{background:var(--accent);color:#1A1206}
+        .tabs button:not(.active):hover{background:var(--card2);color:var(--ink2)}
+        .live-pill{display:inline-flex;align-items:center;gap:7px;background:var(--card2);
+            border:1px solid var(--border2);border-radius:20px;padding:5px 11px;font-size:12px;color:var(--ink2)}
+        .live-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--good);
+            box-shadow:0 0 0 0 rgba(34,197,94,.5);animation:pulse 2s infinite}
+        .live-pill.paused .dot{background:var(--faint);animation:none}
         @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 7px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
-        select,button{font:inherit}
-        .sel,.btn{height:36px;border-radius:9px;border:1px solid var(--border2);background:#16223A;color:var(--ink);font-size:13px;padding:0 12px;cursor:pointer}
+        .btn{height:36px;border-radius:9px;border:1px solid var(--border2);background:var(--card2);
+            color:var(--ink);font:inherit;font-size:13px;padding:0 13px;cursor:pointer}
         .btn.primary{background:var(--accent);border-color:var(--accent);color:#1A1206;font-weight:700}
         .btn.primary:hover{background:var(--accent2)}
         .btn.ghost{background:transparent}
         .btn:disabled{opacity:.55;cursor:default}
-        .lbl-sel{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 
-        .wrap{padding:18px 22px 40px;max-width:1500px}
-        .statusbar{font-size:12.5px;color:var(--muted);margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+        .wrap{padding:18px 22px 48px;max-width:1560px;margin:0 auto}
+        .statusbar{font-size:12.5px;color:var(--muted);margin-bottom:16px;display:flex;
+            gap:10px;flex-wrap:wrap;align-items:center}
         .statusbar .err{color:var(--bad)}
-        .chip{display:inline-flex;align-items:center;gap:6px;background:#16223A;border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11.5px;color:var(--ink2)}
+        .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+            border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11.5px;color:var(--ink2)}
 
         /* KPIs */
-        .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-        @media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
-        .kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+        .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:16px}
+        .kpi{background:linear-gradient(160deg,var(--surface),var(--surface2));
+            border:1px solid var(--border);border-radius:15px;padding:16px 18px;position:relative;overflow:hidden}
         .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--k,var(--c1))}
-        .kpi .lbl{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-        .kpi .val{font-size:30px;font-weight:800;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1}
-        .kpi .hint{font-size:11.5px;color:var(--faint);margin-top:7px}
-        .kpi .ring{position:absolute;right:14px;top:14px}
+        .kpi .lbl{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+        .kpi .val{font-size:34px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums;line-height:1}
+        .kpi .hint{font-size:11.5px;color:var(--faint);margin-top:8px}
 
-        /* Cards */
-        .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 20px}
-        .card h2{margin:0 0 2px;font-size:16px;font-weight:700}
-        .card .sub{color:var(--muted);font-size:12.5px;font-weight:400;margin-bottom:14px}
-        .empty{color:var(--faint);font-size:13px;padding:36px 0;text-align:center}
-        svg{max-width:100%;height:auto;display:block}
+        /* Grid de cards */
+        .grid{display:grid;gap:16px;grid-template-columns:repeat(12,1fr)}
+        .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+            padding:16px 18px;min-width:0}
+        .card.col12{grid-column:span 12}
+        .card.col8{grid-column:span 8}
+        .card.col6{grid-column:span 6}
+        .card.col4{grid-column:span 4}
+        @media(max-width:1080px){.card.col8,.card.col6,.card.col4{grid-column:span 12}}
+        .card h2{margin:0;font-size:15px;font-weight:700}
+        .card .csub{color:var(--muted);font-size:12px;margin-top:2px;margin-bottom:12px}
+        .chead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+        .chead .big{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+        .empty{color:var(--faint);font-size:13px;padding:30px 0;text-align:center}
 
-        .tabpane{display:none}
-        .tabpane.active{display:block}
-        .panehead{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
-        .panehead h2{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em}
-        .panehead .sub{color:var(--muted);font-size:13px}
+        /* Ranking horizontal */
+        .rank{display:flex;flex-direction:column;gap:3px}
+        .rrow{display:flex;align-items:center;gap:11px;padding:5px 6px;border-radius:8px}
+        .rrow:hover{background:var(--card2)}
+        .rrow .nm{width:180px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+            color:var(--ink2);font-size:13px}
+        .rrow .track{flex:1;background:#0C1626;border:1px solid var(--border);border-radius:7px;height:20px;overflow:hidden}
+        .rrow .fill{height:100%;border-radius:6px;min-width:3px;transition:width .5s cubic-bezier(.2,.7,.2,1)}
+        .rrow .qt{width:56px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;font-size:13.5px}
+        @media(max-width:560px){.rrow .nm{width:110px}}
 
-        /* Ranking */
-        .rank{display:flex;flex-direction:column;gap:2px}
-        .rrow{display:flex;align-items:center;gap:12px;padding:7px 8px;border-radius:8px}
-        .rrow:hover{background:#16223a}
-        .rrow .rk{width:26px;flex:none;text-align:center;font-weight:800;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
-        .rrow.top1 .rk{color:var(--accent)} .rrow.top2 .rk{color:#CBD5E1} .rrow.top3 .rk{color:#B45309}
-        .rrow .nm{width:200px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2);font-size:13.5px}
-        .rrow .track{flex:1;background:#0C1626;border:1px solid var(--border);border-radius:7px;height:22px;overflow:hidden}
-        .rrow .fill{height:100%;border-radius:6px;min-width:3px}
-        .rrow .qt{width:66px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;font-size:14px}
-        .rrow .pctlabel{width:48px;text-align:right;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-        @media(max-width:640px){.rrow .nm{width:120px}.rrow .pctlabel{display:none}}
+        .view{display:none}
+        .view.active{display:block}
+
+        /* tooltip */
+        #tip{position:fixed;pointer-events:none;z-index:80;background:#0B1424;border:1px solid var(--border2);
+            border-radius:9px;padding:8px 10px;font-size:12px;color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.45);
+            opacity:0;transition:opacity .12s;max-width:240px}
+        #tip .t{color:var(--muted);font-size:11px;margin-bottom:2px}
+        #tip b{font-variant-numeric:tabular-nums}
+        .bar-rect{transition:height .5s cubic-bezier(.2,.7,.2,1),y .5s cubic-bezier(.2,.7,.2,1)}
     </style>
 </head>
 <body>
-<div class="app">
-    <aside class="side">
+    <div class="top">
         <div class="brand">
             <div class="mk">SP</div>
-            <div><div class="tt">SPARE</div><div class="st">Indicadores</div></div>
+            <div><h1>Indicadores SPARE — RMR</h1>
+                <div class="sub">Painel executivo · ServiceNow · fila TI_N2_FLD_RNR_LOJAS_SPARE</div></div>
         </div>
-        <nav class="nav" id="nav">
-            <button data-tab="geral" class="active"><span class="dot" style="background:var(--accent)"></span> Visão Geral</button>
-            <button data-tab="tickets"><span class="dot" style="background:var(--c1)"></span> Tickets Resolvidos</button>
-            <button data-tab="sla"><span class="dot" style="background:var(--c3)"></span> SLA</button>
-            <button data-tab="aberturas"><span class="dot" style="background:var(--accent)"></span> Abertos por mês</button>
-            <button data-tab="lojas"><span class="dot" style="background:var(--c2)"></span> Top Lojas</button>
-            <button data-tab="subs"><span class="dot" style="background:var(--c4)"></span> Subcategorias</button>
-            <button data-tab="tma"><span class="dot" style="background:var(--c6)"></span> TMA</button>
-        </nav>
-        <div class="foot">
-            Fila: <b id="foot-queue">—</b><br>
-            Referência: <b id="foot-ref">—</b><br>
-            Gerado: <b id="foot-gerado">—</b>
+        <div class="tabs" id="tabs">
+            <button data-view="geral" class="active">Visão Geral</button>
+            <button data-view="sled">SLED &amp; Coletores</button>
         </div>
-    </aside>
+        <div class="spacer"></div>
+        <span class="live-pill" id="live-pill" title="Atualiza sozinho a cada 2 minutos">
+            <span class="dot"></span><span id="live-txt">Ao vivo · 2 min</span>
+        </span>
+        <button class="btn ghost" id="btn-auto" title="Ligar/desligar atualização automática">⏸ Pausar</button>
+        <button class="btn primary" id="btn-refresh">↻ Atualizar</button>
+    </div>
 
-    <div>
-        <div class="top">
-            <div>
-                <h1>Indicadores SPARE — RMR</h1>
-                <div class="sub">Painel executivo · atualização automática do ServiceNow</div>
-            </div>
-            <div class="spacer"></div>
-            <span class="live-pill" id="live-pill" title="A tela se atualiza sozinha a cada 2 minutos, puxando do ServiceNow">
-                <span class="live"></span><span id="live-txt">Ao vivo · 2 min</span>
-            </span>
-            <label class="lbl-sel">Mês (referência)
-                <select class="sel" id="ind-ref"></select>
-            </label>
-            <button class="btn ghost" id="ind-auto" title="Ligar/desligar atualização automática">⏸ Pausar</button>
-            <button class="btn primary" id="ind-refresh">↻ Atualizar do ServiceNow</button>
-        </div>
+    <div class="wrap">
+        <div class="statusbar" id="statusbar">Carregando…</div>
 
-        <div class="wrap">
-            <div class="statusbar" id="ind-status">Carregando…</div>
-
-            <!-- Visão Geral -->
-            <section class="tabpane active" data-pane="geral">
-                <div class="kpis" id="ind-kpis"></div>
-            </section>
-
-            <!-- Tickets -->
-            <section class="tabpane" data-pane="tickets">
-                <div class="card">
-                    <div class="panehead"><h2>Tickets Resolvidos</h2><span class="sub">por mês — ano vigente</span></div>
-                    <div id="ch-tickets"></div>
+        <!-- VIEW: Visão Geral -->
+        <section class="view active" data-view="geral">
+            <div class="kpis" id="kpis"></div>
+            <div class="grid">
+                <div class="card col8">
+                    <div class="chead"><div><h2>Tratado por mês</h2><div class="csub">Incidentes resolvidos/encerrados — últimos 12 meses</div></div></div>
+                    <div id="ch-tratado"></div>
                 </div>
-            </section>
-
-            <!-- SLA -->
-            <section class="tabpane" data-pane="sla">
-                <div class="card">
-                    <div class="panehead"><h2>SLA — resolução dentro do prazo</h2><span class="sub">% por mês</span></div>
+                <div class="card col4">
+                    <div class="chead"><div><h2>SLA</h2><div class="csub">% no prazo — 12 meses</div></div><div class="big" id="sla-big" style="color:var(--good)">—</div></div>
                     <div id="ch-sla"></div>
                 </div>
-            </section>
-
-            <!-- Aberturas -->
-            <section class="tabpane" data-pane="aberturas">
-                <div class="card">
-                    <div class="panehead"><h2>Chamados Abertos</h2><span class="sub">por mês de abertura — fila SPARE</span></div>
-                    <div id="ch-aberturas"></div>
+                <div class="card col6">
+                    <div class="chead"><div><h2>Backlog por mês</h2><div class="csub">Abertos (Novo, Em andamento, Em espera)</div></div></div>
+                    <div id="ch-backlog"></div>
                 </div>
-            </section>
-
-            <!-- Top Lojas -->
-            <section class="tabpane" data-pane="lojas">
-                <div class="card">
-                    <div class="panehead"><h2>Top 20 Lojas</h2><span class="sub">volume de incidentes</span></div>
-                    <div class="rank" id="ch-lojas"></div>
+                <div class="card col6">
+                    <div class="chead"><div><h2>Abertos por status</h2><div class="csub">Distribuição atual</div></div></div>
+                    <div class="rank" id="ch-status"></div>
                 </div>
-            </section>
+                <div class="card col8">
+                    <div class="chead"><div><h2>Incidentes por localidade</h2><div class="csub">Abertos — top 25</div></div></div>
+                    <div class="rank" id="ch-local"></div>
+                </div>
+                <div class="card col4">
+                    <div class="chead"><div><h2>Por BU</h2><div class="csub">Abertos por empresa</div></div></div>
+                    <div class="rank" id="ch-bu"></div>
+                </div>
+            </div>
+        </section>
 
-            <!-- Subcategorias -->
-            <section class="tabpane" data-pane="subs">
-                <div class="card">
-                    <div class="panehead"><h2>Top 10 Subcategorias</h2><span class="sub">volume de incidentes</span></div>
+        <!-- VIEW: SLED & Coletores -->
+        <section class="view" data-view="sled">
+            <div class="grid">
+                <div class="card col6">
+                    <div class="chead"><div><h2>Chamados SLED por mês</h2><div class="csub">Subcategoria SLED / RFID sled — 12 meses (exceto cancelados)</div></div><div class="big" id="sled-big">—</div></div>
+                    <div id="ch-sled"></div>
+                </div>
+                <div class="card col6">
+                    <div class="chead"><div><h2>Chamados Coletores por mês</h2><div class="csub">Subcategoria Coletor — 12 meses (exceto cancelados)</div></div><div class="big" id="col-big">—</div></div>
+                    <div id="ch-coletor"></div>
+                </div>
+                <div class="card col12">
+                    <div class="chead"><div><h2>Top subcategorias</h2><div class="csub">Incidentes abertos</div></div></div>
                     <div class="rank" id="ch-subs"></div>
                 </div>
-            </section>
-
-            <!-- TMA -->
-            <section class="tabpane" data-pane="tma">
-                <div class="card">
-                    <div class="panehead"><h2>TMA — Coletor e SLED</h2><span class="sub">tempo médio em dias (abertos e encerrados no mês)</span></div>
-                    <div id="ch-tma"></div>
-                </div>
-            </section>
-        </div>
+            </div>
+        </section>
     </div>
-</div>
-<script src="/static/indicadores/app.js?v=20260904c"></script>
+
+    <div id="tip"></div>
+    <script src="/static/indicadores/app.js?v=20260905"></script>
 </body>
 </html>

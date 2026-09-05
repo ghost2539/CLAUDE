@@ -79,6 +79,31 @@ class Settings:
     # Campo de data usado para alocar a ANS no mês.
     SN_SLA_DATE_FIELD: str = os.getenv("SN_SLA_DATE_FIELD", "task.closed_at")
 
+    # ── Indicadores (incident) — estados e filtros configuráveis ────────
+    # Valores NUMÉRICOS do campo state em incident:
+    #   1 New · 2 In Progress · 3 On Hold · 6 Resolved · 7 Closed · 8 Canceled
+    SN_STATE_ABERTO: str = os.getenv("SN_STATE_ABERTO", "1,2,3")        # New, In Progress, On Hold
+    SN_STATE_ATENDIMENTO: str = os.getenv("SN_STATE_ATENDIMENTO", "1,2")  # New, In Progress
+    SN_STATE_RESOLVIDO: str = os.getenv("SN_STATE_RESOLVIDO", "6,7")     # Resolved, Closed
+    SN_STATE_CANCELADO: str = os.getenv("SN_STATE_CANCELADO", "8")
+    # Data usada para alocar "tratado/resolvido" no mês.
+    SN_RESOLVED_DATE_FIELD: str = os.getenv("SN_RESOLVED_DATE_FIELD", "closed_at")
+    # Data usada para alocar o BACKLOG no mês ("data bouncing"); cai para
+    # opened_at se o campo não existir na instância.
+    SN_BACKLOG_DATE_FIELD: str = os.getenv("SN_BACKLOG_DATE_FIELD", "opened_at")
+    # Campo agrupador de "Abertos por status" (padrão: state; troque por um
+    # campo custom de estágio, ex.: u_status_spare, se houver).
+    SN_STATUS_FIELD: str = os.getenv("SN_STATUS_FIELD", "state")
+    # Campo de BU/empresa (Renner, Youcom, Camicado, Ashua).
+    SN_BU_FIELD: str = os.getenv("SN_BU_FIELD", "company")
+    # Fragmento de query (encoded) para "Priorizados" — campo custom
+    # "It will be prioritized? = Yes". Sem um valor válido, o KPI fica oculto
+    # para não exibir número errado. Ex.: "u_will_be_prioritized=true".
+    SN_PRIORITIZED_QUERY: str = os.getenv("SN_PRIORITIZED_QUERY", "")
+    # Subcategorias (usadas com LIKE, robusto a variações de valor/rotulo).
+    SN_SUB_SLED_LIKE: str = os.getenv("SN_SUB_SLED_LIKE", "sled")
+    SN_SUB_COLETOR_LIKE: str = os.getenv("SN_SUB_COLETOR_LIKE", "coletor")
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio e SEPARADO do /tv2. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
