@@ -18,7 +18,14 @@ def _env(nome: str, default: str = "") -> str:
     scripts; `${...}` seria comido pelo bash e a variável chegaria vazia.
     """
     bruto = os.getenv(nome, default)
-    if not bruto or "@cofre:" not in bruto:
+    # Variável DECLARADA e vazia cai no padrão. No arquivo de ambiente é
+    # natural deixar "CHAVE=" como "não configurei isto", mas os.getenv
+    # devolveria "" e engoliria o padrão — foi assim que os bancos dos
+    # módulos isolados ficaram com URL vazia e não subiram.
+    # (Proxy é exceção deliberada e tem tratamento próprio em _proxy().)
+    if not bruto:
+        return default
+    if "@cofre:" not in bruto:
         return bruto
     try:
         from core.cofre import expandir

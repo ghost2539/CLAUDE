@@ -166,6 +166,69 @@ def cmd_sondar(args) -> int:
     return 0
 
 
+def _refs_do_env(caminho: Path) -> list[tuple[str, str]]:
+    """[(variável, chave no cofre)] citados no arquivo de ambiente."""
+    out: list[tuple[str, str]] = []
+    if not caminho.is_file():
+        return out
+    for linha in caminho.read_text(encoding="utf-8", errors="replace").splitlines():
+        if linha.lstrip().startswith("#") or "=" not in linha:
+            continue
+        nome, _, valor = linha.partition("=")
+        for ref in cofre.referencias(valor):
+            out.append((nome.strip(), ref))
+    return out
+
+
+def cmd_preparar(args) -> int:
+    """Pede, um a um, os segredos que o ambiente cita e o cofre não tem."""
+    envfile = Path(args.env or os.environ.get(
+        "PORTAL_ENVFILE", Path.home() / ".config" / "portal-spare" / "environment"))
+    if not envfile.is_file():
+        print(f"ERRO: arquivo de ambiente não encontrado: {envfile}")
+        return 1
+
+    refs = _refs_do_env(envfile)
+    if not refs:
+        print(f"Nenhum @cofre:NOME@ citado em {envfile}. Nada a preparar.")
+        return 0
+
+    faltando = []
+    vistos = set()
+    for var, chave in refs:
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        if not cofre.obter(chave):
+            faltando.append((var, chave))
+
+    print(f"Ambiente: {envfile}")
+    print(f"  {len(vistos)} segredo(s) citados · {len(faltando)} sem valor\n")
+    if not faltando:
+        print("Tudo preenchido. Pode subir o serviço.")
+        return 0
+
+    for var, chave in faltando:
+        print(f"── {chave}   (usado em {var})")
+        try:
+            valor = getpass.getpass("   valor (vazio = pular): ")
+        except (KeyboardInterrupt, EOFError):
+            print("\n\nInterrompido. O que já foi gravado permanece.")
+            return 1
+        if not valor:
+            print("   pulado\n")
+            continue
+        cofre.definir(chave, valor)
+        print("   gravado\n")
+
+    restam = [c for _v, c in faltando if not cofre.obter(c)]
+    if restam:
+        print(f"Ainda faltam {len(restam)}: {', '.join(restam)}")
+        return 1
+    print("Todos preenchidos. Pode subir o serviço.")
+    return 0
+
+
 def cmd_acesso(_args) -> int:
     """Por que o cofre corporativo não responde, e o que pedir para resolver."""
     a = cofre.acesso_ao_arquivo()
@@ -424,6 +487,10 @@ def main() -> int:
     p = sub.add_parser("conferir", help="Permissões e segredos citados no ambiente.")
     p.add_argument("--env", help="Caminho do environment (padrão: o do usuário).")
     p.set_defaults(fn=cmd_conferir)
+
+    p = sub.add_parser("preparar", help="Pede os segredos que faltam, um a um.")
+    p.add_argument("--env", help="Caminho do environment.")
+    p.set_defaults(fn=cmd_preparar)
 
     sub.add_parser("acesso", help="Por que o cofre corporativo não responde."
                    ).set_defaults(fn=cmd_acesso)
