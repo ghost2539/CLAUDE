@@ -171,6 +171,20 @@ Situação hoje neste servidor:
 | ServiceNow (conta de serviço) | corporativo, nome desconhecido | guardar no cofre local por ora |
 | Banco, admin, Oracle, SMTP | nenhum | cofre local |
 
+> **O arquivo do cofre fica numa partição restrita.** Os serviços alcançam,
+> o usuário comum não — e não há como contornar: um processo rodando como
+> você lê exatamente o que você lê. Rode `scripts/cofre.py acesso` para ver
+> dono, grupo e modo do arquivo, e escolha:
+>
+> 1. **entrar no grupo** que já tem acesso (`usermod -aG <grupo> <usuário>`);
+> 2. **rodar o portal como o usuário de serviço** que tem acesso, via unit
+>    systemd de sistema (`deploy/portal_spare.service`) — precisa de root uma vez;
+> 3. **pedir os valores** ao time do cofre e guardar no cofre local — funciona
+>    hoje, sem depender de permissão nenhuma;
+> 4. se o time expuser um **comando de leitura**, configure
+>    `VCREPORTS_SECRETS_CMD=sudo -n /usr/local/bin/vcreports-secret {chave}`
+>    no `environment` e o portal passa a usá-lo.
+
 > **"O cofre está indisponível, mas os Correios funcionam."** Então o cofre
 > existe — quem não o enxerga é o interpretador. O `vcreports_secrets` fica
 > instalado no Python **do sistema**, e um venv criado sem
