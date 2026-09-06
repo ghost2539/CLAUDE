@@ -123,6 +123,14 @@ try:
     r = f.testar_abertura(reg)
     print(json.dumps({k: v for k, v in r.items() if k != "resultado"}, ensure_ascii=False, indent=2))
     print("Capturas em data/ebs_forms/capturas/ — abra a última e veja o que o Forms mostrou.")
+    mapa = (r.get("resultado") or {}).get("mapa_da_tela") or ""
+    if mapa:
+        # O mapa dos componentes é o que permite escrever o roteiro de teclas
+        # com precisão, em vez de deduzir a tela por captura.
+        destino = "data/ebs_forms/depuracao/mapa_da_tela.txt"
+        open(destino, "w", encoding="utf-8").write(mapa)
+        print("\n== MAPA DA TELA (também em " + destino + ") ==")
+        print(mapa[:12000])
 except f.ErroForms as e:
     print("FALHOU:", e); sys.exit(1)
 EOF
