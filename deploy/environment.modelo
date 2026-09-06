@@ -1,0 +1,159 @@
+# ============================================================================
+#  Portal de Operações SPARE — arquivo de ambiente
+#
+#  Lugar: ~/.config/portal-spare/environment      (permissão 600)
+#  Carregado com `. arquivo` pelos scripts — por isso NÃO use ${...} aqui.
+#
+#  REGRA: nenhuma senha em texto claro neste arquivo.
+#  Onde for segredo, deixe o marcador @cofre:NOME@ e guarde o valor:
+#      python3 scripts/cofre.py definir NOME
+#      python3 scripts/cofre.py conferir     # mostra o que ainda falta
+#
+#  Marcações:
+#    [PREENCHER]  só você tem o valor (vem do servidor antigo)
+#    [COFRE]      o valor vai para o cofre, não para cá
+#    sem marca    já está no valor correto, mexa só se precisar
+# ============================================================================
+
+# ── 1. Servidor ─────────────────────────────────────────────────────────
+HOST=0.0.0.0
+PORT=8901
+WORKERS=1
+SESSION_TTL_MINUTES=480
+UPLOAD_MAX_MB=50
+TIMEOUT_SECONDS=15
+MAX_WORKERS=40
+
+# HTTPS: preencher só quando houver certificado no servidor.
+SSL_CERTFILE=
+SSL_KEYFILE=
+
+# Verificação de certificado nas chamadas de saída. Em `false` enquanto os
+# sistemas internos usarem certificado próprio; ligar quando forem válidos.
+VERIFY_SSL=false
+
+# Proxy corporativo de saída (deixe vazio se não houver).
+HTTPS_PROXY=
+
+# ── 2. Banco principal ──────────────────────────────────────────────────
+# Produção (Postgres) — a senha fica no cofre:
+#   DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@HOST:5432/portal_spare
+# MySQL, se for o caso (exige `pip install pymysql`):
+#   DATABASE_URL=mysql+pymysql://portal:@cofre:DB_SENHA@@HOST:3306/portal_spare
+# Teste sem servidor de banco (o instalador deixa assim):
+#   DATABASE_URL=sqlite:///CAMINHO/data/db/portal.db
+DATABASE_URL=                                    # [PREENCHER]
+
+# Bancos dos módulos isolados: em branco = SQLite em data/db/, que é o certo
+# na maioria dos casos. Só preencha para apontar para outro servidor.
+INDICADORES_DATABASE_URL=
+AUTOMACOES_DATABASE_URL=
+MONITORAMENTO_DATABASE_URL=
+ORCAMENTO_EXEC_DATABASE_URL=
+ORCAMENTO_SPARE_DATABASE_URL=
+
+# ── 3. Sessão e primeiro administrador ──────────────────────────────────
+PORTAL_SESSION_SECRET=@cofre:PORTAL_SESSION_SECRET@          # [COFRE]
+
+# Seu login de rede. Sem isso, ninguém consegue liberar o acesso de ninguém.
+INITIAL_ADMIN_LOGIN=                             # [PREENCHER]
+INITIAL_ADMIN_PASSWORD=
+
+RATE_LIMIT_LOGIN=5/minute
+RATE_LIMIT_API=120/minute
+
+# ── 4. ServiceNow ───────────────────────────────────────────────────────
+SN_API_BASE=https://renner.service-now.com
+SN_PROXY=http://10.115.30.135:8888
+SN_API_PROXY=http://10.115.30.135:8888
+
+# Conta de serviço — usada SÓ para leitura. Escrita vai sempre como o
+# usuário logado, com os cookies da sessão dele.
+SN_API_USER=                                     # [PREENCHER]
+SN_API_PASS=@cofre:SN_API_PASS@                  # [COFRE]
+
+# Estados numéricos do incident:
+#   1 Novo · 2 Em andamento · 3 Em espera · 6 Resolvido · 7 Encerrado · 8 Cancelado
+SN_STATUS_FIELD=state
+SN_STATE_ABERTO=1,2,3
+SN_STATE_ATENDIMENTO=1,2
+SN_STATE_RESOLVIDO=6,7
+SN_STATE_CANCELADO=8
+
+# Indicadores
+SN_INDIC_QUEUE=TI_N2_FLD_RNR_LOJAS_SPARE
+SN_INDIC_REFRESH_MIN=2
+SN_BACKLOG_DATE_FIELD=u_data_bouncing
+SN_TMA_START_FIELD=u_data_bouncing
+SN_RESOLVED_DATE_FIELD=closed_at
+SN_PRIORITIZED_QUERY=u_prioritized=true
+SN_BU_FIELD=company
+SN_SUB_COLETOR_LIKE=coletor
+SN_SUB_SLED_LIKE=sled
+
+# SLA
+SN_SLA_NAME_LIKE=SPARE
+SN_SLA_STAGE=completed
+SN_SLA_DATE_FIELD=task.closed_at
+SN_SLA_EXTRA=
+
+# Conversão de empresa do EBS para o nome no ServiceNow.
+# Formato: DO_EBS=NO_SN, separado por vírgula.
+SN_COMPANY_MAP=CAMIC_FIS=Camicado
+
+# ── 5. EBS — API REST ───────────────────────────────────────────────────
+EBS_LOGIN_URL=                                   # [PREENCHER]
+EBS_SEARCH_URL=                                  # [PREENCHER]
+
+# ── 6. EBS — base Oracle (leitura direta) ───────────────────────────────
+ORACLE_EBS_DSN=                                  # [PREENCHER]
+ORACLE_EBS_USER=                                 # [PREENCHER]
+ORACLE_EBS_PASS=@cofre:ORACLE_EBS_PASS@          # [COFRE]
+# Instant Client; vazio usa o modo thin (sem biblioteca nativa).
+ORACLE_CLIENT_LIB_DIR=
+
+# ── 7. EBS — API de CAPEX (/controle-orcamento) ─────────────────────────
+EBS_CAPEX_URL=https://suporte.lojasrenner.com.br/ebs/api/capex/
+EBS_CAPEX_TIMEOUT=30
+EBS_CAPEX_VERIFY=false
+EBS_CAPEX_PROXY=
+# Autenticação: usuário/senha OU token. Use um dos dois.
+EBS_CAPEX_USER=
+EBS_CAPEX_PASS=@cofre:EBS_CAPEX_PASS@            # [COFRE]
+EBS_CAPEX_TOKEN=@cofre:EBS_CAPEX_TOKEN@          # [COFRE]
+EBS_CAPEX_TOKEN_SCHEME=Bearer
+EBS_CAPEX_AUTH_HEADER=Authorization
+# Câmbio para projetos fora do Brasil. 0 = busca na API abaixo.
+EBS_CAPEX_ARS_BRL=0
+EBS_CAPEX_UYU_BRL=0
+EBS_CAPEX_FX_URL=https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL
+EBS_CAPEX_FX_PROXY=
+
+# ── 8. Correios (rastreio) ──────────────────────────────────────────────
+CORREIOS_USUARIO=                                # [PREENCHER] CNPJ do contrato
+CORREIOS_CHAVE=@cofre:CORREIOS_CHAVE@            # [COFRE]
+CORREIOS_CARTOES=                                # [PREENCHER] separados por vírgula
+CORREIOS_DR=64
+CORREIOS_CONTRATO=
+
+# ── 9. Automações (encerramento/encaminhamento) ─────────────────────────
+# Horas locais em que a rotina roda sozinha.
+AUTOMACOES_HORARIOS=7,12,16
+# Credencial que a rotina usa para encerrar como usuário de verdade.
+# Liga/desliga e regras ficam em Parâmetros → Automações.
+SN_AUTOMACAO_USUARIO=                            # [PREENCHER]
+SN_AUTOMACAO_SENHA=@cofre:SN_AUTOMACAO_SENHA@    # [COFRE]
+
+# ── 10. Alertas por e-mail ──────────────────────────────────────────────
+# Só os padrões: a configuração efetiva fica em Parâmetros → Acessos & Alertas.
+SMTP_HOST=                                       # [PREENCHER] relay da Renner
+SMTP_PORT=25
+SMTP_SEGURANCA=none
+SMTP_USUARIO=
+SMTP_SENHA=@cofre:SMTP_SENHA@                    # [COFRE]
+SMTP_REMETENTE=portal-spare@lojasrenner.com.br
+ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
+
+# ── 11. Aplicação ───────────────────────────────────────────────────────
+DEFAULT_VALOR_HORA=150.00
+BACKUP_RETENTION_DAYS=30
