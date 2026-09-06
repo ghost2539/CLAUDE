@@ -87,7 +87,7 @@ public class LancadorForms {
         proto = new PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8");
         // Tudo que o Forms imprimir vai para stderr; o stdout fica só para o protocolo.
         System.setOut(System.err);
-        bloquearExit();
+        vigiarExit();
 
         Path jnlp = Paths.get(args[0]);
         Path cache = Paths.get(args[1]);
@@ -121,6 +121,9 @@ public class LancadorForms {
         janela.setLocation(0, 0);
         applet.setPreferredSize(new Dimension(larg, alt));
         janela.setVisible(true);
+        robo = new Robot();
+        robo.setAutoDelay(30);
+        robo.setAutoWaitForIdle(false);
         applet.init();
         // start() do cliente Forms pode não voltar (fica no laço da sessão);
         // roda à parte para o protocolo não ficar refém dele. Se falhar, a
@@ -150,11 +153,9 @@ public class LancadorForms {
                             + " -> " + ev.getSource().getClass().getName());
             }, java.awt.AWTEvent.KEY_EVENT_MASK);
         }
-        robo = new Robot();
         // Sem esperar a fila de eventos entre pressionar e soltar: com o
-        // auto-repeat do X, um Ctrl+V "segurado" colava dezenas de vezes.
-        robo.setAutoDelay(30);
-        robo.setAutoWaitForIdle(false);
+        // auto-repeat do X, um Ctrl+V "segurado" colava dezenas de vezes
+        // (por isso o Robot nasce com autoDelay 30 e sem waitForIdle).
         focar();
         responder("OK pronto classe=" + classe);
 
@@ -401,29 +402,48 @@ public class LancadorForms {
     private static volatile boolean saidaAutorizada = false;
 
     // O applet do EBS e o cliente Forms chamam System.exit() por conta
-    // própria (fim de sessão, janela fechada). Numa JVM que é nossa, isso
-    // derruba o RPA sem deixar rastro. Um SecurityManager (ainda existe no
-    // JDK 21 com -Djava.security.manager=allow) intercepta: registra quem
-    // pediu, com a pilha, e só deixa sair quando o lançador autoriza.
-    @SuppressWarnings("removal")
-    private static void bloquearExit() {
-        try {
-            System.setSecurityManager(new SecurityManager() {
-                @Override public void checkPermission(java.security.Permission p) { }
-                @Override public void checkPermission(java.security.Permission p, Object ctx) { }
-                @Override public void checkExit(int status) {
-                    if (saidaAutorizada) return;
-                    StringBuilder sb = new StringBuilder();
-                    for (StackTraceElement el : Thread.currentThread().getStackTrace()) sb.append("\n    at ").append(el);
-                    System.err.println("[LancadorForms] System.exit(" + status + ") pedido pela thread '"
-                            + Thread.currentThread().getName() + "' — BLOQUEADO" + sb);
-                    responder("EVENTO exit-bloqueado " + status + " thread=" + Thread.currentThread().getName());
-                    throw new SecurityException("saída da JVM bloqueada pelo lançador (status " + status + ")");
-                }
-            });
-        } catch (UnsupportedOperationException e) {
-            System.err.println("[LancadorForms] sem SecurityManager (falta -Djava.security.manager=allow); System.exit do applet não será interceptado");
-        }
+    // própria (fim de sessão, janela fechada) e a JVM some sem rastro. Um
+    // SecurityManager não serve: o Forms 10g, ao vê-lo, chama
+    // checkTopLevelWindow, que o Java 21 não tem mais. O caminho que resta é
+    // o shutdown hook: roda antes da morte, e nessa hora quem pediu a saída
+    // ainda está parado dentro de Runtime.exit — o dump de threads o entrega.
+    // De quebra, fotografa a tela (se o Forms mostrou um erro, está na foto)
+    // e, com -Dforms.segurar.exit=true, não devolve: a JVM fica viva para o
+    // roteiro terminar de olhar.
+    private static void vigiarExit() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (saidaAutorizada) return;
+            String culpado = "?";
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
+                StackTraceElement[] st = e.getValue();
+                boolean saindo = false;
+                for (StackTraceElement el : st)
+                    if (el.getClassName().equals("java.lang.Shutdown") || el.getClassName().equals("java.lang.Runtime") && el.getMethodName().equals("exit"))
+                        saindo = true;
+                if (!saindo) continue;
+                culpado = e.getKey().getName();
+                sb.append("\n  thread '").append(culpado).append("':");
+                for (StackTraceElement el : st) sb.append("\n    at ").append(el);
+            }
+            System.err.println("[LancadorForms] JVM encerrando por System.exit — pedido por: " + culpado + sb);
+            StringBuilder jan = new StringBuilder();
+            for (Window w : Window.getWindows()) jan.append(" [").append(w.getClass().getSimpleName()).append(':').append(tituloDe(w)).append(w.isShowing() ? "" : " oculta").append(']');
+            System.err.println("[LancadorForms] janelas no momento:" + jan);
+            String foto = System.getProperty("forms.captura.saida", "");
+            if (!foto.isEmpty() && robo != null) {
+                try {
+                    BufferedImage img = robo.createScreenCapture(new Rectangle(Toolkit.getDefaultToolkit().getScreenSize()));
+                    ImageIO.write(img, "png", new File(foto));
+                    System.err.println("[LancadorForms] captura no encerramento: " + foto);
+                } catch (Throwable t) { System.err.println("[LancadorForms] sem captura no encerramento: " + t); }
+            }
+            responder("EVENTO exit-pedido thread=" + culpado);
+            if (Boolean.getBoolean("forms.segurar.exit")) {
+                System.err.println("[LancadorForms] segurando a saída (forms.segurar.exit=true)");
+                try { while (!saidaAutorizada) Thread.sleep(500); } catch (InterruptedException ie) { /* liberado */ }
+            }
+        }, "vigia-exit"));
     }
 
     private static void encerrar() {
