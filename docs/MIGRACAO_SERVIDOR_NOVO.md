@@ -24,8 +24,8 @@ env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
     git pull --ff-only origin main
 ```
 
-> O `env -u ...` é necessário porque o proxy corporativo quebra o `git` nesta
-> rede. Vale para todo comando git no servidor.
+> No servidor **antigo** o proxy corporativo quebra o `git`, por isso o
+> `env -u ...`. No servidor **novo** isso não é preciso: a saída é direta.
 
 ### 1.2 Gerar o pacote com TUDO
 
@@ -94,19 +94,24 @@ Faltando algum, é o único momento em que você precisa de alguém com root.
 
 ### 2.2 Trazer o código do GitHub
 
+O caminho no servidor novo é **`/var/www/vcreports/portal-spare`**.
+
 ```bash
-cd ~
-env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
-    git clone https://github.com/ghost2539/CLAUDE.git portal-spare
-cd ~/portal-spare
+sudo mkdir -p /var/www/vcreports && sudo chown $USER /var/www/vcreports   # se ainda não existir
+cd /var/www/vcreports
+git clone https://github.com/ghost2539/CLAUDE.git portal-spare
+cd /var/www/vcreports/portal-spare
 ```
+
+> Este servidor sai direto para a rede — **não precisa de proxy**. Se o
+> `git` reclamar de proxy herdado do ambiente, limpe só para o comando:
+> `env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY git clone ...`
 
 Repositório privado pede autenticação. Use um **token** (Personal Access
 Token do GitHub, escopo `repo`):
 
 ```bash
-env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
-    git clone https://SEU_USUARIO:SEU_TOKEN@github.com/ghost2539/CLAUDE.git portal-spare
+git clone https://SEU_USUARIO:SEU_TOKEN@github.com/ghost2539/CLAUDE.git portal-spare
 ```
 
 > O token fica gravado em `.git/config`. Depois do clone, tire-o de lá:
@@ -181,7 +186,7 @@ E o banco principal — escolha um dos dois:
 
 ```ini
 # (A) TESTE rápido, sem servidor de banco: já vem assim
-DATABASE_URL=sqlite:////home/SEU_USUARIO/portal-spare/data/db/portal.db
+DATABASE_URL=sqlite:////var/www/vcreports/portal-spare/data/db/portal.db
 
 # (B) PRODUÇÃO, com Postgres
 DATABASE_URL=postgresql+psycopg2://usuario:senha@host:5432/portal_spare
@@ -246,7 +251,7 @@ deploy/portal.sh logs
 ### Atualizar depois de um commit novo
 
 ```bash
-cd ~/portal-spare
+cd /var/www/vcreports/portal-spare
 deploy/portal.sh atualizar
 ```
 
@@ -284,7 +289,7 @@ crontab -e
 ```
 
 ```cron
-0 2 * * * cd $HOME/portal-spare && PORTAL_APP_DIR=$HOME/portal-spare \
+0 2 * * * cd /var/www/vcreports/portal-spare && PORTAL_APP_DIR=/var/www/vcreports/portal-spare \
   PORTAL_ENVFILE=$HOME/.config/portal-spare/environment \
   bash scripts/backup.sh >> $HOME/backup-portal.log 2>&1
 ```

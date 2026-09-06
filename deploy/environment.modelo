@@ -15,6 +15,11 @@
 #    sem marca    já está no valor correto, mexa só se precisar
 # ============================================================================
 
+# ── 0. Cofre ────────────────────────────────────────────────────────────
+# Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
+# Só preencha se o portal rodar com um usuário sem diretório pessoal.
+# PORTAL_COFRE_DIR=/var/www/vcreports/.cofre-portal-spare
+
 # ── 1. Servidor ─────────────────────────────────────────────────────────
 HOST=0.0.0.0
 PORT=8901
@@ -32,7 +37,8 @@ SSL_KEYFILE=
 # sistemas internos usarem certificado próprio; ligar quando forem válidos.
 VERIFY_SSL=false
 
-# Proxy corporativo de saída (deixe vazio se não houver).
+# Proxy de saída. O servidor novo tem acesso direto à rede — deixe VAZIO.
+# Só preencha se a saída passar a exigir proxy.
 HTTPS_PROXY=
 
 # ── 2. Banco principal ──────────────────────────────────────────────────
@@ -56,20 +62,21 @@ ORCAMENTO_SPARE_DATABASE_URL=
 PORTAL_SESSION_SECRET=@cofre:PORTAL_SESSION_SECRET@          # [COFRE]
 
 # Seu login de rede. Sem isso, ninguém consegue liberar o acesso de ninguém.
-INITIAL_ADMIN_LOGIN=                             # [PREENCHER]
-INITIAL_ADMIN_PASSWORD=
+INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@              # [COFRE]
+INITIAL_ADMIN_PASSWORD=@cofre:INITIAL_ADMIN_PASSWORD@        # [COFRE]
 
 RATE_LIMIT_LOGIN=5/minute
 RATE_LIMIT_API=120/minute
 
 # ── 4. ServiceNow ───────────────────────────────────────────────────────
 SN_API_BASE=https://renner.service-now.com
-SN_PROXY=http://10.115.30.135:8888
-SN_API_PROXY=http://10.115.30.135:8888
+# Sem proxy neste servidor: a saída é direta.
+SN_PROXY=
+SN_API_PROXY=
 
 # Conta de serviço — usada SÓ para leitura. Escrita vai sempre como o
 # usuário logado, com os cookies da sessão dele.
-SN_API_USER=                                     # [PREENCHER]
+SN_API_USER=@cofre:SN_API_USER@                  # [COFRE]
 SN_API_PASS=@cofre:SN_API_PASS@                  # [COFRE]
 
 # Estados numéricos do incident:
@@ -107,7 +114,7 @@ EBS_SEARCH_URL=                                  # [PREENCHER]
 
 # ── 6. EBS — base Oracle (leitura direta) ───────────────────────────────
 ORACLE_EBS_DSN=                                  # [PREENCHER]
-ORACLE_EBS_USER=                                 # [PREENCHER]
+ORACLE_EBS_USER=@cofre:ORACLE_EBS_USER@          # [COFRE]
 ORACLE_EBS_PASS=@cofre:ORACLE_EBS_PASS@          # [COFRE]
 # Instant Client; vazio usa o modo thin (sem biblioteca nativa).
 ORACLE_CLIENT_LIB_DIR=
@@ -130,9 +137,15 @@ EBS_CAPEX_FX_URL=https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL
 EBS_CAPEX_FX_PROXY=
 
 # ── 8. Correios (rastreio) ──────────────────────────────────────────────
-CORREIOS_USUARIO=                                # [PREENCHER] CNPJ do contrato
-CORREIOS_CHAVE=@cofre:CORREIOS_CHAVE@            # [COFRE]
-CORREIOS_CARTOES=                                # [PREENCHER] separados por vírgula
+# Vêm do COFRE CORPORATIVO, com estas chaves exatas:
+#     vcreports_secret('CORREIOS_USUARIO')
+#     vcreports_secret('CORREIOS_CHAVE')
+#     vcreports_secret('CORREIOS_CARTOES').split(',')
+# Não precisa declarar nada aqui: o portal consulta o cofre direto. As linhas
+# abaixo ficam só como documentação do que ele procura.
+# CORREIOS_USUARIO   -> cofre
+# CORREIOS_CHAVE     -> cofre
+# CORREIOS_CARTOES   -> cofre (lista separada por vírgula)
 CORREIOS_DR=64
 CORREIOS_CONTRATO=
 
@@ -141,7 +154,7 @@ CORREIOS_CONTRATO=
 AUTOMACOES_HORARIOS=7,12,16
 # Credencial que a rotina usa para encerrar como usuário de verdade.
 # Liga/desliga e regras ficam em Parâmetros → Automações.
-SN_AUTOMACAO_USUARIO=                            # [PREENCHER]
+SN_AUTOMACAO_USUARIO=@cofre:SN_AUTOMACAO_USUARIO@   # [COFRE]
 SN_AUTOMACAO_SENHA=@cofre:SN_AUTOMACAO_SENHA@    # [COFRE]
 
 # ── 10. Alertas por e-mail ──────────────────────────────────────────────

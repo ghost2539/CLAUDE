@@ -37,6 +37,21 @@ def _env_obrigatorio(nome: str) -> str:
     return v
 
 
+def _proxy(*nomes: str) -> str:
+    """Primeiro proxy definido na ordem dada.
+
+    Uma variável DECLARADA e vazia é uma decisão ("aqui não tem proxy") e
+    encerra a busca; só a ausência total continua procurando. Sem isso, um
+    `https_proxy` exportado no perfil do servidor entraria no portal sem
+    ninguém ter configurado — e toda chamada de API iria para um endereço
+    que talvez nem exista no destino.
+    """
+    for nome in nomes:
+        if nome in os.environ:
+            return _env(nome, "").strip()
+    return ""
+
+
 def _segredo(nome: str, default: str = "") -> str:
     """Valor que é segredo: cofre corporativo, cofre local, ambiente."""
     try:
@@ -110,17 +125,13 @@ class Settings:
     SN_API_BASE: str = _env("SN_API_BASE", "https://renner.service-now.com")
     SN_API_USER: str = _env("SN_API_USER", "")
     SN_API_PASS: str = _env("SN_API_PASS", "")
-    # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
-    # https_proxy do ambiente se não houver um específico.
-    # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
-    # (SN_PROXY) — que é o que funciona neste servidor. Cai para https_proxy
-    # do ambiente se nada específico for definido.
-    SN_API_PROXY: str = (
-        _env("SN_API_PROXY", "")
-        or _env("SN_PROXY", "")
-        or _env("https_proxy", "")
-        or _env("HTTPS_PROXY", "")
-    )
+    # Proxy de saída para o ServiceNow (senha do @ escapada como %40).
+    #
+    # Declarar SN_PROXY= ou SN_API_PROXY= VAZIO no environment significa
+    # "sem proxy" e encerra a busca. Só quando a variável não existe é que
+    # o https_proxy do sistema é aproveitado — assim um proxy no perfil do
+    # servidor não entra no portal sem alguém ter pedido.
+    SN_API_PROXY: str = _proxy("SN_API_PROXY", "SN_PROXY", "https_proxy", "HTTPS_PROXY")
     # Fila / grupo de atribuição dos indicadores.
     SN_INDIC_QUEUE: str = _env("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
     # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome
