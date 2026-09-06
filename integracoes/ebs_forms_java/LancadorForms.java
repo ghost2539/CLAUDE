@@ -470,6 +470,11 @@ public class LancadorForms {
         public URL getDocumentBase() { try { return new URL(codebase); } catch (Exception e) { return null; } }
         public URL getCodeBase() { try { return new URL(codebase); } catch (Exception e) { return null; } }
         public String getParameter(String name) {
+            // -Dforms.param.NOME=valor sobrepõe o que veio no jnlp (ajuste de
+            // campo sem recompilar; chega por EBS_FORMS_PARAMS no environment).
+            for (String chave : System.getProperties().stringPropertyNames())
+                if (chave.startsWith("forms.param.") && chave.substring(12).equalsIgnoreCase(name))
+                    return System.getProperty(chave);
             for (Map.Entry<String, String> e : params.entrySet())
                 if (e.getKey().equalsIgnoreCase(name)) return e.getValue();
             return null;
