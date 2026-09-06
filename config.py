@@ -223,6 +223,7 @@ class Settings:
     EBS_FORMS_VNC: str = os.getenv('EBS_FORMS_VNC', 'nao')             # sim = acompanhar a tela por VNC (localhost)
     EBS_FORMS_VNC_PORTA: str = os.getenv('EBS_FORMS_VNC_PORTA', '5900')
     EBS_FORMS_CAPTURA: str = os.getenv('EBS_FORMS_CAPTURA', 'java')  # java = desenha as janelas; robot = captura do X
+    EBS_FORMS_DETALHE: str = os.getenv('EBS_FORMS_DETALHE', 'nao')  # sim = devolve também a tela inteira
     # Nomes dos componentes da tela Localizar Ativos (do mapa em data/ebs_forms/depuracao)
     EBS_FORMS_CAMPO_CRITERIO: str = os.getenv('EBS_FORMS_CAMPO_CRITERIO', 'VTextField200')
     EBS_FORMS_CAMPO_LIVRO: str = os.getenv('EBS_FORMS_CAMPO_LIVRO', 'VTextField209')
