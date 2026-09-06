@@ -430,13 +430,22 @@ public class LancadorForms {
             public boolean showDocument(URL url) { responder("EVENTO documento " + url); return true; }
             public boolean isWebBrowserSupported() { return true; }
         };
+        // O FndFormsEngine do EBS se registra como instância única; cada JVM
+        // nossa é uma instância só, então basta aceitar o registro.
+        final javax.jnlp.SingleInstanceService unica = new javax.jnlp.SingleInstanceService() {
+            public void addSingleInstanceListener(javax.jnlp.SingleInstanceListener l) { }
+            public void removeSingleInstanceListener(javax.jnlp.SingleInstanceListener l) { }
+        };
         javax.jnlp.ServiceManager.setServiceManagerStub(new javax.jnlp.ServiceManagerStub() {
             public Object lookup(String name) throws javax.jnlp.UnavailableServiceException {
                 if ("javax.jnlp.BasicService".equals(name)) return basico;
+                if ("javax.jnlp.SingleInstanceService".equals(name)) return unica;
                 responder("EVENTO servico-jnlp-indisponivel " + name);
                 throw new javax.jnlp.UnavailableServiceException(name);
             }
-            public String[] getServiceNames() { return new String[] {"javax.jnlp.BasicService"}; }
+            public String[] getServiceNames() {
+                return new String[] {"javax.jnlp.BasicService", "javax.jnlp.SingleInstanceService"};
+            }
         });
     }
 
