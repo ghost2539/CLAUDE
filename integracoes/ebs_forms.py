@@ -518,7 +518,7 @@ class Cliente:
         for pacote in ("java.lang", "java.lang.reflect", "java.net", "java.util", "java.io", "sun.net.www.protocol.http"):
             abrir += ["--add-opens", f"java.base/{pacote}=ALL-UNNAMED"]
         cmd = [
-            java, *abrir, "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
+            java, *abrir, "-Djava.security.manager=allow", "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
