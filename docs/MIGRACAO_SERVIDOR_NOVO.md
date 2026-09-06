@@ -171,6 +171,25 @@ Situação hoje neste servidor:
 | ServiceNow (conta de serviço) | corporativo, nome desconhecido | guardar no cofre local por ora |
 | Banco, admin, Oracle, SMTP | nenhum | cofre local |
 
+> **"O cofre está indisponível, mas os Correios funcionam."** Então o cofre
+> existe — quem não o enxerga é o interpretador. O `vcreports_secrets` fica
+> instalado no Python **do sistema**, e um venv criado sem
+> `--system-site-packages` não alcança pacote do sistema. Confirme:
+>
+> ```bash
+> python3 -c 'import vcreports_secrets; print(vcreports_secrets.__file__)'   # sistema
+> venv/bin/python -c 'import vcreports_secrets'                              # venv
+> ```
+>
+> Se o primeiro acha e o segundo não, é isso. Corrija recriando o venv:
+>
+> ```bash
+> rm -rf venv && bash deploy/instalar_usuario.sh
+> ```
+>
+> Ou, sem recriar, aponte o diretório no `environment`:
+> `VCREPORTS_SECRETS_PATH=/caminho/onde/esta/o/modulo`
+
 Para descobrir o nome da chave do ServiceNow no corporativo — só leitura, e
 o valor nunca aparece:
 

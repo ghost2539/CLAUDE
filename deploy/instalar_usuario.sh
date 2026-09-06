@@ -27,10 +27,17 @@ echo "-- Python $VER"
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' || {
     echo "ERRO: é necessário Python 3.10 ou superior (encontrado $VER)."; exit 1; }
 
+# --system-site-packages: o cofre corporativo (vcreports_secrets) fica
+# instalado no Python do SISTEMA. Sem esta opção o venv não o enxerga e as
+# credenciais dos Correios somem, mesmo estando no cofre.
 if [ ! -x "$APP_DIR/venv/bin/python" ]; then
-    echo "-- Criando o venv"
-    python3 -m venv "$APP_DIR/venv" || {
+    echo "-- Criando o venv (enxergando os pacotes do sistema)"
+    python3 -m venv --system-site-packages "$APP_DIR/venv" || {
         echo "ERRO: falha ao criar o venv. Falta o pacote python3-venv?"; exit 1; }
+elif ! grep -q "include-system-site-packages = true" "$APP_DIR/venv/pyvenv.cfg" 2>/dev/null; then
+    echo "-- Ajustando o venv para enxergar os pacotes do sistema"
+    sed -i "s|include-system-site-packages = false|include-system-site-packages = true|" \
+        "$APP_DIR/venv/pyvenv.cfg" 2>/dev/null || true
 fi
 "$APP_DIR/venv/bin/pip" install -q --upgrade pip
 echo "-- Instalando dependências (pode demorar)"
@@ -99,6 +106,18 @@ def anda(rotas, achadas):
 print(f"   OK — {len(anda(main.app.routes, set()))} rotas registradas.")
 PY
 [ $? -eq 0 ] || { echo "ERRO: a aplicação não subiu. Verifique o log acima."; exit 1; }
+
+# ── 5. Cofre corporativo ────────────────────────────────────────────────
+echo "-- Cofre corporativo (vcreports_secrets)"
+if "$APP_DIR/venv/bin/python" -c "import vcreports_secrets" 2>/dev/null; then
+    echo "   disponível — Correios e demais chaves saem dele"
+elif python3 -c "import vcreports_secrets" 2>/dev/null; then
+    echo "   ATENÇÃO: o Python do sistema enxerga o cofre, mas o venv NÃO."
+    echo "   Corrija com:"
+    echo "     rm -rf $APP_DIR/venv && bash $APP_DIR/deploy/instalar_usuario.sh"
+else
+    echo "   indisponível neste servidor — os segredos ficam no cofre local"
+fi
 
 chmod +x "$APP_DIR/deploy/portal.sh" 2>/dev/null
 

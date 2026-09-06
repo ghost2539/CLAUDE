@@ -35,6 +35,7 @@ import logging
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 
 _log = logging.getLogger("cofre")
@@ -58,6 +59,15 @@ MARCADOR = "@cofre:"
 
 
 # ── Cofre corporativo ───────────────────────────────────────────────────
+# O módulo costuma estar instalado no Python do SISTEMA, não dentro do venv.
+# Um venv criado sem --system-site-packages não o enxerga, e o cofre parece
+# "inexistente" mesmo estando lá. VCREPORTS_SECRETS_PATH permite apontar o
+# diretório do módulo sem recriar o venv.
+_EXTRA = os.environ.get("VCREPORTS_SECRETS_PATH", "")
+if _EXTRA and _EXTRA not in sys.path:
+    sys.path.append(_EXTRA)
+
+
 def _corporativo(nome: str) -> str:
     try:
         from vcreports_secrets import vcreports_secret  # type: ignore
@@ -68,11 +78,24 @@ def _corporativo(nome: str) -> str:
 
 
 def corporativo_disponivel() -> bool:
+    return diagnostico_corporativo()[0]
+
+
+def diagnostico_corporativo() -> tuple[bool, str]:
+    """(disponível, motivo). O motivo é o que permite consertar sem chutar."""
     try:
-        import vcreports_secrets  # type: ignore  # noqa: F401
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+        import vcreports_secrets  # type: ignore
+        return True, f"módulo em {getattr(vcreports_secrets, '__file__', '?')}"
+    except ImportError as exc:
+        return False, f"ImportError: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def onde_procura() -> list[str]:
+    """Diretórios em que o Python procura o módulo — para conferir se o do
+    sistema está entre eles."""
+    return [p for p in sys.path if p]
 
 
 # ── Arquivos e permissões ───────────────────────────────────────────────
