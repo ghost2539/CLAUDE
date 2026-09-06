@@ -529,22 +529,40 @@ class Cliente:
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=self._log_f, env=env, cwd=str(DIR), text=True,
                                      encoding="utf-8", bufsize=1)
+        self._iniciar_leitor()
         resp = self._ler_ate_resposta(timeout=int(_c("EBS_FORMS_ESPERA_JVM", "180")))
         if not resp.startswith("OK"):
             raise ErroForms(f"Lançador não ficou pronto: {resp}")
 
+    def _iniciar_leitor(self) -> None:
+        """readline() na saída da JVM bloqueia sem limite quando ela fica muda;
+        uma thread lê e enfileira, e quem espera tem timeout de verdade."""
+        import queue
+        self._fila: "queue.Queue[str | None]" = queue.Queue()
+
+        def _ler() -> None:
+            try:
+                for linha in self.proc.stdout:  # type: ignore[union-attr]
+                    self._fila.put(linha.rstrip("\n"))
+            finally:
+                self._fila.put(None)
+
+        threading.Thread(target=_ler, name="ebs-forms-leitor", daemon=True).start()
+
     def _ler_ate_resposta(self, timeout: float) -> str:
-        assert self.proc and self.proc.stdout
+        import queue
+        assert self.proc
         fim = time.time() + timeout
         while time.time() < fim:
-            if self.proc.poll() is not None:
-                cauda = self._cauda_log()
-                raise ErroForms(f"JVM encerrou (código {self.proc.returncode}). Fim do log: {cauda}")
-            linha = self.proc.stdout.readline()
-            if not linha:
-                time.sleep(0.05)
+            try:
+                linha = self._fila.get(timeout=0.5)
+            except queue.Empty:
+                if self.proc.poll() is not None:
+                    raise ErroForms(f"JVM encerrou (código {self.proc.returncode}). Fim do log: {self._cauda_log()}")
                 continue
-            linha = linha.rstrip("\n")
+            if linha is None:
+                self.proc.wait(timeout=5)
+                raise ErroForms(f"JVM encerrou (código {self.proc.returncode}). Fim do log: {self._cauda_log()}")
             if linha.startswith("EVENTO "):
                 self.eventos.append(linha[7:])
                 if linha.startswith("EVENTO documento "):

@@ -116,7 +116,22 @@ public class LancadorForms {
         applet.setPreferredSize(new Dimension(larg, alt));
         janela.setVisible(true);
         applet.init();
-        applet.start();
+        // start() do cliente Forms pode não voltar (fica no laço da sessão);
+        // roda à parte para o protocolo não ficar refém dele. Se falhar, a
+        // JVM encerra com a causa no log e o lado Python enxerga a queda.
+        Thread inicio = new Thread(() -> {
+            try {
+                applet.start();
+                responder("EVENTO start-retornou");
+            } catch (Throwable t) {
+                t.printStackTrace();
+                responder("EVENTO falha-start " + t);
+                System.exit(3);
+            }
+        }, "forms-start");
+        inicio.setDaemon(true);
+        inicio.start();
+        Thread.sleep(1500);
         // A janela já estava visível quando o applet montou os componentes:
         // sem validate() nada é desenhado. E sem gerenciador de janelas no
         // Xvfb ninguém dá o foco — pedimos nós.
