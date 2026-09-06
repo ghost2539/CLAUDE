@@ -55,9 +55,10 @@ if command -v Xvfb >/dev/null; then
   ok "Xvfb: $(command -v Xvfb)"
 elif command -v Xvnc >/dev/null; then
   ok "Xvnc: $(command -v Xvnc) (serve como tela virtual; permite ver por VNC em localhost)"
+elif command -v weston >/dev/null && command -v Xwayland >/dev/null; then
+  ok "weston + Xwayland: tela virtual headless (RHEL/OL 10, sem Xorg)"
 else
-  falta "nenhum servidor X virtual: dnf install xorg-x11-server-Xvfb  OU  dnf install tigervnc-server-minimal"
-  aviso "se o dnf não achar nenhum dos dois, rode: dnf repolist --all | head; dnf provides '*/Xvfb' '*/Xvnc'"
+  falta "nenhuma tela virtual. RHEL/OL 8-9: dnf install xorg-x11-server-Xvfb. RHEL/OL 10 (sem Xorg): dnf install weston xorg-x11-server-Xwayland"
 fi
 if command -v fc-list >/dev/null && [ "$(fc-list 2>/dev/null | wc -l)" -gt 0 ]; then
   ok "fontes: $(fc-list 2>/dev/null | wc -l) encontradas"
