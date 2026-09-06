@@ -262,6 +262,29 @@ def _display_livre(display: str) -> bool:
     return not Path(f"/tmp/.X11-unix/X{n}").exists()
 
 
+def servidor_x(display: str) -> list[str] | None:
+    """Linha de comando do servidor X virtual: Xvfb, ou Xvnc quando só ele existe.
+
+    Nem todo repositório tem o pacote do Xvfb; o Xvnc (tigervnc-server-minimal)
+    é um servidor X completo e ainda permite olhar a tela por VNC ao depurar.
+    Ele só escuta em localhost (túnel SSH para ver).
+    """
+    tam = _c("EBS_FORMS_TELA", "1280x900x24")
+    largura_altura, _, prof = tam.rpartition("x")
+    preferido = _c("EBS_FORMS_XSERVER")  # caminho ou nome, se quiser forçar
+    candidatos = [preferido] if preferido else ["Xvfb", "Xvnc"]
+    for nome in candidatos:
+        exe = shutil.which(nome) if not os.path.isabs(nome) else (nome if os.access(nome, os.X_OK) else None)
+        if not exe:
+            continue
+        if os.path.basename(exe).lower() == "xvnc":
+            porta = 5900 + int(display.lstrip(":").split(".")[0])
+            return [exe, display, "-geometry", largura_altura, "-depth", prof or "24",
+                    "-SecurityTypes", "None", "-localhost", "-rfbport", str(porta), "-AlwaysShared"]
+        return [exe, display, "-screen", "0", tam, "-nolisten", "tcp", "-noreset"]
+    return None
+
+
 class Xvfb:
     """Tela virtual. Uma por processo; reaproveitada entre sessões."""
 
@@ -277,16 +300,13 @@ class Xvfb:
             # Alguém (ou uma execução anterior) já mantém o display; usamos.
             cls._display = display
             return display
-        exe = shutil.which("Xvfb")
-        if not exe:
-            raise ErroForms("Xvfb não está instalado (veja scripts/ebs_forms_preparar.sh).")
-        tam = _c("EBS_FORMS_TELA", "1280x900x24")
+        cmd = servidor_x(display)
+        if not cmd:
+            raise ErroForms("Nenhum servidor X virtual disponível: instale Xvfb (xorg-x11-server-Xvfb) "
+                            "ou Xvnc (tigervnc-server-minimal). Veja scripts/ebs_forms_preparar.sh.")
         DIR_LOGS.mkdir(parents=True, exist_ok=True)
         log = open(DIR_LOGS / "xvfb.log", "ab")  # noqa: SIM115 — vive com o processo
-        cls._proc = subprocess.Popen(
-            [exe, display, "-screen", "0", tam, "-nolisten", "tcp", "-noreset"],
-            stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-        )
+        cls._proc = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         cls._display = display
         for _ in range(50):
             if not _display_livre(display):
@@ -615,7 +635,7 @@ def diagnostico() -> dict[str, Any]:
     return {
         "java": java or "", "java_versao": versao, "javac": javac or "",
         "lancador_compilado": compilado(),
-        "xvfb": shutil.which("Xvfb") or "", "display": display,
+        "xvfb": " ".join(servidor_x(display)[:1]) if servidor_x(display) else "", "display": display,
         "display_ativo": not _display_livre(display),
         "credenciais": cred,
         "home_url": _c("EBS_FORMS_HOME_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE"),
