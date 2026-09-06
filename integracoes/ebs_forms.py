@@ -489,7 +489,19 @@ class Xvfb:
 
 
 def compilado() -> bool:
-    return (DIR_BIN / "LancadorForms.class").exists()
+    """Compilado E atualizado: se o fonte mudou, é preciso recompilar.
+
+    Sem isto, um `git pull` que muda o lançador deixa classes velhas rodando —
+    e o sintoma aparece longe da causa ("ordem desconhecida: ...").
+    """
+    classe = DIR_BIN / "LancadorForms.class"
+    if not classe.exists():
+        return False
+    try:
+        mais_novo = max(f.stat().st_mtime for f in FONTE_JAVA.parent.rglob("*.java"))
+    except ValueError:
+        return True
+    return classe.stat().st_mtime >= mais_novo
 
 
 def compilar() -> str:
@@ -523,6 +535,7 @@ class Cliente:
 
     def iniciar(self) -> None:
         if not compilado():
+            self._registrar("lançador desatualizado: recompilando")
             compilar()
         display = Xvfb.garantir()
         java = _c("EBS_FORMS_JAVA") or shutil.which("java") or "java"
@@ -552,6 +565,7 @@ class Cliente:
             f"-Dforms.segurar.exit={_c('EBS_FORMS_SEGURAR_EXIT', 'true')}",
             # java = teclas pela fila do AWT (Weston headless, sem seat); robot = XTEST (Xvfb/Xvnc)
             f"-Dforms.entrada={_c('EBS_FORMS_ENTRADA', 'java')}",
+            f"-Dforms.captura={_c('EBS_FORMS_CAPTURA', 'java')}",
             f"-Dforms.jars.extra={_c('EBS_FORMS_JARS_EXTRA')}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
