@@ -260,14 +260,13 @@ public class LancadorForms {
             case "clipboard":
                 responder("OK " + Base64.getEncoder().encodeToString(lerClipboard().getBytes(StandardCharsets.UTF_8)));
                 break;
-            case "foto":
-                Rectangle r = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
-                BufferedImage img = robo.createScreenCapture(r);
+            case "foto": {
                 File f = new File(arg.trim());
                 if (f.getParentFile() != null) f.getParentFile().mkdirs();
-                ImageIO.write(img, "png", f);
+                ImageIO.write(capturar(), "png", f);
                 responder("OK " + f.getAbsolutePath());
                 break;
+            }
             case "janelas":
                 StringBuilder sb = new StringBuilder();
                 for (Window w : Window.getWindows()) {
@@ -601,6 +600,41 @@ public class LancadorForms {
         if (maiuscula) robo.keyRelease(KeyEvent.VK_SHIFT);
     }
 
+    /** Imagem da tela. No Xwayland headless o X não guarda o conteúdo (a captura
+     *  sai preta), então desenhamos as próprias janelas Java; o Robot fica como
+     *  reserva para ambientes onde a captura do X funciona. */
+    private static BufferedImage capturar() throws Exception {
+        Dimension tela = Toolkit.getDefaultToolkit().getScreenSize();
+        if (!"robot".equalsIgnoreCase(System.getProperty("forms.captura", "java"))) {
+            try {
+                BufferedImage im = naEDT(() -> {
+                    BufferedImage b = new BufferedImage(tela.width, tela.height, BufferedImage.TYPE_INT_RGB);
+                    java.awt.Graphics2D g = b.createGraphics();
+                    g.setColor(new java.awt.Color(0xD4D0C8));
+                    g.fillRect(0, 0, tela.width, tela.height);
+                    for (Window w : Window.getWindows()) {
+                        if (!w.isShowing() || w.getWidth() <= 0) continue;
+                        java.awt.Point p;
+                        try {
+                            p = w.getLocationOnScreen();
+                        } catch (Exception semTela) {
+                            p = w.getLocation();
+                        }
+                        g.translate(p.x, p.y);
+                        w.printAll(g);
+                        g.translate(-p.x, -p.y);
+                    }
+                    g.dispose();
+                    return b;
+                }, 15000);
+                if (im != null) return im;
+            } catch (Exception e) {
+                responder("EVENTO captura-java-falhou " + e);
+            }
+        }
+        return robo.createScreenCapture(new Rectangle(tela));
+    }
+
     private static void clipboard(String s) {
         Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
         c.setContents(new StringSelection(s), null);
@@ -786,8 +820,7 @@ public class LancadorForms {
             String foto = System.getProperty("forms.captura.saida", "");
             if (!foto.isEmpty() && robo != null) {
                 try {
-                    BufferedImage img = robo.createScreenCapture(new Rectangle(Toolkit.getDefaultToolkit().getScreenSize()));
-                    ImageIO.write(img, "png", new File(foto));
+                    ImageIO.write(capturar(), "png", new File(foto));
                     System.err.println("[LancadorForms] captura no encerramento: " + foto);
                 } catch (Throwable t) { System.err.println("[LancadorForms] sem captura no encerramento: " + t); }
             }
