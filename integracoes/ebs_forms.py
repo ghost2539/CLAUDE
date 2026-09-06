@@ -640,6 +640,10 @@ class Cliente:
     def janelas(self) -> list[str]:
         return base64.b64decode(self.ordem("janelas")).decode("utf-8", "replace").splitlines()
 
+    def arvore(self) -> str:
+        """Mapa da tela: componentes, textos, posições e quem tem o foco."""
+        return base64.b64decode(self.ordem("arvore", timeout=90)).decode("utf-8", "replace")
+
     def foto(self, nome: str) -> str:
         DIR_CAPTURAS.mkdir(parents=True, exist_ok=True)
         seguro = re.sub(r"[^A-Za-z0-9_.-]", "_", nome)
@@ -697,6 +701,7 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         "passos": [
             {"acao": "esperar", "arg": "20000", "nome": "abrindo"},
             {"acao": "foto", "nome": "tela_inicial"},
+            {"acao": "arvore", "nome": "mapa_da_tela"},
         ],
     },
     "localizar_ativo": {
@@ -777,6 +782,8 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             resultado[nome] = cliente.copiar().strip()
         elif acao == "foto":
             capturas.append(cliente.foto(nome))
+        elif acao == "arvore":
+            resultado[nome] = cliente.arvore()
         elif acao == "se_vazio":
             pulando = bool(str(resultado.get(arg, "")).strip())
         elif acao == "fim_se":
