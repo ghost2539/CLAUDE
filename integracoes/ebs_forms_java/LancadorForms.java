@@ -472,9 +472,21 @@ public class LancadorForms {
         public String getParameter(String name) {
             // -Dforms.param.NOME=valor sobrepõe o que veio no jnlp (ajuste de
             // campo sem recompilar; chega por EBS_FORMS_PARAMS no environment).
+            // O valor @nulo@ faz o parâmetro "não existir".
             for (String chave : System.getProperties().stringPropertyNames())
-                if (chave.startsWith("forms.param.") && chave.substring(12).equalsIgnoreCase(name))
-                    return System.getProperty(chave);
+                if (chave.startsWith("forms.param.") && chave.substring(12).equalsIgnoreCase(name)) {
+                    String v = System.getProperty(chave);
+                    return "@nulo@".equals(v) ? null : v;
+                }
+            // O lançador do EBS (JNLPAppletContext.setHTTPCookie) só aceita
+            // clientBrowser em Windows/macOS — em Linux a lista é vazia e ele
+            // aborta. Sem o parâmetro ele pula a checagem e segue para o que
+            // importa: recriar a sessão e guardar o cookie. O parâmetro só
+            // serviria para abrir URLs no navegador, coisa que aqui é nossa.
+            if ("clientBrowser".equalsIgnoreCase(name)) {
+                String so = System.getProperty("os.name", "").toLowerCase();
+                if (!so.startsWith("win") && !so.startsWith("mac")) return null;
+            }
             for (Map.Entry<String, String> e : params.entrySet())
                 if (e.getKey().equalsIgnoreCase(name)) return e.getValue();
             return null;
