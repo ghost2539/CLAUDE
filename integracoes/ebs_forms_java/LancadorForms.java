@@ -338,6 +338,34 @@ public class LancadorForms {
                 responder("OK " + como);
                 break;
             }
+            case "dialogo": {
+                // Avisos do Forms ("Precaução: O ATIVO SELECIONADO ESTÁ BAIXADO!")
+                // são janelas com um texto e botões. Devolvemos o que dizem para
+                // o roteiro decidir — e o dado vira campo no resultado.
+                String d = naEDT(LancadorForms::dialogoJson, 10000);
+                responder("OK " + Base64.getEncoder().encodeToString(d.getBytes(StandardCharsets.UTF_8)));
+                break;
+            }
+            case "clicartexto": {
+                // Clica no botão pelo RÓTULO (OK, Cancelar, Atribuições...),
+                // que é estável mesmo quando o nome do componente muda.
+                String rotulo = arg.trim();
+                java.awt.Component alvo = naEDT(() -> acharPorTexto(rotulo), 10000);
+                if (alvo == null) { responder("ERRO botão não encontrado: " + rotulo); break; }
+                final java.awt.Component a = alvo;
+                String como = naEDT(() -> {
+                    try {
+                        a.getClass().getMethod("doClick").invoke(a);
+                        return "doClick";
+                    } catch (Exception semDoClick) {
+                        cliqueSintetico(a);
+                        return "eventos de mouse";
+                    }
+                }, 8000);
+                sincronizar();
+                responder("OK " + rotulo + " (" + como + ")");
+                break;
+            }
             case "esperarate": {
                 // Espera por CONDIÇÃO, não por relógio: sai assim que a tela
                 // fica pronta, em vez de dormir um tempo fixo "para garantir".
@@ -710,6 +738,61 @@ public class LancadorForms {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** Procura um botão/componente pelo rótulo visível (sem mnemônico). */
+    private static java.awt.Component acharPorTexto(String rotulo) {
+        String alvo = rotulo.replace("&", "").trim().toLowerCase();
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
+                if (!f.isShowing() || !f.isEnabled()) continue;
+                String t = textoDe(f);
+                if (t == null) continue;
+                if (t.replace("&", "").trim().toLowerCase().equals(alvo)) return f;
+            }
+        }
+        return null;
+    }
+
+    /** Aviso na tela: título, texto e botões. Vazio quando não há nenhum. */
+    private static String dialogoJson() {
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            List<java.awt.Container> quadros = new ArrayList<>();
+            acharQuadros(w, quadros);
+            for (java.awt.Container q : quadros) {
+                String titulo = tituloDoQuadro(q);
+                // Um aviso do Forms é pequeno e tem botão de confirmação.
+                boolean temBotao = false;
+                StringBuilder texto = new StringBuilder();
+                List<String> botoes = new ArrayList<>();
+                for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>())) {
+                    String t = textoDe(f);
+                    if (t == null || t.isBlank()) continue;
+                    String nomeClasse = f.getClass().getName();
+                    if (nomeClasse.contains("Button")) { botoes.add(t.trim()); temBotao = true; }
+                    else if (nomeClasse.contains("Label") || nomeClasse.contains("TextArea")) {
+                        if (!t.trim().equals(titulo)) {
+                            if (texto.length() > 0) texto.append(' ');
+                            texto.append(t.trim());
+                        }
+                    }
+                }
+                boolean pequeno = q.getWidth() > 0 && q.getWidth() < 700 && q.getHeight() < 400;
+                if (temBotao && pequeno && texto.length() > 0) {
+                    StringBuilder j = new StringBuilder("{\"titulo\":").append(jsonTexto(titulo))
+                        .append(",\"texto\":").append(jsonTexto(texto.toString()))
+                        .append(",\"botoes\":[");
+                    for (int i = 0; i < botoes.size(); i++) {
+                        if (i > 0) j.append(',');
+                        j.append(jsonTexto(botoes.get(i)));
+                    }
+                    return j.append("]}").toString();
+                }
+            }
+        }
+        return "{}";
     }
 
     private static boolean condicaoAtendida(String cond) throws Exception {
