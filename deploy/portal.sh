@@ -16,7 +16,16 @@ ENVFILE="${PORTAL_ENVFILE:-$HOME/.config/portal-spare/environment}"
 STATE="${PORTAL_STATE_DIR:-$HOME/.local/state/portal-spare}"
 PIDFILE="$STATE/portal.pid"
 LOGFILE="$STATE/portal.log"
-PY="$APP_DIR/venv/bin/python"
+# Interpretador: venv do projeto se existir, senão PORTAL_PYTHON, senão o
+# python3 do sistema. Nem toda instalação tem venv — e sem esta escolha o
+# start falhava com "venv ausente" mesmo com tudo instalado no sistema.
+if [ -x "$APP_DIR/venv/bin/python" ]; then
+    PY="$APP_DIR/venv/bin/python"
+elif [ -n "${PORTAL_PYTHON:-}" ] && [ -x "$PORTAL_PYTHON" ]; then
+    PY="$PORTAL_PYTHON"
+else
+    PY="$(command -v python3 || true)"
+fi
 
 mkdir -p "$STATE"
 
@@ -46,7 +55,12 @@ case "${1:-status}" in
 start)
     if rodando; then echo "Já está rodando (PID $(cat "$PIDFILE"))."; exit 0; fi
     carregar_env
-    [ -x "$PY" ] || { echo "ERRO: venv ausente em $APP_DIR/venv. Rode o instalador."; exit 1; }
+    if [ ! -x "$PY" ]; then
+        echo "ERRO: nenhum Python encontrado."
+        echo "      Instale o python3, crie o venv (bash deploy/instalar_usuario.sh)"
+        echo "      ou aponte um: PORTAL_PYTHON=/caminho/do/python $0 start"
+        exit 1
+    fi
     cd "$APP_DIR" || exit 1
     PORTA="${PORT:-8901}"
     nohup "$PY" -m uvicorn main:app \
@@ -102,9 +116,76 @@ status)
     else
         echo "PARADO."
     fi
-    echo "  app:   $APP_DIR"
-    echo "  env:   $ENVFILE"
-    echo "  log:   $LOGFILE"
+    echo "  app:    $APP_DIR"
+    echo "  python: ${PY:-nenhum}"
+    echo "  env:    $ENVFILE"
+    echo "  log:    $LOGFILE"
+    ;;
+
+instalar-servico|servico)
+    # Gera a unit de USUÁRIO já preenchida (caminhos e interpretador reais)
+    # e instala em ~/.config/systemd/user. Sem root.
+    [ -r "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
+    PORTA="${PORT:-8901}"
+    UNIT_DIR="$HOME/.config/systemd/user"
+    UNIT="$UNIT_DIR/portal-spare.service"
+
+    if [ ! -x "$PY" ]; then
+        echo "ERRO: nenhum Python encontrado para o ExecStart."; exit 1
+    fi
+    mkdir -p "$UNIT_DIR"
+
+    cat > "$UNIT" <<UNITEOF
+# Portal de Operacoes SPARE — servico de usuario (sem root).
+# Gerado por deploy/portal.sh instalar-servico em $(date '+%d/%m/%Y %H:%M').
+[Unit]
+Description=Portal de Operacoes SPARE
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$ENVFILE
+ExecStart=$PY -m uvicorn main:app --host ${HOST:-0.0.0.0} --port $PORTA --workers ${WORKERS:-1}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
+UNITEOF
+    chmod 644 "$UNIT"
+    echo "Unit criada: $UNIT"
+    echo "   python : $PY"
+    echo "   porta  : $PORTA"
+    echo
+
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        echo "AVISO: systemd de usuario indisponivel nesta sessao."
+        echo "   Siga com o modo nohup:  $0 start"
+        exit 1
+    fi
+
+    # O nohup e o systemd brigam pela porta; para o que estiver de pe.
+    if rodando; then
+        echo "Parando a instancia em nohup antes de ativar o servico..."
+        "$0" stop >/dev/null 2>&1
+    fi
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now portal-spare.service && {
+        sleep 3
+        systemctl --user --no-pager --lines=8 status portal-spare.service || true
+    }
+    echo
+    echo "Comandos do dia a dia:"
+    echo "   systemctl --user status|restart|stop portal-spare"
+    echo "   journalctl --user -u portal-spare -f"
+    echo
+    echo "IMPORTANTE: para o servico continuar no ar depois do logout, alguem"
+    echo "com root precisa habilitar UMA VEZ:"
+    echo "   sudo loginctl enable-linger \$USER"
+    echo "Sem isso, o systemd encerra o servico quando sua sessao terminar."
     ;;
 
 endereco|onde|url)
@@ -222,15 +303,17 @@ atualizar)
     env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
         git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" || {
         echo "ERRO no git pull. Nada foi alterado."; exit 1; }
-    if [ -x "$PY" ]; then
+    if [ -x "$APP_DIR/venv/bin/pip" ]; then
         "$APP_DIR/venv/bin/pip" install -q -r "$APP_DIR/requirements.txt" || \
             echo "AVISO: falha ao atualizar dependências."
+    else
+        echo "   (sem venv — dependências do sistema, nada a atualizar)"
     fi
     "$0" restart
     ;;
 
 *)
-    echo "Uso: $0 {start|stop|restart|status|endereco|logs|erros|atualizar}"
+    echo "Uso: $0 {start|stop|restart|status|endereco|logs|erros|atualizar|instalar-servico}"
     exit 1
     ;;
 esac
