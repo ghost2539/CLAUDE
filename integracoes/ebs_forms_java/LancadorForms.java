@@ -326,6 +326,21 @@ public class LancadorForms {
                 responder("OK " + como);
                 break;
             }
+            case "grade": {
+                // Lê a grade de resultados como tabela: os cabeçalhos do Forms
+                // (FolderPrompt) dão o nome de cada coluna pelo x, e os campos
+                // alinhados no mesmo x são os valores. Assim a leitura não
+                // depende de nome de campo nem de contar TABs.
+                String tsv;
+                try {
+                    tsv = naEDT(LancadorForms::grade, 20000);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    responder("ERRO grade: a interface não respondeu em 20 s");
+                    break;
+                }
+                responder("OK " + Base64.getEncoder().encodeToString(tsv.getBytes(StandardCharsets.UTF_8)));
+                break;
+            }
             case "arvore":
                 // O mapa da tela: cada componente com classe, texto, posição e
                 // foco. É a partir daqui que se monta o roteiro de teclas —
@@ -599,6 +614,56 @@ public class LancadorForms {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** Grade de resultados em TSV: primeira linha os cabeçalhos, depois as linhas com valor. */
+    private static String grade() {
+        StringBuilder saida = new StringBuilder();
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            for (java.awt.Container painel : paineisComCabecalho(w, new ArrayList<>())) {
+                java.util.TreeMap<Integer, String> colunas = new java.util.TreeMap<>();
+                for (java.awt.Component f : painel.getComponents())
+                    if (f.getClass().getName().contains("FolderPrompt")) {
+                        String t = textoDe(f);
+                        if (t != null && !t.isBlank()) colunas.put(f.getX(), t.trim());
+                    }
+                if (colunas.size() < 2) continue;
+                // valores por linha (y) e coluna (x mais próximo de um cabeçalho)
+                java.util.TreeMap<Integer, java.util.TreeMap<Integer, String>> linhas = new java.util.TreeMap<>();
+                for (java.awt.Component f : painel.getComponents()) {
+                    if (f.getClass().getName().contains("FolderPrompt")) continue;
+                    if (f.getY() <= 0) continue;
+                    String t = textoDe(f);
+                    if (t == null || t.isBlank()) continue;
+                    Integer col = colunas.floorKey(f.getX() + 5);
+                    if (col == null) col = colunas.firstKey();
+                    linhas.computeIfAbsent(f.getY(), k -> new java.util.TreeMap<>()).put(col, t.trim());
+                }
+                if (linhas.isEmpty()) continue;
+                saida.append(String.join("\t", colunas.values())).append('\n');
+                for (java.util.TreeMap<Integer, String> linha : linhas.values()) {
+                    StringBuilder l = new StringBuilder();
+                    for (Integer x : colunas.keySet()) {
+                        if (l.length() > 0) l.append('\t');
+                        l.append(linha.getOrDefault(x, ""));
+                    }
+                    saida.append(l).append('\n');
+                }
+                saida.append('\n');
+            }
+        }
+        return saida.length() == 0 ? "(nenhuma grade com valores na tela)" : saida.toString();
+    }
+
+    private static List<java.awt.Container> paineisComCabecalho(java.awt.Container c, List<java.awt.Container> achados) {
+        boolean temCabecalho = false;
+        for (java.awt.Component f : c.getComponents()) {
+            if (f.getClass().getName().contains("FolderPrompt")) temCabecalho = true;
+            if (f instanceof java.awt.Container) paineisComCabecalho((java.awt.Container) f, achados);
+        }
+        if (temCabecalho) achados.add(c);
+        return achados;
     }
 
     private static java.awt.Component acharPorNome(String nome) throws Exception {
