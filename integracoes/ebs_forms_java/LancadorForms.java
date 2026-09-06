@@ -114,6 +114,11 @@ public class LancadorForms {
         for (String extra : extras.split(",")) {
             extra = extra.trim();
             if (extra.isEmpty()) continue;
+            if (!extra.matches("[A-Za-z0-9._/-]+\\.jar")) {
+                throw new IllegalArgumentException(
+                    "EBS_FORMS_JARS_EXTRA tem um valor inválido: '" + extra + "'. "
+                    + "Esperado nome de jar (ex.: fndi18n.jar) ou caminho terminando em .jar.");
+            }
             if (!extra.contains("/")) extra = dirJars + extra;
             urls.add(baixarJar(extra, cache));
         }
@@ -177,6 +182,7 @@ public class LancadorForms {
         // auto-repeat do X, um Ctrl+V "segurado" colava dezenas de vezes
         // (por isso o Robot nasce com autoDelay 30 e sem waitForIdle).
         focar();
+        pronto = true;
         responder("OK pronto classe=" + classe);
 
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
@@ -611,6 +617,7 @@ public class LancadorForms {
     }
 
     private static volatile boolean saidaAutorizada = false;
+    private static volatile boolean pronto = false;
 
     // O applet do EBS e o cliente Forms chamam System.exit() por conta
     // própria (fim de sessão, janela fechada) e a JVM some sem rastro. Um
@@ -650,9 +657,15 @@ public class LancadorForms {
                 } catch (Throwable t) { System.err.println("[LancadorForms] sem captura no encerramento: " + t); }
             }
             responder("EVENTO exit-pedido thread=" + culpado);
-            if (Boolean.getBoolean("forms.segurar.exit")) {
-                System.err.println("[LancadorForms] segurando a saída (forms.segurar.exit=true)");
-                try { while (!saidaAutorizada) Thread.sleep(500); } catch (InterruptedException ie) { /* liberado */ }
+            // Segurar a saída só faz sentido com o lançador operacional (para o
+            // roteiro fotografar a tela antes de morrer) e nunca para sempre:
+            // uma falha na PARTIDA precisa encerrar e devolver o erro.
+            if (Boolean.getBoolean("forms.segurar.exit") && pronto) {
+                System.err.println("[LancadorForms] segurando a saída por até 120 s (forms.segurar.exit=true)");
+                long limite = System.currentTimeMillis() + 120_000;
+                try {
+                    while (!saidaAutorizada && System.currentTimeMillis() < limite) Thread.sleep(500);
+                } catch (InterruptedException ie) { /* liberado */ }
             }
         }, "vigia-exit"));
     }
