@@ -219,6 +219,9 @@ class Settings:
     EBS_FORMS_JAVAC: str = os.getenv("EBS_FORMS_JAVAC", "")
     EBS_FORMS_JAVA_OPCOES: str = os.getenv("EBS_FORMS_JAVA_OPCOES", "")
     EBS_FORMS_PARAMS: str = os.getenv("EBS_FORMS_PARAMS", "")  # sobrepõe parâmetros do jnlp: a=1;b=2
+    EBS_FORMS_JARS_EXTRA: str = os.getenv('EBS_FORMS_JARS_EXTRA', '')  # jars adicionais, separados por vírgula
+    EBS_FORMS_VNC: str = os.getenv('EBS_FORMS_VNC', 'nao')             # sim = acompanhar a tela por VNC (localhost)
+    EBS_FORMS_VNC_PORTA: str = os.getenv('EBS_FORMS_VNC_PORTA', '5900')
     EBS_FORMS_CLASSE: str = os.getenv("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = os.getenv("EBS_FORMS_ESPERA_JVM", "180")
 

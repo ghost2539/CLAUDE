@@ -101,7 +101,17 @@ public class LancadorForms {
         List<String> jars = lerJnlp(jnlp);
         List<URL> urls = new ArrayList<>();
         for (String j : jars) urls.add(baixarJar(j, cache));
-        responder("EVENTO jars " + urls.size());
+        // Além dos jars, o EBS carrega classes SOLTAS do codebase (é para isso
+        // que o jnlp declara codebase=".../OA_JAVA/"): NLSUtil, CommBean e
+        // companhia só existem lá. Um URLClassLoader com uma URL terminada em
+        // "/" busca cada classe pelo caminho do pacote, como o navegador fazia.
+        urls.add(new URL(codebase));
+        String extras = System.getProperty("forms.jars.extra", "");
+        for (String extra : extras.split(",")) {
+            extra = extra.trim();
+            if (!extra.isEmpty()) urls.add(baixarJar(extra, cache));
+        }
+        responder("EVENTO jars " + urls.size() + " (inclui codebase " + codebase + ")");
 
         // A classe é a que o jnlp declara (no EBS, FndFormsEngine — é ela quem
         // trata ticket e sessão do Web Start). -Dforms.classe força outra.
