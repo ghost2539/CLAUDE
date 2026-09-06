@@ -92,8 +92,15 @@ def cmd_sondar(args) -> int:
     Só leitura, e o valor nunca é exibido — apenas se existe e o tamanho,
     que basta para reconhecer a chave certa sem expor nada.
     """
-    if not cofre.corporativo_disponivel():
-        print("Cofre corporativo (vcreports_secrets) indisponível neste servidor.")
+    disp, motivo = cofre.diagnostico_corporativo()
+    if not disp:
+        print("Cofre corporativo (vcreports_secrets) INDISPONÍVEL para este Python.")
+        print(f"  {motivo}")
+        print(f"  interpretador: {sys.executable}")
+        print()
+        print("Se a API dos Correios funciona no servidor, o cofre EXISTE — quem não")
+        print("o enxerga é este interpretador. Quase sempre é o venv criado sem")
+        print("--system-site-packages. Rode 'conferir' para as opções de correção.")
         return 1
 
     grupos = dict(CANDIDATOS)
@@ -171,7 +178,19 @@ def cmd_conferir(args) -> int:
     print(f"Diretório do cofre: {cofre.DIR}")
     print(f"  chave:  {cofre.ARQ_CHAVE} {'(existe)' if cofre.ARQ_CHAVE.exists() else '(ainda não criada)'}")
     print(f"  cofre:  {cofre.ARQ_COFRE} {'(existe)' if cofre.ARQ_COFRE.exists() else '(ainda não criado)'}")
-    print(f"  cofre corporativo: {'disponível' if cofre.corporativo_disponivel() else 'indisponível neste servidor'}")
+    disp, motivo = cofre.diagnostico_corporativo()
+    print(f"  cofre corporativo: {'disponível' if disp else 'INDISPONÍVEL'}")
+    print(f"     {motivo}")
+    if not disp:
+        print(f"     interpretador: {sys.executable}")
+        print("     O módulo costuma estar no Python do SISTEMA. Um venv criado")
+        print("     sem --system-site-packages não o enxerga. Confira:")
+        print("       python3 -c 'import vcreports_secrets; print(vcreports_secrets.__file__)'")
+        print("     Se o Python do sistema achar e o venv não, recrie o venv:")
+        print("       rm -rf venv && python3 -m venv --system-site-packages venv")
+        print("       venv/bin/pip install -r requirements.txt")
+        print("     Ou aponte o diretório sem recriar, no environment:")
+        print("       VCREPORTS_SECRETS_PATH=/caminho/onde/esta/o/modulo")
 
     algo = cofre.algoritmo()
     print(f"  cifra em uso: {algo}")

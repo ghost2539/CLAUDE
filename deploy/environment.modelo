@@ -28,6 +28,11 @@
 # Quando descobrir, é só apontar o marcador para o nome certo; o corporativo
 # tem prioridade e passa a responder sozinho.
 #
+# Se o venv não enxergar o cofre corporativo (vcreports_secrets fica no
+# Python do sistema), aponte o diretório do módulo aqui em vez de recriar
+# o venv:
+# VCREPORTS_SECRETS_PATH=/usr/lib/python3/dist-packages
+#
 # Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
 # Só preencha se o portal rodar com um usuário sem diretório pessoal.
 # PORTAL_COFRE_DIR=/var/www/vcreports/.cofre-portal-spare
