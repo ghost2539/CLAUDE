@@ -276,7 +276,14 @@ public class LancadorForms {
                 // O mapa da tela: cada componente com classe, texto, posição e
                 // foco. É a partir daqui que se monta o roteiro de teclas —
                 // muito mais preciso do que interpretar uma captura de tela.
-                responder("OK " + Base64.getEncoder().encodeToString(arvore().getBytes(StandardCharsets.UTF_8)));
+                String mapa;
+                try {
+                    mapa = naEDT(LancadorForms::arvore, 20000);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    responder("ERRO arvore: a interface não respondeu em 20 s (Forms ocupado)");
+                    break;
+                }
+                responder("OK " + Base64.getEncoder().encodeToString(mapa.getBytes(StandardCharsets.UTF_8)));
                 break;
             case "foco":
                 focar();
@@ -316,7 +323,7 @@ public class LancadorForms {
         }
         sincronizar();
         try {
-            java.awt.EventQueue.invokeAndWait(() -> {
+            naEDT(() -> {
                 janela.requestFocus();
                 applet.requestFocusInWindow();
                 // Se o foco parou no próprio applet (um Panel), desce para o
@@ -327,7 +334,8 @@ public class LancadorForms {
                     java.awt.Component primeiro = primeiroFocavel(applet);
                     if (primeiro != null) primeiro.requestFocusInWindow();
                 }
-            });
+                return null;
+            }, 5000);
         } catch (Exception e) { /* foco é melhor esforço */ }
         sincronizar();
     }
@@ -335,10 +343,20 @@ public class LancadorForms {
     // Robot.waitForIdle() (realSync) pode travar para sempre no Xvfb sem
     // gerenciador de janelas. Esperar a fila de eventos do Java esvaziar e
     // dar um respiro ao X é o bastante para o que fazemos aqui.
+    // Tudo que toca a interface roda na thread de eventos do AWT (senão
+    // disputa o tree lock com o Forms e trava os dois) e SEMPRE com prazo:
+    // se o Forms estiver ocupado, o robô responde erro em vez de ficar preso.
+    private static <T> T naEDT(java.util.concurrent.Callable<T> tarefa, long ms) throws Exception {
+        if (java.awt.EventQueue.isDispatchThread()) return tarefa.call();
+        java.util.concurrent.FutureTask<T> tf = new java.util.concurrent.FutureTask<>(tarefa);
+        java.awt.EventQueue.invokeLater(tf);
+        return tf.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
     private static void sincronizar() {
         try {
-            java.awt.EventQueue.invokeAndWait(() -> { });
-        } catch (Exception e) { /* só sincronização */ }
+            naEDT(() -> null, 5000);
+        } catch (Exception e) { /* fila ocupada: seguimos, o passo seguinte tem prazo próprio */ }
         robo.delay(60);
     }
 
@@ -413,7 +431,7 @@ public class LancadorForms {
             boolean tras = alvo.getFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS).contains(ks);
             if (frente || tras) {
                 final java.awt.Component c = alvo;
-                java.awt.EventQueue.invokeAndWait(() -> { if (frente) c.transferFocus(); else c.transferFocusBackward(); });
+                naEDT(() -> { if (frente) c.transferFocus(); else c.transferFocusBackward(); return null; }, 5000);
                 // a troca de foco é assíncrona: espera a fila assentar antes da próxima ordem
                 robo.delay(150);
                 sincronizar();
@@ -461,20 +479,19 @@ public class LancadorForms {
     // (oracle.forms.ui.VTextField / LWTextField) e do Swing têm getText().
     private static String lerCampoFocado() {
         try {
-            final String[] out = new String[1];
-            java.awt.EventQueue.invokeAndWait(() -> {
+            return naEDT(() -> {
                 java.awt.Component c = alvoTeclado();
                 for (String metodo : new String[] {"getSelectedText", "getText"}) {
                     try {
                         java.lang.reflect.Method mt = c.getClass().getMethod(metodo);
                         Object v = mt.invoke(c);
-                        if (v != null && !v.toString().isEmpty()) { out[0] = v.toString(); return; }
+                        if (v != null && !v.toString().isEmpty()) return v.toString();
                     } catch (Exception ignorada) { /* tenta o próximo */ }
                 }
-            });
-            return out[0];
+                return null;
+            }, 5000);
         } catch (Exception e) {
-            return null;
+            return null;  // sem resposta a tempo: quem chamou tenta pela área de transferência
         }
     }
 
@@ -568,7 +585,9 @@ public class LancadorForms {
     }
 
     private static String textoDe(java.awt.Component f) {
-        for (String metodo : new String[] {"getText", "getLabel", "getValue", "getToolTipText"}) {
+        // Só leituras baratas: getValue em componentes do Forms pode disparar
+        // comunicação com o servidor no meio do mapeamento.
+        for (String metodo : new String[] {"getText", "getLabel"}) {
             try {
                 Object v = f.getClass().getMethod(metodo).invoke(f);
                 if (v != null) {
