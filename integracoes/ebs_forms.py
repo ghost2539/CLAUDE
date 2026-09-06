@@ -672,6 +672,17 @@ class Cliente:
             _log.warning("dados: JSON inválido (%s)", exc)
             return {"erro": f"JSON inválido: {exc}", "bruto": bruto[:4000]}
 
+    def dialogo(self) -> dict:
+        """Aviso na tela (título, texto, botões) — vazio quando não há."""
+        bruto = base64.b64decode(self.ordem("dialogo", timeout=30)).decode("utf-8", "replace")
+        try:
+            return json.loads(bruto)
+        except json.JSONDecodeError:
+            return {}
+
+    def clicar_texto(self, rotulo: str) -> str:
+        return self.ordem("clicartexto", rotulo, timeout=30)
+
     def grade(self) -> str:
         """Resultado da consulta como tabela (TSV), lida dos cabeçalhos da tela."""
         return base64.b64decode(self.ordem("grade", timeout=60)).decode("utf-8", "replace")
@@ -770,13 +781,28 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             {"acao": "dados", "nome": "tela"},
         ],
     },
+    "atribuicoes": {
+        "descricao": ("Abre Atribuições (onde fica o Local). Se o ativo estiver baixado, o Forms "
+                      "avisa antes — o aviso é capturado e confirmado, e a leitura segue."),
+        "passos": [
+            {"acao": "clicar", "arg": "{botao_atribuicoes}", "nome": "abrir_atribuicoes"},
+            {"acao": "esperar", "arg": "1200"},
+            {"acao": "dialogo", "nome": "aviso"},
+            {"acao": "clicartexto", "arg": "OK", "nome": "confirmar_aviso", "opcional": True},
+            {"acao": "esperarate", "arg": "janela:Atribuições 15000", "nome": "abrindo", "opcional": True},
+            {"acao": "grade", "nome": "tabela_atribuicoes"},
+            {"acao": "dados", "nome": "tela_atribuicoes"},
+        ],
+    },
     "linhas_origem": {
-        "descricao": "Abre Linhas de Origem (OC/NF do ativo) e lê a grade de lá.",
+        "descricao": "Abre Linhas de Origem, de onde saem a OC (PO) e a NFF do ativo.",
         "passos": [
             {"acao": "clicar", "arg": "{botao_linhas_origem}", "nome": "abrir_linhas_origem"},
-            {"acao": "esperar", "arg": "5000"},
-            {"acao": "foto", "nome": "linhas_origem"},
+            {"acao": "esperar", "arg": "1200"},
+            {"acao": "clicartexto", "arg": "OK", "nome": "confirmar_aviso", "opcional": True},
+            {"acao": "esperarate", "arg": "janela:Linhas de Origem 15000", "nome": "abrindo", "opcional": True},
             {"acao": "grade", "nome": "tabela_origem"},
+            {"acao": "dados", "nome": "tela_origem"},
         ],
     },
 }
@@ -806,8 +832,59 @@ def _tem_resultado(lido: dict) -> bool:
 
 
 def _grades(lido: dict) -> list[dict]:
-    tela = lido.get("tela") or {}
-    return [g for q in tela.get("quadros", []) for g in q.get("grades", [])]
+    """Grades de qualquer tela lida no roteiro (tela, tela_atribuicoes...)."""
+    saida: list[dict] = []
+    for valor in lido.values():
+        if isinstance(valor, dict) and "quadros" in valor:
+            saida += [g for q in valor.get("quadros", []) for g in q.get("grades", [])]
+    return saida
+
+
+def _primeira_linha(lido: dict, *nomes_de_coluna: str) -> dict:
+    """Primeira linha com valor de uma grade que tenha as colunas pedidas."""
+    for grade in _grades(lido):
+        colunas = [c.lower() for c in grade.get("colunas", [])]
+        if nomes_de_coluna and not any(n.lower() in colunas for n in nomes_de_coluna):
+            continue
+        for linha in grade.get("linhas", []):
+            if any(str(v).strip() for v in linha.values()):
+                return linha
+    return {}
+
+
+def _coluna(linha: dict, *possiveis: str) -> str:
+    """Valor da coluna, tolerando variações de rótulo entre versões da tela."""
+    for chave, valor in linha.items():
+        alvo = chave.strip().lower()
+        for p in possiveis:
+            if alvo == p.lower() or alvo.startswith(p.lower()):
+                return str(valor).strip()
+    return ""
+
+
+def montar_ativo(principal: dict, atribuicoes: dict, origem: dict) -> dict:
+    """O resultado no formato que o portal consome.
+
+    Junta as três telas do Forms: a grade de Ativos, o Local (Atribuições) e a
+    OC/NFF (Linhas de Origem). `Baixado` vem do aviso que o Forms dá ao abrir
+    Atribuições de um ativo baixado.
+    """
+    linha = _primeira_linha(principal, "Nr. do Ativo")
+    linha_origem = _primeira_linha(origem, "Nr. da NFF", "Nr. da OC")
+    linha_atrib = _primeira_linha(atribuicoes, "Local", "Conta de Despesas")
+    aviso = (atribuicoes.get("aviso") or {}).get("texto", "")
+    return {
+        "Nr. do Ativo": _coluna(linha, "Nr. do Ativo", "Número do Ativo"),
+        "Descrição": _coluna(linha, "Descrição"),
+        "Nr. da Etiqueta": _coluna(linha, "Nr. da Etiqueta"),
+        "Categoria": _coluna(linha, "Categoria"),
+        "Número de Série": _coluna(linha, "Número de Série"),
+        "Chave do Ativo": _coluna(linha, "Chave do Ativo"),
+        "PO": _coluna(linha_origem, "Nr. da OC", "Nr. da OCC"),
+        "NFF": _coluna(linha_origem, "Nr. da NFF"),
+        "Local": _coluna(linha_atrib, "Local"),
+        "Baixado": "BAIXADO" in aviso.upper(),
+    }
 
 
 def resumo_do_ativo(lido: dict) -> dict:  # noqa: D401
@@ -835,7 +912,9 @@ def variaveis_da_tela() -> dict[str, str]:
         "campo_livro": _c("EBS_FORMS_CAMPO_LIVRO", "VTextField209"),
         "botao_localizar": _c("EBS_FORMS_BOTAO_LOCALIZAR", "Button18"),
         "botao_limpar": _c("EBS_FORMS_BOTAO_LIMPAR", "Button17"),
+        "botao_atribuicoes": _c("EBS_FORMS_BOTAO_ATRIBUICOES", "Button13"),
         "botao_linhas_origem": _c("EBS_FORMS_BOTAO_LINHAS_ORIGEM", "Button14"),
+        "botao_livros": _c("EBS_FORMS_BOTAO_LIVROS", "Button15"),
     }
 
 
@@ -888,6 +967,10 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             resultado[nome] = cliente.ler_campo(arg).strip()
         elif acao == "clicar":
             cliente.clicar(arg)
+        elif acao == "clicartexto":
+            cliente.clicar_texto(arg)
+        elif acao == "dialogo":
+            resultado[nome] = cliente.dialogo()
         elif acao == "se_vazio":
             pulando = bool(str(resultado.get(arg, "")).strip())
         elif acao == "fim_se":
@@ -1111,22 +1194,36 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                 break
             if "voltar_localizar" in roteiros:
                 executar_roteiro(cliente, roteiros["voltar_localizar"], variaveis, sessao, registrar, capturas)
-        if dados and roteiros.get("linhas_origem"):
-            origem = executar_roteiro(cliente, roteiros["linhas_origem"],
-                                      {"criterio": criterio, "livro": livro_ok, **variaveis_da_tela()},
-                                      sessao, registrar, capturas)
-            dados["linhas_origem"] = origem
-        ativo = resumo_do_ativo(dados)
+        atribuicoes: dict[str, Any] = {}
+        origem: dict[str, Any] = {}
+        if dados:
+            variaveis = {"criterio": criterio, "livro": livro_ok, **variaveis_da_tela()}
+            for chave, destino in (("atribuicoes", "atribuicoes"), ("linhas_origem", "origem")):
+                passos = roteiros.get(chave) or ROTEIROS_PADRAO[chave]["passos"]
+                try:
+                    lido = executar_roteiro(cliente, passos, variaveis, sessao, registrar, capturas)
+                except ErroForms as exc:
+                    # Detalhe que falta não invalida o ativo já encontrado.
+                    registrar(f"{chave}: {exc}")
+                    lido = {}
+                if destino == "atribuicoes":
+                    atribuicoes = lido
+                else:
+                    origem = lido
+        ativo = montar_ativo(dados, atribuicoes, origem)
         saida: dict[str, Any] = {
             "criterio": criterio,
             "livro": livro_ok,
-            "encontrado": bool(ativo),
+            "encontrado": bool(ativo.get("Nr. do Ativo")),
             "ativo": ativo,
             "capturas": capturas,
         }
         saida["sessao_reaproveitada"] = reaproveitada
         if detalhe:
             saida["tela"] = dados.get("tela", {})
+            saida["tela_atribuicoes"] = atribuicoes.get("tela_atribuicoes", {})
+            saida["tela_origem"] = origem.get("tela_origem", {})
+            saida["aviso"] = atribuicoes.get("aviso", {})
             saida["eventos"] = cliente.eventos[-30:]
             saida["log_jvm"] = cliente.log_path.name
         _Viva.ultimo_uso = time.time()
