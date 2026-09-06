@@ -158,36 +158,71 @@ class Sessao:
         r2 = self.http.post(acao, data=f.campos, allow_redirects=True, timeout=self.timeout)
         return self._seguir_formularios(r2, saltos + 1)
 
+    _RE_META = re.compile(r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]*content=["\'][^;"\']*;\s*url=([^"\'>]+)', re.I)
+    _RE_JS = re.compile(r'(?:window\.|document\.|top\.)?location(?:\.href)?\s*=\s*["\']([^"\']+)["\']', re.I)
+
+    def _logado(self, r: requests.Response) -> bool:
+        """Só conta como autenticado quando estamos numa página de aplicação do
+        EBS — não no AccessGate/AppsLogin, que também moram no mesmo host."""
+        u = urlparse(r.url)
+        caminho = u.path.lower()
+        if "ebscorporativo" not in u.netloc:
+            return False
+        if any(x in caminho for x in ("accessgate", "appslogin", "dossologin", "applogin")):
+            return False
+        return "oa_html" in caminho or "/forms/" in caminho
+
     def entrar(self) -> None:
-        self._registrar(f"SSO: abrindo {self.home}")
-        r1 = self.http.get(self.home, allow_redirects=True, timeout=self.timeout)
-        self._registrar(f"SSO: chegou em {r1.url} ({r1.status_code})")
-        f = _analisar(r1.text)
-        visiveis = [n for n, t in f.tipos.items() if t in ("text", "password", "email")]
-        if "ebscorporativo" in urlparse(r1.url).netloc and not visiveis:
-            self._registrar("SSO: já autenticado (sessão anterior)")
-            return
-        acao = urljoin(r1.url, f.action or "/oam/server/auth_cred_submit")
-        campos = dict(f.campos)
-        for u in ("username", "userid", "user", "login", "j_username"):
-            if u in campos:
-                campos[u] = self.usuario
-                break
-        else:
-            campos["username"] = self.usuario
-        for s in ("password", "passwd", "pass", "j_password"):
-            if s in campos:
-                campos[s] = self._senha
-                break
-        else:
-            campos["password"] = self._senha
-        self._registrar(f"SSO: enviando credenciais para {acao}")
-        r2 = self.http.post(acao, data=campos, allow_redirects=True, timeout=self.timeout)
-        r3 = self._seguir_formularios(r2)
-        self._registrar(f"SSO: final em {r3.url} ({r3.status_code})")
-        if "ebscorporativo" not in urlparse(r3.url).netloc:
-            self._guardar_depuracao("sso_falha.html", r3.text)
-            raise ErroForms("SSO não levou ao EBS (usuário/senha inválidos ou SSO indisponível).")
+        inicio = _c("EBS_FORMS_LOGIN_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/AppsLogin")
+        self._registrar(f"SSO: abrindo {inicio}")
+        r = self.http.get(inicio, allow_redirects=True, timeout=self.timeout)
+        enviou_senha = False
+        for salto in range(1, 10):
+            self._registrar(f"SSO: salto {salto} -> {r.url} ({r.status_code})")
+            self._guardar_depuracao(f"sso_salto{salto}.html", r.text)
+            if self._logado(r):
+                self._registrar("SSO: autenticado no EBS")
+                return
+            f = _analisar(r.text)
+            senha_campo = next((n for n, t in f.tipos.items() if t == "password"), None)
+            if f.action is not None and senha_campo:
+                if enviou_senha:
+                    raise ErroForms("SSO devolveu o formulário de login de novo: usuário ou senha do robô recusados.")
+                acao = urljoin(r.url, f.action or r.url)
+                campos = dict(f.campos)
+                campos[senha_campo] = self._senha
+                usuario_campo = next((n for n in ("username", "userid", "user", "login", "j_username", "ssousername")
+                                      if n in campos), None)
+                if usuario_campo is None:
+                    usuario_campo = next((n for n, t in f.tipos.items() if t in ("text", "email")), "username")
+                campos[usuario_campo] = self.usuario
+                self._registrar(f"SSO: enviando credenciais para {acao} (campos {sorted(campos)})")
+                r = self.http.post(acao, data=campos, allow_redirects=True, timeout=self.timeout)
+                enviou_senha = True
+                continue
+            if f.action is not None and f.campos:
+                # formulário sem senha = auto-submit do OAM/AccessGate
+                acao = urljoin(r.url, f.action or r.url)
+                self._registrar(f"SSO: formulário automático -> {acao}")
+                r = self.http.post(acao, data=f.campos, allow_redirects=True, timeout=self.timeout)
+                continue
+            m = self._RE_META.search(r.text) or self._RE_JS.search(r.text)
+            if m:
+                destino = urljoin(r.url, html.unescape(m.group(1).strip()))
+                self._registrar(f"SSO: redirecionamento na página -> {destino}")
+                r = self.http.get(destino, allow_redirects=True, timeout=self.timeout)
+                continue
+            # AccessGate com erro e sem saída: tenta o ponto de entrada de login do OAM
+            if "accessgate" in r.url.lower() and salto == 1:
+                alt = urljoin(r.url, "/OA_HTML/AppsLocalLogin.jsp")
+                self._registrar(f"SSO: AccessGate sem formulário; tentando {alt}")
+                r = self.http.get(alt, allow_redirects=True, timeout=self.timeout)
+                continue
+            break
+        raise ErroForms(
+            f"SSO não levou ao EBS (parou em {r.url}). As páginas de cada salto estão em "
+            "data/ebs_forms/depuracao/sso_salto*.html."
+        )
 
     # ── jnlp ────────────────────────────────────────────────────────────
     def _e_jnlp(self, r: requests.Response) -> bool:
@@ -202,7 +237,10 @@ class Sessao:
         `.../OA_HTML/RF.jsp?function_id=...&resp_id=...&resp_appl_id=...`).
         Sem ele, procura na home um link cujo texto seja a função.
         """
-        url = _c("EBS_FORMS_FUNCAO_URL")
+        url = _c("EBS_FORMS_FUNCAO_URL").strip()
+        if url and not url.lower().startswith("http"):
+            raise ErroForms(f"EBS_FORMS_FUNCAO_URL não é um endereço válido: {url[:60]!r}. "
+                            "Cole o link real de 'Informações Financeiras' (começa com http).")
         if url:
             r = self.http.get(url, allow_redirects=True, timeout=self.timeout)
             r = self._seguir_formularios(r)
