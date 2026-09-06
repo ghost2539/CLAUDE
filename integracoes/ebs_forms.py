@@ -567,6 +567,9 @@ class Cliente:
             f"-Dforms.entrada={_c('EBS_FORMS_ENTRADA', 'java')}",
             f"-Dforms.captura={_c('EBS_FORMS_CAPTURA', 'java')}",
             f"-Dforms.jars.extra={_c('EBS_FORMS_JARS_EXTRA')}",
+            # caminhos de menu e tecla para fechar janela variam por instalação
+            f"-Dforms.fechar.menus={_c('EBS_FORMS_FECHAR_MENUS', 'Arquivo|Fechar Janela;Arquivo|Fechar;Janela|Fechar')}",
+            f"-Dforms.fechar.tecla={_c('EBS_FORMS_FECHAR_TECLA', 'CTRL+F4')}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
@@ -780,6 +783,7 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             # sobrou alguma janela de detalhe aberta? o Forms não deixa consultar
             {"acao": "fecharjanela", "arg": "Atribuições", "nome": "fechar_atribuicoes", "opcional": True},
             {"acao": "fecharjanela", "arg": "Linhas de Origem", "nome": "fechar_origem", "opcional": True},
+            {"acao": "esperarate", "arg": "sem janela:Atribuições 10000", "nome": "sem_atribuicoes", "opcional": True},
             {"acao": "menu", "arg": "{menu_localizar}", "nome": "reabrir_busca"},
             {"acao": "esperarate", "arg": "janela:Localizar Ativos 20000", "nome": "busca_aberta"},
             {"acao": "clicar", "arg": "{botao_limpar}", "nome": "limpar", "opcional": True},
@@ -806,14 +810,19 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             # o título traz o ativo: garante que é a janela desta consulta
             {"acao": "esperarate", "arg": "janela:Atribuições - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_atribuicoes"},
-            # o Forms recusa a próxima ação enquanto esta janela estiver aberta
+            # o Forms recusa a próxima ação enquanto esta janela estiver aberta:
+            # consultar com Atribuições na frente é o que gera o erro na tela
             {"acao": "fecharjanela", "arg": "Atribuições", "nome": "fechar", "opcional": True},
-            {"acao": "esperar", "arg": "500"},
+            {"acao": "esperarate", "arg": "sem janela:Atribuições 10000", "nome": "fechou", "opcional": True},
         ],
     },
     "linhas_origem": {
         "descricao": "Abre Linhas de Origem, de onde saem a OC (PO) e a NFF do ativo.",
         "passos": [
+            # a janela de Atribuições precisa ter saído: com ela aberta o Forms
+            # devolve erro em vez de abrir Linhas de Origem
+            {"acao": "fecharjanela", "arg": "Atribuições", "nome": "fechar_atribuicoes", "opcional": True},
+            {"acao": "esperarate", "arg": "sem janela:Atribuições 10000", "nome": "atribuicoes_fechada"},
             {"acao": "focarcampo", "arg": "{campo_grade}", "nome": "foco_grade", "opcional": True},
             {"acao": "clicar", "arg": "{botao_linhas_origem}", "nome": "abrir_linhas_origem"},
             {"acao": "esperar", "arg": "800"},
@@ -821,7 +830,7 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             {"acao": "esperarate", "arg": "janela:Linhas de Origem - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_origem"},
             {"acao": "fecharjanela", "arg": "Linhas de Origem", "nome": "fechar", "opcional": True},
-            {"acao": "esperar", "arg": "500"},
+            {"acao": "esperarate", "arg": "sem janela:Linhas de Origem 10000", "nome": "fechou", "opcional": True},
         ],
     },
 }

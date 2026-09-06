@@ -383,64 +383,12 @@ public class LancadorForms {
                 break;
             }
             case "fecharjanela": {
-                // O X do Forms é desenhado, não é componente. O caminho que
-                // existe de verdade é o menu do sistema da janela (o ícone à
-                // esquerda na barra de título), que tem o item "Fechar".
-                String titulo = arg.trim();
-                String como = "não tentado";
-                java.awt.Component menuSistema = naEDT(() -> {
-                    List<java.awt.Container> quadros = new ArrayList<>();
-                    for (Window w : Window.getWindows()) if (w.isShowing()) acharQuadros(w, quadros);
-                    for (java.awt.Container q : quadros) {
-                        if (!tituloDoQuadro(q).toLowerCase().contains(titulo.toLowerCase())) continue;
-                        for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>()))
-                            if (f.getClass().getName().contains("SystemMenu") && f.isShowing()) return f;
-                    }
-                    return null;
-                }, 10000);
-                if (menuSistema != null) {
-                    final java.awt.Component ms = menuSistema;
-                    naEDT(() -> { cliqueSintetico(ms); return null; }, 8000);
-                    Thread.sleep(400);
-                    java.awt.Component itemFechar = naEDT(() -> {
-                        for (Window w : Window.getWindows()) {
-                            if (!w.isShowing()) continue;
-                            for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
-                                if (!f.isShowing()) continue;
-                                String t = textoDe(f);
-                                if (t == null) continue;
-                                String tl = t.replace("&", "").trim().toLowerCase();
-                                if (tl.equals("fechar") || tl.startsWith("fechar")) return f;
-                            }
-                        }
-                        return null;
-                    }, 8000);
-                    if (itemFechar != null) {
-                        final java.awt.Component it = itemFechar;
-                        naEDT(() -> {
-                            try { it.getClass().getMethod("doClick").invoke(it); }
-                            catch (Exception e) { cliqueSintetico(it); }
-                            return null;
-                        }, 8000);
-                        como = "menu do sistema > " + textoDe(itemFechar);
-                    } else {
-                        tecla("ESC");
-                        como = "menu do sistema aberto, sem item 'Fechar'";
-                    }
-                    sincronizar();
-                    Thread.sleep(400);
-                }
-                // confirma: a janela sumiu mesmo?
-                boolean aberta = condicaoAtendida("janela:" + titulo);
-                if (aberta) {
-                    String alternativa = System.getProperty("forms.fechar.tecla", "CTRL+F4");
-                    tecla(alternativa);
-                    sincronizar();
-                    Thread.sleep(400);
-                    aberta = condicaoAtendida("janela:" + titulo);
-                    como += "; tentei " + alternativa;
-                }
-                responder((aberta ? "ERRO ainda aberta após: " : "OK fechada por ") + como);
+                // O X do Forms é desenhado, não é componente: fechar exige
+                // percorrer os caminhos que existem de verdade. Tenta um a um
+                // e CONFERE a cada tentativa — o robô só segue quando a janela
+                // some, senão o Forms recusa a ação seguinte ("é a tela de
+                // Atribuições que dá o erro quando se consulta com ela aberta").
+                responder(fecharJanela(arg.trim()));
                 break;
             }
             case "menu": {
@@ -915,8 +863,137 @@ public class LancadorForms {
         return "{}";
     }
 
+    /** Fecha um quadro do Forms pelo título, tentando os caminhos que a
+     *  instalação oferece e conferindo depois de cada um. Devolve a resposta
+     *  do protocolo já pronta (OK/ERRO) com a trilha do que foi tentado. */
+    private static String fecharJanela(String titulo) throws Exception {
+        StringBuilder trilha = new StringBuilder();
+        if (!condicaoAtendida("janela:" + titulo)) return "OK já estava fechada";
+
+        // 1) menu do sistema (ícone à esquerda da barra de título) > Fechar
+        java.awt.Component menuSistema = naEDT(() -> {
+            java.awt.Container q = quadroPorTitulo(titulo);
+            if (q == null) return null;
+            for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>()))
+                if (f.getClass().getName().contains("SystemMenu") && f.isShowing()) return f;
+            return null;
+        }, 10000);
+        if (menuSistema != null) {
+            final java.awt.Component ms = menuSistema;
+            naEDT(() -> { cliqueSintetico(ms); return null; }, 8000);
+            Thread.sleep(500);
+            java.awt.Component item = naEDT(() -> itemDeMenuComTexto("fechar"), 8000);
+            if (item != null) {
+                clicar(item);
+                trilha.append("menu do sistema > ").append(textoDe(item));
+            } else {
+                tecla("ESC");
+                trilha.append("menu do sistema sem item 'Fechar'");
+            }
+            sincronizar();
+            Thread.sleep(500);
+            if (!condicaoAtendida("janela:" + titulo)) return "OK fechada por " + trilha;
+        } else {
+            trilha.append("sem menu do sistema");
+        }
+
+        // 2) caminhos da barra de menus (nomes variam por instalação)
+        String caminhos = System.getProperty("forms.fechar.menus", "Arquivo|Fechar Janela;Arquivo|Fechar;Janela|Fechar");
+        for (String caminho : caminhos.split(";")) {
+            if (caminho.isBlank()) continue;
+            if (!seguirMenu(caminho.trim())) continue;
+            trilha.append("; menu ").append(caminho.trim());
+            sincronizar();
+            Thread.sleep(500);
+            if (!condicaoAtendida("janela:" + titulo)) return "OK fechada por " + trilha;
+        }
+
+        // 3) tecla de fechar janela da instalação
+        String combo = System.getProperty("forms.fechar.tecla", "CTRL+F4");
+        tecla(combo);
+        sincronizar();
+        Thread.sleep(500);
+        trilha.append("; tecla ").append(combo);
+        if (!condicaoAtendida("janela:" + titulo)) return "OK fechada por " + trilha;
+
+        // 4) último recurso: pedir o fechamento ao próprio componente do quadro
+        String reflexao = naEDT(() -> {
+            java.awt.Container q = quadroPorTitulo(titulo);
+            for (java.awt.Container c = q; c != null; c = c.getParent()) {
+                for (String m : new String[]{"doDefaultCloseAction", "close", "closeWindow"}) {
+                    try {
+                        java.lang.reflect.Method met = c.getClass().getMethod(m);
+                        met.setAccessible(true);
+                        met.invoke(c);
+                        return c.getClass().getSimpleName() + "." + m + "()";
+                    } catch (Exception ignorado) { }
+                }
+            }
+            return "";
+        }, 8000);
+        if (reflexao != null && !reflexao.isEmpty()) {
+            sincronizar();
+            Thread.sleep(500);
+            trilha.append("; ").append(reflexao);
+            if (!condicaoAtendida("janela:" + titulo)) return "OK fechada por " + trilha;
+        }
+        return "ERRO ainda aberta após: " + trilha;
+    }
+
+    private static java.awt.Container quadroPorTitulo(String titulo) {
+        List<java.awt.Container> quadros = new ArrayList<>();
+        for (Window w : Window.getWindows()) if (w.isShowing()) acharQuadros(w, quadros);
+        for (java.awt.Container q : quadros)
+            if (tituloDoQuadro(q).toLowerCase().contains(titulo.toLowerCase())) return q;
+        return null;
+    }
+
+    /** Item de menu visível cujo rótulo começa com o texto dado. Só itens de
+     *  menu: a barra de menus tem rótulos parecidos e não fecha nada. */
+    private static java.awt.Component itemDeMenuComTexto(String prefixo) {
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
+                if (!f.isShowing()) continue;
+                String classe = f.getClass().getName();
+                if (!classe.contains("MenuItem") && !classe.contains("MenuElement")) continue;
+                String t = textoDe(f);
+                if (t == null) continue;
+                if (t.replace("&", "").trim().toLowerCase().startsWith(prefixo)) return f;
+            }
+        }
+        return null;
+    }
+
+    private static void clicar(java.awt.Component alvo) throws Exception {
+        final java.awt.Component a = alvo;
+        naEDT(() -> {
+            try { a.getClass().getMethod("doClick").invoke(a); }
+            catch (Exception e) { cliqueSintetico(a); }
+            return null;
+        }, 8000);
+    }
+
+    /** Percorre "Menu|Item" clicando item a item; false se algum não existir. */
+    private static boolean seguirMenu(String caminho) throws Exception {
+        String[] partes = caminho.split("\\|");
+        for (String parte : partes) {
+            final String item = parte.trim();
+            java.awt.Component m = naEDT(() -> acharPorTexto(item), 5000);
+            if (m == null) { tecla("ESC"); return false; }
+            clicar(m);
+            sincronizar();
+            Thread.sleep(400);
+        }
+        return true;
+    }
+
     private static boolean condicaoAtendida(String cond) throws Exception {
-        final String c = cond.trim();
+        String bruta = cond.trim();
+        // "sem janela:Atribuições" espera o CONTRÁRIO: é assim que o roteiro
+        // garante que a tela de detalhe saiu antes da próxima ação.
+        if (bruta.toLowerCase().startsWith("sem ")) return !condicaoAtendida(bruta.substring(4));
+        final String c = bruta;
         return Boolean.TRUE.equals(naEDT(() -> {
             if (c.startsWith("campo:")) {
                 String nome = c.substring(6).trim();
