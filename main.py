@@ -164,6 +164,20 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── EBS Forms (RPA sobre o cliente Oracle Forms) — banco próprio ────
+    # Roda em segundo plano numa tela virtual; só a API entra aqui.
+    try:
+        import db.ebs_forms as _db_forms
+        _db_forms.init_db()
+        from routers.ebs_forms import router as ebs_forms_router, pagina_router as ebs_forms_pagina
+        app.include_router(ebs_forms_router)
+        app.include_router(ebs_forms_pagina)  # tela /ebs-forms (exige login e permissão)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("ebs_forms").error(
+            "Módulo EBS Forms NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     return app
 
 

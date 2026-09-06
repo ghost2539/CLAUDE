@@ -209,3 +209,14 @@ ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
 # ── 11. Aplicação ───────────────────────────────────────────────────────
 DEFAULT_VALOR_HORA=150.00
 BACKUP_RETENTION_DAYS=30
+
+# ── EBS Forms (RPA) ─────────────────────────────────────────────────────
+# Usuário e senha do robô: SÓ no cofre → python3 scripts/cofre.py definir EBS_FORMS_USER / EBS_FORMS_PASS
+EBS_FORMS_HOME_URL=http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE
+EBS_FORMS_FUNCAO_URL=                            # link RF.jsp da função "Informações Financeiras" (recomendado)
+EBS_FORMS_FUNCAO=Informações Financeiras
+EBS_FORMS_RESPONSABILIDADE=RENNER_FA_CONSULTA
+EBS_FORMS_LIVROS=FA_RENNER,FA_RENNER_FIS
+EBS_FORMS_DISPLAY=:99
+EBS_FORMS_TELA=1280x900x24
+EBS_FORMS_DATABASE_URL=                          # vazio = data/db/ebs_forms.db
