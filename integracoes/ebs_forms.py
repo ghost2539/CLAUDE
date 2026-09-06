@@ -507,6 +507,7 @@ class Cliente:
         tam = _c("EBS_FORMS_TELA", "1280x900x24").split("x")
         classe = _c("EBS_FORMS_CLASSE")  # vazio = a classe que o jnlp declara
         DIR_LOGS.mkdir(parents=True, exist_ok=True)
+        DIR_CAPTURAS.mkdir(parents=True, exist_ok=True)
         self.log_path = DIR_LOGS / f"jvm-{datetime.now():%Y%m%d-%H%M%S}.log"
         self._log_f = open(self.log_path, "wb")  # noqa: SIM115 — fechado em encerrar()
         # O cliente Forms foi escrito para o Java 8 e usa pacotes internos
@@ -518,7 +519,9 @@ class Cliente:
         for pacote in ("java.lang", "java.lang.reflect", "java.net", "java.util", "java.io", "sun.net.www.protocol.http"):
             abrir += ["--add-opens", f"java.base/{pacote}=ALL-UNNAMED"]
         cmd = [
-            java, *abrir, "-Djava.security.manager=allow", "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
+            java, *abrir, "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
+            f"-Dforms.captura.saida={DIR_CAPTURAS / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-saida-jvm.png')}",
+            f"-Dforms.segurar.exit={_c('EBS_FORMS_SEGURAR_EXIT', 'true')}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
