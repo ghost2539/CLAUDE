@@ -143,6 +143,7 @@ class Sessao:
         self.timeout = int(_c("EBS_FORMS_TIMEOUT", "40"))
         self._registrar = registrar or (lambda m: _log.info("%s", m))
         self.jnlp_pronto: str = ""
+        self.url_jnlp: str = ""
 
     # ── SSO (Oracle Access Manager) ─────────────────────────────────────
     def _seguir_formularios(self, r: requests.Response, saltos: int = 0) -> requests.Response:
@@ -184,6 +185,7 @@ class Sessao:
             if self._e_jnlp(r):
                 # O OAM devolveu direto ao frmservlet: o jnlp já está na mão.
                 self.jnlp_pronto = r.text
+                self.url_jnlp = r.url
                 self._registrar("SSO: autenticado e o jnlp já veio no redirecionamento")
                 return
             if self._logado(r):
@@ -245,6 +247,15 @@ class Sessao:
         """
         if self.jnlp_pronto:
             j, self.jnlp_pronto = self.jnlp_pronto, ""
+            if self.url_jnlp:
+                # Pede de novo para sair com tickets recém-emitidos.
+                try:
+                    r = self.http.get(self.url_jnlp, allow_redirects=True, timeout=self.timeout)
+                    if self._e_jnlp(r):
+                        self._registrar("jnlp renovado antes de abrir o Forms")
+                        return r.text
+                except requests.RequestException as exc:
+                    self._registrar(f"jnlp: renovação falhou ({exc}); usando o anterior")
             return j
         url = _c("EBS_FORMS_FUNCAO_URL").strip()
         if url and not url.lower().startswith("http"):
@@ -407,6 +418,16 @@ class Xvfb:
             log_path.unlink()
         except FileNotFoundError:
             pass
+        # Sobras de uma rodada anterior (Weston órfão, lock e socket) impedem
+        # o novo de subir: "unable to lock lockfile". Só mexemos no nosso
+        # socket nomeado, nunca em outro compositor da máquina.
+        subprocess.run(["pkill", "-f", "weston .*--socket=portal-ebs-forms"], capture_output=True)
+        time.sleep(0.3)
+        for sobra in ("portal-ebs-forms", "portal-ebs-forms.lock"):
+            try:
+                (runtime / sobra).unlink()
+            except FileNotFoundError:
+                pass
         env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = str(runtime)
         env.pop("DISPLAY", None)
@@ -487,8 +508,16 @@ class Cliente:
         DIR_LOGS.mkdir(parents=True, exist_ok=True)
         self.log_path = DIR_LOGS / f"jvm-{datetime.now():%Y%m%d-%H%M%S}.log"
         self._log_f = open(self.log_path, "wb")  # noqa: SIM115 — fechado em encerrar()
+        # O cliente Forms foi escrito para o Java 8 e usa pacotes internos
+        # (sun.awt, sun.java2d...) que o Java 21 fecha por padrão.
+        abrir = []
+        for pacote in ("sun.awt", "sun.java2d", "sun.awt.X11", "sun.font", "sun.swing", "java.awt",
+                       "java.awt.event", "java.awt.peer", "javax.swing", "java.applet"):
+            abrir += ["--add-opens", f"java.desktop/{pacote}=ALL-UNNAMED"]
+        for pacote in ("java.lang", "java.lang.reflect", "java.net", "java.util", "java.io", "sun.net.www.protocol.http"):
+            abrir += ["--add-opens", f"java.base/{pacote}=ALL-UNNAMED"]
         cmd = [
-            java, "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
+            java, *abrir, "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
@@ -786,8 +815,13 @@ def testar_abertura(registrar: Callable[[str], None], roteiro_abrir: list[dict] 
     cliente: Cliente | None = None
     try:
         usuario, senha = credenciais()
+        if not compilado():
+            compilar()
+        registrar(f"tela virtual: display {Xvfb.garantir()}")
         sessao = Sessao(usuario, senha, registrar)
         sessao.entrar()
+        # Os tickets do jnlp são de vida curta: ele é pedido por último, com a
+        # tela virtual já de pé e os jars já em cache.
         jnlp = sessao.obter_jnlp()
         registrar(f"jnlp obtido ({len(jnlp)} bytes)")
         cliente = Cliente(jnlp, registrar)
@@ -812,6 +846,9 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
     cliente: Cliente | None = None
     try:
         usuario, senha = credenciais()
+        if not compilado():
+            compilar()
+        registrar(f"tela virtual: display {Xvfb.garantir()}")
         sessao = Sessao(usuario, senha, registrar)
         sessao.entrar()
         cliente = Cliente(sessao.obter_jnlp(), registrar)
