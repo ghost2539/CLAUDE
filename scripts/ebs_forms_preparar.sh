@@ -22,6 +22,16 @@ ENV_FILE="${PORTAL_ENV_FILE:-$HOME/.config/portal-spare/environment}"
 if [ -f "$ENV_FILE" ]; then
   set -a; . "$ENV_FILE"; set +a
 fi
+# Modo isolado: numa cópia à parte (teste no servidor antigo, que roda o
+# branch producao), não existe environment do portal. O config.py exige
+# banco e segredo de sessão; aqui basta algo local — o RPA não toca o portal.
+if [ -z "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL="sqlite:///$DADOS/portal_isolado.db"
+  export PORTAL_SESSION_SECRET="${PORTAL_SESSION_SECRET:-isolado-$(hostname)}"
+  export INITIAL_ADMIN_LOGIN="${INITIAL_ADMIN_LOGIN:-isolado}"
+  export COFRE_CORPORATIVO="${COFRE_CORPORATIVO:-nao}"
+  echo "  (modo isolado: sem environment do portal; usando banco local em data/ebs_forms/)"
+fi
 
 echo "== Java =="
 JAVA="${EBS_FORMS_JAVA:-$(command -v java || true)}"
