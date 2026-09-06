@@ -361,7 +361,7 @@ public class LancadorForms {
                 Thread.sleep(500);
                 String itens = naEDT(() -> {
                     StringBuilder j = new StringBuilder("[");
-                    boolean p = true;
+                    boolean primeiroItem = true;
                     for (Window w : Window.getWindows()) {
                         if (!w.isShowing()) continue;
                         for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
@@ -370,8 +370,8 @@ public class LancadorForms {
                             if (!cl.contains("MenuItem") && !cl.contains("Menu$")) continue;
                             String t = textoDe(f);
                             if (t == null || t.isBlank()) continue;
-                            if (!p) j.append(',');
-                            p = false;
+                            if (!primeiroItem) j.append(',');
+                            primeiroItem = false;
                             j.append(jsonTexto(t.trim()));
                         }
                     }
