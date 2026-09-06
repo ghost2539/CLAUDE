@@ -522,6 +522,8 @@ class Cliente:
             java, *abrir, "-Djava.awt.headless=false", f"-Dforms.classe={classe}",
             f"-Dforms.captura.saida={DIR_CAPTURAS / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-saida-jvm.png')}",
             f"-Dforms.segurar.exit={_c('EBS_FORMS_SEGURAR_EXIT', 'true')}",
+            # java = teclas pela fila do AWT (Weston headless, sem seat); robot = XTEST (Xvfb/Xvnc)
+            f"-Dforms.entrada={_c('EBS_FORMS_ENTRADA', 'java')}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
