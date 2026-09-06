@@ -277,6 +277,12 @@ class Settings:
     EBS_FORMS_JARS_EXTRA: str = _env("EBS_FORMS_JARS_EXTRA", "fndi18n.jar")  # jars adicionais, separados por vírgula
     EBS_FORMS_VNC: str = _env('EBS_FORMS_VNC', 'nao')             # sim = acompanhar a tela por VNC (localhost)
     EBS_FORMS_VNC_PORTA: str = _env('EBS_FORMS_VNC_PORTA', '5900')
+    # Nomes dos componentes da tela Localizar Ativos (do mapa em data/ebs_forms/depuracao)
+    EBS_FORMS_CAMPO_CRITERIO: str = _env('EBS_FORMS_CAMPO_CRITERIO', 'VTextField200')
+    EBS_FORMS_CAMPO_LIVRO: str = _env('EBS_FORMS_CAMPO_LIVRO', '')
+    EBS_FORMS_BOTAO_LOCALIZAR: str = _env('EBS_FORMS_BOTAO_LOCALIZAR', 'Button18')
+    EBS_FORMS_BOTAO_LIMPAR: str = _env('EBS_FORMS_BOTAO_LIMPAR', 'Button17')
+    EBS_FORMS_BOTAO_LINHAS_ORIGEM: str = _env('EBS_FORMS_BOTAO_LINHAS_ORIGEM', 'Button14')
     EBS_FORMS_CLASSE: str = _env("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = _env("EBS_FORMS_ESPERA_JVM", "180")
 
