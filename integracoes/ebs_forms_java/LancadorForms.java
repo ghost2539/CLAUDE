@@ -346,6 +346,70 @@ public class LancadorForms {
                 responder("OK " + Base64.getEncoder().encodeToString(d.getBytes(StandardCharsets.UTF_8)));
                 break;
             }
+            case "itensmenu": {
+                // Abre um menu e devolve os itens: é assim que descobrimos o
+                // texto exato de "Fechar Janela"/"Localizar" nesta instalação.
+                String nomeMenu = arg.trim();
+                java.awt.Component m = naEDT(() -> acharPorTexto(nomeMenu), 8000);
+                if (m == null) { responder("ERRO menu não encontrado: " + nomeMenu); break; }
+                final java.awt.Component mm = m;
+                naEDT(() -> {
+                    try { mm.getClass().getMethod("doClick").invoke(mm); }
+                    catch (Exception e) { cliqueSintetico(mm); }
+                    return null;
+                }, 8000);
+                Thread.sleep(500);
+                String itens = naEDT(() -> {
+                    StringBuilder j = new StringBuilder("[");
+                    boolean p = true;
+                    for (Window w : Window.getWindows()) {
+                        if (!w.isShowing()) continue;
+                        for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
+                            if (!f.isShowing()) continue;
+                            String cl = f.getClass().getName();
+                            if (!cl.contains("MenuItem") && !cl.contains("Menu$")) continue;
+                            String t = textoDe(f);
+                            if (t == null || t.isBlank()) continue;
+                            if (!p) j.append(',');
+                            p = false;
+                            j.append(jsonTexto(t.trim()));
+                        }
+                    }
+                    return j.append(']').toString();
+                }, 10000);
+                tecla("ESC");   // não deixa o menu aberto atrapalhando
+                sincronizar();
+                responder("OK " + Base64.getEncoder().encodeToString(itens.getBytes(StandardCharsets.UTF_8)));
+                break;
+            }
+            case "fecharjanela": {
+                // O Forms recusa ações enquanto uma janela de detalhe está
+                // aberta. Tentamos, nesta ordem: o X da barra de título, o item
+                // de menu de fechar, e por fim esconder o quadro.
+                String titulo = arg.trim();
+                String como = naEDT(() -> {
+                    List<java.awt.Container> quadros = new ArrayList<>();
+                    for (Window w : Window.getWindows()) if (w.isShowing()) acharQuadros(w, quadros);
+                    java.awt.Container alvo = null;
+                    for (java.awt.Container q : quadros)
+                        if (tituloDoQuadro(q).toLowerCase().contains(titulo.toLowerCase())) alvo = q;
+                    if (alvo == null) return "quadro não encontrado";
+                    // o X é o componente mais à direita da barra de título
+                    java.awt.Component fechar = null;
+                    for (java.awt.Component f : todosOsComponentes(alvo, new ArrayList<>())) {
+                        String cl = f.getClass().getName();
+                        if (!cl.contains("TitleBar") && !cl.contains("Close")) continue;
+                        if (!f.isShowing() || f.getWidth() <= 0 || f.getWidth() > 40) continue;
+                        if (fechar == null || f.getLocationOnScreen().x > fechar.getLocationOnScreen().x) fechar = f;
+                    }
+                    if (fechar != null) { cliqueSintetico(fechar); return "X da barra de título (" + fechar.getClass().getSimpleName() + ")"; }
+                    alvo.setVisible(false);
+                    return "quadro escondido (sem X encontrado)";
+                }, 10000);
+                sincronizar();
+                responder("OK " + como);
+                break;
+            }
             case "menu": {
                 // Navega no menu do Forms: "menu Verificar|Localizar". Depois de
                 // uma consulta o Forms FECHA a janela Localizar Ativos; é por
