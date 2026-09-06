@@ -15,20 +15,14 @@ SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Lê um segredo do cofre `vcreports_secrets` (servidor novo); se ele não
-    estiver disponível, cai para variável de ambiente (servidor atual/transição).
+    """Segredo pelo caminho único do projeto (`core.cofre`): cofre
+    corporativo, cofre local cifrado e, por último, variável de ambiente.
 
-    No servidor novo as credenciais dos Correios NÃO ficam em variável de
-    ambiente nem em arquivo — vêm somente do cofre, que só a aplicação lê.
+    As credenciais dos Correios NÃO devem ficar em variável de ambiente nem
+    em arquivo de configuração — só no cofre, que apenas a aplicação lê.
     """
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        val = vcreports_secret(nome)
-        if val:
-            return str(val)
-    except Exception:
-        pass
-    return os.environ.get(nome, default)
+    from core.cofre import obter
+    return obter(nome, default)
 
 
 def _correios_creds():

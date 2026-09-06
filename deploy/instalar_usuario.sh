@@ -47,16 +47,30 @@ if [ -f "$ENVFILE" ]; then
     echo "-- Arquivo de ambiente já existe (mantido): $ENVFILE"
 else
     echo "-- Gerando $ENVFILE"
+    # O segredo de sessão nasce NO COFRE, não no arquivo: o environment é
+    # lido por qualquer um que abra o arquivo e entra em backup.
     SEGREDO="$("$APP_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    "$APP_DIR/venv/bin/python" "$APP_DIR/scripts/cofre.py" definir \
+        PORTAL_SESSION_SECRET --valor "$SEGREDO" >/dev/null 2>&1 \
+        && SEGREDO_REF='@cofre:PORTAL_SESSION_SECRET@' \
+        || SEGREDO_REF="$SEGREDO"
+    unset SEGREDO
     cat > "$ENVFILE" <<EOF
 # Ambiente do Portal SPARE — NÃO versionar. Gerado em $(date '+%d/%m/%Y %H:%M').
 
-# Banco principal. Em produção é Postgres:
-#   DATABASE_URL=postgresql+psycopg2://usuario:senha@host:5432/portal_spare
+# ── Segredos ────────────────────────────────────────────────────────
+# NADA de usuário e senha em texto claro aqui. Onde for segredo, use o
+# marcador @cofre:NOME@ e guarde o valor com:
+#     python3 scripts/cofre.py definir NOME
+# Conferir o que está pendente:
+#     python3 scripts/cofre.py conferir
+
+# Banco principal. Em produção é Postgres, com a senha no cofre:
+#   DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@host:5432/portal_spare
 # Para TESTE sem servidor de banco, o SQLite abaixo já funciona:
 DATABASE_URL=sqlite:///$APP_DIR/data/db/portal.db
 
-PORTAL_SESSION_SECRET=$SEGREDO
+PORTAL_SESSION_SECRET=$SEGREDO_REF
 
 HOST=0.0.0.0
 PORT=8901
@@ -67,15 +81,18 @@ WORKERS=1
 INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
 
 # ── Integrações (preencher conforme for testando) ──
+# O que não é segredo fica aqui; o que é segredo vai para o cofre.
 # EBS_LOGIN_URL=
-# SN_API_USER=
-# SN_API_PASSWORD=
+# SN_API_BASE=https://renner.service-now.com
+# SN_API_USER=svc_do_portal
+# SN_API_PASSWORD=@cofre:SN_API_PASSWORD@
 # CORREIOS_USUARIO=
-# CORREIOS_CHAVE=
+# CORREIOS_CHAVE=@cofre:CORREIOS_CHAVE@
 
 # ── Alertas por e-mail (opcional) ──
 # SMTP_HOST=
 # SMTP_PORT=25
+# SMTP_SENHA=@cofre:SMTP_SENHA@
 # ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
 EOF
     chmod 600 "$ENVFILE"
@@ -119,6 +136,9 @@ cat <<EOF
 == Pronto ==
 
   1. Revise o ambiente:   $ENVFILE
+     Segredos NÃO vão nele — guarde no cofre:
+        $APP_DIR/venv/bin/python scripts/cofre.py definir NOME
+        $APP_DIR/venv/bin/python scripts/cofre.py conferir
   2. Suba o portal:       $APP_DIR/deploy/portal.sh start
   3. Confira:             $APP_DIR/deploy/portal.sh status
   4. Acompanhe o log:     $APP_DIR/deploy/portal.sh logs
