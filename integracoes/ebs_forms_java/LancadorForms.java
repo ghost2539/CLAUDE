@@ -383,31 +383,64 @@ public class LancadorForms {
                 break;
             }
             case "fecharjanela": {
-                // O Forms recusa ações enquanto uma janela de detalhe está
-                // aberta. Tentamos, nesta ordem: o X da barra de título, o item
-                // de menu de fechar, e por fim esconder o quadro.
+                // O X do Forms é desenhado, não é componente. O caminho que
+                // existe de verdade é o menu do sistema da janela (o ícone à
+                // esquerda na barra de título), que tem o item "Fechar".
                 String titulo = arg.trim();
-                String como = naEDT(() -> {
+                String como = "não tentado";
+                java.awt.Component menuSistema = naEDT(() -> {
                     List<java.awt.Container> quadros = new ArrayList<>();
                     for (Window w : Window.getWindows()) if (w.isShowing()) acharQuadros(w, quadros);
-                    java.awt.Container alvo = null;
-                    for (java.awt.Container q : quadros)
-                        if (tituloDoQuadro(q).toLowerCase().contains(titulo.toLowerCase())) alvo = q;
-                    if (alvo == null) return "quadro não encontrado";
-                    // o X é o componente mais à direita da barra de título
-                    java.awt.Component fechar = null;
-                    for (java.awt.Component f : todosOsComponentes(alvo, new ArrayList<>())) {
-                        String cl = f.getClass().getName();
-                        if (!cl.contains("TitleBar") && !cl.contains("Close")) continue;
-                        if (!f.isShowing() || f.getWidth() <= 0 || f.getWidth() > 40) continue;
-                        if (fechar == null || f.getLocationOnScreen().x > fechar.getLocationOnScreen().x) fechar = f;
+                    for (java.awt.Container q : quadros) {
+                        if (!tituloDoQuadro(q).toLowerCase().contains(titulo.toLowerCase())) continue;
+                        for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>()))
+                            if (f.getClass().getName().contains("SystemMenu") && f.isShowing()) return f;
                     }
-                    if (fechar != null) { cliqueSintetico(fechar); return "X da barra de título (" + fechar.getClass().getSimpleName() + ")"; }
-                    alvo.setVisible(false);
-                    return "quadro escondido (sem X encontrado)";
+                    return null;
                 }, 10000);
-                sincronizar();
-                responder("OK " + como);
+                if (menuSistema != null) {
+                    final java.awt.Component ms = menuSistema;
+                    naEDT(() -> { cliqueSintetico(ms); return null; }, 8000);
+                    Thread.sleep(400);
+                    java.awt.Component itemFechar = naEDT(() -> {
+                        for (Window w : Window.getWindows()) {
+                            if (!w.isShowing()) continue;
+                            for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
+                                if (!f.isShowing()) continue;
+                                String t = textoDe(f);
+                                if (t == null) continue;
+                                String tl = t.replace("&", "").trim().toLowerCase();
+                                if (tl.equals("fechar") || tl.startsWith("fechar")) return f;
+                            }
+                        }
+                        return null;
+                    }, 8000);
+                    if (itemFechar != null) {
+                        final java.awt.Component it = itemFechar;
+                        naEDT(() -> {
+                            try { it.getClass().getMethod("doClick").invoke(it); }
+                            catch (Exception e) { cliqueSintetico(it); }
+                            return null;
+                        }, 8000);
+                        como = "menu do sistema > " + textoDe(itemFechar);
+                    } else {
+                        tecla("ESC");
+                        como = "menu do sistema aberto, sem item 'Fechar'";
+                    }
+                    sincronizar();
+                    Thread.sleep(400);
+                }
+                // confirma: a janela sumiu mesmo?
+                boolean aberta = condicaoAtendida("janela:" + titulo);
+                if (aberta) {
+                    String alternativa = System.getProperty("forms.fechar.tecla", "CTRL+F4");
+                    tecla(alternativa);
+                    sincronizar();
+                    Thread.sleep(400);
+                    aberta = condicaoAtendida("janela:" + titulo);
+                    como += "; tentei " + alternativa;
+                }
+                responder((aberta ? "ERRO ainda aberta após: " : "OK fechada por ") + como);
                 break;
             }
             case "menu": {

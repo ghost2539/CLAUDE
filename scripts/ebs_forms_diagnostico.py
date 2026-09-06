@@ -90,7 +90,10 @@ def main() -> int:
         passo("ler Atribuições", lambda: json.dumps(cliente.dados(), ensure_ascii=False)[:600])
         capturas.append(cliente.foto("diag_atribuicoes"))
 
-        passo("FECHAR a janela Atribuições", lambda: cliente.ordem("fecharjanela", "Atribuições", timeout=30))
+        passo("FECHAR a janela Atribuições", lambda: cliente.ordem("fecharjanela", "Atribuições", timeout=60))
+        passo("janelas abertas agora", lambda: cliente.janelas())
+        passo("quadros abertos agora",
+              lambda: [q.get("titulo") for q in (cliente.dados() or {}).get("quadros", [])])
         capturas.append(cliente.foto("diag_apos_fechar"))
 
         passo("focar a grade de novo", lambda: cliente.focar_campo(v["campo_grade"]))
