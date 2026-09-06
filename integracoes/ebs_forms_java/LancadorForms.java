@@ -338,6 +338,24 @@ public class LancadorForms {
                 responder("OK " + como);
                 break;
             }
+            case "esperarate": {
+                // Espera por CONDIÇÃO, não por relógio: sai assim que a tela
+                // fica pronta, em vez de dormir um tempo fixo "para garantir".
+                //   esperarate janela:Localizar Ativos 60000
+                //   esperarate campo:VTextField200 30000
+                //   esperarate grade 30000
+                String[] pa = arg.trim().split("\\s+(?=\\d+$)");
+                String cond = pa[0].trim();
+                long limite = System.currentTimeMillis() + (pa.length > 1 ? Long.parseLong(pa[1]) : 30000);
+                boolean pronto2 = false;
+                while (System.currentTimeMillis() < limite) {
+                    if (condicaoAtendida(cond)) { pronto2 = true; break; }
+                    Thread.sleep(200);
+                }
+                if (!pronto2) { responder("ERRO esperarate: '" + cond + "' não aconteceu no prazo"); break; }
+                responder("OK " + cond);
+                break;
+            }
             case "dados": {
                 // Tudo o que a tela tem, inclusive o que não cabe nela: as
                 // colunas da grade existem na memória mesmo fora da área
@@ -692,6 +710,43 @@ public class LancadorForms {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private static boolean condicaoAtendida(String cond) throws Exception {
+        final String c = cond.trim();
+        return Boolean.TRUE.equals(naEDT(() -> {
+            if (c.startsWith("campo:")) {
+                String nome = c.substring(6).trim();
+                for (Window w : Window.getWindows())
+                    if (w.isShowing() && procurar(w, nome) != null) return true;
+                return false;
+            }
+            if (c.startsWith("janela:")) {
+                String titulo = c.substring(7).trim().toLowerCase();
+                List<java.awt.Container> quadros = new ArrayList<>();
+                for (Window w : Window.getWindows()) {
+                    if (!w.isShowing()) continue;
+                    acharQuadros(w, quadros);
+                    if (tituloDe(w) != null && tituloDe(w).toLowerCase().contains(titulo)) return true;
+                }
+                for (java.awt.Container q : quadros)
+                    if (tituloDoQuadro(q).toLowerCase().contains(titulo)) return true;
+                return false;
+            }
+            if (c.equals("grade")) {
+                for (Window w : Window.getWindows()) {
+                    if (!w.isShowing()) continue;
+                    for (java.awt.Container painel : paineisComCabecalho(w, new ArrayList<>()))
+                        for (java.awt.Component f : painel.getComponents()) {
+                            if (!ehCampo(f) || f.getY() <= 0) continue;
+                            String t = textoDe(f);
+                            if (t != null && !t.isBlank()) return true;
+                        }
+                }
+                return false;
+            }
+            return false;
+        }, 8000));
     }
 
     // ── tudo da tela em JSON ────────────────────────────────────────────
