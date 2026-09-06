@@ -198,10 +198,33 @@ class Settings:
 
     # Módulos com permissão por usuário. "orcamento" não aparece na sidebar
     # do portal — é a tela /controle-orcamento, liberada individualmente.
+    # ── EBS Forms (RPA sobre o cliente Oracle Forms) — aditivo ──────────
+    # Usuário/senha do robô vêm do cofre local (EBS_FORMS_USER / EBS_FORMS_PASS),
+    # resolvidos dentro de integracoes/ebs_forms.py.
+    EBS_FORMS_DATABASE_URL: str = os.getenv("EBS_FORMS_DATABASE_URL") or _sqlite("ebs_forms")
+    EBS_FORMS_HOME_URL: str = os.getenv(
+        "EBS_FORMS_HOME_URL",
+        "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE",
+    )
+    EBS_FORMS_FUNCAO_URL: str = os.getenv("EBS_FORMS_FUNCAO_URL", "")
+    EBS_FORMS_FUNCAO: str = os.getenv("EBS_FORMS_FUNCAO", "Informações Financeiras")
+    EBS_FORMS_RESPONSABILIDADE: str = os.getenv("EBS_FORMS_RESPONSABILIDADE", "RENNER_FA_CONSULTA")
+    EBS_FORMS_LIVROS: str = os.getenv("EBS_FORMS_LIVROS", "FA_RENNER,FA_RENNER_FIS")
+    EBS_FORMS_PROXY: str = os.getenv("EBS_FORMS_PROXY", "")
+    EBS_FORMS_VERIFY: str = os.getenv("EBS_FORMS_VERIFY", "false")
+    EBS_FORMS_TIMEOUT: str = os.getenv("EBS_FORMS_TIMEOUT", "40")
+    EBS_FORMS_DISPLAY: str = os.getenv("EBS_FORMS_DISPLAY", ":99")
+    EBS_FORMS_TELA: str = os.getenv("EBS_FORMS_TELA", "1280x900x24")
+    EBS_FORMS_JAVA: str = os.getenv("EBS_FORMS_JAVA", "")
+    EBS_FORMS_JAVAC: str = os.getenv("EBS_FORMS_JAVAC", "")
+    EBS_FORMS_JAVA_OPCOES: str = os.getenv("EBS_FORMS_JAVA_OPCOES", "")
+    EBS_FORMS_CLASSE: str = os.getenv("EBS_FORMS_CLASSE", "oracle.forms.engine.Main")
+    EBS_FORMS_ESPERA_JVM: str = os.getenv("EBS_FORMS_ESPERA_JVM", "180")
+
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare"
+        "orcamento_spare", "ebs_forms"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
