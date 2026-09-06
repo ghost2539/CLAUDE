@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>EBS Forms (RPA) - SPARE</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/ebs-forms/app.css?v={{v}}">
+    <script defer src="/static/ebs-forms/app.js?v={{v}}"></script>
+</head>
+<body>
+<header class="topo">
+    <div class="topo-in">
+        <a class="voltar" href="/">&larr; Portal</a>
+        <h1>EBS Forms (RPA)</h1>
+        <span class="sub">Consulta de ativos pelo Oracle Forms do EBS</span>
+        <span id="quem" class="quem"></span>
+    </div>
+</header>
+
+<main class="pagina">
+    <div id="aviso" class="aviso" hidden></div>
+
+    <!-- 1. Status / diagnóstico -->
+    <section class="card" id="sec-status">
+        <div class="card-cab">
+            <h2>Status e diagnóstico</h2>
+            <div class="acoes">
+                <button type="button" id="bt-status" class="bt">Atualizar</button>
+                <button type="button" id="bt-compilar" class="bt admin" hidden>Compilar lançador</button>
+                <button type="button" id="bt-testar" class="bt bt-sec admin" hidden>Testar abertura</button>
+            </div>
+        </div>
+        <div id="status-grade" class="grade-status">
+            <p class="mudo">Carregando…</p>
+        </div>
+        <pre id="compilar-saida" class="log" hidden></pre>
+    </section>
+
+    <!-- 2. Consultar ativo -->
+    <section class="card" id="sec-consulta">
+        <div class="card-cab">
+            <h2>Consultar ativo</h2>
+        </div>
+        <form id="form-consulta" class="linha-form" autocomplete="off">
+            <label for="criterio">Número do ativo, etiqueta ou série</label>
+            <input id="criterio" name="criterio" type="text" maxlength="80" required placeholder="ex.: 123456">
+            <label class="chk"><input id="forcar" type="checkbox"> Ignorar cache (24 h)</label>
+            <button type="submit" id="bt-consultar" class="bt">Consultar</button>
+        </form>
+        <div id="consulta-estado" class="estado" hidden></div>
+        <div id="consulta-detalhe" class="detalhe" hidden></div>
+    </section>
+
+    <!-- 3. Execuções -->
+    <section class="card" id="sec-execucoes">
+        <div class="card-cab">
+            <h2>Execuções</h2>
+            <div class="acoes">
+                <button type="button" id="bt-execucoes" class="bt bt-sec">Atualizar</button>
+            </div>
+        </div>
+        <div class="tabela-rolagem">
+            <table class="tabela" id="tab-execucoes">
+                <thead>
+                <tr>
+                    <th>#</th><th>Tipo</th><th>Critério</th><th>Usuário</th>
+                    <th>Situação</th><th>Início</th><th>Fim</th><th>Capturas</th>
+                </tr>
+                </thead>
+                <tbody><tr><td colspan="8" class="mudo">Carregando…</td></tr></tbody>
+            </table>
+        </div>
+        <div id="exec-detalhe" class="detalhe" hidden></div>
+    </section>
+
+    <!-- 4. Roteiros (admin) -->
+    <section class="card admin" id="sec-roteiros" hidden>
+        <div class="card-cab">
+            <h2>Roteiros</h2>
+            <div class="acoes">
+                <button type="button" id="bt-roteiros" class="bt bt-sec">Atualizar</button>
+            </div>
+        </div>
+        <p class="mudo" id="roteiros-ajuda"></p>
+        <div id="roteiros-lista"></div>
+    </section>
+</main>
+
+<noscript>Este módulo requer JavaScript habilitado.</noscript>
+</body>
+</html>
