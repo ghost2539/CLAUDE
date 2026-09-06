@@ -58,7 +58,17 @@ start)
         echo "Portal no ar (PID $(cat "$PIDFILE")) — porta $PORTA"
         echo "  log: $LOGFILE"
     else
-        echo "FALHOU. Últimas linhas do log:"; tail -n 25 "$LOGFILE"; exit 1
+        echo
+        echo "FALHOU AO SUBIR. Últimas linhas do log:"
+        echo "----------------------------------------------------------------"
+        tail -n 30 "$LOGFILE"
+        echo "----------------------------------------------------------------"
+        echo
+        echo "Para o diagnóstico completo (o que falta configurar):"
+        echo "    $APP_DIR/venv/bin/python $APP_DIR/scripts/prevoo.py"
+        echo "Log inteiro: $LOGFILE"
+        rm -f "$PIDFILE"
+        exit 1
     fi
     ;;
 
@@ -181,7 +191,27 @@ endereco|onde|url)
     ;;
 
 logs)
+    # Acompanha em tempo real (Ctrl+C para sair). Para só ver o que já
+    # aconteceu, use "erros" — este aqui fica preso na tela.
     tail -n "${2:-80}" -f "$LOGFILE"
+    ;;
+
+erros|ultimolog)
+    # Mostra e SAI: é o que se quer quando o portal não subiu.
+    if [ ! -f "$LOGFILE" ]; then
+        echo "Sem log ainda em $LOGFILE — o portal nunca chegou a subir."
+        echo "Rode:  $0 start"
+        exit 1
+    fi
+    N="${2:-60}"
+    echo "== Últimas $N linhas de $LOGFILE =="
+    tail -n "$N" "$LOGFILE"
+    echo
+    echo "== Erros e tracebacks no log =="
+    if grep -nE "Traceback|Error|ERROR|Exception|NÃO carregado|FALHOU" "$LOGFILE" \
+       | tail -n 20 | sed 's/^/   /'; then :; fi
+    grep -qE "Traceback|Error|ERROR|Exception" "$LOGFILE" \
+        || echo "   (nenhum)"
     ;;
 
 atualizar)
@@ -200,7 +230,7 @@ atualizar)
     ;;
 
 *)
-    echo "Uso: $0 {start|stop|restart|status|endereco|logs|atualizar}"
+    echo "Uso: $0 {start|stop|restart|status|endereco|logs|erros|atualizar}"
     exit 1
     ;;
 esac
