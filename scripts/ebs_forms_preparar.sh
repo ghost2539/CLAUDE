@@ -53,8 +53,11 @@ fi
 echo "== Tela virtual =="
 if command -v Xvfb >/dev/null; then
   ok "Xvfb: $(command -v Xvfb)"
+elif command -v Xvnc >/dev/null; then
+  ok "Xvnc: $(command -v Xvnc) (serve como tela virtual; permite ver por VNC em localhost)"
 else
-  falta "Xvfb não instalado (dnf install xorg-x11-server-Xvfb)"
+  falta "nenhum servidor X virtual: dnf install xorg-x11-server-Xvfb  OU  dnf install tigervnc-server-minimal"
+  aviso "se o dnf não achar nenhum dos dois, rode: dnf repolist --all | head; dnf provides '*/Xvfb' '*/Xvnc'"
 fi
 if command -v fc-list >/dev/null && [ "$(fc-list 2>/dev/null | wc -l)" -gt 0 ]; then
   ok "fontes: $(fc-list 2>/dev/null | wc -l) encontradas"
