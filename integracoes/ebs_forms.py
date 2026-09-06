@@ -710,7 +710,7 @@ class Cliente:
 # olhando as capturas de cada passo.
 ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
     "abrir": {
-        "descricao": "Espera o Forms abrir a tela Localizar Ativos e fotografa.",
+        "descricao": "Espera o Forms abrir a tela Localizar Ativos, fotografa e mapeia os componentes.",
         "passos": [
             {"acao": "esperar", "arg": "20000", "nome": "abrindo"},
             {"acao": "foto", "nome": "tela_inicial"},
@@ -718,46 +718,34 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         ],
     },
     "localizar_ativo": {
-        "descricao": "Preenche o critério e o Livro na tela Localizar Ativos e dispara Localizar.",
+        "descricao": ("Preenche o critério (e o Livro, se configurado) na tela Localizar Ativos "
+                      "e aciona o botão Localizar. Os campos são endereçados pelo nome do mapa: "
+                      "{campo_criterio} e {campo_livro} vêm de EBS_FORMS_CAMPO_CRITERIO/LIVRO."),
         "passos": [
             {"acao": "foto", "nome": "antes"},
+            {"acao": "focarcampo", "arg": "{campo_criterio}", "nome": "foco_criterio"},
             {"acao": "texto", "arg": "{criterio}", "nome": "criterio"},
-            {"acao": "tecla", "arg": "TAB", "nome": "proximo_campo"},
+            {"acao": "lercampo", "arg": "{campo_criterio}", "nome": "criterio_conferido"},
             {"acao": "foto", "nome": "criterio_preenchido"},
-            {"acao": "tecla", "arg": "ALT+L", "nome": "localizar"},
-            {"acao": "esperar", "arg": "4000", "nome": "consultando"},
+            {"acao": "clicar", "arg": "{botao_localizar}", "nome": "localizar"},
+            {"acao": "esperar", "arg": "6000", "nome": "consultando"},
             {"acao": "foto", "nome": "resultado"},
         ],
     },
     "ler_ativo": {
-        "descricao": "Lê os campos da linha selecionada na tela Ativos (Tab entre campos).",
+        "descricao": "Lê a grade de resultados como tabela (os cabeçalhos do Forms nomeiam as colunas).",
         "passos": [
-            {"acao": "copiar", "nome": "nr_ativo"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "descricao"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "etiqueta"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "categoria"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "serie"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "chave"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "tipo_ativo"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "unidades"},
-            {"acao": "tecla", "arg": "TAB"},
-            {"acao": "copiar", "nome": "tipo_propriedade"},
+            {"acao": "grade", "nome": "tabela"},
             {"acao": "foto", "nome": "lido"},
         ],
     },
     "linhas_origem": {
-        "descricao": "Abre Linhas de Origem (OC/NF do ativo) e lê a primeira linha.",
+        "descricao": "Abre Linhas de Origem (OC/NF do ativo) e lê a grade de lá.",
         "passos": [
-            {"acao": "tecla", "arg": "ALT+L", "nome": "botao_linhas_origem"},
-            {"acao": "esperar", "arg": "3000"},
+            {"acao": "clicar", "arg": "{botao_linhas_origem}", "nome": "abrir_linhas_origem"},
+            {"acao": "esperar", "arg": "5000"},
             {"acao": "foto", "nome": "linhas_origem"},
+            {"acao": "grade", "nome": "tabela_origem"},
         ],
     },
 }
@@ -767,6 +755,22 @@ def _substituir(valor: str, variaveis: dict[str, str]) -> str:
     def _v(m: re.Match) -> str:
         return variaveis.get(m.group(1), "")
     return re.sub(r"\{(\w+)\}", _v, valor or "")
+
+
+def variaveis_da_tela() -> dict[str, str]:
+    """Nomes de componentes da tela, ajustáveis sem tocar no roteiro.
+
+    Vêm do mapa (`arvore`): na tela Localizar Ativos os rótulos são desenhados
+    no canvas e não aparecem como componentes, então o campo é identificado
+    pelo nome gerado pelo Forms, que é estável para uma mesma versão da tela.
+    """
+    return {
+        "campo_criterio": _c("EBS_FORMS_CAMPO_CRITERIO", "VTextField200"),
+        "campo_livro": _c("EBS_FORMS_CAMPO_LIVRO"),
+        "botao_localizar": _c("EBS_FORMS_BOTAO_LOCALIZAR", "Button18"),
+        "botao_limpar": _c("EBS_FORMS_BOTAO_LIMPAR", "Button17"),
+        "botao_linhas_origem": _c("EBS_FORMS_BOTAO_LINHAS_ORIGEM", "Button14"),
+    }
 
 
 def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, str],
@@ -913,7 +917,7 @@ def testar_abertura(registrar: Callable[[str], None], roteiro_abrir: list[dict] 
         cliente = Cliente(jnlp, registrar)
         cliente.iniciar()
         passos = roteiro_abrir or ROTEIROS_PADRAO["abrir"]["passos"]
-        resultado = executar_roteiro(cliente, passos, {}, sessao, registrar, capturas)
+        resultado = executar_roteiro(cliente, passos, variaveis_da_tela(), sessao, registrar, capturas)
         janelas = cliente.janelas()
         return {"resultado": resultado, "janelas": janelas, "eventos": cliente.eventos[-30:],
                 "capturas": capturas, "log_jvm": cliente.log_path.name}
@@ -940,11 +944,11 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
         cliente = Cliente(sessao.obter_jnlp(), registrar)
         cliente.iniciar()
         executar_roteiro(cliente, roteiros.get("abrir") or ROTEIROS_PADRAO["abrir"]["passos"],
-                         {}, sessao, registrar, capturas)
+                         variaveis_da_tela(), sessao, registrar, capturas)
         dados: dict[str, Any] = {}
         livro_ok = ""
         for livro in (livros_tentar or livros()):
-            variaveis = {"criterio": criterio, "livro": livro}
+            variaveis = {"criterio": criterio, "livro": livro, **variaveis_da_tela()}
             registrar(f"tentando livro {livro}")
             executar_roteiro(cliente, roteiros.get("localizar_ativo") or ROTEIROS_PADRAO["localizar_ativo"]["passos"],
                              variaveis, sessao, registrar, capturas)
@@ -958,7 +962,8 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                 executar_roteiro(cliente, roteiros["voltar_localizar"], variaveis, sessao, registrar, capturas)
         if dados and roteiros.get("linhas_origem"):
             origem = executar_roteiro(cliente, roteiros["linhas_origem"],
-                                      {"criterio": criterio, "livro": livro_ok}, sessao, registrar, capturas)
+                                      {"criterio": criterio, "livro": livro_ok, **variaveis_da_tela()},
+                                      sessao, registrar, capturas)
             dados["linhas_origem"] = origem
         return {"criterio": criterio, "livro": livro_ok, "dados": dados, "encontrado": bool(dados),
                 "capturas": capturas, "eventos": cliente.eventos[-30:], "log_jvm": cliente.log_path.name}
