@@ -899,7 +899,8 @@ public class LancadorForms {
                 if (!p1) bloco.append(',');
                 p1 = false;
                 bloco.append("{\"nome\":").append(jsonTexto(nome))
-                     .append(",\"valor\":").append(jsonTexto(v.trim())).append('}');
+                     .append(",\"valor\":").append(jsonTexto(v.trim()))
+                     .append(",\"x\":").append(f.getX()).append(",\"y\":").append(f.getY()).append('}');
             }
             String grades = gradesJson(q);
             if (p1 && grades.isEmpty()) continue;   // quadro sem nada a dizer
