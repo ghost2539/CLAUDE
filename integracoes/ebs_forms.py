@@ -794,23 +794,25 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         "descricao": ("Abre Atribuições (onde fica o Local). Se o ativo estiver baixado, o Forms "
                       "avisa antes — o aviso é capturado e confirmado, e a leitura segue."),
         "passos": [
+            # devolve o contexto ao bloco Ativos: os botões pertencem a ele
+            {"acao": "focarcampo", "arg": "{campo_grade}", "nome": "foco_grade", "opcional": True},
             {"acao": "clicar", "arg": "{botao_atribuicoes}", "nome": "abrir_atribuicoes"},
-            {"acao": "esperar", "arg": "1200"},
+            {"acao": "esperar", "arg": "800"},
             {"acao": "dialogo", "nome": "aviso"},
             {"acao": "clicartexto", "arg": "OK", "nome": "confirmar_aviso", "opcional": True},
-            {"acao": "esperarate", "arg": "janela:Atribuições 15000", "nome": "abrindo", "opcional": True},
-            {"acao": "grade", "nome": "tabela_atribuicoes"},
+            # o título traz o ativo: garante que é a janela desta consulta
+            {"acao": "esperarate", "arg": "janela:Atribuições - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_atribuicoes"},
         ],
     },
     "linhas_origem": {
         "descricao": "Abre Linhas de Origem, de onde saem a OC (PO) e a NFF do ativo.",
         "passos": [
+            {"acao": "focarcampo", "arg": "{campo_grade}", "nome": "foco_grade", "opcional": True},
             {"acao": "clicar", "arg": "{botao_linhas_origem}", "nome": "abrir_linhas_origem"},
-            {"acao": "esperar", "arg": "1200"},
+            {"acao": "esperar", "arg": "800"},
             {"acao": "clicartexto", "arg": "OK", "nome": "confirmar_aviso", "opcional": True},
-            {"acao": "esperarate", "arg": "janela:Linhas de Origem 15000", "nome": "abrindo", "opcional": True},
-            {"acao": "grade", "nome": "tabela_origem"},
+            {"acao": "esperarate", "arg": "janela:Linhas de Origem - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_origem"},
         ],
     },
@@ -871,7 +873,37 @@ def _coluna(linha: dict, *possiveis: str) -> str:
     return ""
 
 
-def montar_ativo(principal: dict, atribuicoes: dict, origem: dict) -> dict:
+def _quadro(lido: dict, *titulos: str) -> dict:
+    """Quadro (janela do Forms) cujo título contenha um dos textos dados.
+
+    O título traz o ativo ("Atribuições - 11837250"), então é ele que garante
+    que estamos lendo a janela DESTA consulta, e não a que sobrou da anterior.
+    """
+    for valor in lido.values():
+        if not isinstance(valor, dict) or "quadros" not in valor:
+            continue
+        for q in valor.get("quadros", []):
+            titulo = (q.get("titulo") or "").lower()
+            if any(t.lower() in titulo for t in titulos):
+                return q
+    return {}
+
+
+def _linha_de_campos(quadro: dict) -> list[dict]:
+    """Campos da primeira linha de registros, da esquerda para a direita.
+
+    Telas como Atribuições desenham os cabeçalhos no canvas (não são
+    componentes), então não há grade para ler: resta a posição.
+    """
+    campos = [c for c in quadro.get("campos", []) if str(c.get("valor", "")).strip()]
+    if not campos:
+        return []
+    topo = min(c.get("y", 0) for c in campos)
+    primeira = [c for c in campos if abs(c.get("y", 0) - topo) <= 12]
+    return sorted(primeira, key=lambda c: c.get("x", 0))
+
+
+def montar_ativo(principal: dict, atribuicoes: dict, origem: dict, criterio: str = "") -> dict:
     """O resultado no formato que o portal consome.
 
     Junta as três telas do Forms: a grade de Ativos, o Local (Atribuições) e a
@@ -882,6 +914,21 @@ def montar_ativo(principal: dict, atribuicoes: dict, origem: dict) -> dict:
     linha_origem = _primeira_linha(origem, "Nr. da NFF", "Nr. da OC")
     linha_atrib = _primeira_linha(atribuicoes, "Local", "Conta de Despesas")
     aviso = (atribuicoes.get("aviso") or {}).get("texto", "")
+
+    # Atribuições não tem cabeçalho de grade: lemos por posição, e só do quadro
+    # que traz o ativo no título (para não pegar o da consulta anterior).
+    local = _coluna(linha_atrib, "Local")
+    if not local:
+        campos = _linha_de_campos(_quadro(atribuicoes, f"atribuições - {criterio}", "atribuições"))
+        if campos:
+            local = str(campos[-1].get("valor", "")).strip()   # Local é a última coluna
+
+    po = _coluna(linha_origem, "Nr. da OC", "Nr. da OCC")
+    nff = _coluna(linha_origem, "Nr. da NFF")
+    if not (po or nff):
+        campos = _linha_de_campos(_quadro(origem, f"linhas de origem - {criterio}", "linhas de origem"))
+        if campos:
+            nff = nff or str(campos[0].get("valor", "")).strip()   # NFF é a primeira coluna
     return {
         "Nr. do Ativo": _coluna(linha, "Nr. do Ativo", "Número do Ativo"),
         "Descrição": _coluna(linha, "Descrição"),
@@ -889,9 +936,9 @@ def montar_ativo(principal: dict, atribuicoes: dict, origem: dict) -> dict:
         "Categoria": _coluna(linha, "Categoria"),
         "Número de Série": _coluna(linha, "Número de Série"),
         "Chave do Ativo": _coluna(linha, "Chave do Ativo"),
-        "PO": _coluna(linha_origem, "Nr. da OC", "Nr. da OCC"),
-        "NFF": _coluna(linha_origem, "Nr. da NFF"),
-        "Local": _coluna(linha_atrib, "Local"),
+        "PO": po,
+        "NFF": nff,
+        "Local": local,
         "Baixado": "BAIXADO" in aviso.upper(),
     }
 
@@ -922,6 +969,7 @@ def variaveis_da_tela() -> dict[str, str]:
         "botao_localizar": _c("EBS_FORMS_BOTAO_LOCALIZAR", "Button18"),
         "botao_limpar": _c("EBS_FORMS_BOTAO_LIMPAR", "Button17"),
         "menu_localizar": _c("EBS_FORMS_MENU_LOCALIZAR", "Verificar|Localizar"),
+        "campo_grade": _c("EBS_FORMS_CAMPO_GRADE", "VTextField10"),
         "botao_atribuicoes": _c("EBS_FORMS_BOTAO_ATRIBUICOES", "Button13"),
         "botao_linhas_origem": _c("EBS_FORMS_BOTAO_LINHAS_ORIGEM", "Button14"),
         "botao_livros": _c("EBS_FORMS_BOTAO_LIVROS", "Button15"),
@@ -1241,7 +1289,7 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                     atribuicoes = lido
                 else:
                     origem = lido
-        ativo = montar_ativo(dados, atribuicoes, origem)
+        ativo = montar_ativo(dados, atribuicoes, origem, criterio)
         etapa(f"concluído: {'ativo encontrado' if ativo.get('Nr. do Ativo') else 'nada encontrado'}")
         saida: dict[str, Any] = {
             "criterio": criterio,
