@@ -437,35 +437,53 @@ class Xvfb:
         # (túnel: ssh -L 5900:localhost:5900 servidor). Sem TLS porque não sai
         # da máquina; o acesso é o do túnel SSH.
         porta_vnc = _c("EBS_FORMS_VNC_PORTA", "5900")
+        comum = ["--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
+                 "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+        tentativas: list[list[str]] = []
         if _c("EBS_FORMS_VNC", "nao").lower() in ("sim", "true", "1"):
-            cmd = [weston, "--backend=vnc", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
-                   f"--port={porta_vnc}", "--disable-transport-layer-security",
-                   "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
-        else:
-            cmd = [weston, "--backend=headless", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
-                   "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+            # O backend VNC varia entre versões (TLS obrigatório, opções com
+            # outro nome, build sem neatvnc). Tentamos as formas conhecidas e,
+            # se nenhuma subir, seguimos em headless: ver a tela é conveniência,
+            # não pode impedir o RPA de rodar.
+            tentativas.append([weston, "--backend=vnc", f"--port={porta_vnc}",
+                               "--disable-transport-layer-security"] + comum)
+            tentativas.append([weston, "--backend=vnc", f"--port={porta_vnc}"] + comum)
+        tentativas.append([weston, "--backend=headless"] + comum)
         extra = _c("EBS_FORMS_WESTON_OPCOES")
-        if extra:
-            cmd += extra.split()
         saida = open(DIR_LOGS / "weston.saida.log", "ab")  # noqa: SIM115 — vive com o processo
-        cls._proc = subprocess.Popen(cmd, stdout=saida, stderr=saida, stdin=subprocess.DEVNULL, env=env)
-        cls._xdg_runtime = str(runtime)
-        for _ in range(150):
-            if cls._proc.poll() is not None:
-                raise ErroForms(f"weston encerrou ao iniciar (código {cls._proc.returncode}); "
-                                f"veja data/ebs_forms/logs/weston.log e weston.saida.log")
+        ultimo = ""
+        for i, cmd in enumerate(tentativas, 1):
+            if extra:
+                cmd = cmd + extra.split()
             try:
-                m = re.search(r"listening on display (:\d+)", log_path.read_text(errors="replace"))
+                log_path.unlink()
             except FileNotFoundError:
-                m = None
-            if m:
-                cls._display = m.group(1)
-                # O Xwayland sobe "preguiçoso", no primeiro cliente X; dá um
-                # respiro para o compositor terminar de montar a área de trabalho.
-                time.sleep(1.0)
-                return cls._display
-            time.sleep(0.1)
-        raise ErroForms("weston subiu mas não anunciou o display X (--xwayland); veja data/ebs_forms/logs/weston.log")
+                pass
+            cls._proc = subprocess.Popen(cmd, stdout=saida, stderr=saida, stdin=subprocess.DEVNULL, env=env)
+            cls._xdg_runtime = str(runtime)
+            for _ in range(150):
+                if cls._proc.poll() is not None:
+                    ultimo = f"tentativa {i} ({cmd[1]}) encerrou com código {cls._proc.returncode}"
+                    break
+                try:
+                    m = re.search(r"listening on display (:\d+)", log_path.read_text(errors="replace"))
+                except FileNotFoundError:
+                    m = None
+                if m:
+                    cls._display = m.group(1)
+                    if "--backend=vnc" in cmd:
+                        _log.info("tela virtual com VNC em localhost:%s", porta_vnc)
+                    # O Xwayland sobe "preguiçoso", no primeiro cliente X; dá um
+                    # respiro para o compositor terminar de montar a área de trabalho.
+                    time.sleep(1.0)
+                    return cls._display
+                time.sleep(0.1)
+            else:
+                ultimo = f"tentativa {i} ({cmd[1]}) subiu mas não anunciou o display X"
+                cls._proc.kill()
+            _log.warning("tela virtual: %s; tentando a próxima forma", ultimo)
+        raise ErroForms(f"nenhuma forma de subir a tela virtual funcionou ({ultimo}); "
+                        f"veja data/ebs_forms/logs/weston.log e weston.saida.log")
 
     _xdg_runtime: str = ""
 
