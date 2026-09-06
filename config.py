@@ -273,7 +273,7 @@ class Settings:
     EBS_FORMS_JAVA: str = _env("EBS_FORMS_JAVA", "")
     EBS_FORMS_JAVAC: str = _env("EBS_FORMS_JAVAC", "")
     EBS_FORMS_JAVA_OPCOES: str = _env("EBS_FORMS_JAVA_OPCOES", "")
-    EBS_FORMS_CLASSE: str = _env("EBS_FORMS_CLASSE", "oracle.forms.engine.Main")
+    EBS_FORMS_CLASSE: str = _env("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = _env("EBS_FORMS_ESPERA_JVM", "180")
 
     MODULES: list[str] = [

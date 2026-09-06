@@ -471,7 +471,8 @@ def compilar() -> str:
         raise ErroForms("javac não encontrado: instale o pacote -devel do OpenJDK ou compile em outra máquina "
                         "e copie as classes para data/ebs_forms/bin.")
     DIR_BIN.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run([javac, "-Xlint:-removal", "-d", str(DIR_BIN), str(FONTE_JAVA)],
+    fontes = sorted(str(f) for f in FONTE_JAVA.parent.rglob("*.java"))
+    r = subprocess.run([javac, "-Xlint:-removal", "-d", str(DIR_BIN), *fontes],
                        capture_output=True, text=True, timeout=120)
     saida = (r.stdout + r.stderr).strip()
     if r.returncode != 0:
@@ -504,7 +505,7 @@ class Cliente:
         env.pop("JAVA_TOOL_OPTIONS", None)  # nada de proxy/truststore herdado
         env["LANG"] = env.get("LANG") or "pt_BR.UTF-8"
         tam = _c("EBS_FORMS_TELA", "1280x900x24").split("x")
-        classe = _c("EBS_FORMS_CLASSE", "oracle.forms.engine.Main")
+        classe = _c("EBS_FORMS_CLASSE")  # vazio = a classe que o jnlp declara
         DIR_LOGS.mkdir(parents=True, exist_ok=True)
         self.log_path = DIR_LOGS / f"jvm-{datetime.now():%Y%m%d-%H%M%S}.log"
         self._log_f = open(self.log_path, "wb")  # noqa: SIM115 — fechado em encerrar()
@@ -524,7 +525,7 @@ class Cliente:
         opcoes = _c("EBS_FORMS_JAVA_OPCOES")
         if opcoes:
             cmd[1:1] = opcoes.split()
-        self._registrar(f"JVM: {java} (display {display}, classe {classe})")
+        self._registrar(f"JVM: {java} (display {display}, classe {classe or 'a do jnlp'})")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=self._log_f, env=env, cwd=str(DIR), text=True,
                                      encoding="utf-8", bufsize=1)
