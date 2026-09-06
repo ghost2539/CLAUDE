@@ -602,11 +602,17 @@ class Cliente:
 
         threading.Thread(target=_ler, name="ebs-forms-leitor", daemon=True).start()
 
-    def _ler_ate_resposta(self, timeout: float) -> str:
+    def _ler_ate_resposta(self, timeout: float, oque: str = "") -> str:
         import queue
         assert self.proc
-        fim = time.time() + timeout
+        inicio = time.time()
+        fim = inicio + timeout
+        proximo_aviso = inicio + 5
         while time.time() < fim:
+            if time.time() >= proximo_aviso:
+                # Sem isto, uma espera longa é indistinguível de travamento.
+                self._registrar(f"... aguardando {oque or 'o Forms'} há {int(time.time() - inicio)}s")
+                proximo_aviso += 5
             try:
                 linha = self._fila.get(timeout=0.5)
             except queue.Empty:
@@ -630,7 +636,7 @@ class Cliente:
         assert self.proc and self.proc.stdin
         self.proc.stdin.write(f"{cmd} {arg}".strip() + "\n")
         self.proc.stdin.flush()
-        resp = self._ler_ate_resposta(timeout)
+        resp = self._ler_ate_resposta(timeout, cmd)
         if resp.startswith("ERRO"):
             raise ErroForms(f"{cmd}: {resp[5:]}")
         return resp[3:] if len(resp) > 3 else ""
@@ -931,7 +937,8 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             if acao == "fim_se":
                 pulando = False
             continue
-        registrar(f"passo {i} {acao} {nome}")
+        registrar(f"passo {i}/{len(passos)} {acao} {nome}")
+        _t0 = time.time()
         if passo.get("opcional"):
             # Passo de conveniência (esperar a grade encher, por exemplo): se
             # não acontecer, seguimos — quem decide é a leitura do resultado.
@@ -987,6 +994,9 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
                 resultado[nome] = ""
         else:
             raise ErroForms(f"passo {i}: ação desconhecida '{acao}'")
+        _dt = time.time() - _t0
+        if _dt >= 1:
+            registrar(f"passo {i} {acao} concluído em {_dt:.1f}s")
     return resultado
 
 
@@ -1169,21 +1179,27 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
     capturas: list[str] = []
     cliente: Cliente | None = None
     reaproveitada = False
+    _inicio = time.time()
+
+    def etapa(msg: str) -> None:
+        registrar(f"[{time.time() - _inicio:5.1f}s] {msg}")
+
     try:
         if _c("EBS_FORMS_SESSAO_VIVA", "sim").lower() in ("sim", "true", "1") and _sessao_utilizavel():
             sessao, cliente = _Viva.sessao, _Viva.cliente          # type: ignore[assignment]
             reaproveitada = True
-            registrar("reaproveitando a sessão do Forms já aberta")
+            etapa("sessão do Forms reaproveitada (sem novo login)")
             executar_roteiro(cliente, roteiros.get("limpar") or ROTEIROS_PADRAO["limpar"]["passos"],
                              variaveis_da_tela(), sessao, registrar, capturas)
         else:
             fechar_sessao()
             sessao, cliente = _abrir_sessao(registrar, roteiros, capturas)
+        etapa("tela pronta; iniciando a consulta")
         dados: dict[str, Any] = {}
         livro_ok = ""
         for livro in (livros_tentar or livros()):
             variaveis = {"criterio": criterio, "livro": livro, **variaveis_da_tela()}
-            registrar(f"tentando livro {livro}")
+            etapa(f"consultando com o livro {livro}")
             executar_roteiro(cliente, roteiros.get("localizar_ativo") or ROTEIROS_PADRAO["localizar_ativo"]["passos"],
                              variaveis, sessao, registrar, capturas)
             lido = executar_roteiro(cliente, roteiros.get("ler_ativo") or ROTEIROS_PADRAO["ler_ativo"]["passos"],
@@ -1211,6 +1227,7 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                 else:
                     origem = lido
         ativo = montar_ativo(dados, atribuicoes, origem)
+        etapa(f"concluído: {'ativo encontrado' if ativo.get('Nr. do Ativo') else 'nada encontrado'}")
         saida: dict[str, Any] = {
             "criterio": criterio,
             "livro": livro_ok,
