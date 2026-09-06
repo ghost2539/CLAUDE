@@ -28,10 +28,11 @@
 # Quando descobrir, é só apontar o marcador para o nome certo; o corporativo
 # tem prioridade e passa a responder sozinho.
 #
-# Se o venv não enxergar o cofre corporativo (vcreports_secrets fica no
-# Python do sistema), aponte o diretório do módulo aqui em vez de recriar
-# o venv:
-# VCREPORTS_SECRETS_PATH=/usr/lib/python3/dist-packages
+# O cofre corporativo é resolvido sozinho: import normal, senão o módulo em
+# /usr/local/lib/vcreports/vcreports_secrets.py, senão o arquivo
+# /etc/vcreports/.secrets.env lido direto. Só ajuste se o caminho for outro:
+# VCREPORTS_SECRETS_MODULE=/usr/local/lib/vcreports/vcreports_secrets.py
+# VCREPORTS_SECRETS_FILE=/etc/vcreports/.secrets.env
 #
 # Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
 # Só preencha se o portal rodar com um usuário sem diretório pessoal.
@@ -164,9 +165,9 @@ EBS_CAPEX_FX_PROXY=
 # ── 8. Correios (rastreio) ──────────────────────────────────────────────
 # JÁ RESOLVIDO: vêm do cofre corporativo, que hoje é o único lugar onde
 # estas chaves existem. Nada a cadastrar. Chaves exatas:
-#     vcreports_secret('CORREIOS_USUARIO')
-#     vcreports_secret('CORREIOS_CHAVE')
-#     vcreports_secret('CORREIOS_CARTOES').split(',')
+#     s('CORREIOS_USUARIO')
+#     s('CORREIOS_CHAVE')
+#     s('CORREIOS_CARTOES').split(',')
 # Não precisa declarar nada aqui: o portal consulta o cofre direto. As linhas
 # abaixo ficam só como documentação do que ele procura.
 # CORREIOS_USUARIO   -> cofre

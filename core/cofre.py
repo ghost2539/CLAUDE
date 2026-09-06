@@ -59,22 +59,132 @@ MARCADOR = "@cofre:"
 
 
 # ── Cofre corporativo ───────────────────────────────────────────────────
-# O módulo costuma estar instalado no Python do SISTEMA, não dentro do venv.
-# Um venv criado sem --system-site-packages não o enxerga, e o cofre parece
-# "inexistente" mesmo estando lá. VCREPORTS_SECRETS_PATH permite apontar o
-# diretório do módulo sem recriar o venv.
+# O loader oficial fica em /usr/local/lib/vcreports/vcreports_secrets.py e é
+# importável no Python do SISTEMA por um .pth. Um venv isolado não o alcança.
+# A API pública é `s(chave, default)`, com alias `secret` — NÃO existe
+# `vcreports_secret`.
+#
+# Por baixo, ele apenas lê o arquivo /etc/vcreports/.secrets.env (KEY=VALOR).
+# Por isso tentamos, nesta ordem, até algo responder:
+#   1. o módulo já importável;
+#   2. o módulo carregado pelo caminho absoluto (resolve o venv isolado);
+#   3. o arquivo do cofre lido direto (resolve até sem o módulo).
+
+CAMINHO_MODULO = os.environ.get(
+    "VCREPORTS_SECRETS_MODULE", "/usr/local/lib/vcreports/vcreports_secrets.py")
+CAMINHO_ARQUIVO = os.environ.get(
+    "VCREPORTS_SECRETS_FILE", "/etc/vcreports/.secrets.env")
+
+# Diretório extra no sys.path (alternativa a recriar o venv).
 _EXTRA = os.environ.get("VCREPORTS_SECRETS_PATH", "")
 if _EXTRA and _EXTRA not in sys.path:
     sys.path.append(_EXTRA)
 
+_modulo = None          # módulo resolvido
+_modulo_via = ""        # como foi resolvido, para diagnóstico
+_arquivo_cache: dict | None = None
+
+
+def _funcao_do_modulo(mod):
+    """O loader expõe `s`; `secret` é alias. Aceitamos também o nome antigo,
+    caso alguma versão o tenha."""
+    for nome in ("s", "secret", "vcreports_secret"):
+        fn = getattr(mod, nome, None)
+        if callable(fn):
+            return fn
+    return None
+
+
+def _resolver_modulo():
+    """Módulo do cofre, importado normalmente ou pelo caminho absoluto."""
+    global _modulo, _modulo_via
+    if _modulo is not None:
+        return _modulo
+    try:
+        import vcreports_secrets as mod  # type: ignore
+        _modulo, _modulo_via = mod, f"import direto ({getattr(mod, '__file__', '?')})"
+        return _modulo
+    except Exception:  # noqa: BLE001
+        pass
+    if os.path.isfile(CAMINHO_MODULO):
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("vcreports_secrets", CAMINHO_MODULO)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _modulo, _modulo_via = mod, f"carregado por caminho ({CAMINHO_MODULO})"
+                return _modulo
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Falha ao carregar o cofre por caminho (%s): %s", CAMINHO_MODULO, exc)
+    return None
+
+
+def _ler_arquivo_cofre() -> dict:
+    """Lê /etc/vcreports/.secrets.env no mesmo formato do loader oficial.
+
+    Último recurso — e o único que diz com certeza o que está NO COFRE, sem
+    a mistura com variáveis de ambiente que o `s()` faz.
+    """
+    global _arquivo_cache
+    if _arquivo_cache is not None:
+        return _arquivo_cache
+    dados: dict[str, str] = {}
+    try:
+        with open(CAMINHO_ARQUIVO, "r", encoding="utf-8") as f:
+            for bruto in f:
+                linha = bruto.strip()
+                if not linha or linha.startswith("#") or "=" not in linha:
+                    continue
+                k, _, v = linha.partition("=")
+                k, v = k.strip(), v.strip()
+                if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+                    v = v[1:-1]
+                dados[k] = v
+    except OSError:
+        pass   # sem permissão ou inexistente: os outros caminhos assumem
+    _arquivo_cache = dados
+    return dados
+
 
 def _corporativo(nome: str) -> str:
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        v = vcreports_secret(nome)
-        return str(v) if v else ""
-    except Exception:  # noqa: BLE001 — ausente na maioria dos servidores
-        return ""
+    mod = _resolver_modulo()
+    if mod is not None:
+        fn = _funcao_do_modulo(mod)
+        if fn:
+            try:
+                v = fn(nome)
+                if v:
+                    return str(v)
+            except Exception:  # noqa: BLE001
+                pass
+    return _ler_arquivo_cofre().get(nome, "")
+
+
+def _somente_cofre(nome: str) -> str:
+    """Valor que está DE FATO no arquivo do cofre.
+
+    O `s()` oficial cai para `os.environ` quando a chave não existe; para
+    sondar, isso daria falso positivo. Quando o arquivo não é legível,
+    voltamos ao caminho normal e avisamos no diagnóstico.
+    """
+    arq = _ler_arquivo_cofre()
+    if arq:
+        return arq.get(nome, "")
+    return _corporativo(nome)
+
+
+def arquivo_legivel() -> bool:
+    return bool(_ler_arquivo_cofre())
+
+
+def chaves_corporativas() -> list[str]:
+    """Nomes das chaves do cofre corporativo, quando o arquivo é legível.
+
+    Resolve o problema de "existe mas não sei o nome": em vez de adivinhar,
+    lê a lista. Valores nunca saem daqui.
+    """
+    return sorted(_ler_arquivo_cofre().keys())
 
 
 def corporativo_disponivel() -> bool:
@@ -83,18 +193,22 @@ def corporativo_disponivel() -> bool:
 
 def diagnostico_corporativo() -> tuple[bool, str]:
     """(disponível, motivo). O motivo é o que permite consertar sem chutar."""
-    try:
-        import vcreports_secrets  # type: ignore
-        return True, f"módulo em {getattr(vcreports_secrets, '__file__', '?')}"
-    except ImportError as exc:
-        return False, f"ImportError: {exc}"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"{type(exc).__name__}: {exc}"
+    mod = _resolver_modulo()
+    if mod is not None:
+        fn = _funcao_do_modulo(mod)
+        if fn:
+            return True, f"{_modulo_via}, função {fn.__name__}()"
+        return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
+    if _ler_arquivo_cofre():
+        return True, f"arquivo lido direto ({CAMINHO_ARQUIVO})"
+    if os.path.exists(CAMINHO_ARQUIVO):
+        return False, f"{CAMINHO_ARQUIVO} existe mas não é legível por este usuário"
+    return False, (f"módulo não importável e {CAMINHO_MODULO} / {CAMINHO_ARQUIVO} "
+                   f"não encontrados")
 
 
 def onde_procura() -> list[str]:
-    """Diretórios em que o Python procura o módulo — para conferir se o do
-    sistema está entre eles."""
+    """Diretórios em que o Python procura o módulo."""
     return [p for p in sys.path if p]
 
 

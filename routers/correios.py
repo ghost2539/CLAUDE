@@ -31,10 +31,10 @@ def _secret(nome: str, default: str = "") -> str:
 def _correios_creds():
     """Retorna as credenciais dos Correios no momento do uso (não guarda em
     global), buscando do cofre a cada chamada de autenticação."""
-    # Exatamente as chaves do cofre corporativo:
-    #     vcreports_secret('CORREIOS_USUARIO')
-    #     vcreports_secret('CORREIOS_CHAVE')
-    #     vcreports_secret('CORREIOS_CARTOES').split(',')
+    # Chaves do cofre corporativo (loader oficial: `s(chave)`):
+    #     s('CORREIOS_USUARIO')
+    #     s('CORREIOS_CHAVE')
+    #     s('CORREIOS_CARTOES').split(',')
     usuario = _secret("CORREIOS_USUARIO")
     chave = _secret("CORREIOS_CHAVE")
     cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
@@ -81,7 +81,7 @@ def _check_credenciais():
         raise HTTPException(
             500,
             "Credenciais dos Correios ausentes. Elas vêm do cofre corporativo "
-            "(vcreports_secret: CORREIOS_USUARIO, CORREIOS_CHAVE, "
+            "(chaves CORREIOS_USUARIO, CORREIOS_CHAVE, "
             "CORREIOS_CARTOES). Confira com: python3 scripts/cofre.py conferir",
         )
 

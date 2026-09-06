@@ -13,7 +13,7 @@ Princípios de segurança (a base é PRODUÇÃO — EBSPRD):
   • Bind variables sempre (``:param``) — nada de concatenar valor em SQL.
 
 Credenciais: vêm do COFRE do EBS (separado do cofre dos Correios), via
-``from vcreports_secrets import s`` — exatamente como no helper que já funciona.
+``core.cofre`` — que resolve o loader oficial (`s()`) em qualquer venv.
 """
 from __future__ import annotations
 
@@ -28,13 +28,9 @@ import oracledb
 def _secret(nome: str, default=None):
     """Segredo do EBS. O cofre do EBS expõe `s()`, diferente do cofre geral,
     por isso a tentativa própria antes de cair no caminho comum."""
-    try:
-        from vcreports_secrets import s as _s  # cofre do EBS
-        val = _s(nome, default)
-        if val not in (None, ""):
-            return val
-    except Exception:  # noqa: BLE001
-        pass
+    # Passa pelo core.cofre: ele resolve o loader por import, por caminho
+    # absoluto ou lendo o arquivo do cofre — o import direto falharia num
+    # venv isolado, que é o caso deste servidor.
     from core.cofre import obter
     return obter(nome, default or "") or default
 

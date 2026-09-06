@@ -49,7 +49,7 @@ _DELIVERED_CODES = {"BDE", "BDI"}
 
 
 # ── Credencial para a rotina 100% automática ────────────────────────────
-# Preferência: cofre (vcreports_secret) no servidor novo. Enquanto não há
+# Preferência: cofre corporativo no servidor novo. Enquanto não há
 # cofre, guardamos a senha CRIPTOGRAFADA no banco de automações (chave
 # derivada do SESSION_SECRET). Nunca em texto puro.
 def _secret(nome: str, default: str = "") -> str:
