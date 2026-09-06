@@ -223,7 +223,9 @@ def corporativo_disponivel() -> bool:
 def diagnostico_corporativo() -> tuple[bool, str]:
     """(disponível, motivo). O motivo é o que permite consertar sem chutar."""
     if COMANDO:
-        return True, f"comando configurado: {COMANDO}"
+        # Configurado não é o mesmo que funcionando; sem uma chave conhecida
+        # para testar, não dá para afirmar que responde.
+        return True, f"comando configurado (não verificado): {COMANDO}"
     mod = _resolver_modulo()
     if mod is not None:
         fn = _funcao_do_modulo(mod)
