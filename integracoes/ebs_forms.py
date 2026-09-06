@@ -568,10 +568,26 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
 # ═══════════════════════════════════════════════════════════════════════
 # 4. Operações de alto nível
 # ═══════════════════════════════════════════════════════════════════════
+def _segredo(nome: str) -> str:
+    """Cofre local primeiro; variável de ambiente só como último recurso.
+
+    Resolvido aqui, e não pelo config.py, para o módulo rodar igual no branch
+    de produção (que ainda não tem a expansão `@cofre:` no config).
+    """
+    try:
+        from core.cofre import obter
+        v = obter(nome, "")
+        if v:
+            return v
+    except Exception:  # noqa: BLE001 — sem cofre, segue para o ambiente
+        pass
+    return os.environ.get(nome, "")
+
+
 def credenciais() -> tuple[str, str]:
-    """Conta que o robô usa no EBS — sempre pelo cofre, nunca pelo environment."""
-    usuario = _config_mod._segredo("EBS_FORMS_USER", "")
-    senha = _config_mod._segredo("EBS_FORMS_PASS", "")
+    """Conta que o robô usa no EBS — pelo cofre, nunca escrita no environment."""
+    usuario = _segredo("EBS_FORMS_USER")
+    senha = _segredo("EBS_FORMS_PASS")
     if not usuario or not senha:
         raise ErroForms("Credenciais do robô ausentes: defina EBS_FORMS_USER e EBS_FORMS_PASS no cofre "
                         "(python3 scripts/cofre.py definir EBS_FORMS_USER).")
