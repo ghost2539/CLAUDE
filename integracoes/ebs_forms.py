@@ -649,6 +649,10 @@ class Cliente:
     def clicar(self, nome: str) -> str:
         return self.ordem("clicar", nome, timeout=60)
 
+    def grade(self) -> str:
+        """Resultado da consulta como tabela (TSV), lida dos cabeçalhos da tela."""
+        return base64.b64decode(self.ordem("grade", timeout=60)).decode("utf-8", "replace")
+
     def arvore(self) -> str:
         """Mapa da tela: componentes, textos, posições e quem tem o foco."""
         return base64.b64decode(self.ordem("arvore", timeout=90)).decode("utf-8", "replace")
@@ -793,6 +797,8 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             capturas.append(cliente.foto(nome))
         elif acao == "arvore":
             resultado[nome] = cliente.arvore()
+        elif acao == "grade":
+            resultado[nome] = cliente.grade()
         elif acao == "focarcampo":
             cliente.focar_campo(arg)
         elif acao == "lercampo":
