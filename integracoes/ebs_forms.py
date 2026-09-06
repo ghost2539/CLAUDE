@@ -388,6 +388,16 @@ class Xvfb:
             raise ErroForms("Nenhuma tela virtual disponível. Instale Xvfb (xorg-x11-server-Xvfb) ou, em "
                             "RHEL/OL 10, weston + xorg-x11-server-Xwayland. Veja scripts/ebs_forms_preparar.sh.")
         tam = _c("EBS_FORMS_TELA", "1280x900x24").split("x")
+        # Servidor que nunca rodou X não tem /tmp/.X11-unix; sem ela o Xwayland
+        # do Weston não consegue criar o socket do display e o Weston cai.
+        x11 = Path("/tmp/.X11-unix")
+        try:
+            x11.mkdir(mode=0o1777, exist_ok=True)
+            os.chmod(x11, 0o1777)
+        except PermissionError:
+            if not x11.is_dir():
+                raise ErroForms("/tmp/.X11-unix não existe e não consegui criá-la; como root: "
+                                "mkdir -m 1777 /tmp/.X11-unix")
         runtime = DIR / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
         os.chmod(runtime, 0o700)  # o Wayland exige XDG_RUNTIME_DIR só do dono
