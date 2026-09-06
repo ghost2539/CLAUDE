@@ -6,6 +6,46 @@ from functools import lru_cache
 _ROOT = Path(__file__).parent
 
 
+def _env(nome: str, default: str = "") -> str:
+    """Variável de ambiente com `@cofre:CHAVE@` já resolvido.
+
+    Deixa o `environment` legível e sem senha: a linha fica inteira lá, e só
+    o pedaço secreto vem do cofre. Ex.:
+
+        DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@host/base
+
+    O marcador usa `@` porque o arquivo é carregado com `. arquivo` pelos
+    scripts; `${...}` seria comido pelo bash e a variável chegaria vazia.
+    """
+    bruto = os.getenv(nome, default)
+    if not bruto or "@cofre:" not in bruto:
+        return bruto
+    try:
+        from core.cofre import expandir
+        return expandir(bruto)
+    except Exception:  # noqa: BLE001 — sem cofre, devolve como veio
+        return bruto
+
+
+def _env_obrigatorio(nome: str) -> str:
+    v = _env(nome)
+    if not v:
+        raise RuntimeError(
+            f"{nome} não está definido. Configure em "
+            f"~/.config/portal-spare/environment (veja .env.example)."
+        )
+    return v
+
+
+def _segredo(nome: str, default: str = "") -> str:
+    """Valor que é segredo: cofre corporativo, cofre local, ambiente."""
+    try:
+        from core.cofre import obter
+        return obter(nome, default)
+    except Exception:  # noqa: BLE001
+        return os.getenv(nome, default)
+
+
 def _sqlite(nome: str) -> str:
     """URL do banco SQLite `nome`, guardado em `data/db/`.
 
@@ -33,111 +73,111 @@ class Settings:
     STATIC: Path = ROOT / "static"
     UPLOAD: Path = ROOT / "data" / "uploads"
 
-    DATABASE_URL: str = os.environ["DATABASE_URL"]
-    SESSION_SECRET: str = os.environ["PORTAL_SESSION_SECRET"]
-    SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
+    DATABASE_URL: str = _env_obrigatorio("DATABASE_URL")
+    SESSION_SECRET: str = _env_obrigatorio("PORTAL_SESSION_SECRET")
+    SESSION_TTL: int = int(_env("SESSION_TTL_MINUTES", "480")) * 60
 
-    EBS_LOGIN_URL: str = os.getenv("EBS_LOGIN_URL", "")
-    EBS_SEARCH_URL: str = os.getenv("EBS_SEARCH_URL", "")
-    VERIFY_SSL: bool = os.getenv("VERIFY_SSL", "false").lower() == "true"
-    TIMEOUT: int = int(os.getenv("TIMEOUT_SECONDS", "15"))
-    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "40"))
-    CREDENTIALS_DIRECTORY: str = os.getenv("CREDENTIALS_DIRECTORY", "")
+    EBS_LOGIN_URL: str = _env("EBS_LOGIN_URL", "")
+    EBS_SEARCH_URL: str = _env("EBS_SEARCH_URL", "")
+    VERIFY_SSL: bool = _env("VERIFY_SSL", "false").lower() == "true"
+    TIMEOUT: int = int(_env("TIMEOUT_SECONDS", "15"))
+    MAX_WORKERS: int = int(_env("MAX_WORKERS", "40"))
+    CREDENTIALS_DIRECTORY: str = _env("CREDENTIALS_DIRECTORY", "")
 
-    HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8901"))
-    WORKERS: int = int(os.getenv("WORKERS", "1"))
+    HOST: str = _env("HOST", "0.0.0.0")
+    PORT: int = int(_env("PORT", "8901"))
+    WORKERS: int = int(_env("WORKERS", "1"))
 
-    DEFAULT_HOURLY_RATE: float = float(os.getenv("DEFAULT_VALOR_HORA", "150"))
-    INITIAL_ADMIN_LOGIN: str = os.getenv("INITIAL_ADMIN_LOGIN", "")
-    INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
-    UPLOAD_MAX_MB: int = int(os.getenv("UPLOAD_MAX_MB", "50"))
+    DEFAULT_HOURLY_RATE: float = float(_env("DEFAULT_VALOR_HORA", "150"))
+    INITIAL_ADMIN_LOGIN: str = _env("INITIAL_ADMIN_LOGIN", "")
+    INITIAL_ADMIN_PASSWORD: str = _env("INITIAL_ADMIN_PASSWORD", "")
+    UPLOAD_MAX_MB: int = int(_env("UPLOAD_MAX_MB", "50"))
 
-    RATE_LIMIT_LOGIN: str = os.getenv("RATE_LIMIT_LOGIN", "5/minute")
-    RATE_LIMIT_API: str = os.getenv("RATE_LIMIT_API", "120/minute")
+    RATE_LIMIT_LOGIN: str = _env("RATE_LIMIT_LOGIN", "5/minute")
+    RATE_LIMIT_API: str = _env("RATE_LIMIT_API", "120/minute")
 
-    SSL_CERTFILE: str = os.getenv("SSL_CERTFILE", "")
-    SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
+    SSL_CERTFILE: str = _env("SSL_CERTFILE", "")
+    SSL_KEYFILE: str = _env("SSL_KEYFILE", "")
 
     # ── Indicadores (RMR) — módulo isolado em /indicadores ──────────────
     # Banco próprio, separado do resto do sistema. Default: SQLite local.
-    INDICADORES_DATABASE_URL: str = os.getenv(
+    INDICADORES_DATABASE_URL: str = _env(
         "INDICADORES_DATABASE_URL",
         _sqlite("indicadores"),
     )
     # Conta de serviço do ServiceNow (API REST) — usada só para LEITURA.
     # A senha nunca fica no repositório; vem do ambiente / systemd-creds.
-    SN_API_BASE: str = os.getenv("SN_API_BASE", "https://renner.service-now.com")
-    SN_API_USER: str = os.getenv("SN_API_USER", "")
-    SN_API_PASS: str = os.getenv("SN_API_PASS", "")
+    SN_API_BASE: str = _env("SN_API_BASE", "https://renner.service-now.com")
+    SN_API_USER: str = _env("SN_API_USER", "")
+    SN_API_PASS: str = _env("SN_API_PASS", "")
     # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
     # https_proxy do ambiente se não houver um específico.
     # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
     # (SN_PROXY) — que é o que funciona neste servidor. Cai para https_proxy
     # do ambiente se nada específico for definido.
     SN_API_PROXY: str = (
-        os.getenv("SN_API_PROXY", "")
-        or os.getenv("SN_PROXY", "")
-        or os.getenv("https_proxy", "")
-        or os.getenv("HTTPS_PROXY", "")
+        _env("SN_API_PROXY", "")
+        or _env("SN_PROXY", "")
+        or _env("https_proxy", "")
+        or _env("HTTPS_PROXY", "")
     )
     # Fila / grupo de atribuição dos indicadores.
-    SN_INDIC_QUEUE: str = os.getenv("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
+    SN_INDIC_QUEUE: str = _env("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
     # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome
     # interno varia por instância; ajuste se necessário.
-    SN_TMA_START_FIELD: str = os.getenv("SN_TMA_START_FIELD", "u_data_bouncing")
+    SN_TMA_START_FIELD: str = _env("SN_TMA_START_FIELD", "u_data_bouncing")
     # ── Indicadores: fonte das ANS (task_sla) ───────────────────────────
     # Só contam ANS cujo NOME contém este texto (ex.: "SPARE") — evita puxar
     # SLA de outras filas. Ajuste para o nome exato da ANS de Resolução se
     # precisar restringir mais (ex.: "SPARE Resolução").
-    SN_SLA_NAME_LIKE: str = os.getenv("SN_SLA_NAME_LIKE", "SPARE")
+    SN_SLA_NAME_LIKE: str = _env("SN_SLA_NAME_LIKE", "SPARE")
     # Estágio da ANS considerado (só concluídas evita falso estouro de ANS
     # ainda em andamento). Vazio = não filtra por estágio.
-    SN_SLA_STAGE: str = os.getenv("SN_SLA_STAGE", "completed")
+    SN_SLA_STAGE: str = _env("SN_SLA_STAGE", "completed")
     # Filtro extra opcional na task_sla (ex.: para isolar só Resolução).
-    SN_SLA_EXTRA: str = os.getenv("SN_SLA_EXTRA", "")
+    SN_SLA_EXTRA: str = _env("SN_SLA_EXTRA", "")
     # Campo de data usado para alocar a ANS no mês.
-    SN_SLA_DATE_FIELD: str = os.getenv("SN_SLA_DATE_FIELD", "task.closed_at")
+    SN_SLA_DATE_FIELD: str = _env("SN_SLA_DATE_FIELD", "task.closed_at")
 
     # ── Indicadores (incident) — estados e filtros configuráveis ────────
     # Valores NUMÉRICOS do campo state em incident:
     #   1 New · 2 In Progress · 3 On Hold · 6 Resolved · 7 Closed · 8 Canceled
-    SN_STATE_ABERTO: str = os.getenv("SN_STATE_ABERTO", "1,2,3")        # New, In Progress, On Hold
-    SN_STATE_ATENDIMENTO: str = os.getenv("SN_STATE_ATENDIMENTO", "1,2")  # New, In Progress
-    SN_STATE_RESOLVIDO: str = os.getenv("SN_STATE_RESOLVIDO", "6,7")     # Resolved, Closed
-    SN_STATE_CANCELADO: str = os.getenv("SN_STATE_CANCELADO", "8")
+    SN_STATE_ABERTO: str = _env("SN_STATE_ABERTO", "1,2,3")        # New, In Progress, On Hold
+    SN_STATE_ATENDIMENTO: str = _env("SN_STATE_ATENDIMENTO", "1,2")  # New, In Progress
+    SN_STATE_RESOLVIDO: str = _env("SN_STATE_RESOLVIDO", "6,7")     # Resolved, Closed
+    SN_STATE_CANCELADO: str = _env("SN_STATE_CANCELADO", "8")
     # Data usada para alocar "tratado/resolvido" no mês.
-    SN_RESOLVED_DATE_FIELD: str = os.getenv("SN_RESOLVED_DATE_FIELD", "closed_at")
+    SN_RESOLVED_DATE_FIELD: str = _env("SN_RESOLVED_DATE_FIELD", "closed_at")
     # Data usada para alocar o BACKLOG no mês ("data bouncing"); cai para
     # opened_at se o campo não existir na instância.
-    SN_BACKLOG_DATE_FIELD: str = os.getenv("SN_BACKLOG_DATE_FIELD", "u_data_bouncing")
+    SN_BACKLOG_DATE_FIELD: str = _env("SN_BACKLOG_DATE_FIELD", "u_data_bouncing")
     # Campo agrupador de "Abertos por status" (padrão: state; troque por um
     # campo custom de estágio, ex.: u_status_spare, se houver).
-    SN_STATUS_FIELD: str = os.getenv("SN_STATUS_FIELD", "state")
+    SN_STATUS_FIELD: str = _env("SN_STATUS_FIELD", "state")
     # Campo de BU/empresa (Renner, Youcom, Camicado, Ashua).
-    SN_BU_FIELD: str = os.getenv("SN_BU_FIELD", "company")
+    SN_BU_FIELD: str = _env("SN_BU_FIELD", "company")
     # Fragmento de query (encoded) para "Priorizados" — campo custom
     # "It will be prioritized? = Yes". Sem um valor válido, o KPI fica oculto
     # para não exibir número errado.
-    SN_PRIORITIZED_QUERY: str = os.getenv("SN_PRIORITIZED_QUERY", "u_prioritized=true")
+    SN_PRIORITIZED_QUERY: str = _env("SN_PRIORITIZED_QUERY", "u_prioritized=true")
     # Subcategorias (usadas com LIKE, robusto a variações de valor/rotulo).
-    SN_SUB_SLED_LIKE: str = os.getenv("SN_SUB_SLED_LIKE", "sled")
-    SN_SUB_COLETOR_LIKE: str = os.getenv("SN_SUB_COLETOR_LIKE", "coletor")
+    SN_SUB_SLED_LIKE: str = _env("SN_SUB_SLED_LIKE", "sled")
+    SN_SUB_COLETOR_LIKE: str = _env("SN_SUB_COLETOR_LIKE", "coletor")
     # Recalcula os indicadores em segundo plano a cada N minutos (0 desliga).
     # A tela relê o snapshot a cada 2 min, então 2 mantém o painel sempre atual.
-    SN_INDIC_REFRESH_MIN: int = int(os.getenv("SN_INDIC_REFRESH_MIN", "2") or 2)
+    SN_INDIC_REFRESH_MIN: int = int(_env("SN_INDIC_REFRESH_MIN", "2") or 2)
 
     # ── Automações (encerramento/encaminhamento) — módulo isolado ───────
     # Banco próprio, separado do portal. Default: SQLite local.
-    AUTOMACOES_DATABASE_URL: str = os.getenv(
+    AUTOMACOES_DATABASE_URL: str = _env(
         "AUTOMACOES_DATABASE_URL",
         _sqlite("automacoes"),
     )
     # Horários (hora local) em que a rotina roda sozinha. CSV de horas.
-    AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
+    AUTOMACOES_HORARIOS: str = _env("AUTOMACOES_HORARIOS", "7,12,16")
 
     # ── Monitoramento (saúde e falhas) — módulo isolado ─────────────────
-    MONITORAMENTO_DATABASE_URL: str = os.getenv(
+    MONITORAMENTO_DATABASE_URL: str = _env(
         "MONITORAMENTO_DATABASE_URL",
         _sqlite("monitoramento"),
     )
@@ -146,51 +186,51 @@ class Settings:
     # Apenas VALORES PADRÃO: a configuração efetiva fica no banco de
     # monitoramento e é editável em Parâmetros → Monitoramento. A senha só
     # vem do cofre (SMTP_SENHA) ou do store cifrado — nunca do código.
-    SMTP_HOST: str = os.getenv("SMTP_HOST", "")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "25"))
-    SMTP_SEGURANCA: str = os.getenv("SMTP_SEGURANCA", "none")  # none|starttls|ssl
-    SMTP_USUARIO: str = os.getenv("SMTP_USUARIO", "")
-    SMTP_REMETENTE: str = os.getenv("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
-    ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
+    SMTP_HOST: str = _env("SMTP_HOST", "")
+    SMTP_PORT: int = int(_env("SMTP_PORT", "25"))
+    SMTP_SEGURANCA: str = _env("SMTP_SEGURANCA", "none")  # none|starttls|ssl
+    SMTP_USUARIO: str = _env("SMTP_USUARIO", "")
+    SMTP_REMETENTE: str = _env("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
+    ALERTA_EMAIL_TO: str = _env("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
 
     # ── Orçamento do SPARE (CAPEX da área) — módulo isolado ─────────────
     # Banco PRÓPRIO, separado do /controle-orcamento e do portal.
-    ORCAMENTO_SPARE_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_SPARE_DATABASE_URL: str = _env(
         "ORCAMENTO_SPARE_DATABASE_URL",
         _sqlite("orcamento_spare"),
     )
 
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
-    ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_EXEC_DATABASE_URL: str = _env(
         "ORCAMENTO_EXEC_DATABASE_URL",
         _sqlite("controle_orcamento_exec"),
     )
     # API de CAPEX do EBS (preenche os valores dos projetos).
-    EBS_CAPEX_URL: str = os.getenv(
+    EBS_CAPEX_URL: str = _env(
         "EBS_CAPEX_URL", "https://suporte.lojasrenner.com.br/ebs/api/capex/"
     )
-    EBS_CAPEX_PROXY: str = os.getenv("EBS_CAPEX_PROXY", "")
-    EBS_CAPEX_TIMEOUT: int = int(os.getenv("EBS_CAPEX_TIMEOUT", "30"))
-    EBS_CAPEX_VERIFY: bool = os.getenv("EBS_CAPEX_VERIFY", "false").lower() == "true"
+    EBS_CAPEX_PROXY: str = _env("EBS_CAPEX_PROXY", "")
+    EBS_CAPEX_TIMEOUT: int = int(_env("EBS_CAPEX_TIMEOUT", "30"))
+    EBS_CAPEX_VERIFY: bool = _env("EBS_CAPEX_VERIFY", "false").lower() == "true"
     # Autenticação da API de CAPEX (a API exige credencial em chamadas de servidor).
     # Opção A — Basic auth (usuário/senha):
-    EBS_CAPEX_USER: str = os.getenv("EBS_CAPEX_USER", "")
-    EBS_CAPEX_PASS: str = os.getenv("EBS_CAPEX_PASS", "")
+    EBS_CAPEX_USER: str = _env("EBS_CAPEX_USER", "")
+    EBS_CAPEX_PASS: str = _env("EBS_CAPEX_PASS", "")
     # Opção B — token/header (ex.: Bearer). Se EBS_CAPEX_TOKEN estiver definido,
     # é enviado como  "<EBS_CAPEX_TOKEN_SCHEME> <token>"  no header indicado.
-    EBS_CAPEX_TOKEN: str = os.getenv("EBS_CAPEX_TOKEN", "")
-    EBS_CAPEX_TOKEN_SCHEME: str = os.getenv("EBS_CAPEX_TOKEN_SCHEME", "Bearer")
-    EBS_CAPEX_AUTH_HEADER: str = os.getenv("EBS_CAPEX_AUTH_HEADER", "Authorization")
+    EBS_CAPEX_TOKEN: str = _env("EBS_CAPEX_TOKEN", "")
+    EBS_CAPEX_TOKEN_SCHEME: str = _env("EBS_CAPEX_TOKEN_SCHEME", "Bearer")
+    EBS_CAPEX_AUTH_HEADER: str = _env("EBS_CAPEX_AUTH_HEADER", "Authorization")
     # Conversão de moeda para projetos de Argentina (ARS) e Uruguai (UYU) → BRL.
     # Cotação em REAIS por 1 peso. Se 0, o sistema tenta buscar cotação ao vivo
     # (EBS_CAPEX_FX_URL); se também falhar, não converte e avisa.
-    EBS_CAPEX_ARS_BRL: float = float(os.getenv("EBS_CAPEX_ARS_BRL", "0") or 0)
-    EBS_CAPEX_UYU_BRL: float = float(os.getenv("EBS_CAPEX_UYU_BRL", "0") or 0)
-    EBS_CAPEX_FX_URL: str = os.getenv(
+    EBS_CAPEX_ARS_BRL: float = float(_env("EBS_CAPEX_ARS_BRL", "0") or 0)
+    EBS_CAPEX_UYU_BRL: float = float(_env("EBS_CAPEX_UYU_BRL", "0") or 0)
+    EBS_CAPEX_FX_URL: str = _env(
         "EBS_CAPEX_FX_URL", "https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL"
     )
-    EBS_CAPEX_FX_PROXY: str = os.getenv("EBS_CAPEX_FX_PROXY", "")
+    EBS_CAPEX_FX_PROXY: str = _env("EBS_CAPEX_FX_PROXY", "")
 
     # Módulos com permissão por usuário. "orcamento" não aparece na sidebar
     # do portal — é a tela /controle-orcamento, liberada individualmente.

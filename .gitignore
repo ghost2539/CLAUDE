@@ -10,6 +10,13 @@ ebs_probe_out/
 tools/ebs_probe_out/
 forms_capture*.jsonl
 
+# Cofre de segredos: mora fora do repositório, mas nunca por acidente aqui
+cofre.json
+cofre.key
+*.sem-segredo
+environment
+environment-*
+
 # Dados de execução: bancos SQLite e uploads nunca vão para o repositório
 data/db/
 data/uploads/

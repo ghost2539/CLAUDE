@@ -126,7 +126,46 @@ novo e **confere se a aplicação carrega**, mostrando o número de rotas.
 
 Nada é escrito fora da sua pasta pessoal e do diretório do projeto.
 
-### 2.4 Ajustar o ambiente
+### 2.4 Trazer a configuração do servidor antigo, sem as senhas
+
+O pacote restaurado deixa o ambiente antigo em
+`~/environment-do-servidor-antigo.txt` — **com as senhas em texto claro**.
+Em vez de copiá-lo por cima, passe pelo importador: ele move o que é segredo
+para o cofre e escreve um ambiente limpo, onde a senha vira `@cofre:NOME@`.
+
+```bash
+# 1. Veja o que aconteceria, sem gravar nada
+venv/bin/python scripts/cofre.py importar-env ~/environment-do-servidor-antigo.txt --simular
+
+# 2. Se estiver certo, execute
+venv/bin/python scripts/cofre.py importar-env ~/environment-do-servidor-antigo.txt
+
+# 3. Confira o resultado e coloque no lugar
+cat ~/environment-do-servidor-antigo.txt.sem-segredo
+cp ~/environment-do-servidor-antigo.txt.sem-segredo ~/.config/portal-spare/environment
+chmod 600 ~/.config/portal-spare/environment
+
+# 4. Apague o arquivo antigo — ele ainda tem as senhas
+shred -u ~/environment-do-servidor-antigo.txt
+
+# 5. Confirme que nada ficou faltando
+venv/bin/python scripts/cofre.py conferir
+```
+
+O `conferir` lista cada `@cofre:NOME@` citado no ambiente e diz se o valor
+existe. Também avisa se a cifra em uso não for a Fernet e se as permissões
+do cofre estiverem frouxas.
+
+> **Até onde o cofre local protege.** Ele tira as senhas do arquivo que
+> qualquer um abre, do backup e de uma cópia da pasta. Ele **não** protege
+> contra quem executa código como o mesmo usuário do portal: a aplicação
+> precisa abrir o cofre sozinha na subida, então a chave está ao alcance
+> dela — e de quem for esse usuário. Root lê tudo. Vale enquanto as
+> permissões separarem as pessoas de verdade; se todos entram com o mesmo
+> usuário, é cosmético. Segredo de valor alto deve ir para o cofre
+> corporativo (`vcreports_secrets`), que o portal já prefere quando existe.
+
+### 2.4b Ajustar o restante do ambiente
 
 ```bash
 nano ~/.config/portal-spare/environment

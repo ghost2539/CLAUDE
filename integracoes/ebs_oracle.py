@@ -26,15 +26,17 @@ import oracledb
 
 # ── Segredos (cofre do EBS) ───────────────────────────────────────
 def _secret(nome: str, default=None):
-    """Lê um segredo do cofre do EBS. Fallback para env só em transição/dev."""
+    """Segredo do EBS. O cofre do EBS expõe `s()`, diferente do cofre geral,
+    por isso a tentativa própria antes de cair no caminho comum."""
     try:
-        from vcreports_secrets import s  # cofre do EBS (separado do dos Correios)
-        val = s(nome, default)
+        from vcreports_secrets import s as _s  # cofre do EBS
+        val = _s(nome, default)
         if val not in (None, ""):
             return val
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
-    return os.environ.get(nome, default)
+    from core.cofre import obter
+    return obter(nome, default or "") or default
 
 
 def _config() -> dict:
