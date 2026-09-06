@@ -235,6 +235,10 @@ class Settings:
     EBS_FORMS_BOTAO_LOCALIZAR: str = os.getenv('EBS_FORMS_BOTAO_LOCALIZAR', 'Button18')
     EBS_FORMS_BOTAO_LIMPAR: str = os.getenv('EBS_FORMS_BOTAO_LIMPAR', 'Button17')
     EBS_FORMS_BOTAO_LINHAS_ORIGEM: str = os.getenv('EBS_FORMS_BOTAO_LINHAS_ORIGEM', 'Button14')
+    # o X do Forms é desenhado: fechar janela é pelo menu do sistema, por um
+    # caminho da barra de menus ou por tecla — varia conforme a instalação
+    EBS_FORMS_FECHAR_MENUS: str = os.getenv('EBS_FORMS_FECHAR_MENUS', 'Arquivo|Fechar Janela;Arquivo|Fechar;Janela|Fechar')
+    EBS_FORMS_FECHAR_TECLA: str = os.getenv('EBS_FORMS_FECHAR_TECLA', 'CTRL+F4')
     EBS_FORMS_CLASSE: str = os.getenv("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = os.getenv("EBS_FORMS_ESPERA_JVM", "180")
 
