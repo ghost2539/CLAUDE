@@ -157,6 +157,49 @@ shred -u ~/environment-do-servidor-antigo.txt
 venv/bin/python scripts/cofre.py conferir
 ```
 
+#### Os dois cofres
+
+Todo `@cofre:NOME@` é procurado nesta ordem: **cofre corporativo**
+(`vcreports_secrets`, só leitura, mantido por outro time) → **cofre local**
+cifrado → variável de ambiente.
+
+Situação hoje neste servidor:
+
+| Segredo | Onde está | O que fazer |
+|---|---|---|
+| Correios (usuário, chave, cartões) | cofre corporativo | nada — já funciona |
+| ServiceNow (conta de serviço) | corporativo, nome desconhecido | guardar no cofre local por ora |
+| Banco, admin, Oracle, SMTP | nenhum | cofre local |
+
+Para descobrir o nome da chave do ServiceNow no corporativo — só leitura, e
+o valor nunca aparece:
+
+```bash
+venv/bin/python scripts/cofre.py sondar
+```
+
+Ele testa os nomes prováveis e mostra quais respondem, com o tamanho do
+valor (o suficiente para reconhecer a chave certa). Aceita nomes seus:
+
+```bash
+venv/bin/python scripts/cofre.py sondar NOME_QUE_ME_PASSARAM OUTRO_NOME
+```
+
+Achou? Aponte o marcador para o nome certo no `environment` e apague a
+cópia local:
+
+```bash
+# no environment:  SN_API_PASS=@cofre:SERVICENOW_SENHA@
+venv/bin/python scripts/cofre.py remover SN_API_PASS
+```
+
+Enquanto não achar, guarde no cofre local:
+
+```bash
+venv/bin/python scripts/cofre.py definir SN_API_USER
+venv/bin/python scripts/cofre.py definir SN_API_PASS
+```
+
 O `conferir` lista cada `@cofre:NOME@` citado no ambiente e diz se o valor
 existe. Também avisa se a cifra em uso não for a Fernet e se as permissões
 do cofre estiverem frouxas.
