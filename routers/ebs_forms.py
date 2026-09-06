@@ -74,8 +74,8 @@ def _rodar_em_segundo_plano(execucao_id: int, alvo, *args) -> None:
         try:
             r = alvo(_registrar, *args)
             db.concluir_execucao(execucao_id, True, r, capturas=r.get("capturas", []))
-            if r.get("encontrado") and r.get("dados"):
-                db.salvar_ativo(r["criterio"], r.get("livro", ""), r["dados"], execucao_id)
+            if r.get("encontrado") and r.get("ativo"):
+                db.salvar_ativo(r["criterio"], r.get("livro", ""), r["ativo"], execucao_id)
         except forms.ErroForms as exc:
             _registrar(f"ERRO: {exc}")
             db.concluir_execucao(execucao_id, False, erro=str(exc))
@@ -94,6 +94,7 @@ class ConsultaIn(BaseModel):
     criterio: str                      # número do ativo, etiqueta ou série
     livros: Optional[list[str]] = None
     forcar: bool = False               # ignora o que já foi coletado nas últimas 24 h
+    detalhe: bool = False              # inclui a tela inteira (campo a campo) na resposta
 
 
 @router.post("/testar-abertura")
@@ -119,7 +120,8 @@ def consultar(req: Request, body: ConsultaIn):
         if pronto:
             return {"execucao_id": None, "cache": True, **pronto}
     eid = db.criar_execucao("consulta", {"criterio": criterio, "livros": body.livros}, _quem(sess))
-    _rodar_em_segundo_plano(eid, forms.consultar_ativo, criterio, db.roteiros_ativos(), body.livros)
+    _rodar_em_segundo_plano(eid, forms.consultar_ativo, criterio, db.roteiros_ativos(),
+                            body.livros, body.detalhe)
     return {"execucao_id": eid, "cache": False}
 
 

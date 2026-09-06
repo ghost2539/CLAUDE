@@ -801,7 +801,7 @@ def _grades(lido: dict) -> list[dict]:
     return [g for q in tela.get("quadros", []) for g in q.get("grades", [])]
 
 
-def resumo_do_ativo(lido: dict) -> dict:
+def resumo_do_ativo(lido: dict) -> dict:  # noqa: D401
     """A primeira linha da grade de ativos, achatada em nome → valor.
 
     É o formato que o portal consome; `tela` continua no resultado para quem
@@ -987,8 +987,15 @@ def testar_abertura(registrar: Callable[[str], None], roteiro_abrir: list[dict] 
 
 
 def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: dict[str, list[dict]],
-                    livros_tentar: list[str] | None = None) -> dict[str, Any]:
-    """Consulta um ativo (número, etiqueta ou série) tentando cada Livro na ordem."""
+                    livros_tentar: list[str] | None = None, detalhe: bool | None = None) -> dict[str, Any]:
+    """Consulta um ativo (número, etiqueta ou série) tentando cada Livro na ordem.
+
+    Por padrão devolve só o que interessa: os campos do ativo com valor. Com
+    `detalhe`, acrescenta `tela` — todos os quadros abertos, campo a campo —
+    para quando for preciso investigar o que o Forms mostrou.
+    """
+    if detalhe is None:
+        detalhe = _c("EBS_FORMS_DETALHE", "nao").lower() in ("sim", "true", "1")
     if not _trava.acquire(timeout=5):
         raise ErroForms("Já existe uma sessão Forms em andamento.")
     capturas: list[str] = []
@@ -1024,10 +1031,19 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                                       {"criterio": criterio, "livro": livro_ok, **variaveis_da_tela()},
                                       sessao, registrar, capturas)
             dados["linhas_origem"] = origem
-        return {"criterio": criterio, "livro": livro_ok,
-                "ativo": resumo_do_ativo(dados), "dados": dados,
-                "encontrado": bool(resumo_do_ativo(dados)),
-                "capturas": capturas, "eventos": cliente.eventos[-30:], "log_jvm": cliente.log_path.name}
+        ativo = resumo_do_ativo(dados)
+        saida: dict[str, Any] = {
+            "criterio": criterio,
+            "livro": livro_ok,
+            "encontrado": bool(ativo),
+            "ativo": ativo,
+            "capturas": capturas,
+        }
+        if detalhe:
+            saida["tela"] = dados.get("tela", {})
+            saida["eventos"] = cliente.eventos[-30:]
+            saida["log_jvm"] = cliente.log_path.name
+        return saida
     finally:
         if cliente:
             cliente.encerrar()

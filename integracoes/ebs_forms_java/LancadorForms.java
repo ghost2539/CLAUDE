@@ -724,26 +724,28 @@ public class LancadorForms {
             if (quadros.isEmpty()) quadros.add(w);  // sem quadros internos: a própria janela
         }
         for (java.awt.Container q : quadros) {
-            if (!primeiro) j.append(',');
-            primeiro = false;
-            j.append("{\"titulo\":").append(jsonTexto(tituloDoQuadro(q)));
-            j.append(",\"campos\":[");
+            StringBuilder bloco = new StringBuilder();
+            bloco.append("{\"titulo\":").append(jsonTexto(tituloDoQuadro(q)));
+            bloco.append(",\"campos\":[");
+            // o quadro é montado à parte e só entra no JSON se tiver conteúdo
             boolean p1 = true;
             for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>())) {
                 if (f.getClass().getName().contains("FolderPrompt")) continue;
                 if (!ehCampo(f)) continue;
                 String v = textoDe(f);
+                if (v == null || v.isBlank()) continue;   // campo vazio não é dado
                 String nome = f.getName();
-                if ((v == null || v.isBlank()) && (nome == null || nome.isEmpty())) continue;
-                if (!p1) j.append(',');
+                if (!p1) bloco.append(',');
                 p1 = false;
-                j.append("{\"nome\":").append(jsonTexto(nome))
-                 .append(",\"tipo\":").append(jsonTexto(f.getClass().getSimpleName()))
-                 .append(",\"valor\":").append(jsonTexto(v == null ? "" : v.trim()))
-                 .append(",\"x\":").append(f.getX()).append(",\"y\":").append(f.getY())
-                 .append(",\"habilitado\":").append(f.isEnabled()).append('}');
+                bloco.append("{\"nome\":").append(jsonTexto(nome))
+                     .append(",\"valor\":").append(jsonTexto(v.trim())).append('}');
             }
-            j.append("],\"grades\":[").append(gradesJson(q)).append("]}");
+            String grades = gradesJson(q);
+            if (p1 && grades.isEmpty()) continue;   // quadro sem nada a dizer
+            bloco.append("],\"grades\":[").append(grades).append("]}");
+            if (!primeiro) j.append(',');
+            primeiro = false;
+            j.append(bloco);
         }
         j.append("],\"rodape\":").append(jsonTexto(rodape())).append('}');
         return j.toString();
@@ -835,9 +837,11 @@ public class LancadorForms {
                 j.append('{');
                 boolean pc = true;
                 for (Map.Entry<Integer, String> col : colunas.entrySet()) {
+                    String valor = linha.get(col.getKey());
+                    if (valor == null || valor.isBlank()) continue;   // coluna vazia sai do JSON
                     if (!pc) j.append(',');
                     pc = false;
-                    j.append(jsonTexto(col.getValue())).append(':').append(jsonTexto(linha.getOrDefault(col.getKey(), "")));
+                    j.append(jsonTexto(col.getValue())).append(':').append(jsonTexto(valor));
                 }
                 j.append('}');
             }
