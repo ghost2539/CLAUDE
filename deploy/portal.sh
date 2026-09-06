@@ -84,7 +84,10 @@ status)
         echo "NO AR — PID $pid"
         ps -o pid,etime,rss,cmd -p "$pid" --no-headers 2>/dev/null
         PORTA="${PORT:-8901}"
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORTA/" 2>/dev/null)"
+        # --noproxy: num servidor com http_proxy no ambiente, o curl mandaria
+        # a checagem de 127.0.0.1 para o proxy e reportaria falha falsa.
+        code="$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 5 \
+                "http://127.0.0.1:$PORTA/" 2>/dev/null)"
         echo "  resposta HTTP na porta $PORTA: ${code:-sem resposta}"
     else
         echo "PARADO."
@@ -92,6 +95,89 @@ status)
     echo "  app:   $APP_DIR"
     echo "  env:   $ENVFILE"
     echo "  log:   $LOGFILE"
+    ;;
+
+endereco|onde|url)
+    [ -r "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
+    PORTA="${PORT:-8901}"
+    BIND="${HOST:-0.0.0.0}"
+
+    echo "== Onde o portal atende =="
+    if rodando; then
+        echo "   estado : NO AR (PID $(cat "$PIDFILE"))"
+    else
+        echo "   estado : PARADO — suba com: $0 start"
+    fi
+    echo "   bind   : $BIND:$PORTA"
+    if [ "$BIND" = "127.0.0.1" ] || [ "$BIND" = "localhost" ]; then
+        echo
+        echo "   ATENÇÃO: preso em $BIND — só responde DENTRO do servidor."
+        echo "   Para acessar de outra máquina, no $ENVFILE:"
+        echo "       HOST=0.0.0.0"
+        echo "   e depois: $0 restart"
+    fi
+
+    echo
+    echo "-- Do próprio servidor"
+    echo "   http://127.0.0.1:$PORTA"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 5 \
+            "http://127.0.0.1:$PORTA/" 2>/dev/null)"
+    if [ "$code" = "200" ]; then
+        echo "      resposta: 200 — o portal está atendendo"
+    else
+        echo "      resposta: ${code:-sem resposta}"
+    fi
+
+    echo
+    echo "-- Da rede (tente estes no navegador)"
+    ips="$(hostname -I 2>/dev/null)"
+    if [ -z "$ips" ]; then
+        ips="$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')"
+    fi
+    if [ -z "$ips" ]; then
+        echo "   (não consegui descobrir o IP — use 'ip a' e monte a URL na mão)"
+    else
+        for ip in $ips; do echo "   http://$ip:$PORTA"; done
+    fi
+    nome="$(hostname -f 2>/dev/null || hostname 2>/dev/null)"
+    [ -n "$nome" ] && echo "   http://$nome:$PORTA"
+
+    echo
+    echo "-- Quem está escutando na porta $PORTA"
+    if command -v ss >/dev/null 2>&1; then
+        LINHAS="$(ss -tlnp 2>/dev/null | grep ":$PORTA " || true)"
+    else
+        LINHAS="$(netstat -tlnp 2>/dev/null | grep ":$PORTA " || true)"
+    fi
+    if [ -n "$LINHAS" ]; then
+        echo "$LINHAS" | sed 's/^/   /'
+    elif [ "$code" = "200" ]; then
+        # ss/netstat sem privilégio não enxerga o socket de outro processo;
+        # como o HTTP respondeu, afirmar "ninguém escutando" seria mentira.
+        echo "   (ss/netstat não listou — provavelmente sem privilégio para ver"
+        echo "    o socket; o HTTP respondeu 200, então está escutando)"
+    else
+        echo "   ninguém — o processo não está escutando nessa porta"
+    fi
+
+    echo
+    echo "-- Firewall"
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "^Status: active"; then
+        echo "   ufw ATIVO:"
+        ufw status 2>/dev/null | sed -n '1,12p' | sed 's/^/     /'
+        echo "     liberar:  sudo ufw allow $PORTA/tcp"
+    elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+        echo "   firewalld ATIVO — portas: $(firewall-cmd --list-ports 2>/dev/null)"
+        echo "     liberar:  sudo firewall-cmd --add-port=$PORTA/tcp --permanent && sudo firewall-cmd --reload"
+    elif command -v iptables >/dev/null 2>&1 && [ "$(iptables -S 2>/dev/null | wc -l)" -gt 3 ]; then
+        echo "   iptables com regras — confira com: sudo iptables -L -n"
+    else
+        echo "   nenhum firewall local aparente"
+    fi
+
+    echo
+    echo "Se responde em 127.0.0.1 mas não pela rede, o problema NÃO é o portal:"
+    echo "é firewall local, firewall de rede ou o endereço usado no navegador."
     ;;
 
 logs)
@@ -114,7 +200,7 @@ atualizar)
     ;;
 
 *)
-    echo "Uso: $0 {start|stop|restart|status|logs|atualizar}"
+    echo "Uso: $0 {start|stop|restart|status|endereco|logs|atualizar}"
     exit 1
     ;;
 esac
