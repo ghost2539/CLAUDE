@@ -76,6 +76,7 @@ public class LancadorForms {
     private static Applet applet;
     private static final Map<String, String> params = new LinkedHashMap<>();
     private static String codebase = "";
+    private static String mainClass = "";
     private static int larg = 1280, alt = 900;
 
     public static void main(String[] args) throws Exception {
@@ -97,7 +98,11 @@ public class LancadorForms {
         for (String j : jars) urls.add(baixarJar(j, cache));
         responder("EVENTO jars " + urls.size());
 
-        String classe = System.getProperty("forms.classe", "oracle.forms.engine.Main");
+        // A classe é a que o jnlp declara (no EBS, FndFormsEngine — é ela quem
+        // trata ticket e sessão do Web Start). -Dforms.classe força outra.
+        String classe = System.getProperty("forms.classe", "");
+        if (classe.isEmpty()) classe = mainClass.isEmpty() ? "oracle.forms.engine.Main" : mainClass;
+        registrarServicosJnlp();
         URLClassLoader cl = new URLClassLoader(urls.toArray(new URL[0]), LancadorForms.class.getClassLoader());
         Thread.currentThread().setContextClassLoader(cl);
         applet = (Applet) cl.loadClass(classe).getDeclaredConstructor().newInstance();
@@ -388,6 +393,8 @@ public class LancadorForms {
         List<String> jars = new ArrayList<>();
         NodeList nj = doc.getElementsByTagName("jar");
         for (int i = 0; i < nj.getLength(); i++) jars.add(((Element) nj.item(i)).getAttribute("href"));
+        NodeList nd = doc.getElementsByTagName("applet-desc");
+        if (nd.getLength() > 0) mainClass = ((Element) nd.item(0)).getAttribute("main-class");
         NodeList np = doc.getElementsByTagName("param");
         for (int i = 0; i < np.getLength(); i++) {
             Element e = (Element) np.item(i);
@@ -413,6 +420,24 @@ public class LancadorForms {
             responder("EVENTO baixado " + nome);
         }
         return destino.toUri().toURL();
+    }
+
+    // ── serviços do Java Web Start (javax.jnlp) ─────────────────────────
+    private static void registrarServicosJnlp() {
+        final javax.jnlp.BasicService basico = new javax.jnlp.BasicService() {
+            public URL getCodeBase() { try { return new URL(codebase); } catch (Exception e) { return null; } }
+            public boolean isOffline() { return false; }
+            public boolean showDocument(URL url) { responder("EVENTO documento " + url); return true; }
+            public boolean isWebBrowserSupported() { return true; }
+        };
+        javax.jnlp.ServiceManager.setServiceManagerStub(new javax.jnlp.ServiceManagerStub() {
+            public Object lookup(String name) throws javax.jnlp.UnavailableServiceException {
+                if ("javax.jnlp.BasicService".equals(name)) return basico;
+                responder("EVENTO servico-jnlp-indisponivel " + name);
+                throw new javax.jnlp.UnavailableServiceException(name);
+            }
+            public String[] getServiceNames() { return new String[] {"javax.jnlp.BasicService"}; }
+        });
     }
 
     // ── o "navegador" que o applet enxerga ──────────────────────────────
