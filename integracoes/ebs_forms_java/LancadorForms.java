@@ -78,6 +78,10 @@ public class LancadorForms {
     private static String codebase = "";
     private static String mainClass = "";
     private static int larg = 1280, alt = 900;
+    // "java": teclas injetadas na fila de eventos do AWT (não passam pelo X —
+    // obrigatório no Weston headless, cujo Xwayland aborta ao receber XTEST
+    // sem seat). "robot": XTEST via java.awt.Robot (Xvfb/Xvnc).
+    private static final boolean ENTRADA_JAVA = !"robot".equalsIgnoreCase(System.getProperty("forms.entrada", "java"));
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
@@ -199,19 +203,31 @@ public class LancadorForms {
                 // digitar acento e o Forms aceita colar. Argumento em base64
                 // para sobreviver a espaços e quebras de linha.
                 String txt = new String(Base64.getDecoder().decode(arg.trim()), StandardCharsets.UTF_8);
-                clipboard(txt);
-                tecla("CTRL+V");
+                if (ENTRADA_JAVA) {
+                    for (char c : txt.toCharArray()) digitarCharJava(c);
+                    sincronizar();
+                } else {
+                    clipboard(txt);
+                    tecla("CTRL+V");
+                }
                 responder("OK");
                 break;
             case "digitar":
                 // Só ASCII, tecla a tecla — para números e códigos, é mais
                 // fiel ao que uma pessoa faz e dispara as validações do campo.
                 String s = new String(Base64.getDecoder().decode(arg.trim()), StandardCharsets.UTF_8);
-                for (char c : s.toCharArray()) digitarChar(c);
+                for (char c : s.toCharArray()) { if (ENTRADA_JAVA) digitarCharJava(c); else digitarChar(c); }
+                sincronizar();
                 responder("OK");
                 break;
             case "copiar":
-                // Seleciona o campo atual e devolve o conteúdo em base64.
+                // Primeiro sem X: getText() do componente focado. Só se não
+                // der, seleciona e copia pela área de transferência.
+                String direto = lerCampoFocado();
+                if (direto != null) {
+                    responder("OK " + Base64.getEncoder().encodeToString(direto.getBytes(StandardCharsets.UTF_8)));
+                    break;
+                }
                 clipboard(" vazio ");
                 tecla("HOME"); tecla("SHIFT+END"); tecla("CTRL+C");
                 Thread.sleep(120);
@@ -267,12 +283,15 @@ public class LancadorForms {
     private static void focar() {
         janela.validate();
         janela.toFront();
-        Dimension tela = Toolkit.getDefaultToolkit().getScreenSize();
-        int x = Math.min(janela.getWidth(), tela.width) - 4;
-        int y = Math.min(janela.getHeight(), tela.height) - 4;
-        robo.mouseMove(x, y);
-        robo.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
-        robo.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+        if (!ENTRADA_JAVA) {
+            // Xvfb sem gerenciador de janelas: só um clique dá o foco X.
+            Dimension tela = Toolkit.getDefaultToolkit().getScreenSize();
+            int x = Math.min(janela.getWidth(), tela.width) - 4;
+            int y = Math.min(janela.getHeight(), tela.height) - 4;
+            robo.mouseMove(x, y);
+            robo.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+            robo.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+        }
         sincronizar();
         try {
             java.awt.EventQueue.invokeAndWait(() -> {
@@ -315,6 +334,7 @@ public class LancadorForms {
     }
 
     private static void tecla(String combo) throws Exception {
+        if (ENTRADA_JAVA) { teclaJava(combo); return; }
         List<Integer> mods = new ArrayList<>();
         int principal = -1;
         for (String parte : combo.toUpperCase().split("\\+")) {
@@ -334,6 +354,106 @@ public class LancadorForms {
         // é entregue antes da próxima ordem, sem tecla segurada no meio.
         sincronizar();
         robo.delay(40);
+    }
+
+    // ── entrada pela fila de eventos do Java ────────────────────────────
+    private static java.awt.Component alvoTeclado() {
+        java.awt.Component c = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        if (c == null) c = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getPermanentFocusOwner();
+        return c != null ? c : applet;
+    }
+
+    private static void postar(java.awt.AWTEvent ev) {
+        Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(ev);
+    }
+
+    private static void teclaJava(String combo) throws Exception {
+        int mods = 0;
+        int principal = -1;
+        for (String parte : combo.toUpperCase().split("\\+")) {
+            switch (parte) {
+                case "CTRL": mods |= KeyEvent.CTRL_DOWN_MASK; break;
+                case "SHIFT": mods |= KeyEvent.SHIFT_DOWN_MASK; break;
+                case "ALT": mods |= KeyEvent.ALT_DOWN_MASK; break;
+                default: principal = codigoTecla(parte);
+            }
+        }
+        if (principal < 0) throw new IllegalArgumentException("tecla inválida: " + combo);
+        final int code = principal, m = mods;
+        java.awt.Component alvo = alvoTeclado();
+        // TAB/Shift+TAB: se o componente deixa a travessia de foco para o AWT
+        // (Swing), um evento sintético não a dispara — fazemos a troca direto.
+        // O Forms desliga a travessia e trata TAB como "próximo item"; nesse
+        // caso o evento segue normalmente para ele.
+        if (code == KeyEvent.VK_TAB && alvo.getFocusTraversalKeysEnabled()) {
+            java.awt.AWTKeyStroke ks = java.awt.AWTKeyStroke.getAWTKeyStroke(KeyEvent.VK_TAB, m);
+            boolean frente = alvo.getFocusTraversalKeys(java.awt.KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS).contains(ks);
+            boolean tras = alvo.getFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS).contains(ks);
+            if (frente || tras) {
+                final java.awt.Component c = alvo;
+                java.awt.EventQueue.invokeAndWait(() -> { if (frente) c.transferFocus(); else c.transferFocusBackward(); });
+                // a troca de foco é assíncrona: espera a fila assentar antes da próxima ordem
+                robo.delay(150);
+                sincronizar();
+                return;
+            }
+        }
+        long t = System.currentTimeMillis();
+        char ch = KeyEvent.CHAR_UNDEFINED;
+        if (code >= KeyEvent.VK_A && code <= KeyEvent.VK_Z) {
+            ch = (m & KeyEvent.CTRL_DOWN_MASK) != 0 ? (char) (code - KeyEvent.VK_A + 1)
+               : (m & KeyEvent.SHIFT_DOWN_MASK) != 0 ? (char) code : (char) (code + 32);
+        } else if (code >= KeyEvent.VK_0 && code <= KeyEvent.VK_9) {
+            ch = (char) code;
+        } else if (code == KeyEvent.VK_ENTER) ch = '\n';
+        else if (code == KeyEvent.VK_TAB) ch = '\t';
+        else if (code == KeyEvent.VK_SPACE) ch = ' ';
+        else if (code == KeyEvent.VK_BACK_SPACE) ch = '\b';
+        else if (code == KeyEvent.VK_ESCAPE) ch = 27;
+        else if (code == KeyEvent.VK_DELETE) ch = 127;
+        // modificadores primeiro, como um teclado de verdade
+        if ((m & KeyEvent.CTRL_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_PRESSED, t, KeyEvent.CTRL_DOWN_MASK, KeyEvent.VK_CONTROL, KeyEvent.CHAR_UNDEFINED));
+        if ((m & KeyEvent.SHIFT_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_PRESSED, t, m & (KeyEvent.CTRL_DOWN_MASK | KeyEvent.SHIFT_DOWN_MASK), KeyEvent.VK_SHIFT, KeyEvent.CHAR_UNDEFINED));
+        if ((m & KeyEvent.ALT_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_PRESSED, t, m, KeyEvent.VK_ALT, KeyEvent.CHAR_UNDEFINED));
+        postar(new KeyEvent(alvo, KeyEvent.KEY_PRESSED, t, m, code, ch));
+        if (ch != KeyEvent.CHAR_UNDEFINED && (m & KeyEvent.ALT_DOWN_MASK) == 0)
+            postar(new KeyEvent(alvo, KeyEvent.KEY_TYPED, t, m, KeyEvent.VK_UNDEFINED, ch));
+        postar(new KeyEvent(alvo, KeyEvent.KEY_RELEASED, t, m, code, ch));
+        if ((m & KeyEvent.ALT_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_RELEASED, t, 0, KeyEvent.VK_ALT, KeyEvent.CHAR_UNDEFINED));
+        if ((m & KeyEvent.SHIFT_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_RELEASED, t, 0, KeyEvent.VK_SHIFT, KeyEvent.CHAR_UNDEFINED));
+        if ((m & KeyEvent.CTRL_DOWN_MASK) != 0) postar(new KeyEvent(alvo, KeyEvent.KEY_RELEASED, t, 0, KeyEvent.VK_CONTROL, KeyEvent.CHAR_UNDEFINED));
+        sincronizar();
+    }
+
+    private static void digitarCharJava(char c) throws Exception {
+        java.awt.Component alvo = alvoTeclado();
+        long t = System.currentTimeMillis();
+        int code = KeyEvent.getExtendedKeyCodeForChar(c);
+        int m = Character.isUpperCase(c) ? KeyEvent.SHIFT_DOWN_MASK : 0;
+        postar(new KeyEvent(alvo, KeyEvent.KEY_PRESSED, t, m, code == KeyEvent.VK_UNDEFINED ? KeyEvent.VK_UNDEFINED : code, c));
+        postar(new KeyEvent(alvo, KeyEvent.KEY_TYPED, t, m, KeyEvent.VK_UNDEFINED, c));
+        postar(new KeyEvent(alvo, KeyEvent.KEY_RELEASED, t, m, code == KeyEvent.VK_UNDEFINED ? KeyEvent.VK_UNDEFINED : code, c));
+    }
+
+    // Lê o texto do componente focado sem passar pelo X: os campos do Forms
+    // (oracle.forms.ui.VTextField / LWTextField) e do Swing têm getText().
+    private static String lerCampoFocado() {
+        try {
+            final String[] out = new String[1];
+            java.awt.EventQueue.invokeAndWait(() -> {
+                java.awt.Component c = alvoTeclado();
+                for (String metodo : new String[] {"getSelectedText", "getText"}) {
+                    try {
+                        java.lang.reflect.Method mt = c.getClass().getMethod(metodo);
+                        Object v = mt.invoke(c);
+                        if (v != null && !v.toString().isEmpty()) { out[0] = v.toString(); return; }
+                    } catch (Exception ignorada) { /* tenta o próximo */ }
+                }
+            });
+            return out[0];
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static int codigoTecla(String nome) throws Exception {
