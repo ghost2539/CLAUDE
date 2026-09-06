@@ -218,6 +218,7 @@ class Settings:
     EBS_FORMS_JAVA: str = os.getenv("EBS_FORMS_JAVA", "")
     EBS_FORMS_JAVAC: str = os.getenv("EBS_FORMS_JAVAC", "")
     EBS_FORMS_JAVA_OPCOES: str = os.getenv("EBS_FORMS_JAVA_OPCOES", "")
+    EBS_FORMS_PARAMS: str = os.getenv("EBS_FORMS_PARAMS", "")  # sobrepõe parâmetros do jnlp: a=1;b=2
     EBS_FORMS_CLASSE: str = os.getenv("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = os.getenv("EBS_FORMS_ESPERA_JVM", "180")
 
