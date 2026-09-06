@@ -185,8 +185,12 @@ class Settings:
     # Conversão de moeda para projetos de Argentina (ARS) e Uruguai (UYU) → BRL.
     # Cotação em REAIS por 1 peso. Se 0, o sistema tenta buscar cotação ao vivo
     # (EBS_CAPEX_FX_URL); se também falhar, não converte e avisa.
-    EBS_CAPEX_ARS_BRL: float = float(os.getenv("EBS_CAPEX_ARS_BRL", "0") or 0)
-    EBS_CAPEX_UYU_BRL: float = float(os.getenv("EBS_CAPEX_UYU_BRL", "0") or 0)
+    # Cotações fixadas em produção: a busca ao vivo (EBS_CAPEX_FX_URL) não é
+    # confiável no ambiente, e sem valor o portal deixa de converter. Rever
+    # periodicamente — cotação em código envelhece em silêncio; o ideal é
+    # sobrescrever por EBS_CAPEX_ARS_BRL / EBS_CAPEX_UYU_BRL no environment.
+    EBS_CAPEX_ARS_BRL: float = float(os.getenv("EBS_CAPEX_ARS_BRL", "0.0034") or 0)
+    EBS_CAPEX_UYU_BRL: float = float(os.getenv("EBS_CAPEX_UYU_BRL", "0.13") or 0)
     EBS_CAPEX_FX_URL: str = os.getenv(
         "EBS_CAPEX_FX_URL", "https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL"
     )
