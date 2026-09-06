@@ -735,27 +735,32 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
     "abrir": {
         "descricao": "Espera o Forms abrir a tela Localizar Ativos, fotografa e mapeia os componentes.",
         "passos": [
-            {"acao": "esperar", "arg": "20000", "nome": "abrindo"},
+            {"acao": "esperarate", "arg": "janela:Localizar Ativos 90000", "nome": "abrindo"},
             {"acao": "foto", "nome": "tela_inicial"},
             {"acao": "arvore", "nome": "mapa_da_tela"},
         ],
     },
     "localizar_ativo": {
-        "descricao": ("Preenche o critério (e o Livro, se configurado) na tela Localizar Ativos "
-                      "e aciona o botão Localizar. Os campos são endereçados pelo nome do mapa: "
-                      "{campo_criterio} e {campo_livro} vêm de EBS_FORMS_CAMPO_CRITERIO/LIVRO."),
+        "descricao": ("Preenche o critério e o Livro na tela Localizar Ativos e aciona Localizar. "
+                      "Os campos são endereçados pelo nome do mapa ({campo_criterio}, {campo_livro})."),
         "passos": [
-            {"acao": "foto", "nome": "antes"},
             {"acao": "focarcampo", "arg": "{campo_criterio}", "nome": "foco_criterio"},
             {"acao": "texto", "arg": "{criterio}", "nome": "criterio"},
             {"acao": "lercampo", "arg": "{campo_criterio}", "nome": "criterio_conferido"},
             {"acao": "focarcampo", "arg": "{campo_livro}", "nome": "foco_livro"},
             {"acao": "texto", "arg": "{livro}", "nome": "livro"},
             {"acao": "lercampo", "arg": "{campo_livro}", "nome": "livro_conferido"},
-            {"acao": "foto", "nome": "criterio_preenchido"},
             {"acao": "clicar", "arg": "{botao_localizar}", "nome": "localizar"},
-            {"acao": "esperar", "arg": "6000", "nome": "consultando"},
-            {"acao": "foto", "nome": "resultado"},
+            # sai assim que a grade tem linha; sem resultado, o prazo curto
+            # encerra e o próximo Livro é tentado
+            {"acao": "esperarate", "arg": "grade 15000", "nome": "consultando", "opcional": True},
+        ],
+    },
+    "limpar": {
+        "descricao": "Zera os critérios para a próxima consulta na mesma sessão aberta.",
+        "passos": [
+            {"acao": "clicar", "arg": "{botao_limpar}", "nome": "limpar"},
+            {"acao": "esperar", "arg": "600"},
         ],
     },
     "ler_ativo": {
@@ -763,8 +768,6 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
                       "inclusive as colunas que não cabem na área visível, mais a barra de status."),
         "passos": [
             {"acao": "dados", "nome": "tela"},
-            {"acao": "grade", "nome": "tabela"},
-            {"acao": "foto", "nome": "lido"},
         ],
     },
     "linhas_origem": {
@@ -777,6 +780,12 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
+
+def _prazo(arg: str) -> float:
+    """Prazo em ms declarado no fim do argumento de `esperarate`."""
+    m = re.search(r"(\d+)\s*$", arg or "")
+    return float(m.group(1)) if m else 30000.0
 
 
 def _substituir(valor: str, variaveis: dict[str, str]) -> str:
@@ -844,8 +853,19 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
                 pulando = False
             continue
         registrar(f"passo {i} {acao} {nome}")
+        if passo.get("opcional"):
+            # Passo de conveniência (esperar a grade encher, por exemplo): se
+            # não acontecer, seguimos — quem decide é a leitura do resultado.
+            try:
+                executar_roteiro(cliente, [{**passo, "opcional": False}], variaveis, sessao,
+                                 registrar, capturas)
+            except ErroForms as exc:
+                registrar(f"passo {i} {acao}: {exc} (opcional, seguindo)")
+            continue
         if acao == "esperar":
             cliente.esperar(int(arg or "1000"))
+        elif acao == "esperarate":
+            cliente.ordem("esperarate", arg, timeout=_prazo(arg) / 1000 + 30)
         elif acao == "tecla":
             cliente.tecla(arg)
         elif acao == "texto":
@@ -986,6 +1006,71 @@ def testar_abertura(registrar: Callable[[str], None], roteiro_abrir: list[dict] 
         _trava.release()
 
 
+# ── sessão viva ─────────────────────────────────────────────────────────
+# Abrir o Forms custa de 20 a 40 s (SSO, jnlp, JVM, montagem da tela). Manter
+# a sessão aberta entre consultas faz a segunda em diante custar segundos:
+# basta limpar os critérios e consultar de novo. A sessão morre sozinha por
+# inatividade, e qualquer erro a descarta — na dúvida, reabre.
+class _Viva:
+    cliente: "Cliente | None" = None
+    sessao: "Sessao | None" = None
+    ultimo_uso: float = 0.0
+    aberta_em: float = 0.0
+
+
+def _minutos(nome: str, padrao: str) -> float:
+    try:
+        return float(_c(nome, padrao))
+    except ValueError:
+        return float(padrao)
+
+
+def _sessao_utilizavel() -> bool:
+    if _Viva.cliente is None or _Viva.cliente.proc is None or _Viva.cliente.proc.poll() is not None:
+        return False
+    agora = time.time()
+    if agora - _Viva.ultimo_uso > _minutos("EBS_FORMS_SESSAO_OCIOSA_MIN", "10") * 60:
+        return False
+    if agora - _Viva.aberta_em > _minutos("EBS_FORMS_SESSAO_MAXIMA_MIN", "60") * 60:
+        return False
+    try:
+        _Viva.cliente.ordem("ping", timeout=10)
+        return True
+    except Exception:  # noqa: BLE001 — sessão morta é sessão para descartar
+        return False
+
+
+def fechar_sessao(registrar: Callable[[str], None] | None = None) -> None:
+    """Encerra a sessão viva (fim de expediente, manutenção, erro)."""
+    if _Viva.cliente is not None:
+        try:
+            _Viva.cliente.encerrar()
+        except Exception:  # noqa: BLE001
+            pass
+        if registrar:
+            registrar("sessão do Forms encerrada")
+    _Viva.cliente = None
+    _Viva.sessao = None
+
+
+def _abrir_sessao(registrar: Callable[[str], None], roteiros: dict[str, list[dict]],
+                  capturas: list[str]) -> tuple["Sessao", "Cliente"]:
+    usuario, senha = credenciais()
+    if not compilado():
+        registrar("lançador desatualizado: recompilando")
+        compilar()
+    registrar(f"tela virtual: display {Xvfb.garantir()}")
+    sessao = Sessao(usuario, senha, registrar)
+    sessao.entrar()
+    cliente = Cliente(sessao.obter_jnlp(), registrar)
+    cliente.iniciar()
+    executar_roteiro(cliente, roteiros.get("abrir") or ROTEIROS_PADRAO["abrir"]["passos"],
+                     variaveis_da_tela(), sessao, registrar, capturas)
+    _Viva.cliente, _Viva.sessao = cliente, sessao
+    _Viva.aberta_em = _Viva.ultimo_uso = time.time()
+    return sessao, cliente
+
+
 def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: dict[str, list[dict]],
                     livros_tentar: list[str] | None = None, detalhe: bool | None = None) -> dict[str, Any]:
     """Consulta um ativo (número, etiqueta ou série) tentando cada Livro na ordem.
@@ -1000,17 +1085,17 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
         raise ErroForms("Já existe uma sessão Forms em andamento.")
     capturas: list[str] = []
     cliente: Cliente | None = None
+    reaproveitada = False
     try:
-        usuario, senha = credenciais()
-        if not compilado():
-            compilar()
-        registrar(f"tela virtual: display {Xvfb.garantir()}")
-        sessao = Sessao(usuario, senha, registrar)
-        sessao.entrar()
-        cliente = Cliente(sessao.obter_jnlp(), registrar)
-        cliente.iniciar()
-        executar_roteiro(cliente, roteiros.get("abrir") or ROTEIROS_PADRAO["abrir"]["passos"],
-                         variaveis_da_tela(), sessao, registrar, capturas)
+        if _c("EBS_FORMS_SESSAO_VIVA", "sim").lower() in ("sim", "true", "1") and _sessao_utilizavel():
+            sessao, cliente = _Viva.sessao, _Viva.cliente          # type: ignore[assignment]
+            reaproveitada = True
+            registrar("reaproveitando a sessão do Forms já aberta")
+            executar_roteiro(cliente, roteiros.get("limpar") or ROTEIROS_PADRAO["limpar"]["passos"],
+                             variaveis_da_tela(), sessao, registrar, capturas)
+        else:
+            fechar_sessao()
+            sessao, cliente = _abrir_sessao(registrar, roteiros, capturas)
         dados: dict[str, Any] = {}
         livro_ok = ""
         for livro in (livros_tentar or livros()):
@@ -1039,14 +1124,20 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
             "ativo": ativo,
             "capturas": capturas,
         }
+        saida["sessao_reaproveitada"] = reaproveitada
         if detalhe:
             saida["tela"] = dados.get("tela", {})
             saida["eventos"] = cliente.eventos[-30:]
             saida["log_jvm"] = cliente.log_path.name
+        _Viva.ultimo_uso = time.time()
         return saida
+    except BaseException:
+        # Sessão em estado desconhecido não serve para a próxima consulta.
+        fechar_sessao(registrar)
+        raise
     finally:
-        if cliente:
-            cliente.encerrar()
+        if _c("EBS_FORMS_SESSAO_VIVA", "sim").lower() not in ("sim", "true", "1"):
+            fechar_sessao()
         _trava.release()
 
 
