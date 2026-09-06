@@ -44,6 +44,20 @@ def passo(titulo: str, fn) -> object:
         return None
 
 
+def _trecho_da_arvore(padrao: str, limite: int = 2500) -> str:
+    """Linhas do mapa de componentes que casam com o padrão — o suficiente
+    para achar o controle certo sem despejar a árvore inteira."""
+    try:
+        arv = _CLIENTE[0].arvore()
+    except Exception as exc:  # noqa: BLE001 — diagnóstico não pode parar aqui
+        return f"(árvore indisponível: {exc})"
+    linhas = [l for l in arv.splitlines() if padrao.lower() in l.lower()]
+    return ("\n   ".join(linhas))[:limite] or f"(nada com '{padrao}')"
+
+
+_CLIENTE: list = [None]
+
+
 def main() -> int:
     capturas: list[str] = []
     usuario, _ = f.credenciais()
@@ -58,6 +72,7 @@ def main() -> int:
     jnlp = sessao.obter_jnlp()
     log(f"jnlp obtido ({len(jnlp)} bytes)")
     cliente = f.Cliente(jnlp, log)
+    _CLIENTE[0] = cliente
     passo("abrir o Forms", cliente.iniciar)
     v = f.variaveis_da_tela()
 
@@ -91,6 +106,14 @@ def main() -> int:
         capturas.append(cliente.foto("diag_atribuicoes"))
 
         passo("FECHAR a janela Atribuições", lambda: cliente.ordem("fecharjanela", "Atribuições", timeout=60))
+        sumiu = passo("Atribuições sumiu mesmo?",
+                      lambda: cliente.ordem("esperarate", "sem janela:Atribuições 8000", timeout=20))
+        if sumiu is None:
+            # ainda aberta: o que existe na barra de título é o que decide o
+            # próximo caminho de fechamento
+            log("   barra de título de Atribuições (componentes):")
+            log("   " + _trecho_da_arvore("Atribui"))
+            log("   componentes de menu/título: " + _trecho_da_arvore("SystemMenu"))
         passo("janelas abertas agora", lambda: cliente.janelas())
         passo("quadros abertos agora",
               lambda: [q.get("titulo") for q in (cliente.dados() or {}).get("quadros", [])])
