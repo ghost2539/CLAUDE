@@ -525,6 +525,11 @@ class Cliente:
         opcoes = _c("EBS_FORMS_JAVA_OPCOES")
         if opcoes:
             cmd[1:1] = opcoes.split()
+        # EBS_FORMS_PARAMS="clientBrowser=chrome;outro=valor" sobrepõe parâmetros do jnlp.
+        for par in _c("EBS_FORMS_PARAMS").split(";"):
+            if "=" in par:
+                nome, valor = par.split("=", 1)
+                cmd.insert(1, f"-Dforms.param.{nome.strip()}={valor.strip()}")
         self._registrar(f"JVM: {java} (display {display}, classe {classe or 'a do jnlp'})")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=self._log_f, env=env, cwd=str(DIR), text=True,
