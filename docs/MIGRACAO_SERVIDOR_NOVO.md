@@ -300,7 +300,14 @@ deploy/portal.sh start
 deploy/portal.sh status
 ```
 
-Acesse: `http://SERVIDOR_NOVO:8901`
+Para descobrir o endereço exato — IPs do servidor, se está preso em
+localhost, quem escuta na porta e se há firewall no caminho:
+
+```bash
+deploy/portal.sh endereco
+```
+
+Acesse pela URL que ele indicar (algo como `http://10.x.x.x:8901`).
 
 Deu errado? O log diz o porquê:
 
