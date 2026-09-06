@@ -278,6 +278,54 @@ public class LancadorForms {
                 }
                 responder("OK " + Base64.getEncoder().encodeToString(sb.toString().getBytes(StandardCharsets.UTF_8)));
                 break;
+            case "focarcampo": {
+                // Endereça o componente pelo nome do mapa (ex.: VTextField227).
+                // Mais robusto que contar TABs: independe da ordem da tela.
+                java.awt.Component alvo = acharPorNome(arg.trim());
+                if (alvo == null) { responder("ERRO campo não encontrado: " + arg.trim()); break; }
+                final java.awt.Component a = alvo;
+                naEDT(() -> { a.requestFocusInWindow(); return null; }, 5000);
+                sincronizar();
+                responder("OK " + alvo.getClass().getSimpleName());
+                break;
+            }
+            case "lercampo": {
+                java.awt.Component alvo = acharPorNome(arg.trim());
+                if (alvo == null) { responder("ERRO campo não encontrado: " + arg.trim()); break; }
+                final java.awt.Component a = alvo;
+                String lido = naEDT(() -> {
+                    String t = textoDe(a);
+                    return t == null ? "" : t;
+                }, 5000);
+                responder("OK " + Base64.getEncoder().encodeToString(lido.getBytes(StandardCharsets.UTF_8)));
+                break;
+            }
+            case "clicar": {
+                // Botões do EBS (oracle.apps.fnd.ui.Button) e do EWT expõem
+                // doClick(); quando não expõem, mandamos os eventos de mouse.
+                java.awt.Component alvo = acharPorNome(arg.trim());
+                if (alvo == null) { responder("ERRO botão não encontrado: " + arg.trim()); break; }
+                final java.awt.Component a = alvo;
+                String como = naEDT(() -> {
+                    try {
+                        a.getClass().getMethod("doClick").invoke(a);
+                        return "doClick";
+                    } catch (Exception semDoClick) {
+                        long t = System.currentTimeMillis();
+                        int x = a.getWidth() / 2, y = a.getHeight() / 2;
+                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_PRESSED, t,
+                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 1,
+                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 2,
+                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+                        return "eventos de mouse";
+                    }
+                }, 8000);
+                sincronizar();
+                responder("OK " + como);
+                break;
+            }
             case "arvore":
                 // O mapa da tela: cada componente com classe, texto, posição e
                 // foco. É a partir daqui que se monta o roteiro de teclas —
@@ -551,6 +599,28 @@ public class LancadorForms {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private static java.awt.Component acharPorNome(String nome) throws Exception {
+        return naEDT(() -> {
+            for (Window w : Window.getWindows()) {
+                if (!w.isShowing()) continue;
+                java.awt.Component c = procurar(w, nome);
+                if (c != null) return c;
+            }
+            return null;
+        }, 8000);
+    }
+
+    private static java.awt.Component procurar(java.awt.Container c, String nome) {
+        for (java.awt.Component f : c.getComponents()) {
+            if (nome.equals(f.getName())) return f;
+            if (f instanceof java.awt.Container) {
+                java.awt.Component achado = procurar((java.awt.Container) f, nome);
+                if (achado != null) return achado;
+            }
+        }
+        return null;
     }
 
     private static String arvore() {

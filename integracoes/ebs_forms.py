@@ -640,6 +640,15 @@ class Cliente:
     def janelas(self) -> list[str]:
         return base64.b64decode(self.ordem("janelas")).decode("utf-8", "replace").splitlines()
 
+    def focar_campo(self, nome: str) -> str:
+        return self.ordem("focarcampo", nome, timeout=30)
+
+    def ler_campo(self, nome: str) -> str:
+        return base64.b64decode(self.ordem("lercampo", nome, timeout=30)).decode("utf-8", "replace")
+
+    def clicar(self, nome: str) -> str:
+        return self.ordem("clicar", nome, timeout=60)
+
     def arvore(self) -> str:
         """Mapa da tela: componentes, textos, posições e quem tem o foco."""
         return base64.b64decode(self.ordem("arvore", timeout=90)).decode("utf-8", "replace")
@@ -784,6 +793,12 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             capturas.append(cliente.foto(nome))
         elif acao == "arvore":
             resultado[nome] = cliente.arvore()
+        elif acao == "focarcampo":
+            cliente.focar_campo(arg)
+        elif acao == "lercampo":
+            resultado[nome] = cliente.ler_campo(arg).strip()
+        elif acao == "clicar":
+            cliente.clicar(arg)
         elif acao == "se_vazio":
             pulando = bool(str(resultado.get(arg, "")).strip())
         elif acao == "fim_se":
