@@ -740,6 +740,9 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             {"acao": "focarcampo", "arg": "{campo_criterio}", "nome": "foco_criterio"},
             {"acao": "texto", "arg": "{criterio}", "nome": "criterio"},
             {"acao": "lercampo", "arg": "{campo_criterio}", "nome": "criterio_conferido"},
+            {"acao": "focarcampo", "arg": "{campo_livro}", "nome": "foco_livro"},
+            {"acao": "texto", "arg": "{livro}", "nome": "livro"},
+            {"acao": "lercampo", "arg": "{campo_livro}", "nome": "livro_conferido"},
             {"acao": "foto", "nome": "criterio_preenchido"},
             {"acao": "clicar", "arg": "{botao_localizar}", "nome": "localizar"},
             {"acao": "esperar", "arg": "6000", "nome": "consultando"},
@@ -780,7 +783,7 @@ def variaveis_da_tela() -> dict[str, str]:
     """
     return {
         "campo_criterio": _c("EBS_FORMS_CAMPO_CRITERIO", "VTextField200"),
-        "campo_livro": _c("EBS_FORMS_CAMPO_LIVRO"),
+        "campo_livro": _c("EBS_FORMS_CAMPO_LIVRO", "VTextField209"),
         "botao_localizar": _c("EBS_FORMS_BOTAO_LOCALIZAR", "Button18"),
         "botao_limpar": _c("EBS_FORMS_BOTAO_LIMPAR", "Button17"),
         "botao_linhas_origem": _c("EBS_FORMS_BOTAO_LINHAS_ORIGEM", "Button14"),
