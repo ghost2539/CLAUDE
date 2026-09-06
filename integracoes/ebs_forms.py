@@ -774,10 +774,13 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         ],
     },
     "limpar": {
-        "descricao": "Zera os critérios para a próxima consulta na mesma sessão aberta.",
+        "descricao": ("Reabre a tela de busca para a próxima consulta. Depois de localizar, o Forms "
+                      "FECHA a janela Localizar Ativos — ela volta pelo menu Verificar > Localizar."),
         "passos": [
-            {"acao": "clicar", "arg": "{botao_limpar}", "nome": "limpar"},
-            {"acao": "esperar", "arg": "600"},
+            {"acao": "menu", "arg": "{menu_localizar}", "nome": "reabrir_busca"},
+            {"acao": "esperarate", "arg": "janela:Localizar Ativos 20000", "nome": "busca_aberta"},
+            {"acao": "clicar", "arg": "{botao_limpar}", "nome": "limpar", "opcional": True},
+            {"acao": "esperar", "arg": "400"},
         ],
     },
     "ler_ativo": {
@@ -918,6 +921,7 @@ def variaveis_da_tela() -> dict[str, str]:
         "campo_livro": _c("EBS_FORMS_CAMPO_LIVRO", "VTextField209"),
         "botao_localizar": _c("EBS_FORMS_BOTAO_LOCALIZAR", "Button18"),
         "botao_limpar": _c("EBS_FORMS_BOTAO_LIMPAR", "Button17"),
+        "menu_localizar": _c("EBS_FORMS_MENU_LOCALIZAR", "Verificar|Localizar"),
         "botao_atribuicoes": _c("EBS_FORMS_BOTAO_ATRIBUICOES", "Button13"),
         "botao_linhas_origem": _c("EBS_FORMS_BOTAO_LINHAS_ORIGEM", "Button14"),
         "botao_livros": _c("EBS_FORMS_BOTAO_LIVROS", "Button15"),
@@ -976,6 +980,8 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             cliente.clicar(arg)
         elif acao == "clicartexto":
             cliente.clicar_texto(arg)
+        elif acao == "menu":
+            cliente.ordem("menu", arg, timeout=60)
         elif acao == "dialogo":
             resultado[nome] = cliente.dialogo()
         elif acao == "se_vazio":
@@ -1222,6 +1228,15 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                     # Detalhe que falta não invalida o ativo já encontrado.
                     registrar(f"{chave}: {exc}")
                     lido = {}
+                if not _grades(lido):
+                    # Sem grade: a janela não abriu ou abriu outra coisa. A foto
+                    # e a árvore dizem qual dos dois foi.
+                    etapa(f"{chave}: nenhuma grade lida — guardando captura para diagnóstico")
+                    try:
+                        capturas.append(cliente.foto(f"sem_{chave}"))
+                        lido[f"arvore_{chave}"] = cliente.arvore()[:8000]
+                    except ErroForms:
+                        pass
                 if destino == "atribuicoes":
                     atribuicoes = lido
                 else:
