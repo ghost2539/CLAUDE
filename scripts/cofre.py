@@ -107,13 +107,44 @@ def cmd_sondar(args) -> int:
     if args.nome:
         grupos = {"Informados por você": list(args.nome)}
 
+    # Se o arquivo do cofre for legível, não há o que adivinhar: lista-se.
+    conhecidas = cofre.chaves_corporativas()
+    if conhecidas and not args.nome:
+        print(f"Cofre corporativo legível — {len(conhecidas)} chave(s). "
+              "Valores não são exibidos.\n")
+        for nome in conhecidas:
+            tam = len(cofre._somente_cofre(nome))
+            print(f"  {nome:34s} ({tam} caracteres)")
+        print()
+        sn = [k for k in conhecidas if any(t in k.upper() for t in ("SN_", "SERVICENOW", "SNOW"))]
+        if sn:
+            print("Parecem ser do ServiceNow:")
+            for k in sn:
+                print(f"  {k}")
+            senha = next((k for k in sn if any(t in k.upper()
+                          for t in ("PASS", "SENHA", "TOKEN"))), None)
+            usuario = next((k for k in sn if any(t in k.upper()
+                            for t in ("USER", "USUARIO", "LOGIN"))), None)
+            print("\nNo environment, aponte os marcadores:")
+            if usuario:
+                print(f"  SN_API_USER=@cofre:{usuario}@")
+            if senha:
+                print(f"  SN_API_PASS=@cofre:{senha}@")
+            if usuario or senha:
+                print("\nE apague a cópia do cofre local, se houver:")
+                for chave, _ in (("SN_API_USER", usuario), ("SN_API_PASS", senha)):
+                    print(f"  python3 scripts/cofre.py remover {chave}")
+        else:
+            print("Nenhuma chave com cara de ServiceNow nesta lista.")
+        return 0
+
     print("Sondando o cofre corporativo — só leitura, valores não são exibidos.\n")
     achadas: list[str] = []
     for grupo, nomes in grupos.items():
         print(f"{grupo}:")
         alguma = False
         for nome in nomes:
-            valor = cofre._corporativo(nome)
+            valor = cofre._somente_cofre(nome)
             if valor:
                 achadas.append(nome)
                 alguma = True
