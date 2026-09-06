@@ -169,7 +169,7 @@ class RoteiroIn(BaseModel):
 
 
 _ACOES = {"esperar", "tecla", "texto", "digitar", "copiar", "foto", "arvore",
-          "focarcampo", "focoatual", "lercampo", "clicar", "grade", "dados", "se_vazio", "fim_se", "documento"}
+          "esperarate", "focarcampo", "focoatual", "lercampo", "clicar", "grade", "dados", "se_vazio", "fim_se", "documento"}
 
 
 @router.get("/roteiros")
