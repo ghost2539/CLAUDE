@@ -346,6 +346,29 @@ public class LancadorForms {
                 responder("OK " + Base64.getEncoder().encodeToString(d.getBytes(StandardCharsets.UTF_8)));
                 break;
             }
+            case "menu": {
+                // Navega no menu do Forms: "menu Verificar|Localizar". Depois de
+                // uma consulta o Forms FECHA a janela Localizar Ativos; é por
+                // aqui que ela volta para a consulta seguinte.
+                String[] caminho = arg.split("\\|");
+                StringBuilder trilha = new StringBuilder();
+                for (int k = 0; k < caminho.length; k++) {
+                    String item = caminho[k].trim();
+                    java.awt.Component m = naEDT(() -> acharPorTexto(item), 8000);
+                    if (m == null) { responder("ERRO menu: não achei '" + item + "'" + (trilha.length() > 0 ? " depois de " + trilha : "")); break; }
+                    final java.awt.Component mm = m;
+                    naEDT(() -> {
+                        try { mm.getClass().getMethod("doClick").invoke(mm); }
+                        catch (Exception e) { cliqueSintetico(mm); }
+                        return null;
+                    }, 8000);
+                    trilha.append(trilha.length() > 0 ? " > " : "").append(item);
+                    sincronizar();
+                    Thread.sleep(400);   // o submenu precisa montar antes do próximo item
+                    if (k == caminho.length - 1) responder("OK menu " + trilha);
+                }
+                break;
+            }
             case "clicartexto": {
                 // Clica no botão pelo RÓTULO (OK, Cancelar, Atribuições...),
                 // que é estável mesmo quando o nome do componente muda.
