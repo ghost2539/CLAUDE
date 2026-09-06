@@ -272,6 +272,12 @@ public class LancadorForms {
                 }
                 responder("OK " + Base64.getEncoder().encodeToString(sb.toString().getBytes(StandardCharsets.UTF_8)));
                 break;
+            case "arvore":
+                // O mapa da tela: cada componente com classe, texto, posição e
+                // foco. É a partir daqui que se monta o roteiro de teclas —
+                // muito mais preciso do que interpretar uma captura de tela.
+                responder("OK " + Base64.getEncoder().encodeToString(arvore().getBytes(StandardCharsets.UTF_8)));
+                break;
             case "foco":
                 focar();
                 java.awt.KeyboardFocusManager kfm = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager();
@@ -522,6 +528,56 @@ public class LancadorForms {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private static String arvore() {
+        StringBuilder sb = new StringBuilder();
+        java.awt.Component focado = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        int[] contados = {0};
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            sb.append("JANELA ").append(w.getClass().getSimpleName()).append(" \"").append(tituloDe(w)).append("\" ")
+              .append(w.getWidth()).append('x').append(w.getHeight()).append('\n');
+            descrever(w, 1, sb, focado, contados);
+        }
+        if (contados[0] >= LIMITE_ARVORE) sb.append("... (lista truncada em ").append(LIMITE_ARVORE).append(" componentes)\n");
+        return sb.toString();
+    }
+
+    private static final int LIMITE_ARVORE = 500;
+
+    private static void descrever(java.awt.Container c, int nivel, StringBuilder sb,
+                                  java.awt.Component focado, int[] contados) {
+        for (java.awt.Component f : c.getComponents()) {
+            if (contados[0]++ >= LIMITE_ARVORE) return;
+            if (!f.isVisible()) continue;
+            sb.append("  ".repeat(nivel)).append(f == focado ? "> " : "  ")
+              .append(f.getClass().getName());
+            String nome = f.getName();
+            if (nome != null && !nome.isEmpty() && !nome.startsWith("null")) sb.append(" nome=").append(nome);
+            String texto = textoDe(f);
+            if (texto != null && !texto.isEmpty()) sb.append(" texto=\"").append(texto.replace('\n', ' ')).append('"');
+            java.awt.Rectangle r = f.getBounds();
+            sb.append(" em ").append(r.x).append(',').append(r.y)
+              .append(' ').append(r.width).append('x').append(r.height);
+            if (!f.isEnabled()) sb.append(" desabilitado");
+            if (f.isFocusable()) sb.append(" focavel");
+            sb.append('\n');
+            if (f instanceof java.awt.Container) descrever((java.awt.Container) f, nivel + 1, sb, focado, contados);
+        }
+    }
+
+    private static String textoDe(java.awt.Component f) {
+        for (String metodo : new String[] {"getText", "getLabel", "getValue", "getToolTipText"}) {
+            try {
+                Object v = f.getClass().getMethod(metodo).invoke(f);
+                if (v != null) {
+                    String t = v.toString();
+                    if (!t.isEmpty()) return t.length() > 80 ? t.substring(0, 80) + "…" : t;
+                }
+            } catch (Exception ignorada) { /* componente sem esse método */ }
+        }
+        return null;
     }
 
     private static String tituloDe(Window w) {
