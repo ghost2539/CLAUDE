@@ -302,8 +302,7 @@ class Xvfb:
             return display
         cmd = servidor_x(display)
         if not cmd:
-            raise ErroForms("Nenhum servidor X virtual disponível: instale Xvfb (xorg-x11-server-Xvfb) "
-                            "ou Xvnc (tigervnc-server-minimal). Veja scripts/ebs_forms_preparar.sh.")
+            return cls._garantir_weston()
         DIR_LOGS.mkdir(parents=True, exist_ok=True)
         log = open(DIR_LOGS / "xvfb.log", "ab")  # noqa: SIM115 — vive com o processo
         cls._proc = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
@@ -315,6 +314,58 @@ class Xvfb:
                 raise ErroForms("Xvfb encerrou ao iniciar; veja data/ebs_forms/logs/xvfb.log")
             time.sleep(0.1)
         return display
+
+    @classmethod
+    def _garantir_weston(cls) -> str:
+        """RHEL/Oracle Linux 10 não têm mais Xorg (nem Xvfb, nem Xvnc): só
+        Wayland. O Weston em modo *headless* sobe um compositor sem monitor e,
+        com --xwayland, um servidor X por cima — para o Java é um X normal, e
+        o Weston ainda faz o papel de gerenciador de janelas (foco). O número
+        do display é escolhido pelo Xwayland; lemos do log do Weston."""
+        weston = _c("EBS_FORMS_WESTON") or shutil.which("weston")
+        if not weston or not shutil.which("Xwayland"):
+            raise ErroForms("Nenhuma tela virtual disponível. Instale Xvfb (xorg-x11-server-Xvfb) ou, em "
+                            "RHEL/OL 10, weston + xorg-x11-server-Xwayland. Veja scripts/ebs_forms_preparar.sh.")
+        tam = _c("EBS_FORMS_TELA", "1280x900x24").split("x")
+        runtime = DIR / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        os.chmod(runtime, 0o700)  # o Wayland exige XDG_RUNTIME_DIR só do dono
+        DIR_LOGS.mkdir(parents=True, exist_ok=True)
+        log_path = DIR_LOGS / "weston.log"
+        try:
+            log_path.unlink()
+        except FileNotFoundError:
+            pass
+        env = dict(os.environ)
+        env["XDG_RUNTIME_DIR"] = str(runtime)
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        cmd = [weston, "--backend=headless", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
+               "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+        extra = _c("EBS_FORMS_WESTON_OPCOES")
+        if extra:
+            cmd += extra.split()
+        saida = open(DIR_LOGS / "weston.saida.log", "ab")  # noqa: SIM115 — vive com o processo
+        cls._proc = subprocess.Popen(cmd, stdout=saida, stderr=saida, stdin=subprocess.DEVNULL, env=env)
+        cls._xdg_runtime = str(runtime)
+        for _ in range(150):
+            if cls._proc.poll() is not None:
+                raise ErroForms(f"weston encerrou ao iniciar (código {cls._proc.returncode}); "
+                                f"veja data/ebs_forms/logs/weston.log e weston.saida.log")
+            try:
+                m = re.search(r"listening on display (:\d+)", log_path.read_text(errors="replace"))
+            except FileNotFoundError:
+                m = None
+            if m:
+                cls._display = m.group(1)
+                # O Xwayland sobe "preguiçoso", no primeiro cliente X; dá um
+                # respiro para o compositor terminar de montar a área de trabalho.
+                time.sleep(1.0)
+                return cls._display
+            time.sleep(0.1)
+        raise ErroForms("weston subiu mas não anunciou o display X (--xwayland); veja data/ebs_forms/logs/weston.log")
+
+    _xdg_runtime: str = ""
 
 
 def compilado() -> bool:
@@ -356,6 +407,8 @@ class Cliente:
         java = _c("EBS_FORMS_JAVA") or shutil.which("java") or "java"
         env = dict(os.environ)
         env["DISPLAY"] = display
+        if Xvfb._xdg_runtime:
+            env["XDG_RUNTIME_DIR"] = Xvfb._xdg_runtime
         env.pop("JAVA_TOOL_OPTIONS", None)  # nada de proxy/truststore herdado
         env["LANG"] = env.get("LANG") or "pt_BR.UTF-8"
         tam = _c("EBS_FORMS_TELA", "1280x900x24").split("x")
@@ -635,7 +688,8 @@ def diagnostico() -> dict[str, Any]:
     return {
         "java": java or "", "java_versao": versao, "javac": javac or "",
         "lancador_compilado": compilado(),
-        "xvfb": " ".join(servidor_x(display)[:1]) if servidor_x(display) else "", "display": display,
+        "xvfb": (servidor_x(display) or [""])[0] or (("weston+Xwayland") if shutil.which("weston") and shutil.which("Xwayland") else ""),
+        "display": display,
         "display_ativo": not _display_livre(display),
         "credenciais": cred,
         "home_url": _c("EBS_FORMS_HOME_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE"),
