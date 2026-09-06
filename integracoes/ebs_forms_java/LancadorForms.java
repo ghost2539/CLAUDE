@@ -286,21 +286,23 @@ public class LancadorForms {
                 java.awt.Component alvo = acharPorNome(arg.trim());
                 if (alvo == null) { responder("ERRO campo não encontrado: " + arg.trim()); break; }
                 final java.awt.Component a = alvo;
-                naEDT(() -> { a.requestFocusInWindow(); return null; }, 5000);
+                final java.awt.Component anterior = alvoAtual;
+                naEDT(() -> {
+                    // Um clique de verdade é o que o Forms entende como "entrei
+                    // neste item": ele move o cursor e prepara a validação.
+                    cliqueSintetico(a);
+                    a.requestFocusInWindow();
+                    // Sem gerenciador de janelas não há foco real; avisamos o
+                    // componente diretamente para ele desenhar o cursor e
+                    // aceitar digitação.
+                    if (anterior != null && anterior != a)
+                        anterior.dispatchEvent(new java.awt.event.FocusEvent(anterior, java.awt.event.FocusEvent.FOCUS_LOST, false, a));
+                    a.dispatchEvent(new java.awt.event.FocusEvent(a, java.awt.event.FocusEvent.FOCUS_GAINED, false, anterior));
+                    return null;
+                }, 8000);
+                alvoAtual = a;
                 sincronizar();
-                String dono = donoDoFoco();
-                if (!arg.trim().equals(dono)) {
-                    naEDT(() -> { cliqueSintetico(a); return null; }, 8000);
-                    sincronizar();
-                    robo.delay(200);
-                    sincronizar();
-                    dono = donoDoFoco();
-                }
-                if (!arg.trim().equals(dono)) {
-                    responder("ERRO o foco não foi para " + arg.trim() + " (está em " + dono + ")");
-                    break;
-                }
-                responder("OK foco em " + dono);
+                responder("OK alvo=" + arg.trim() + " foco=" + donoDoFoco());
                 break;
             }
             case "lercampo": {
@@ -476,13 +478,29 @@ public class LancadorForms {
     }
 
     // ── entrada pela fila de eventos do Java ────────────────────────────
+    // Componente escolhido por "focarcampo". Numa tela virtual sem teclado
+    // (Weston headless não tem seat) NENHUMA janela fica ativa, o AWT não tem
+    // dono do foco e um evento postado na fila não chega a lugar nenhum. Por
+    // isso guardamos o alvo e entregamos o evento direto a ele.
+    private static volatile java.awt.Component alvoAtual = null;
+
     private static java.awt.Component alvoTeclado() {
+        if (alvoAtual != null && alvoAtual.isShowing()) return alvoAtual;
         java.awt.Component c = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
         if (c == null) c = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getPermanentFocusOwner();
         return c != null ? c : applet;
     }
 
+    /** Entrega o evento ao componente, sem depender do dono do foco. */
     private static void postar(java.awt.AWTEvent ev) {
+        Object fonte = ev.getSource();
+        if (fonte instanceof java.awt.Component) {
+            java.awt.Component c = (java.awt.Component) fonte;
+            try {
+                naEDT(() -> { c.dispatchEvent(ev); return null; }, 8000);
+                return;
+            } catch (Exception e) { /* cai para a fila */ }
+        }
         Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(ev);
     }
 
@@ -725,11 +743,11 @@ public class LancadorForms {
     private static void cliqueSintetico(java.awt.Component a) {
         long t = System.currentTimeMillis();
         int x = Math.max(1, a.getWidth() / 2), y = Math.max(1, a.getHeight() / 2);
-        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_PRESSED, t,
+        a.dispatchEvent(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_PRESSED, t,
                 java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
-        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 1,
+        a.dispatchEvent(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 1,
                 java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
-        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 2,
+        a.dispatchEvent(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 2,
                 java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
     }
 
