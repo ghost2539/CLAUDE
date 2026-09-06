@@ -274,6 +274,9 @@ class Settings:
     EBS_FORMS_JAVAC: str = _env("EBS_FORMS_JAVAC", "")
     EBS_FORMS_JAVA_OPCOES: str = _env("EBS_FORMS_JAVA_OPCOES", "")
     EBS_FORMS_PARAMS: str = _env("EBS_FORMS_PARAMS", "")  # sobrepõe parâmetros do jnlp: a=1;b=2
+    EBS_FORMS_JARS_EXTRA: str = _env('EBS_FORMS_JARS_EXTRA', '')  # jars adicionais, separados por vírgula
+    EBS_FORMS_VNC: str = _env('EBS_FORMS_VNC', 'nao')             # sim = acompanhar a tela por VNC (localhost)
+    EBS_FORMS_VNC_PORTA: str = _env('EBS_FORMS_VNC_PORTA', '5900')
     EBS_FORMS_CLASSE: str = _env("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = _env("EBS_FORMS_ESPERA_JVM", "180")
 
