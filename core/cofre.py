@@ -66,9 +66,12 @@ MARCADOR = "@cofre:"
 #
 # Por baixo, ele apenas lê o arquivo /etc/vcreports/.secrets.env (KEY=VALOR).
 # Por isso tentamos, nesta ordem, até algo responder:
-#   1. o módulo já importável;
-#   2. o módulo carregado pelo caminho absoluto (resolve o venv isolado);
-#   3. o arquivo do cofre lido direto (resolve até sem o módulo).
+#   1. um comando de leitura, se o time do cofre expuser um
+#      (VCREPORTS_SECRETS_CMD) — é o caminho quando o arquivo fica numa
+#      partição que o usuário não alcança;
+#   2. o módulo já importável;
+#   3. o módulo carregado pelo caminho absoluto (resolve o venv isolado);
+#   4. o arquivo do cofre lido direto (resolve até sem o módulo).
 
 CAMINHO_MODULO = os.environ.get(
     "VCREPORTS_SECRETS_MODULE", "/usr/local/lib/vcreports/vcreports_secrets.py")
@@ -147,7 +150,33 @@ def _ler_arquivo_cofre() -> dict:
     return dados
 
 
+# Comando de leitura, quando o time do cofre expuser um (ex.: um wrapper com
+# sudo). Use {chave} como marcador do nome. Só roda o que o administrador
+# configurou explicitamente aqui.
+#   VCREPORTS_SECRETS_CMD=sudo -n /usr/local/bin/vcreports-secret {chave}
+COMANDO = os.environ.get("VCREPORTS_SECRETS_CMD", "")
+
+
+def _por_comando(nome: str) -> str:
+    if not COMANDO:
+        return ""
+    import shlex
+    import subprocess
+    try:
+        argv = [p.replace("{chave}", nome) for p in shlex.split(COMANDO)]
+        if not any("{chave}" in p for p in shlex.split(COMANDO)):
+            argv.append(nome)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Comando do cofre falhou para '%s': %s", nome, exc)
+        return ""
+
+
 def _corporativo(nome: str) -> str:
+    v = _por_comando(nome)
+    if v:
+        return v
     mod = _resolver_modulo()
     if mod is not None:
         fn = _funcao_do_modulo(mod)
@@ -193,6 +222,8 @@ def corporativo_disponivel() -> bool:
 
 def diagnostico_corporativo() -> tuple[bool, str]:
     """(disponível, motivo). O motivo é o que permite consertar sem chutar."""
+    if COMANDO:
+        return True, f"comando configurado: {COMANDO}"
     mod = _resolver_modulo()
     if mod is not None:
         fn = _funcao_do_modulo(mod)
@@ -205,6 +236,54 @@ def diagnostico_corporativo() -> tuple[bool, str]:
         return False, f"{CAMINHO_ARQUIVO} existe mas não é legível por este usuário"
     return False, (f"módulo não importável e {CAMINHO_MODULO} / {CAMINHO_ARQUIVO} "
                    f"não encontrados")
+
+
+def acesso_ao_arquivo() -> dict:
+    """Quem é dono do arquivo do cofre e se este processo consegue lê-lo.
+
+    O arquivo costuma ficar numa partição restrita: os serviços alcançam, o
+    usuário comum não. Não existe contorno — o que se resolve é a IDENTIDADE
+    que roda o portal (usuário/grupo) ou a permissão de grupo no arquivo.
+    Este diagnóstico existe para pedir exatamente a coisa certa.
+    """
+    import grp
+    import pwd
+
+    info: dict = {
+        "caminho": CAMINHO_ARQUIVO,
+        "existe": False, "legivel": False,
+        "dono": "", "grupo": "", "modo": "",
+        "usuario_atual": "", "grupos_atuais": [],
+        "erro": "",
+    }
+    try:
+        info["usuario_atual"] = pwd.getpwuid(os.getuid()).pw_name
+        info["grupos_atuais"] = sorted(
+            g.gr_name for g in grp.getgrall() if info["usuario_atual"] in g.gr_mem
+        ) + [grp.getgrgid(os.getgid()).gr_name]
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        st = os.stat(CAMINHO_ARQUIVO)
+        info["existe"] = True
+        info["modo"] = oct(stat.S_IMODE(st.st_mode))[2:]
+        try:
+            info["dono"] = pwd.getpwuid(st.st_uid).pw_name
+        except Exception:  # noqa: BLE001
+            info["dono"] = str(st.st_uid)
+        try:
+            info["grupo"] = grp.getgrgid(st.st_gid).gr_name
+        except Exception:  # noqa: BLE001
+            info["grupo"] = str(st.st_gid)
+        info["legivel"] = os.access(CAMINHO_ARQUIVO, os.R_OK)
+    except PermissionError as exc:
+        info["erro"] = f"sem permissão nem para consultar o arquivo: {exc}"
+    except FileNotFoundError:
+        info["erro"] = "arquivo não encontrado neste caminho"
+    except OSError as exc:
+        info["erro"] = str(exc)
+    return info
 
 
 def onde_procura() -> list[str]:

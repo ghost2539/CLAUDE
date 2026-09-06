@@ -166,6 +166,59 @@ def cmd_sondar(args) -> int:
     return 0
 
 
+def cmd_acesso(_args) -> int:
+    """Por que o cofre corporativo não responde, e o que pedir para resolver."""
+    a = cofre.acesso_ao_arquivo()
+    disp, motivo = cofre.diagnostico_corporativo()
+
+    print("Cofre corporativo")
+    print(f"  situação    : {'FUNCIONA' if disp else 'não responde'} — {motivo}")
+    print()
+    print("Arquivo do cofre")
+    print(f"  caminho     : {a['caminho']}")
+    if a["erro"]:
+        print(f"  problema    : {a['erro']}")
+    else:
+        print(f"  existe      : {'sim' if a['existe'] else 'não'}")
+        print(f"  dono:grupo  : {a['dono']}:{a['grupo']}   modo {a['modo']}")
+        print(f"  eu consigo ler: {'SIM' if a['legivel'] else 'NÃO'}")
+    print()
+    print("Este processo")
+    print(f"  usuário     : {a['usuario_atual']}")
+    print(f"  grupos      : {', '.join(a['grupos_atuais']) or '—'}")
+    print(f"  interpretador: {sys.executable}")
+
+    if disp:
+        print("\nNada a fazer: o portal consegue ler o cofre.")
+        return 0
+
+    print("\n" + "=" * 68)
+    print("NÃO existe forma de contornar a permissão do arquivo. Um processo")
+    print("rodando como você lê exatamente o que você lê. O que dá para mudar")
+    print("é a identidade que roda o portal, ou a permissão de grupo. Opções,")
+    print("da menos invasiva para a mais:")
+    print()
+    grupo = a["grupo"] or "<grupo do arquivo>"
+    print(f"  1. Entrar no grupo que já tem acesso — pedir ao time do cofre:")
+    print(f"       sudo usermod -aG {grupo} {a['usuario_atual'] or '<seu_usuario>'}")
+    print("     (precisa sair e entrar de novo para valer)")
+    print()
+    print("  2. Rodar o portal como o usuário de serviço que tem acesso, com")
+    print("     uma unit systemd de sistema (deploy/portal_spare.service).")
+    print("     Exige root uma vez para instalar a unit.")
+    print()
+    print("  3. Pedir ao time do cofre os VALORES das chaves que você usa e")
+    print("     guardá-los no cofre local (funciona hoje, sem depender de nada):")
+    print("       python3 scripts/cofre.py definir CORREIOS_USUARIO")
+    print("       python3 scripts/cofre.py definir CORREIOS_CHAVE")
+    print("       python3 scripts/cofre.py definir CORREIOS_CARTOES")
+    print()
+    print("  4. Se o time expuser um comando/serviço de leitura (CLI com sudo,")
+    print("     API local), me diga qual: dá para plugar como mais uma fonte.")
+    print("=" * 68)
+    return 1
+
+
 def cmd_listar(_args) -> int:
     nomes = cofre.listar()
     print(f"Cofre local: {cofre.ARQ_COFRE}")
@@ -371,6 +424,9 @@ def main() -> int:
     p = sub.add_parser("conferir", help="Permissões e segredos citados no ambiente.")
     p.add_argument("--env", help="Caminho do environment (padrão: o do usuário).")
     p.set_defaults(fn=cmd_conferir)
+
+    sub.add_parser("acesso", help="Por que o cofre corporativo não responde."
+                   ).set_defaults(fn=cmd_acesso)
 
     p = sub.add_parser("sondar", help="Descobre quais chaves o cofre corporativo responde.")
     p.add_argument("nome", nargs="*", help="Nomes específicos a testar (padrão: a lista conhecida).")

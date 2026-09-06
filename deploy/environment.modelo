@@ -28,11 +28,19 @@
 # Quando descobrir, é só apontar o marcador para o nome certo; o corporativo
 # tem prioridade e passa a responder sozinho.
 #
-# O cofre corporativo é resolvido sozinho: import normal, senão o módulo em
-# /usr/local/lib/vcreports/vcreports_secrets.py, senão o arquivo
-# /etc/vcreports/.secrets.env lido direto. Só ajuste se o caminho for outro:
+# O cofre corporativo é resolvido sozinho, nesta ordem: comando de leitura
+# (abaixo), import do módulo, módulo carregado por caminho absoluto, e o
+# arquivo lido direto. Ajuste só se o caminho no servidor for outro:
 # VCREPORTS_SECRETS_MODULE=/usr/local/lib/vcreports/vcreports_secrets.py
 # VCREPORTS_SECRETS_FILE=/etc/vcreports/.secrets.env
+#
+# O arquivo do cofre fica numa partição restrita: os serviços alcançam, o
+# usuário comum não. Se o time do cofre expuser um comando de leitura, é ele
+# que resolve — {chave} é substituído pelo nome do segredo:
+# VCREPORTS_SECRETS_CMD=sudo -n /usr/local/bin/vcreports-secret {chave}
+#
+# Diagnóstico de por que o cofre não responde:
+#     python3 scripts/cofre.py acesso
 #
 # Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
 # Só preencha se o portal rodar com um usuário sem diretório pessoal.
