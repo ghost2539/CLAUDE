@@ -142,6 +142,7 @@ class Sessao:
                        "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE")
         self.timeout = int(_c("EBS_FORMS_TIMEOUT", "40"))
         self._registrar = registrar or (lambda m: _log.info("%s", m))
+        self.jnlp_pronto: str = ""
 
     # ── SSO (Oracle Access Manager) ─────────────────────────────────────
     def _seguir_formularios(self, r: requests.Response, saltos: int = 0) -> requests.Response:
@@ -180,6 +181,11 @@ class Sessao:
         for salto in range(1, 10):
             self._registrar(f"SSO: salto {salto} -> {r.url} ({r.status_code})")
             self._guardar_depuracao(f"sso_salto{salto}.html", r.text)
+            if self._e_jnlp(r):
+                # O OAM devolveu direto ao frmservlet: o jnlp já está na mão.
+                self.jnlp_pronto = r.text
+                self._registrar("SSO: autenticado e o jnlp já veio no redirecionamento")
+                return
             if self._logado(r):
                 self._registrar("SSO: autenticado no EBS")
                 return
@@ -237,13 +243,19 @@ class Sessao:
         `.../OA_HTML/RF.jsp?function_id=...&resp_id=...&resp_appl_id=...`).
         Sem ele, procura na home um link cujo texto seja a função.
         """
+        if self.jnlp_pronto:
+            j, self.jnlp_pronto = self.jnlp_pronto, ""
+            return j
         url = _c("EBS_FORMS_FUNCAO_URL").strip()
         if url and not url.lower().startswith("http"):
             raise ErroForms(f"EBS_FORMS_FUNCAO_URL não é um endereço válido: {url[:60]!r}. "
                             "Cole o link real de 'Informações Financeiras' (começa com http).")
         if url:
+            url = self._sem_tokens_de_aba(url)
+            self._registrar(f"função: pedindo {url}")
             r = self.http.get(url, allow_redirects=True, timeout=self.timeout)
             r = self._seguir_formularios(r)
+            self._registrar(f"função: chegou em {r.url} ({r.status_code}, {r.headers.get('Content-Type')})")
             if self._e_jnlp(r):
                 return r.text
             self._guardar_depuracao("funcao_nao_jnlp.html", r.text)
@@ -272,6 +284,17 @@ class Sessao:
             f"'{_c('EBS_FORMS_FUNCAO', 'Informações Financeiras')}' no navegador "
             "e informe em EBS_FORMS_FUNCAO_URL (a home foi guardada em data/ebs_forms/depuracao/home.html)."
         )
+
+    @staticmethod
+    def _sem_tokens_de_aba(url: str) -> str:
+        """Links copiados da home do EBS trazem tokens presos à aba do navegador
+        (oas, oapc, transactionid...). Fora dela viram "erro inesperado";
+        sem eles o RF.jsp funciona como link direto."""
+        from urllib.parse import parse_qsl, urlencode, urlunparse
+        u = urlparse(url)
+        descartar = {"oas", "oapc", "transactionid", "_ti", "retainam", "addbreadcrumb", "oapb", "oaspid"}
+        q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k.lower() not in descartar]
+        return urlunparse(u._replace(query=urlencode(q, safe="/:'%,")))
 
     def baixar(self, url: str, destino: Path) -> Path:
         """Baixa com a sessão autenticada (usado para o que o Forms manda abrir no navegador)."""
