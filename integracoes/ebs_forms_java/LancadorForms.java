@@ -77,6 +77,7 @@ public class LancadorForms {
     private static final Map<String, String> params = new LinkedHashMap<>();
     private static String codebase = "";
     private static String mainClass = "";
+    private static String dirJars = "/OA_JAVA/oracle/apps/fnd/jar/";
     private static int larg = 1280, alt = 900;
     // "java": teclas injetadas na fila de eventos do AWT (não passam pelo X —
     // obrigatório no Weston headless, cujo Xwayland aborta ao receber XTEST
@@ -106,10 +107,15 @@ public class LancadorForms {
         // companhia só existem lá. Um URLClassLoader com uma URL terminada em
         // "/" busca cada classe pelo caminho do pacote, como o navegador fazia.
         urls.add(new URL(codebase));
+        // Jars que o jnlp não declara mas o Forms precisa (ex.: fndi18n.jar,
+        // com NLSUtil). Nome curto vale: resolvemos no mesmo diretório dos
+        // jars do jnlp — é o que scripts/ebs_forms_achar_classe.sh sugere.
         String extras = System.getProperty("forms.jars.extra", "");
         for (String extra : extras.split(",")) {
             extra = extra.trim();
-            if (!extra.isEmpty()) urls.add(baixarJar(extra, cache));
+            if (extra.isEmpty()) continue;
+            if (!extra.contains("/")) extra = dirJars + extra;
+            urls.add(baixarJar(extra, cache));
         }
         responder("EVENTO jars " + urls.size() + " (inclui codebase " + codebase + ")");
 
@@ -593,7 +599,12 @@ public class LancadorForms {
         if (!codebase.endsWith("/")) codebase += "/";
         List<String> jars = new ArrayList<>();
         NodeList nj = doc.getElementsByTagName("jar");
-        for (int i = 0; i < nj.getLength(); i++) jars.add(((Element) nj.item(i)).getAttribute("href"));
+        for (int i = 0; i < nj.getLength(); i++) {
+            String href = ((Element) nj.item(i)).getAttribute("href");
+            jars.add(href);
+            int barra = href.lastIndexOf('/');
+            if (barra > 0 && href.contains("/jar/")) dirJars = href.substring(0, barra + 1);
+        }
         NodeList nd = doc.getElementsByTagName("applet-desc");
         if (nd.getLength() > 0) mainClass = ((Element) nd.item(0)).getAttribute("main-class");
         NodeList np = doc.getElementsByTagName("param");
