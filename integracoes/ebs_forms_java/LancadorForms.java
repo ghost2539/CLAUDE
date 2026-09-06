@@ -87,6 +87,7 @@ public class LancadorForms {
         proto = new PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8");
         // Tudo que o Forms imprimir vai para stderr; o stdout fica só para o protocolo.
         System.setOut(System.err);
+        bloquearExit();
 
         Path jnlp = Paths.get(args[0]);
         Path cache = Paths.get(args[1]);
@@ -109,6 +110,11 @@ public class LancadorForms {
         applet.setStub(new Stub());
 
         janela = new Frame("LancadorForms");
+        janela.addWindowListener(new java.awt.event.WindowAdapter() {
+            public void windowClosing(java.awt.event.WindowEvent e) { responder("EVENTO janela-lancador closing"); }
+            public void windowClosed(java.awt.event.WindowEvent e) { responder("EVENTO janela-lancador closed"); }
+            public void windowIconified(java.awt.event.WindowEvent e) { responder("EVENTO janela-lancador iconified"); }
+        });
         janela.setLayout(new BorderLayout());
         janela.add(applet, BorderLayout.CENTER);
         janela.setSize(larg, alt);
@@ -126,6 +132,7 @@ public class LancadorForms {
             } catch (Throwable t) {
                 t.printStackTrace();
                 responder("EVENTO falha-start " + t);
+                saidaAutorizada = true;
                 System.exit(3);
             }
         }, "forms-start");
@@ -391,7 +398,36 @@ public class LancadorForms {
         proto.flush();
     }
 
+    private static volatile boolean saidaAutorizada = false;
+
+    // O applet do EBS e o cliente Forms chamam System.exit() por conta
+    // própria (fim de sessão, janela fechada). Numa JVM que é nossa, isso
+    // derruba o RPA sem deixar rastro. Um SecurityManager (ainda existe no
+    // JDK 21 com -Djava.security.manager=allow) intercepta: registra quem
+    // pediu, com a pilha, e só deixa sair quando o lançador autoriza.
+    @SuppressWarnings("removal")
+    private static void bloquearExit() {
+        try {
+            System.setSecurityManager(new SecurityManager() {
+                @Override public void checkPermission(java.security.Permission p) { }
+                @Override public void checkPermission(java.security.Permission p, Object ctx) { }
+                @Override public void checkExit(int status) {
+                    if (saidaAutorizada) return;
+                    StringBuilder sb = new StringBuilder();
+                    for (StackTraceElement el : Thread.currentThread().getStackTrace()) sb.append("\n    at ").append(el);
+                    System.err.println("[LancadorForms] System.exit(" + status + ") pedido pela thread '"
+                            + Thread.currentThread().getName() + "' — BLOQUEADO" + sb);
+                    responder("EVENTO exit-bloqueado " + status + " thread=" + Thread.currentThread().getName());
+                    throw new SecurityException("saída da JVM bloqueada pelo lançador (status " + status + ")");
+                }
+            });
+        } catch (UnsupportedOperationException e) {
+            System.err.println("[LancadorForms] sem SecurityManager (falta -Djava.security.manager=allow); System.exit do applet não será interceptado");
+        }
+    }
+
     private static void encerrar() {
+        saidaAutorizada = true;
         try { if (applet != null) { applet.stop(); applet.destroy(); } } catch (Throwable t) { /* encerrando */ }
         try { if (janela != null) janela.dispose(); } catch (Throwable t) { /* encerrando */ }
         System.exit(0);
