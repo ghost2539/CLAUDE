@@ -777,6 +777,9 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         "descricao": ("Reabre a tela de busca para a próxima consulta. Depois de localizar, o Forms "
                       "FECHA a janela Localizar Ativos — ela volta pelo menu Verificar > Localizar."),
         "passos": [
+            # sobrou alguma janela de detalhe aberta? o Forms não deixa consultar
+            {"acao": "fecharjanela", "arg": "Atribuições", "nome": "fechar_atribuicoes", "opcional": True},
+            {"acao": "fecharjanela", "arg": "Linhas de Origem", "nome": "fechar_origem", "opcional": True},
             {"acao": "menu", "arg": "{menu_localizar}", "nome": "reabrir_busca"},
             {"acao": "esperarate", "arg": "janela:Localizar Ativos 20000", "nome": "busca_aberta"},
             {"acao": "clicar", "arg": "{botao_limpar}", "nome": "limpar", "opcional": True},
@@ -803,6 +806,9 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             # o título traz o ativo: garante que é a janela desta consulta
             {"acao": "esperarate", "arg": "janela:Atribuições - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_atribuicoes"},
+            # o Forms recusa a próxima ação enquanto esta janela estiver aberta
+            {"acao": "fecharjanela", "arg": "Atribuições", "nome": "fechar", "opcional": True},
+            {"acao": "esperar", "arg": "500"},
         ],
     },
     "linhas_origem": {
@@ -814,6 +820,8 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
             {"acao": "clicartexto", "arg": "OK", "nome": "confirmar_aviso", "opcional": True},
             {"acao": "esperarate", "arg": "janela:Linhas de Origem - {criterio} 20000", "nome": "abrindo"},
             {"acao": "dados", "nome": "tela_origem"},
+            {"acao": "fecharjanela", "arg": "Linhas de Origem", "nome": "fechar", "opcional": True},
+            {"acao": "esperar", "arg": "500"},
         ],
     },
 }
@@ -1030,6 +1038,11 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             cliente.clicar_texto(arg)
         elif acao == "menu":
             cliente.ordem("menu", arg, timeout=60)
+        elif acao == "fecharjanela":
+            cliente.ordem("fecharjanela", arg, timeout=30)
+        elif acao == "itensmenu":
+            resultado[nome] = base64.b64decode(
+                cliente.ordem("itensmenu", arg, timeout=60)).decode("utf-8", "replace")
         elif acao == "dialogo":
             resultado[nome] = cliente.dialogo()
         elif acao == "se_vazio":
