@@ -46,57 +46,28 @@ chmod 700 "$ENVDIR"
 if [ -f "$ENVFILE" ]; then
     echo "-- Arquivo de ambiente já existe (mantido): $ENVFILE"
 else
-    echo "-- Gerando $ENVFILE"
-    # O segredo de sessão nasce NO COFRE, não no arquivo: o environment é
-    # lido por qualquer um que abra o arquivo e entra em backup.
-    SEGREDO="$("$APP_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
-    "$APP_DIR/venv/bin/python" "$APP_DIR/scripts/cofre.py" definir \
-        PORTAL_SESSION_SECRET --valor "$SEGREDO" >/dev/null 2>&1 \
-        && SEGREDO_REF='@cofre:PORTAL_SESSION_SECRET@' \
-        || SEGREDO_REF="$SEGREDO"
-    unset SEGREDO
-    cat > "$ENVFILE" <<EOF
-# Ambiente do Portal SPARE — NÃO versionar. Gerado em $(date '+%d/%m/%Y %H:%M').
-
-# ── Segredos ────────────────────────────────────────────────────────
-# NADA de usuário e senha em texto claro aqui. Onde for segredo, use o
-# marcador @cofre:NOME@ e guarde o valor com:
-#     python3 scripts/cofre.py definir NOME
-# Conferir o que está pendente:
-#     python3 scripts/cofre.py conferir
-
-# Banco principal. Em produção é Postgres, com a senha no cofre:
-#   DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@host:5432/portal_spare
-# Para TESTE sem servidor de banco, o SQLite abaixo já funciona:
-DATABASE_URL=sqlite:///$APP_DIR/data/db/portal.db
-
-PORTAL_SESSION_SECRET=$SEGREDO_REF
-
-HOST=0.0.0.0
-PORT=8901
-WORKERS=1
-
-# Primeiro administrador: coloque aqui o SEU login de rede, senão ninguém
-# consegue liberar o acesso de mais ninguém.
-INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
-
-# ── Integrações (preencher conforme for testando) ──
-# O que não é segredo fica aqui; o que é segredo vai para o cofre.
-# EBS_LOGIN_URL=
-# SN_API_BASE=https://renner.service-now.com
-# SN_API_USER=svc_do_portal
-# SN_API_PASSWORD=@cofre:SN_API_PASSWORD@
-# CORREIOS_USUARIO=
-# CORREIOS_CHAVE=@cofre:CORREIOS_CHAVE@
-
-# ── Alertas por e-mail (opcional) ──
-# SMTP_HOST=
-# SMTP_PORT=25
-# SMTP_SENHA=@cofre:SMTP_SENHA@
-# ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
-EOF
+    echo "-- Gerando $ENVFILE a partir de deploy/environment.modelo"
+    cp "$APP_DIR/deploy/environment.modelo" "$ENVFILE"
     chmod 600 "$ENVFILE"
-    echo "   >> AJUSTE o INITIAL_ADMIN_LOGIN antes de subir."
+
+    # O segredo de sessão nasce NO COFRE: o environment é lido por qualquer
+    # um que abra o arquivo e entra em backup.
+    SEGREDO="$("$APP_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    if "$APP_DIR/venv/bin/python" "$APP_DIR/scripts/cofre.py" definir \
+            PORTAL_SESSION_SECRET --valor "$SEGREDO" >/dev/null 2>&1; then
+        echo "   segredo de sessão gerado e guardado no cofre"
+    else
+        echo "   AVISO: não consegui gravar no cofre; gravando no arquivo."
+        sed -i "s|^PORTAL_SESSION_SECRET=.*|PORTAL_SESSION_SECRET=$SEGREDO|" "$ENVFILE"
+    fi
+    unset SEGREDO
+
+    # Banco: SQLite local já preenchido, para o portal subir sem servidor de
+    # banco. Trocar para Postgres é editar uma linha.
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=sqlite:///$APP_DIR/data/db/portal.db|" "$ENVFILE"
+
+    echo "   >> Falta preencher o que está marcado com [PREENCHER]:"
+    grep -n "\[PREENCHER\]" "$ENVFILE" | sed 's/^/      /' | head -20
 fi
 
 # ── 4. Conferência: o app carrega? ──────────────────────────────────────────
