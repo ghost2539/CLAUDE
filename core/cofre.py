@@ -156,6 +156,11 @@ def _ler_arquivo_cofre() -> dict:
 #   VCREPORTS_SECRETS_CMD=sudo -n /usr/local/bin/vcreports-secret {chave}
 COMANDO = os.environ.get("VCREPORTS_SECRETS_CMD", "")
 
+# Liga/desliga o cofre corporativo. Desligado, o portal usa SÓ o cofre local
+# — nenhuma tentativa de import, de leitura de arquivo ou de comando.
+USAR_CORPORATIVO = os.environ.get("COFRE_CORPORATIVO", "sim").strip().lower() \
+    not in ("nao", "não", "0", "false", "off", "desligado")
+
 
 def _por_comando(nome: str) -> str:
     if not COMANDO:
@@ -174,6 +179,8 @@ def _por_comando(nome: str) -> str:
 
 
 def _corporativo(nome: str) -> str:
+    if not USAR_CORPORATIVO:
+        return ""
     v = _por_comando(nome)
     if v:
         return v
@@ -190,13 +197,15 @@ def _corporativo(nome: str) -> str:
     return _ler_arquivo_cofre().get(nome, "")
 
 
-def _somente_cofre(nome: str) -> str:
+def _somente_cofre(nome: str) -> str:  # noqa: D401
     """Valor que está DE FATO no arquivo do cofre.
 
     O `s()` oficial cai para `os.environ` quando a chave não existe; para
     sondar, isso daria falso positivo. Quando o arquivo não é legível,
     voltamos ao caminho normal e avisamos no diagnóstico.
     """
+    if not USAR_CORPORATIVO:
+        return ""
     arq = _ler_arquivo_cofre()
     if arq:
         return arq.get(nome, "")
@@ -207,12 +216,14 @@ def arquivo_legivel() -> bool:
     return bool(_ler_arquivo_cofre())
 
 
-def chaves_corporativas() -> list[str]:
+def chaves_corporativas() -> list[str]:  # noqa: D401
     """Nomes das chaves do cofre corporativo, quando o arquivo é legível.
 
     Resolve o problema de "existe mas não sei o nome": em vez de adivinhar,
     lê a lista. Valores nunca saem daqui.
     """
+    if not USAR_CORPORATIVO:
+        return []
     return sorted(_ler_arquivo_cofre().keys())
 
 
@@ -222,6 +233,8 @@ def corporativo_disponivel() -> bool:
 
 def diagnostico_corporativo() -> tuple[bool, str]:
     """(disponível, motivo). O motivo é o que permite consertar sem chutar."""
+    if not USAR_CORPORATIVO:
+        return False, "desligado por configuração (COFRE_CORPORATIVO=nao)"
     if COMANDO:
         # Configurado não é o mesmo que funcionando; sem uma chave conhecida
         # para testar, não dá para afirmar que responde.
@@ -423,16 +436,25 @@ def _local(nome: str) -> str:
 # ── API pública ─────────────────────────────────────────────────────────
 def obter(nome: str, default: str = "") -> str:
     """O segredo `nome`: cofre corporativo, cofre local, ambiente, default."""
-    for fonte in (_corporativo, _local):
-        v = fonte(nome)
+    for origem in (_corporativo, _local):
+        v = origem(nome)
         if v:
             return v
-    return os.environ.get(nome, default)
+
+    # Cuidado com a auto-referência: é comum a variável de ambiente ter o
+    # MESMO nome da chave (INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@).
+    # Sem esta guarda, o fallback devolveria o próprio marcador como se
+    # fosse o segredo — e o erro só apareceria muito depois, na forma de uma
+    # senha literal "@cofre:...@" sendo recusada pelo servidor.
+    v = os.environ.get(nome, "")
+    if v and MARCADOR not in v:
+        return v
+    return default
 
 
 def fonte(nome: str) -> str:
     """De onde `nome` viria agora — para diagnóstico, sem revelar o valor."""
-    if _corporativo(nome):
+    if USAR_CORPORATIVO and _corporativo(nome):
         return "cofre corporativo"
     if _local(nome):
         return "cofre local"

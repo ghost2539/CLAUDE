@@ -16,6 +16,10 @@
 # ============================================================================
 
 # ── 0. Cofre ────────────────────────────────────────────────────────────
+# Cofre corporativo LIGADO ou DESLIGADO. Desligado, o portal usa só o cofre
+# local — nenhuma tentativa de import, de leitura de arquivo ou de comando.
+COFRE_CORPORATIVO=nao
+
 # Todo @cofre:NOME@ é procurado nesta ordem:
 #   1. cofre CORPORATIVO (vcreports_secrets) — só leitura, mantido por outro time
 #   2. cofre LOCAL cifrado (scripts/cofre.py definir NOME)
@@ -76,13 +80,13 @@ HTTPS_PROXY=
 #   DATABASE_URL=sqlite:///CAMINHO/data/db/portal.db
 DATABASE_URL=                                    # [PREENCHER]
 
-# Bancos dos módulos isolados: em branco = SQLite em data/db/, que é o certo
-# na maioria dos casos. Só preencha para apontar para outro servidor.
-INDICADORES_DATABASE_URL=
-AUTOMACOES_DATABASE_URL=
-MONITORAMENTO_DATABASE_URL=
-ORCAMENTO_EXEC_DATABASE_URL=
-ORCAMENTO_SPARE_DATABASE_URL=
+# Bancos dos módulos isolados: sem declarar = SQLite em data/db/, que é o
+# certo na maioria dos casos. Descomente só para apontar a outro servidor.
+# INDICADORES_DATABASE_URL=
+# AUTOMACOES_DATABASE_URL=
+# MONITORAMENTO_DATABASE_URL=
+# ORCAMENTO_EXEC_DATABASE_URL=
+# ORCAMENTO_SPARE_DATABASE_URL=
 
 # ── 3. Sessão e primeiro administrador ──────────────────────────────────
 PORTAL_SESSION_SECRET=@cofre:PORTAL_SESSION_SECRET@          # [COFRE]
