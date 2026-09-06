@@ -95,7 +95,7 @@ then ok "credenciais no cofre"; else falta "defina: python3 scripts/cofre.py def
 
 echo "== Lançador =="
 if [ -n "$JAVAC" ]; then
-  if "$JAVAC" -Xlint:-removal -d "$DADOS/bin" integracoes/ebs_forms_java/LancadorForms.java 2>"$DADOS/logs/javac.log"; then
+  if "$JAVAC" -Xlint:-removal -d "$DADOS/bin" $(find integracoes/ebs_forms_java -name '*.java') 2>"$DADOS/logs/javac.log"; then
     ok "LancadorForms compilado em data/ebs_forms/bin"
   else
     falta "javac falhou — veja data/ebs_forms/logs/javac.log"
