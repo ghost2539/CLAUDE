@@ -338,6 +338,21 @@ public class LancadorForms {
                 responder("OK " + como);
                 break;
             }
+            case "dados": {
+                // Tudo o que a tela tem, inclusive o que não cabe nela: as
+                // colunas da grade existem na memória mesmo fora da área
+                // visível, e cada quadro do Forms (Localizar Ativos, Ativos,
+                // Navegador) vira um objeto com seus campos e grades.
+                String json;
+                try {
+                    json = naEDT(LancadorForms::dadosJson, 30000);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    responder("ERRO dados: a interface não respondeu em 30 s");
+                    break;
+                }
+                responder("OK " + Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8)));
+                break;
+            }
             case "grade": {
                 // Lê a grade de resultados como tabela: os cabeçalhos do Forms
                 // (FolderPrompt) dão o nome de cada coluna pelo x, e os campos
@@ -679,6 +694,158 @@ public class LancadorForms {
         }
     }
 
+    // ── tudo da tela em JSON ────────────────────────────────────────────
+    private static String jsonTexto(String v) {
+        if (v == null) return "null";
+        StringBuilder b = new StringBuilder("\"");
+        for (char c : v.toCharArray()) {
+            switch (c) {
+                case '"': b.append("\\\""); break;
+                case '\\': b.append("\\\\"); break;
+                case '\n': b.append("\\n"); break;
+                case '\r': b.append("\\r"); break;
+                case '\t': b.append("\\t"); break;
+                default:
+                    if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+                    else b.append(c);
+            }
+        }
+        return b.append('"').toString();
+    }
+
+    /** Quadros do Forms (janelas internas), cada um com seus campos e grades. */
+    private static String dadosJson() {
+        StringBuilder j = new StringBuilder("{\"quadros\":[");
+        boolean primeiro = true;
+        List<java.awt.Container> quadros = new ArrayList<>();
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            acharQuadros(w, quadros);
+            if (quadros.isEmpty()) quadros.add(w);  // sem quadros internos: a própria janela
+        }
+        for (java.awt.Container q : quadros) {
+            if (!primeiro) j.append(',');
+            primeiro = false;
+            j.append("{\"titulo\":").append(jsonTexto(tituloDoQuadro(q)));
+            j.append(",\"campos\":[");
+            boolean p1 = true;
+            for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>())) {
+                if (f.getClass().getName().contains("FolderPrompt")) continue;
+                if (!ehCampo(f)) continue;
+                String v = textoDe(f);
+                String nome = f.getName();
+                if ((v == null || v.isBlank()) && (nome == null || nome.isEmpty())) continue;
+                if (!p1) j.append(',');
+                p1 = false;
+                j.append("{\"nome\":").append(jsonTexto(nome))
+                 .append(",\"tipo\":").append(jsonTexto(f.getClass().getSimpleName()))
+                 .append(",\"valor\":").append(jsonTexto(v == null ? "" : v.trim()))
+                 .append(",\"x\":").append(f.getX()).append(",\"y\":").append(f.getY())
+                 .append(",\"habilitado\":").append(f.isEnabled()).append('}');
+            }
+            j.append("],\"grades\":[").append(gradesJson(q)).append("]}");
+        }
+        j.append("],\"rodape\":").append(jsonTexto(rodape())).append('}');
+        return j.toString();
+    }
+
+    private static boolean ehCampo(java.awt.Component f) {
+        String c = f.getClass().getName();
+        return c.contains("VTextField") || c.contains("VPopList") || c.contains("TextField")
+            || c.contains("Checkbox") || c.contains("CheckBox") || c.contains("ComboBox");
+    }
+
+    private static List<java.awt.Component> todosOsComponentes(java.awt.Container c, List<java.awt.Component> saida) {
+        for (java.awt.Component f : c.getComponents()) {
+            saida.add(f);
+            if (f instanceof java.awt.Container) todosOsComponentes((java.awt.Container) f, saida);
+        }
+        return saida;
+    }
+
+    /** Quadro = janela interna do Forms (ExtendedFrame). */
+    private static void acharQuadros(java.awt.Container c, List<java.awt.Container> saida) {
+        for (java.awt.Component f : c.getComponents()) {
+            if (f.getClass().getName().contains("ExtendedFrame") && f.isShowing()) saida.add((java.awt.Container) f);
+            else if (f instanceof java.awt.Container) acharQuadros((java.awt.Container) f, saida);
+        }
+    }
+
+    private static String tituloDoQuadro(java.awt.Container q) {
+        for (java.awt.Component f : todosOsComponentes(q, new ArrayList<>())) {
+            if (f.getClass().getName().contains("LWLabel")) {
+                String t = textoDe(f);
+                if (t != null && !t.isBlank()) return t.trim();
+            }
+        }
+        String t = q instanceof Window ? tituloDe((Window) q) : q.getName();
+        return t == null ? "" : t;
+    }
+
+    /** A barra de status do Forms: "Registro: 1/1", mensagens, modo. */
+    private static String rodape() {
+        StringBuilder sb = new StringBuilder();
+        for (Window w : Window.getWindows()) {
+            if (!w.isShowing()) continue;
+            for (java.awt.Component f : todosOsComponentes(w, new ArrayList<>())) {
+                if (f.getY() < w.getHeight() * 0.85) continue;   // só a faixa do rodapé
+                if (ehCampo(f)) continue;                        // campo não é mensagem
+                String t = textoDe(f);
+                if (t != null && !t.isBlank() && t.length() < 120) {
+                    if (sb.length() > 0) sb.append(" | ");
+                    sb.append(t.trim());
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String gradesJson(java.awt.Container raiz) {
+        StringBuilder j = new StringBuilder();
+        boolean primeira = true;
+        for (java.awt.Container painel : paineisComCabecalho(raiz, new ArrayList<>())) {
+            java.util.TreeMap<Integer, String> colunas = new java.util.TreeMap<>();
+            for (java.awt.Component f : painel.getComponents())
+                if (f.getClass().getName().contains("FolderPrompt")) {
+                    String t = textoDe(f);
+                    if (t != null && !t.isBlank()) colunas.put(f.getX(), t.trim());
+                }
+            if (colunas.size() < 2) continue;
+            java.util.TreeMap<Integer, java.util.TreeMap<Integer, String>> linhas = new java.util.TreeMap<>();
+            for (java.awt.Component f : painel.getComponents()) {
+                if (f.getClass().getName().contains("FolderPrompt") || f.getY() <= 0) continue;
+                if (!ehCampo(f)) continue;   // rótulo e legenda não são linha de dados
+                String t = textoDe(f);
+                if (t == null || t.isBlank()) continue;
+                Integer col = colunas.floorKey(f.getX() + 5);
+                if (col == null) col = colunas.firstKey();
+                linhas.computeIfAbsent(f.getY(), k -> new java.util.TreeMap<>()).put(col, t.trim());
+            }
+            if (linhas.isEmpty()) continue;
+            if (!primeira) j.append(',');
+            primeira = false;
+            j.append("{\"colunas\":[");
+            boolean p = true;
+            for (String c : colunas.values()) { if (!p) j.append(','); p = false; j.append(jsonTexto(c)); }
+            j.append("],\"linhas\":[");
+            boolean pl = true;
+            for (java.util.TreeMap<Integer, String> linha : linhas.values()) {
+                if (!pl) j.append(',');
+                pl = false;
+                j.append('{');
+                boolean pc = true;
+                for (Map.Entry<Integer, String> col : colunas.entrySet()) {
+                    if (!pc) j.append(',');
+                    pc = false;
+                    j.append(jsonTexto(col.getValue())).append(':').append(jsonTexto(linha.getOrDefault(col.getKey(), "")));
+                }
+                j.append('}');
+            }
+            j.append("]}");
+        }
+        return j.toString();
+    }
+
     /** Grade de resultados em TSV: primeira linha os cabeçalhos, depois as linhas com valor. */
     private static String grade() {
         StringBuilder saida = new StringBuilder();
@@ -696,7 +863,7 @@ public class LancadorForms {
                 java.util.TreeMap<Integer, java.util.TreeMap<Integer, String>> linhas = new java.util.TreeMap<>();
                 for (java.awt.Component f : painel.getComponents()) {
                     if (f.getClass().getName().contains("FolderPrompt")) continue;
-                    if (f.getY() <= 0) continue;
+                    if (f.getY() <= 0 || !ehCampo(f)) continue;
                     String t = textoDe(f);
                     if (t == null || t.isBlank()) continue;
                     Integer col = colunas.floorKey(f.getX() + 5);

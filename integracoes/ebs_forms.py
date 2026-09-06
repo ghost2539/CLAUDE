@@ -663,6 +663,15 @@ class Cliente:
     def clicar(self, nome: str) -> str:
         return self.ordem("clicar", nome, timeout=60)
 
+    def dados(self) -> dict:
+        """Tudo o que a tela tem, em JSON: quadros, campos, grades e rodapé."""
+        bruto = base64.b64decode(self.ordem("dados", timeout=90)).decode("utf-8", "replace")
+        try:
+            return json.loads(bruto)
+        except json.JSONDecodeError as exc:
+            _log.warning("dados: JSON inválido (%s)", exc)
+            return {"erro": f"JSON inválido: {exc}", "bruto": bruto[:4000]}
+
     def grade(self) -> str:
         """Resultado da consulta como tabela (TSV), lida dos cabeçalhos da tela."""
         return base64.b64decode(self.ordem("grade", timeout=60)).decode("utf-8", "replace")
@@ -750,8 +759,10 @@ ROTEIROS_PADRAO: dict[str, dict[str, Any]] = {
         ],
     },
     "ler_ativo": {
-        "descricao": "Lê a grade de resultados como tabela (os cabeçalhos do Forms nomeiam as colunas).",
+        "descricao": ("Lê TUDO o que a tela tem: cada quadro do Forms com seus campos e grades, "
+                      "inclusive as colunas que não cabem na área visível, mais a barra de status."),
         "passos": [
+            {"acao": "dados", "nome": "tela"},
             {"acao": "grade", "nome": "tabela"},
             {"acao": "foto", "nome": "lido"},
         ],
@@ -772,6 +783,35 @@ def _substituir(valor: str, variaveis: dict[str, str]) -> str:
     def _v(m: re.Match) -> str:
         return variaveis.get(m.group(1), "")
     return re.sub(r"\{(\w+)\}", _v, valor or "")
+
+
+def _tem_resultado(lido: dict) -> bool:
+    """Houve ativo? Só conta linha de grade com valor — a tela sempre devolve
+    algo (campos vazios, rodapé), então presença de texto não basta."""
+    for grade in _grades(lido):
+        for linha in grade.get("linhas", []):
+            if any(str(v).strip() for v in linha.values()):
+                return True
+    tabela = lido.get("tabela") or ""
+    return isinstance(tabela, str) and len([l for l in tabela.splitlines() if l.strip()]) > 1
+
+
+def _grades(lido: dict) -> list[dict]:
+    tela = lido.get("tela") or {}
+    return [g for q in tela.get("quadros", []) for g in q.get("grades", [])]
+
+
+def resumo_do_ativo(lido: dict) -> dict:
+    """A primeira linha da grade de ativos, achatada em nome → valor.
+
+    É o formato que o portal consome; `tela` continua no resultado para quem
+    precisar do detalhe completo (todos os quadros, campos e o rodapé).
+    """
+    for grade in _grades(lido):
+        for linha in grade.get("linhas", []):
+            if any(str(v).strip() for v in linha.values()):
+                return {k: v for k, v in linha.items() if str(v).strip()}
+    return {}
 
 
 def variaveis_da_tela() -> dict[str, str]:
@@ -820,6 +860,8 @@ def executar_roteiro(cliente: Cliente, passos: list[dict], variaveis: dict[str, 
             resultado[nome] = cliente.arvore()
         elif acao == "grade":
             resultado[nome] = cliente.grade()
+        elif acao == "dados":
+            resultado[nome] = cliente.dados()
         elif acao == "focarcampo":
             cliente.focar_campo(arg)
         elif acao == "lercampo":
@@ -971,7 +1013,7 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                              variaveis, sessao, registrar, capturas)
             lido = executar_roteiro(cliente, roteiros.get("ler_ativo") or ROTEIROS_PADRAO["ler_ativo"]["passos"],
                                     variaveis, sessao, registrar, capturas)
-            if any(str(v).strip() for v in lido.values()):
+            if _tem_resultado(lido):
                 dados = lido
                 livro_ok = livro
                 break
@@ -982,7 +1024,9 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
                                       {"criterio": criterio, "livro": livro_ok, **variaveis_da_tela()},
                                       sessao, registrar, capturas)
             dados["linhas_origem"] = origem
-        return {"criterio": criterio, "livro": livro_ok, "dados": dados, "encontrado": bool(dados),
+        return {"criterio": criterio, "livro": livro_ok,
+                "ativo": resumo_do_ativo(dados), "dados": dados,
+                "encontrado": bool(resumo_do_ativo(dados)),
                 "capturas": capturas, "eventos": cliente.eventos[-30:], "log_jvm": cliente.log_path.name}
     finally:
         if cliente:
