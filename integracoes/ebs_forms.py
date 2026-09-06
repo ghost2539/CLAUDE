@@ -432,8 +432,18 @@ class Xvfb:
         env["XDG_RUNTIME_DIR"] = str(runtime)
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
-        cmd = [weston, "--backend=headless", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
-               "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+        # Com EBS_FORMS_VNC=sim a mesma tela vira um servidor VNC em localhost:
+        # dá para ACOMPANHAR o Forms ao vivo enquanto se ajusta o roteiro
+        # (túnel: ssh -L 5900:localhost:5900 servidor). Sem TLS porque não sai
+        # da máquina; o acesso é o do túnel SSH.
+        porta_vnc = _c("EBS_FORMS_VNC_PORTA", "5900")
+        if _c("EBS_FORMS_VNC", "nao").lower() in ("sim", "true", "1"):
+            cmd = [weston, "--backend=vnc", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
+                   f"--port={porta_vnc}", "--disable-transport-layer-security",
+                   "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+        else:
+            cmd = [weston, "--backend=headless", "--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
+                   "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
         extra = _c("EBS_FORMS_WESTON_OPCOES")
         if extra:
             cmd += extra.split()
@@ -524,6 +534,7 @@ class Cliente:
             f"-Dforms.segurar.exit={_c('EBS_FORMS_SEGURAR_EXIT', 'true')}",
             # java = teclas pela fila do AWT (Weston headless, sem seat); robot = XTEST (Xvfb/Xvnc)
             f"-Dforms.entrada={_c('EBS_FORMS_ENTRADA', 'java')}",
+            f"-Dforms.jars.extra={_c('EBS_FORMS_JARS_EXTRA')}",
             "-Dsun.java2d.xrender=false", "-Xmx512m",
             "-cp", str(DIR_BIN), "LancadorForms", str(self._jnlp), str(DIR_JARS), tam[0], tam[1],
         ]
