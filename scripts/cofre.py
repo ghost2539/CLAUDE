@@ -29,15 +29,36 @@ from core import cofre  # noqa: E402
 PADRAO_SEGREDO = re.compile(
     r"(SENHA|PASSWORD|SECRET|_KEY$|_CHAVE|TOKEN|CREDENTIAL|PASS$)", re.I
 )
+
+# Vão para o cofre mesmo sem "cara" de segredo: identificam contas de
+# serviço e o administrador do portal. Nome de usuário não é senha, mas
+# entrega metade do caminho a quem estiver olhando o arquivo.
+SEMPRE_COFRE = {
+    "SN_API_USER", "SN_API_USUARIO",
+    "SN_AUTOMACAO_USUARIO",
+    "INITIAL_ADMIN_LOGIN", "INITIAL_ADMIN_PASSWORD",
+    "ORACLE_EBS_USER",
+    "EBS_CAPEX_USER",
+    "SMTP_USUARIO",
+    "CORREIOS_USUARIO", "CORREIOS_CARTOES", "CORREIOS_CONTRATO",
+}
 # Exceções: têm cara de segredo, mas são só configuração.
 NAO_SEGREDO = {"SMTP_SEGURANCA", "EBS_CAPEX_TOKEN_SCHEME", "SESSION_TTL_MINUTES"}
+
+# Proxy do servidor antigo. No servidor novo a saída é direta, e carregar o
+# proxy velho faria TODA chamada de API tentar um endereço que não existe
+# ali. Não apagamos: comentamos, para o valor não se perder.
+PROXIES = {"SN_PROXY", "SN_API_PROXY", "HTTPS_PROXY", "HTTP_PROXY",
+           "https_proxy", "http_proxy", "EBS_CAPEX_PROXY", "EBS_CAPEX_FX_PROXY"}
 
 # URLs de conexão: a senha fica embutida e precisa ser extraída.
 COM_SENHA_NA_URL = re.compile(r"^(?P<pre>\w[\w+]*://[^:/@]+):(?P<senha>[^@]+)@(?P<pos>.+)$")
 
 
 def _eh_segredo(nome: str) -> bool:
-    return nome not in NAO_SEGREDO and bool(PADRAO_SEGREDO.search(nome))
+    if nome in NAO_SEGREDO:
+        return False
+    return nome in SEMPRE_COFRE or bool(PADRAO_SEGREDO.search(nome))
 
 
 def cmd_listar(_args) -> int:
@@ -136,6 +157,7 @@ def cmd_importar_env(args) -> int:
     destino = Path(args.saida) if args.saida else origem.with_name(origem.name + ".sem-segredo")
     saida: list[str] = []
     movidos: list[tuple[str, str]] = []
+    neutralizados: list[str] = []
 
     for linha in origem.read_text(encoding="utf-8", errors="replace").splitlines():
         crua = linha.rstrip("\n")
@@ -148,6 +170,13 @@ def cmd_importar_env(args) -> int:
 
         if not valor or "@cofre:" in valor:
             saida.append(crua)
+            continue
+
+        if nome in PROXIES:
+            saida.append(f"{nome}=")
+            saida.append(f"#   ^ vinha como {valor} no servidor antigo.")
+            saida.append("#     Zerado: este servidor sai direto para a rede.")
+            neutralizados.append(nome)
             continue
 
         # URL com senha embutida: só a senha sai de linha.
@@ -192,6 +221,12 @@ def cmd_importar_env(args) -> int:
             print(f"  {nome:32s} ({oque})")
     else:
         print("\nNenhum segredo identificado no arquivo de origem.")
+
+    if neutralizados:
+        print(f"\n{len(neutralizados)} proxy(s) zerado(s) — este servidor sai direto:")
+        for n in neutralizados:
+            print(f"  {n}")
+        print("  (o valor antigo ficou como comentário, caso precise voltar)")
 
     if not args.simular:
         print(f"\nO arquivo de origem NÃO foi alterado: {origem}")

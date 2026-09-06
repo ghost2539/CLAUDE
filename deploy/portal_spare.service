@@ -8,9 +8,9 @@ Requires=postgresql.service
 Type=simple
 User=portalspare
 Group=portalspare
-WorkingDirectory=/opt/portal-spare-v2
+WorkingDirectory=/var/www/vcreports/portal-spare
 EnvironmentFile=/etc/portal_operacoes_spare/environment
-ExecStart=/opt/portal-spare-v2/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
+ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
 Restart=on-failure
 RestartSec=5
 # Credenciais protegidas via systemd
@@ -20,7 +20,7 @@ LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credenti
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/portal-spare-v2/data
+ReadWritePaths=/var/www/vcreports/portal-spare/data
 PrivateTmp=yes
 
 [Install]
