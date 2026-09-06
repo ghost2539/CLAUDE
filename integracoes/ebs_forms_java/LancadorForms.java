@@ -278,14 +278,29 @@ public class LancadorForms {
                 responder("OK " + Base64.getEncoder().encodeToString(sb.toString().getBytes(StandardCharsets.UTF_8)));
                 break;
             case "focarcampo": {
-                // Endereça o componente pelo nome do mapa (ex.: VTextField227).
-                // Mais robusto que contar TABs: independe da ordem da tela.
+                // Endereça o componente pelo nome do mapa (ex.: VTextField200).
+                // O AWT entrega KeyEvent ao DONO DO FOCO, não ao componente de
+                // origem — e o Forms gerencia foco por conta própria. Por isso
+                // pedimos o foco, CONFERIMOS, e só então damos por bom; se não
+                // pegou, um clique sintético (evento Java, não XTEST) resolve.
                 java.awt.Component alvo = acharPorNome(arg.trim());
                 if (alvo == null) { responder("ERRO campo não encontrado: " + arg.trim()); break; }
                 final java.awt.Component a = alvo;
                 naEDT(() -> { a.requestFocusInWindow(); return null; }, 5000);
                 sincronizar();
-                responder("OK " + alvo.getClass().getSimpleName());
+                String dono = donoDoFoco();
+                if (!arg.trim().equals(dono)) {
+                    naEDT(() -> { cliqueSintetico(a); return null; }, 8000);
+                    sincronizar();
+                    robo.delay(200);
+                    sincronizar();
+                    dono = donoDoFoco();
+                }
+                if (!arg.trim().equals(dono)) {
+                    responder("ERRO o foco não foi para " + arg.trim() + " (está em " + dono + ")");
+                    break;
+                }
+                responder("OK foco em " + dono);
                 break;
             }
             case "lercampo": {
@@ -299,6 +314,9 @@ public class LancadorForms {
                 responder("OK " + Base64.getEncoder().encodeToString(lido.getBytes(StandardCharsets.UTF_8)));
                 break;
             }
+            case "focoatual":
+                responder("OK " + donoDoFoco());
+                break;
             case "clicar": {
                 // Botões do EBS (oracle.apps.fnd.ui.Button) e do EWT expõem
                 // doClick(); quando não expõem, mandamos os eventos de mouse.
@@ -310,14 +328,7 @@ public class LancadorForms {
                         a.getClass().getMethod("doClick").invoke(a);
                         return "doClick";
                     } catch (Exception semDoClick) {
-                        long t = System.currentTimeMillis();
-                        int x = a.getWidth() / 2, y = a.getHeight() / 2;
-                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_PRESSED, t,
-                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
-                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 1,
-                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
-                        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 2,
-                                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+                        cliqueSintetico(a);
                         return "eventos de mouse";
                     }
                 }, 8000);
@@ -698,6 +709,28 @@ public class LancadorForms {
         }
         if (temCabecalho) achados.add(c);
         return achados;
+    }
+
+    private static String donoDoFoco() throws Exception {
+        return naEDT(() -> {
+            java.awt.Component c = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+            if (c == null) return "(nenhum)";
+            String n = c.getName();
+            return (n == null || n.isEmpty()) ? c.getClass().getSimpleName() : n;
+        }, 5000);
+    }
+
+    /** Clique de mouse pela fila de eventos do Java (sem XTEST: o Xwayland
+     *  headless não tem seat e aborta ao receber input do X). */
+    private static void cliqueSintetico(java.awt.Component a) {
+        long t = System.currentTimeMillis();
+        int x = Math.max(1, a.getWidth() / 2), y = Math.max(1, a.getHeight() / 2);
+        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_PRESSED, t,
+                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 1,
+                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
+        postar(new java.awt.event.MouseEvent(a, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 2,
+                java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false));
     }
 
     private static java.awt.Component acharPorNome(String nome) throws Exception {
