@@ -61,6 +61,73 @@ def _eh_segredo(nome: str) -> bool:
     return nome in SEMPRE_COFRE or bool(PADRAO_SEGREDO.search(nome))
 
 
+# Nomes prováveis das chaves no cofre corporativo. Como só dá para LER, a
+# única forma de descobrir o nome é tentar — daí a lista de candidatos.
+CANDIDATOS: dict[str, list[str]] = {
+    "Correios": [
+        "CORREIOS_USUARIO", "CORREIOS_CHAVE", "CORREIOS_CARTOES",
+        "CORREIOS_CONTRATO", "CORREIOS_DR",
+    ],
+    "ServiceNow": [
+        "SN_API_USER", "SN_API_USUARIO", "SN_USER", "SN_USUARIO",
+        "SERVICENOW_USER", "SERVICENOW_USUARIO", "SNOW_USER",
+        "SN_API_PASS", "SN_API_PASSWORD", "SN_API_SENHA", "SN_SENHA",
+        "SN_PASS", "SN_PASSWORD", "SERVICENOW_SENHA", "SERVICENOW_PASSWORD",
+        "SNOW_SENHA", "SNOW_PASSWORD",
+        "SN_TOKEN", "SERVICENOW_TOKEN",
+    ],
+    "EBS / Oracle": [
+        "ORACLE_EBS_USER", "ORACLE_EBS_USUARIO", "ORACLE_EBS_PASS",
+        "ORACLE_EBS_SENHA", "EBS_USER", "EBS_USUARIO", "EBS_SENHA",
+        "EBS_PASSWORD", "EBS_CAPEX_USER", "EBS_CAPEX_PASS", "EBS_CAPEX_TOKEN",
+    ],
+    "E-mail": ["SMTP_USUARIO", "SMTP_USER", "SMTP_SENHA", "SMTP_PASSWORD"],
+    "Banco": ["DB_SENHA", "DB_PASSWORD", "PORTAL_DB_SENHA", "DATABASE_PASSWORD"],
+}
+
+
+def cmd_sondar(args) -> int:
+    """Descobre QUAIS chaves o cofre corporativo responde.
+
+    Só leitura, e o valor nunca é exibido — apenas se existe e o tamanho,
+    que basta para reconhecer a chave certa sem expor nada.
+    """
+    if not cofre.corporativo_disponivel():
+        print("Cofre corporativo (vcreports_secrets) indisponível neste servidor.")
+        return 1
+
+    grupos = dict(CANDIDATOS)
+    if args.nome:
+        grupos = {"Informados por você": list(args.nome)}
+
+    print("Sondando o cofre corporativo — só leitura, valores não são exibidos.\n")
+    achadas: list[str] = []
+    for grupo, nomes in grupos.items():
+        print(f"{grupo}:")
+        alguma = False
+        for nome in nomes:
+            valor = cofre._corporativo(nome)
+            if valor:
+                achadas.append(nome)
+                alguma = True
+                print(f"  [existe]  {nome:28s} ({len(valor)} caracteres)")
+            elif args.tudo:
+                print(f"  [   -  ]  {nome}")
+        if not alguma and not args.tudo:
+            print("  (nenhuma das tentativas respondeu)")
+        print()
+
+    if achadas:
+        print("Para usar uma dessas, aponte o marcador no environment:")
+        print(f"  SN_API_PASS=@cofre:{achadas[-1]}@")
+        print("\nO cofre corporativo tem prioridade: onde o nome bater, é ele que responde.")
+    else:
+        print("Nenhuma chave conhecida respondeu. Peça ao time que mantém o cofre")
+        print("a lista de nomes disponíveis e sonde com:")
+        print("  python3 scripts/cofre.py sondar NOME1 NOME2 ...")
+    return 0
+
+
 def cmd_listar(_args) -> int:
     nomes = cofre.listar()
     print(f"Cofre local: {cofre.ARQ_COFRE}")
@@ -254,6 +321,11 @@ def main() -> int:
     p = sub.add_parser("conferir", help="Permissões e segredos citados no ambiente.")
     p.add_argument("--env", help="Caminho do environment (padrão: o do usuário).")
     p.set_defaults(fn=cmd_conferir)
+
+    p = sub.add_parser("sondar", help="Descobre quais chaves o cofre corporativo responde.")
+    p.add_argument("nome", nargs="*", help="Nomes específicos a testar (padrão: a lista conhecida).")
+    p.add_argument("--tudo", action="store_true", help="Mostra também o que não respondeu.")
+    p.set_defaults(fn=cmd_sondar)
 
     p = sub.add_parser("importar-env", help="Migra um environment antigo para o cofre.")
     p.add_argument("arquivo")

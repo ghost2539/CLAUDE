@@ -16,6 +16,18 @@
 # ============================================================================
 
 # ── 0. Cofre ────────────────────────────────────────────────────────────
+# Todo @cofre:NOME@ é procurado nesta ordem:
+#   1. cofre CORPORATIVO (vcreports_secrets) — só leitura, mantido por outro time
+#   2. cofre LOCAL cifrado (scripts/cofre.py definir NOME)
+#   3. variável de ambiente de mesmo nome
+#
+# Hoje o corporativo tem os Correios. O ServiceNow também está lá, mas com
+# nome ainda desconhecido — enquanto isso, fica no cofre local. Para achar
+# o nome (só leitura, não mostra valor):
+#     python3 scripts/cofre.py sondar
+# Quando descobrir, é só apontar o marcador para o nome certo; o corporativo
+# tem prioridade e passa a responder sozinho.
+#
 # Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
 # Só preencha se o portal rodar com um usuário sem diretório pessoal.
 # PORTAL_COFRE_DIR=/var/www/vcreports/.cofre-portal-spare
@@ -76,8 +88,16 @@ SN_API_PROXY=
 
 # Conta de serviço — usada SÓ para leitura. Escrita vai sempre como o
 # usuário logado, com os cookies da sessão dele.
-SN_API_USER=@cofre:SN_API_USER@                  # [COFRE]
-SN_API_PASS=@cofre:SN_API_PASS@                  # [COFRE]
+#
+# Está no cofre corporativo, mas o nome da chave ainda é desconhecido; por
+# ora guarde no cofre LOCAL com estes nomes:
+#     python3 scripts/cofre.py definir SN_API_USER
+#     python3 scripts/cofre.py definir SN_API_PASS
+# Quando descobrir o nome no corporativo (scripts/cofre.py sondar), troque
+# o marcador — ex.: SN_API_PASS=@cofre:SERVICENOW_SENHA@ — e apague a cópia
+# local com: scripts/cofre.py remover SN_API_PASS
+SN_API_USER=@cofre:SN_API_USER@                  # [COFRE local, por enquanto]
+SN_API_PASS=@cofre:SN_API_PASS@                  # [COFRE local, por enquanto]
 
 # Estados numéricos do incident:
 #   1 Novo · 2 Em andamento · 3 Em espera · 6 Resolvido · 7 Encerrado · 8 Cancelado
@@ -137,7 +157,8 @@ EBS_CAPEX_FX_URL=https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL
 EBS_CAPEX_FX_PROXY=
 
 # ── 8. Correios (rastreio) ──────────────────────────────────────────────
-# Vêm do COFRE CORPORATIVO, com estas chaves exatas:
+# JÁ RESOLVIDO: vêm do cofre corporativo, que hoje é o único lugar onde
+# estas chaves existem. Nada a cadastrar. Chaves exatas:
 #     vcreports_secret('CORREIOS_USUARIO')
 #     vcreports_secret('CORREIOS_CHAVE')
 #     vcreports_secret('CORREIOS_CARTOES').split(',')
