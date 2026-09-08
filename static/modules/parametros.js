@@ -25,7 +25,10 @@ window.SPARE_MODULES.parametros = {
             ['conta',           'Minha conta']
         ];
 
-        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos', 'automacoes',
+        // Automações fica fora da lista: a aba é de todos. Dentro dela, quem
+        // não é admin vê a situação, os logs e o botão Rodar agora — a
+        // configuração (credencial, cofre, horários) segue só do admin.
+        var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
                          'monitoramento', 'acessos'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
@@ -234,16 +237,24 @@ async function _renderIndicadoresConfig(S) {
 
 /* ── Automações (encerramento/encaminhamento) ───────────────────── */
 async function renderAutomacoes(c, S) {
+    // A aba é de todos. Sem ser admin, a tela é de acompanhamento: situação da
+    // rotina, regras em vigor, logs — e o botão de rodar agora, que age no
+    // ServiceNow com a sessão de quem clicou.
+    var usuario = S.user() || {};
+    var permAutom = (usuario.permission_map || {}).automacoes || {};
+    var ehAdmin = !!(usuario.is_admin || permAutom.can_admin);
     c.innerHTML =
         '<h1 class="page-title">Automações</h1>' +
         '<p class="text-muted">Rotina que encerra ou encaminha chamados entregues, ' +
             'com o seu usuário. Só age quando o último evento do rastreio é ENTREGUE.</p>' +
-        '<div class="card mb-3"><div class="card-header">Configuração da rotina</div>' +
+        '<div class="card mb-3"><div class="card-header">' +
+            (ehAdmin ? 'Configuração da rotina' : 'Situação da rotina') + '</div>' +
             '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
             '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
             '<span>Regras (subcategoria → ação)</span>' +
-            '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button></div>' +
+            (ehAdmin ? '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button>' : '') +
+            '</div>' +
             '<div class="card-body" id="au-regras"></div></div>' +
         '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
             '<span>Logs</span>' +
@@ -256,6 +267,28 @@ async function renderAutomacoes(c, S) {
     async function loadCfg() {
         var cfg = await S.api('/automacoes/config');
         var host = document.getElementById('au-cfg');
+        if (cfg.somente_leitura) {
+            host.innerHTML =
+                '<div class="form-grid cols-2">' +
+                    '<div class="form-group"><label>Rotina automática</label>' +
+                        '<div style="padding-top:6px;font-weight:600">' +
+                        (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</div></div>' +
+                    '<div class="form-group"><label>Horários</label>' +
+                        '<div style="padding-top:6px">' + S.esc(cfg.horarios || '') + '</div></div>' +
+                    '<div class="form-group"><label>Sessão para a rotina</label>' +
+                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
+                        (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
+                        '</div></div>' +
+                    '<div class="form-group"><label>Última execução</label>' +
+                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
+                        S.esc(cfg.ultima_execucao || '—') + '</div></div>' +
+                '</div>' +
+                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Rodar agora</button>' +
+                '<span class="text-muted" style="margin-left:10px">' +
+                'A configuração da rotina é do administrador.</span></div>';
+            ligarBotaoRodar();
+            return;
+        }
         var modo100 = cfg.cofre_disponivel
             ? '<span style="color:#16a34a;font-weight:600">Cofre disponível</span> — a rotina roda 100% automática.'
             : (cfg.tem_credencial
@@ -328,7 +361,13 @@ async function renderAutomacoes(c, S) {
                 S.toast('Credencial removida.', 'success'); loadCfg();
             } catch (e) { S.toast(e.message, 'error'); }
         };
-        document.getElementById('au-run').onclick = async function () {
+        ligarBotaoRodar();
+    }
+
+    function ligarBotaoRodar() {
+        var btn = document.getElementById('au-run');
+        if (!btn) return;
+        btn.onclick = async function () {
             if (!confirm('Rodar a rotina agora com o seu usuário?')) return;
             var b = this; b.disabled = true; var t = b.textContent; b.textContent = 'Rodando…';
             try {
@@ -349,7 +388,9 @@ async function renderAutomacoes(c, S) {
             { key: 'nome', label: 'Nome' },
             { key: 'acao', label: 'Ação' },
             { key: 'fila_destino', label: 'Fila destino' },
-            { key: 'ativo', label: 'Ativa', render: function (v) { return v ? 'Sim' : 'Não'; } },
+            { key: 'ativo', label: 'Ativa', render: function (v) { return v ? 'Sim' : 'Não'; } }
+        ];
+        if (ehAdmin) cols.push(
             { key: 'a', label: '', render: function (_, r) {
                 var w = S.el('div', { className: 'btn-row' });
                 var e = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
@@ -364,7 +405,7 @@ async function renderAutomacoes(c, S) {
                 w.append(e, x);
                 return w;
             }}
-        ];
+        );
         var host = document.getElementById('au-regras');
         host.innerHTML = '';
         host.appendChild(S.table(cols, d.regras));
@@ -437,7 +478,8 @@ async function renderAutomacoes(c, S) {
         host.appendChild(S.table(cols, d.logs));
     }
 
-    document.getElementById('au-regra-add').onclick = function () { editRegra(); };
+    var addBtn = document.getElementById('au-regra-add');   // só existe para admin
+    if (addBtn) addBtn.onclick = function () { editRegra(); };
     document.getElementById('au-log-refresh').onclick = loadLogs;
     document.getElementById('au-log-q').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') loadLogs();
@@ -1027,7 +1069,10 @@ async function renderPermissions(c, S) {
         reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
-        orcamento_spare: 'Orçamento SPARE'         // CAPEX da área
+        orcamento_spare: 'Orçamento SPARE',        // CAPEX da área
+        ebs_forms: 'EBS Forms (RPA)',
+        // A aba é de todos; "Administrar" é quem configura a rotina e as regras
+        automacoes: 'Automações'
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];

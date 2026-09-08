@@ -138,14 +138,47 @@ async def iniciar_espelho() -> str:
     if porta <= 0 or _servidor_espelho is not None:
         return "desligado" if porta <= 0 else "já ligado"
     host = getattr(_cfg, "CONSULTA_TIMES_HOST", "") or _cfg.HOST
+
+    # A porta é reservada AQUI, não pelo uvicorn: quando ele não consegue
+    # abrir a porta, chama sys.exit(1) — e isso derrubaria o portal inteiro
+    # por causa de um acessório (o aplicativo antigo ainda de pé, por exemplo).
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((host, porta))
+        sock.listen(128)
+        sock.set_inheritable(True)
+    except OSError as exc:
+        sock.close()
+        _log.warning("Consulta Times NÃO espelhada em %s:%s (%s). O portal segue "
+                     "normal na %s; pare quem ocupa a porta e reinicie.",
+                     host, porta, exc, _cfg.PORT)
+        return f"indisponível ({exc})"
+
     ssl_kwargs = {}
     if _cfg.SSL_CERTFILE and _cfg.SSL_KEYFILE:
         ssl_kwargs = {"ssl_certfile": _cfg.SSL_CERTFILE, "ssl_keyfile": _cfg.SSL_KEYFILE}
-    config = uvicorn.Config(criar_app_espelho(), host=host, port=porta,
-                            log_level="warning", access_log=False, **ssl_kwargs)
+    config = uvicorn.Config(criar_app_espelho(), log_level="warning",
+                            access_log=False, **ssl_kwargs)
     _servidor_espelho = uvicorn.Server(config)
     _servidor_espelho.install_signal_handlers = lambda: None  # o sinal é do portal
-    asyncio.create_task(_servidor_espelho.serve())
+
+    async def _servir() -> None:
+        try:
+            await _servidor_espelho.serve(sockets=[sock])
+        except BaseException as exc:  # noqa: BLE001 — inclusive SystemExit
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            _log.error("espelho da Consulta Times parou: %s", exc)
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    asyncio.create_task(_servir())
     _log.info("Consulta Times espelhada em %s:%s", host, porta)
     return f"{host}:{porta}"
 

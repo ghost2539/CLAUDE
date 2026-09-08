@@ -328,29 +328,45 @@ class RegraIn(BaseModel):
     ordem: int = 100
 
 
+def _admin_automacoes(req: Request) -> dict:
+    """Quem configura a rotina: marcado em 'Administrar' no módulo Automações
+    (ou administrador do portal). Ver a aba não exige permissão nenhuma."""
+    return require_permission(req, "automacoes", "admin")
+
+
+def _pode_administrar(req: Request) -> bool:
+    try:
+        _admin_automacoes(req)
+        return True
+    except HTTPException:
+        return False
+
+
 @router.get("/regras")
 def regras_list(req: Request):
-    require_permission(req, "parametros", "admin")
+    # Listar é leitura: a aba Automações é de todos; criar, alterar e excluir
+    # regra exige "Administrar" no módulo.
+    get_session(req)
     return {"regras": db.listar_regras()}
 
 
 @router.post("/regras")
 def regras_add(body: RegraIn, req: Request):
-    require_permission(req, "parametros", "admin")
+    _admin_automacoes(req)
     rid = db.salvar_regra(body.model_dump())
     return {"ok": True, "id": rid}
 
 
 @router.put("/regras/{rid}")
 def regras_edit(rid: int, body: RegraIn, req: Request):
-    require_permission(req, "parametros", "admin")
+    _admin_automacoes(req)
     db.salvar_regra(body.model_dump(), rid=rid)
     return {"ok": True}
 
 
 @router.delete("/regras/{rid}")
 def regras_del(rid: int, req: Request):
-    require_permission(req, "parametros", "admin")
+    _admin_automacoes(req)
     db.excluir_regra(rid)
     return {"ok": True}
 
@@ -358,14 +374,25 @@ def regras_del(rid: int, req: Request):
 # ── Endpoints: logs e config ────────────────────────────────────────────
 @router.get("/logs")
 def logs_list(req: Request, origem: str = "", q: str = "", limit: int = 500):
-    require_permission(req, "parametros", "view")
+    get_session(req)
     return {"logs": db.listar_logs(limit=limit, origem=origem, q=q)}
 
 
 @router.get("/config")
 def config_get(req: Request):
-    require_permission(req, "parametros", "admin")
+    """Situação da rotina. Todo usuário vê o essencial; quem tem "Administrar"
+    em Automações recebe (e altera) o que envolve credencial e cofre."""
+    get_session(req)
     cfg = db.obter_config()
+    if not _pode_administrar(req):
+        return {
+            "enabled": bool(cfg.get("enabled", False)),
+            "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
+            "tem_sessao": bool(cfg.get("sn_cookies")),
+            "usuario": cfg.get("usuario", ""),
+            "ultima_execucao": cfg.get("ultima_execucao", ""),
+            "somente_leitura": True,
+        }
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
@@ -379,6 +406,7 @@ def config_get(req: Request):
         "cofre_pass_key": cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY,
         "tem_credencial": bool(cfg.get("cred_user") and cfg.get("cred_blob")),
         "credencial_usuario": cfg.get("cred_user", ""),
+        "somente_leitura": False,
     }
 
 
@@ -395,7 +423,7 @@ class ConfigIn(BaseModel):
 
 @router.put("/config")
 def config_put(body: ConfigIn, req: Request):
-    sd = require_permission(req, "parametros", "admin")
+    sd = _admin_automacoes(req)
     dados = {"enabled": bool(body.enabled)}
     if body.horarios.strip():
         dados["horarios"] = body.horarios.strip()
@@ -427,8 +455,11 @@ def config_put(body: ConfigIn, req: Request):
 # ── Executar (botão) ────────────────────────────────────────────────────
 @router.post("/run")
 def run_now(req: Request):
-    """Roda a rotina AGORA, com a sessão do usuário logado (botão)."""
-    sd = require_permission(req, "rastreio", "edit")
+    """Roda a rotina AGORA, com a sessão do usuário logado (botão).
+
+    Basta estar autenticado: a rotina escreve no ServiceNow COMO o usuário —
+    quem não pode encerrar um chamado lá também não consegue por aqui."""
+    sd = get_session(req)
     session = _sn_session_from_portal(req)
     # Aproveita para atualizar a sessão salva (mantém a rotina agendada viva).
     try:
