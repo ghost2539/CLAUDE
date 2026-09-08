@@ -92,3 +92,66 @@ def consulta_export(body: ConsultaIn, req: Request):
     check_rate_limit(req, "api")
     resultado = _consultar(body.identificadores)
     return xlsx_response(resultado["resultados"], "consulta_ativos.xlsx")
+
+
+# ── Espelho na porta 8502 ───────────────────────────────────────────────
+# O aplicativo antigo atendia em :8502 e os times têm esse endereço salvo.
+# Em vez de um segundo serviço (não há root para isso), o MESMO processo
+# abre um segundo listener servindo só esta tela — o portal inteiro continua
+# exclusivo da 8901. Falhar aqui (porta ocupada, por exemplo) nunca derruba
+# o portal: o espelho é acessório.
+_servidor_espelho = None
+
+
+def criar_app_espelho():
+    """App enxuto: só a tela Consulta de Ativos — Times e seus dois endpoints."""
+    from fastapi import FastAPI
+    from fastapi.responses import RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+    from core.security import (
+        BotProtectionMiddleware, MaxBodyMiddleware, SecurityHeadersMiddleware,
+    )
+
+    app = FastAPI(title="Consulta de Ativos — Times", docs_url=None,
+                  redoc_url=None, openapi_url=None)
+    app.add_middleware(MaxBodyMiddleware)
+    app.add_middleware(BotProtectionMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.mount("/static", StaticFiles(directory=_cfg.STATIC), name="static")
+    app.include_router(router)
+
+    @app.get("/")
+    def raiz():
+        return RedirectResponse("/consulta-times", status_code=302)
+
+    return app
+
+
+async def iniciar_espelho() -> str:
+    """Sobe o listener do espelho como tarefa do próprio processo."""
+    global _servidor_espelho
+    import asyncio
+
+    import uvicorn
+
+    porta = int(getattr(_cfg, "CONSULTA_TIMES_PORTA", 0) or 0)
+    if porta <= 0 or _servidor_espelho is not None:
+        return "desligado" if porta <= 0 else "já ligado"
+    host = getattr(_cfg, "CONSULTA_TIMES_HOST", "") or _cfg.HOST
+    ssl_kwargs = {}
+    if _cfg.SSL_CERTFILE and _cfg.SSL_KEYFILE:
+        ssl_kwargs = {"ssl_certfile": _cfg.SSL_CERTFILE, "ssl_keyfile": _cfg.SSL_KEYFILE}
+    config = uvicorn.Config(criar_app_espelho(), host=host, port=porta,
+                            log_level="warning", access_log=False, **ssl_kwargs)
+    _servidor_espelho = uvicorn.Server(config)
+    _servidor_espelho.install_signal_handlers = lambda: None  # o sinal é do portal
+    asyncio.create_task(_servidor_espelho.serve())
+    _log.info("Consulta Times espelhada em %s:%s", host, porta)
+    return f"{host}:{porta}"
+
+
+async def parar_espelho() -> None:
+    global _servidor_espelho
+    if _servidor_espelho is not None:
+        _servidor_espelho.should_exit = True
+        _servidor_espelho = None
