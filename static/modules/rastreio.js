@@ -1,18 +1,12 @@
-/* Correios — rastreio de objetos e encerramento de chamados entregues.
-   Sub-abas: Rastreios (consulta em lote) e Encerramento. */
+/* Correios — rastreio de objetos em lote.
+   O encerramento de chamados entregues saiu daqui: quem faz isso hoje é a
+   rotina de Automações (Parâmetros → Automações) e a tela do ServiceNow. */
 (function () {
     var S = window.SPARE;
 
     function render(content, sub) {
-        var TABS = [
-            ['rastreios',     'Rastreios'],
-            ['encerramento',  'Encerramento']
-        ];
-        sub = sub || 'rastreios';
-        S.tabs(TABS, sub, 'rastreio');
         content.innerHTML = '';
-        if (sub === 'encerramento') renderEncerramento(content, S);
-        else renderRastreios(content, S);
+        renderRastreios(content, S);
     }
 
     /* ── Barra de progresso reutilizável ──────────────────────────── */
@@ -155,121 +149,6 @@
                 })
                 .finally(function () { testBtn.disabled = false; testBtn.textContent = 'Testar conexão'; });
         };
-    }
-
-    /* ── Encerramento de chamados entregues (escreve no ServiceNow) ── */
-    function renderEncerramento(content, S) {
-        var card = S.el('div', { className: 'card' });
-        var body = S.el('div', { className: 'card-body' });
-        body.innerHTML =
-            '<h1 class="page-title">Encerramento de chamados entregues</h1>' +
-            '<p style="color:var(--text-secondary);margin:0 0 12px;font-size:.9rem">' +
-            'Lista chamados On Hold/In Progress de coletor/sled cujo objeto já foi entregue. ' +
-            'O encerramento <strong>altera o ServiceNow</strong> — revise antes de confirmar.</p>';
-
-        var btn = S.el('button', { className: 'btn btn-outline', textContent: 'Buscar candidatos' });
-        body.appendChild(btn);
-        var btnRotina = S.el('button', {
-            className: 'btn btn-primary', textContent: 'Rodar rotina de automação',
-            style: 'margin-left:8px'
-        });
-        body.appendChild(btnRotina);
-        var rotOut = S.el('div', { id: 'enc-rotina-out', style: 'margin-top:12px' });
-        body.appendChild(rotOut);
-        var out = S.el('div', { id: 'enc-out', style: 'margin-top:12px' });
-        body.appendChild(out);
-        card.appendChild(body);
-        content.appendChild(card);
-
-        btnRotina.onclick = function () {
-            if (!confirm('Rodar a rotina agora? Ela encerra/encaminha os chamados entregues ' +
-                'conforme as regras (Parâmetros → Automações), com o seu usuário.')) return;
-            btnRotina.disabled = true; var t = btnRotina.textContent; btnRotina.textContent = 'Rodando…';
-            rotOut.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Executando rotina...</div>';
-            S.api('/automacoes/run', { method: 'POST' })
-                .then(function (d) {
-                    var r = d.resumo || {};
-                    rotOut.innerHTML = '<div class="alert alert-success">' +
-                        'Rotina concluída — ' + (r.encerrados || 0) + ' encerrado(s), ' +
-                        (r.encaminhados || 0) + ' encaminhado(s), ' + (r.erros || 0) + ' erro(s). ' +
-                        '(' + (r.analisados || 0) + ' analisados)</div>' +
-                        '<div style="font-size:.85rem;color:var(--text-secondary);margin-top:4px">' +
-                        'Detalhes em Parâmetros → Automações → Logs.</div>';
-                })
-                .catch(function (e) {
-                    rotOut.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
-                })
-                .finally(function () { btnRotina.disabled = false; btnRotina.textContent = t; });
-        };
-
-        function carregar() {
-            btn.disabled = true; btn.textContent = 'Buscando...';
-            out.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Analisando fila...</div>';
-            S.api('/servicenow/encerramento/candidatos')
-                .then(function (d) {
-                    var els = d.elegiveis || [];
-                    if (!els.length) {
-                        var diag = '<div style="color:var(--text-secondary)">' +
-                            'Nenhum candidato. Analisados: ' + (d.total_analisados || 0) +
-                            ' | com rastreio: ' + (d.total_com_rastreio || 0) + '.</div>';
-                        diag += '<div style="margin-top:10px;font-weight:600">Subcategorias encontradas na fila:</div>' +
-                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px">' +
-                            S.esc(JSON.stringify(d.subcategorias_encontradas || {}, null, 2)) + '</pre>';
-                        diag += '<div style="margin-top:6px;font-weight:600">Motivos de rejeição:</div>' +
-                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px">' +
-                            S.esc(JSON.stringify(d.motivos_rejeicao || {}, null, 2)) + '</pre>';
-                        diag += '<div style="margin-top:6px;font-weight:600">Amostra (com rastreio):</div>' +
-                            '<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg-secondary);padding:10px;border-radius:6px;max-height:320px;overflow:auto">' +
-                            S.esc(JSON.stringify(d.amostra_com_rastreio || [], null, 2)) + '</pre>';
-                        out.innerHTML = diag;
-                        return;
-                    }
-                    var h = '<div style="margin-bottom:8px;color:var(--text-secondary)">' +
-                        els.length + ' candidato(s) (de ' + d.total_analisados + ' analisados):</div>' +
-                        '<table class="table"><thead><tr><th>Número</th><th>Subcat.</th>' +
-                        '<th>Rastreio</th><th>Entrega</th><th></th></tr></thead><tbody>';
-                    els.forEach(function (c) {
-                        var ent = c.entrega || {};
-                        h += '<tr>' +
-                            '<td>' + S.esc(c.number) + '</td>' +
-                            '<td>' + S.esc(c.subcategory) + '</td>' +
-                            '<td>' + S.esc(c.tracking) + '</td>' +
-                            '<td>' + S.esc((ent.data || '') + ' ' + (ent.recebedor_nome || '')) + '</td>' +
-                            '<td><button class="btn btn-sm btn-primary" data-sid="' + S.esc(c.sys_id) +
-                            '" data-num="' + S.esc(c.number) + '">Encerrar</button></td>' +
-                        '</tr>';
-                    });
-                    h += '</tbody></table>';
-                    out.innerHTML = h;
-                    out.querySelectorAll('button[data-sid]').forEach(function (b) {
-                        b.onclick = function () { encerrar(b.getAttribute('data-sid'), b.getAttribute('data-num'), b); };
-                    });
-                })
-                .catch(function (err) {
-                    out.innerHTML = '<div style="color:#dc2626">' + S.esc(err.message) + '</div>';
-                })
-                .finally(function () { btn.disabled = false; btn.textContent = 'Buscar candidatos'; });
-        }
-
-        function encerrar(sysId, numero, b) {
-            if (!confirm('Encerrar o chamado ' + numero + ' no ServiceNow?\n\n' +
-                'Isto muda o estado para Resolvido e preenche a closure information. ' +
-                'Ação real, não pode ser desfeita pelo portal.')) return;
-            b.disabled = true; b.textContent = 'Encerrando...';
-            S.api('/servicenow/encerramento/executar', {
-                method: 'POST', body: { sys_id: sysId, confirmar: true }
-            })
-                .then(function (r) {
-                    S.toast('Chamado ' + (r.encerrado || numero) + ' encerrado.', 'success');
-                    b.textContent = 'Encerrado ✓';
-                })
-                .catch(function (err) {
-                    S.toast(err.message || 'Falha ao encerrar.', 'error');
-                    b.disabled = false; b.textContent = 'Encerrar';
-                });
-        }
-
-        btn.onclick = carregar;
     }
 
     window.SPARE_MODULES = window.SPARE_MODULES || {};
