@@ -72,11 +72,44 @@ TELAS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# ── Configuração das telas (Parâmetros → Dashboards) ────────────────────
+# Guardada em Setting["dashboards"]: {chave: {titulo, subtitulo, intervalo,
+# ativo}}. O que não estiver configurado usa o padrão de TELAS acima. Ler a
+# configuração nunca pode derrubar um painel de parede — daí o try amplo.
+def _config(chave: str) -> dict:
+    try:
+        from db.portal import Setting, SessionLocal
+        with SessionLocal() as s:
+            x = s.get(Setting, "dashboards")
+            todos = (x.value if x else {}) or {}
+        return dict(todos.get(chave) or {})
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("config dos dashboards indisponível (%s): usando o padrão", exc)
+        return {}
+
+
+def _titulos(chave: str) -> tuple[str, str, str]:
+    titulo, subtitulo, pendencia = TELAS[chave]
+    cfg = _config(chave)
+    return (str(cfg.get("titulo") or titulo),
+            str(cfg.get("subtitulo") or subtitulo),
+            pendencia)
+
+
 def _pagina(chave: str) -> HTMLResponse:
     caminho = _DIR / f"{chave}.html"
     if not caminho.exists():   # tela ainda não publicada
         return HTMLResponse("<h1>Tela não encontrada.</h1>", status_code=404)
-    return HTMLResponse(caminho.read_text(encoding="utf-8"))
+    cfg = _config(chave)
+    if cfg.get("ativo") is False:
+        return HTMLResponse(
+            "<h1 style='font-family:system-ui;padding:40px'>Painel desativado.</h1>",
+            status_code=404)
+    html = caminho.read_text(encoding="utf-8")
+    intervalo = int(cfg.get("intervalo") or 60)
+    if intervalo > 0:
+        html = html.replace('data-intervalo="60"', f'data-intervalo="{max(10, intervalo)}"')
+    return HTMLResponse(html)
 
 
 @router.get("/cockpit-spare", response_class=HTMLResponse)
@@ -101,7 +134,7 @@ def pagina_dash_estoques():
 
 # ── Dados ───────────────────────────────────────────────────────────────
 def _base(chave: str, blocos: list | None = None) -> dict:
-    titulo, subtitulo, pendencia = TELAS[chave]
+    titulo, subtitulo, pendencia = _titulos(chave)
     blocos = blocos or []
     return {
         "titulo": titulo,

@@ -20,7 +20,7 @@ window.SPARE_MODULES.parametros = {
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
-            ['tv',              'TV'],
+            ['dashboards',      'Dashboards'],
             ['conta',           'Minha conta']
         ];
 
@@ -28,7 +28,7 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'monitoramento', 'acessos'];
+                         'monitoramento', 'acessos', 'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -49,7 +49,7 @@ window.SPARE_MODULES.parametros = {
             automacoes:     renderAutomacoes,
             monitoramento:  renderMonitoramento,
             acessos:        renderAcessos,
-            tv:             renderTV,
+            dashboards:     renderDashboards,
             conta:          renderAccount
         };
 
@@ -243,9 +243,10 @@ async function _renderIndicadoresConfig(S) {
 
 /* ── Automações (encerramento/encaminhamento) ───────────────────── */
 async function renderAutomacoes(c, S) {
-    // A aba é de todos. Sem ser admin, a tela é de acompanhamento: situação da
-    // rotina, regras em vigor, logs — e o botão de rodar agora, que age no
-    // ServiceNow com a sessão de quem clicou.
+    // A aba é de todos, e as REGRAS também: qualquer usuário cria, edita e
+    // exclui regra, e roda a rotina (que age no ServiceNow com a sessão de
+    // quem clicou). Só a CONFIGURAÇÃO da rotina — horários, cofre, credencial
+    // — pede "Administrar" no módulo Automações.
     var usuario = S.user() || {};
     var permAutom = (usuario.permission_map || {}).automacoes || {};
     var ehAdmin = !!(usuario.is_admin || permAutom.can_admin);
@@ -259,7 +260,7 @@ async function renderAutomacoes(c, S) {
             '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Regras (subcategoria → ação)</span>' +
-            (ehAdmin ? '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button>' : '') +
+            '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button>' +
             '</div>' +
             '<div class="card-body" id="au-regras"></div></div>' +
         '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -384,7 +385,7 @@ async function renderAutomacoes(c, S) {
             { key: 'fila_destino', label: 'Fila destino' },
             { key: 'ativo', label: 'Ativa', render: function (v) { return v ? 'Sim' : 'Não'; } }
         ];
-        if (ehAdmin) cols.push(
+        cols.push(
             { key: 'a', label: '', render: function (_, r) {
                 var w = S.el('div', { className: 'btn-row' });
                 var e = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
@@ -472,8 +473,7 @@ async function renderAutomacoes(c, S) {
         host.appendChild(S.table(cols, d.logs));
     }
 
-    var addBtn = document.getElementById('au-regra-add');   // só existe para admin
-    if (addBtn) addBtn.onclick = function () { editRegra(); };
+    document.getElementById('au-regra-add').onclick = function () { editRegra(); };
     document.getElementById('au-log-refresh').onclick = loadLogs;
     document.getElementById('au-log-q').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') loadLogs();
@@ -947,8 +947,15 @@ async function renderLocations(c, S) {
 async function renderClassifications(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Classificações</h1>' +
-        '<p class="text-muted">Regras de classificação automática de ativos por descrição EBS.</p>' +
-        '<button id="pm-class-add2" class="btn btn-primary mb-3">Nova regra</button>' +
+        '<p class="text-muted">Regras de classificação automática de ativos por descrição EBS. ' +
+            'Salvar uma regra já reclassifica os ativos que casam com ela; use ' +
+            '<b>Aplicar em toda a base</b> para passar todas as regras de novo sobre ' +
+            'a base de recebimento inteira (inclusive o que está como NÃO CLASSIFICADA).</p>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="pm-class-add2" class="btn btn-primary">Nova regra</button>' +
+            '<button id="pm-class-apply" class="btn btn-secondary">Aplicar em toda a base</button>' +
+        '</div>' +
+        '<div id="pm-class-msg"></div>' +
         '<div id="pm-class-list2"></div>';
 
     async function load() {
@@ -1007,6 +1014,25 @@ async function renderClassifications(c, S) {
     }
 
     document.getElementById('pm-class-add2').onclick = function () { edit(); };
+
+    document.getElementById('pm-class-apply').onclick = async function () {
+        if (!confirm('Reaplicar todas as regras sobre a base de recebimento inteira?')) return;
+        var b = this, t = b.textContent;
+        b.disabled = true; b.textContent = 'Aplicando…';
+        try {
+            S.loading(true);
+            var d = await S.api('/parametros/classificacoes/aplicar-base', { method: 'POST' });
+            document.getElementById('pm-class-msg').innerHTML =
+                '<div class="alert alert-success">' + d.analisados + ' ativo(s) analisado(s); ' +
+                d.atualizados + ' reclassificado(s); ' + d.sem_regra + ' sem regra que case.</div>';
+            S.toast('Base reclassificada.', 'success');
+        } catch (e) {
+            S.toast(e.message, 'error');
+        } finally {
+            S.loading(false); b.disabled = false; b.textContent = t;
+        }
+    };
+
     load();
 }
 
@@ -1322,33 +1348,86 @@ async function renderSequences(c, S) {
 }
 
 /* ── TV ─────────────────────────────────────────────────────────── */
-async function renderTV(c, S) {
-    c.innerHTML = '<h1 class="page-title">Painel TV</h1>';
-    var d = await S.api('/parametros/config/tv');
-    var fields = [
-        ['title',     'Título'],
-        ['interval',  'Intervalo em segundos', 'number'],
-        ['last_rows', 'Quantidade de linhas',  'number']
-    ];
-    var form = S.el('div', { className: 'form-grid cols-2' });
-    fields.forEach(function (f) {
-        form.appendChild(_pField(f[1], f[0], d[f[0]] || '', f[2] || 'text'));
+/* ── Dashboards (telas de TV) ───────────────────────────────────── */
+// Uma linha por tela: título, subtítulo, intervalo de atualização e se está
+// no ar. As telas ficam em painel de parede, sem teclado — por isso o que se
+// configura aqui é a apresentação, nunca o que elas mostram de dado.
+var _DASHBOARDS = [
+    ['cockpit-spare',      'Cockpit SPARE',      'Performance do time — visão gerencial'],
+    ['dash-recebimento',   'Recebimento',        'Entrada de equipamentos'],
+    ['dash-centralreparos','Central de Reparos', 'Frente, retaguarda e coletores/SLEDs'],
+    ['dash-estoques',      'Estoques',           'Níveis e movimentação']
+];
+
+async function renderDashboards(c, S) {
+    var cfg = {};
+    try { cfg = (await S.api('/parametros/config/dashboards')) || {}; } catch (e) { cfg = {}; }
+
+    var html =
+        '<h1 class="page-title">Dashboards</h1>' +
+        '<p class="text-muted">Telas de TV do portal. Cada uma tem o seu endereço e ' +
+            'atualiza sozinha no intervalo abaixo. Desativada, a tela sai do ar sem ' +
+            'precisar mexer no servidor.</p>';
+
+    _DASHBOARDS.forEach(function (d) {
+        var chave = d[0], nomePadrao = d[1], subPadrao = d[2];
+        var atual = cfg[chave] || {};
+        html +=
+            '<div class="card mb-3"><div class="card-header" ' +
+                'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+                '<span>' + S.esc(nomePadrao) + '</span>' +
+                '<a class="btn btn-sm btn-secondary" href="/' + chave + '" target="_blank" ' +
+                    'rel="noopener">Abrir a tela</a>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<div class="form-grid cols-2">' +
+                    '<div class="form-group"><label>Título</label>' +
+                        '<input id="dh-' + chave + '-titulo" class="form-control" ' +
+                        'placeholder="' + S.esc(nomePadrao) + '" value="' +
+                        S.esc(atual.titulo || '') + '"></div>' +
+                    '<div class="form-group"><label>Subtítulo</label>' +
+                        '<input id="dh-' + chave + '-sub" class="form-control" ' +
+                        'placeholder="' + S.esc(subPadrao) + '" value="' +
+                        S.esc(atual.subtitulo || '') + '"></div>' +
+                    '<div class="form-group"><label>Atualizar a cada (segundos)</label>' +
+                        '<input id="dh-' + chave + '-int" type="number" min="10" class="form-control" ' +
+                        'value="' + (atual.intervalo || 60) + '"></div>' +
+                    '<div class="form-group"><label>Situação</label>' +
+                        '<label class="checkbox-label" style="padding-top:8px">' +
+                        '<input type="checkbox" id="dh-' + chave + '-ativo"' +
+                        (atual.ativo === false ? '' : ' checked') + '> No ar</label></div>' +
+                '</div>' +
+                '<div class="text-muted" style="font-size:.8rem;margin-top:6px">' +
+                    'Endereço: <code>/' + chave + '</code></div>' +
+            '</div></div>';
     });
-    var saveBtn = S.el('button', { className: 'btn btn-primary mt-3', textContent: 'Salvar' });
-    saveBtn.onclick = async function () {
-        var body = Object.assign({}, d);
-        fields.forEach(function (f) {
-            body[f[0]] = document.getElementById(f[0]).value;
+
+    html += '<button id="dh-save" class="btn btn-primary">Salvar dashboards</button>' +
+            '<span id="dh-msg" class="text-muted" style="margin-left:10px"></span>';
+    c.innerHTML = html;
+
+    document.getElementById('dh-save').onclick = async function () {
+        var corpo = {};
+        var erro = '';
+        _DASHBOARDS.forEach(function (d) {
+            var chave = d[0];
+            var intervalo = parseInt(document.getElementById('dh-' + chave + '-int').value, 10) || 60;
+            if (intervalo < 10) { erro = 'O intervalo mínimo é 10 segundos.'; }
+            corpo[chave] = {
+                titulo:    document.getElementById('dh-' + chave + '-titulo').value.trim(),
+                subtitulo: document.getElementById('dh-' + chave + '-sub').value.trim(),
+                intervalo: intervalo,
+                ativo:     document.getElementById('dh-' + chave + '-ativo').checked
+            };
         });
-        await S.api('/parametros/config/tv', { method: 'PUT', body: body });
-        S.toast('Configuração TV salva.', 'success');
+        if (erro) { S.toast(erro, 'error'); return; }
+        try {
+            await S.api('/parametros/config/dashboards', { method: 'PUT', body: corpo });
+            document.getElementById('dh-msg').textContent =
+                'Salvo. As telas pegam a mudança ao recarregar.';
+            S.toast('Dashboards salvos.', 'success');
+        } catch (e) { S.toast(e.message, 'error'); }
     };
-    var card = S.el('div', { className: 'card' });
-    var cardBody = S.el('div', { className: 'card-body' });
-    cardBody.appendChild(form);
-    card.appendChild(cardBody);
-    c.appendChild(card);
-    c.appendChild(saveBtn);
 }
 
 /* ── Minha conta ────────────────────────────────────────────────── */

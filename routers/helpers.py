@@ -80,6 +80,58 @@ def reapply_classification(s: Session, rule: "Classification") -> int:
     return updated
 
 
+def reclassify_all(s: Session, chunk: int = 2000) -> dict[str, int]:
+    """Passa TODAS as regras sobre TODA a base de recebimento.
+
+    Salvar uma regra já reclassifica o que casa com ela; isto aqui é o
+    contrário: varre a base inteira, inclusive o que ficou como
+    "NÃO CLASSIFICADA" ou foi classificado por uma regra que mudou depois.
+    As regras são lidas uma única vez (a base pode ter dezenas de milhares
+    de linhas) e a leitura é em blocos, para não carregar tudo na memória.
+    """
+    rules = s.scalars(
+        select(Classification)
+        .where(Classification.active == True)  # noqa: E712
+        .order_by(func.length(Classification.description_pattern).desc())
+    ).all()
+    regras = [
+        (r.description_pattern.upper(), (r.company or "").upper(), r.category, r.model, r.company)
+        for r in rules
+        if (r.description_pattern or "").strip()
+    ]
+
+    analisados = atualizados = sem_regra = 0
+    ultimo_id = 0
+    while True:
+        lote = s.scalars(
+            select(Asset).where(Asset.id > ultimo_id).order_by(Asset.id).limit(chunk)
+        ).all()
+        if not lote:
+            break
+        for a in lote:
+            ultimo_id = a.id
+            analisados += 1
+            d = (a.description or "").upper()
+            c = (a.company or "").upper()
+            achou = None
+            for padrao, empresa, categoria, modelo, empresa_regra in regras:
+                if padrao in d and (not empresa or empresa == c):
+                    achou = (categoria, modelo, empresa_regra)
+                    break
+            if not achou:
+                sem_regra += 1
+                continue
+            categoria, modelo, empresa_regra = achou
+            if a.category != categoria or a.model != modelo:
+                a.category = categoria
+                a.model = modelo
+                atualizados += 1
+            if empresa_regra and not a.company:
+                a.company = empresa_regra
+        s.flush()
+    return {"analisados": analisados, "atualizados": atualizados, "sem_regra": sem_regra}
+
+
 # ── Asset helpers ─────────────────────────────────────────────────
 
 def find_asset(s: Session, r: dict) -> Asset | None:
