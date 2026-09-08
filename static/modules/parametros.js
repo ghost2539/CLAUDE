@@ -14,7 +14,6 @@ window.SPARE_MODULES.parametros = {
             ['visual',          'Visual'],
             ['locais',          'Locais'],
             ['classificacoes',  'Classificações'],
-            ['valor-hora',      'Valor-hora'],
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
@@ -26,7 +25,7 @@ window.SPARE_MODULES.parametros = {
         ];
 
         // Automações fica fora da lista: a aba é de todos. Dentro dela, quem
-        // não é admin vê a situação, os logs e o botão Rodar agora — a
+        // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
                          'monitoramento', 'acessos'];
@@ -44,7 +43,6 @@ window.SPARE_MODULES.parametros = {
             visual:         renderVisual,
             locais:         renderLocations,
             classificacoes: renderClassifications,
-            'valor-hora':   renderHourly,
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
             'config-modulos': renderConfigModulos,
@@ -126,6 +124,13 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Central de Reparos — valor-hora</div>' +
+            '<div class="card-body" id="cm-valor-hora">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Indicadores — filtros do ServiceNow</div>' +
             '<div class="card-body">' +
                 '<p class="text-muted">Ajusta as consultas do painel de Indicadores. ' +
@@ -136,6 +141,7 @@ function renderConfigModulos(c, S) {
         '</div>';
 
     _renderIndicadoresConfig(S);
+    _renderValorHora(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -251,15 +257,15 @@ async function renderAutomacoes(c, S) {
             (ehAdmin ? 'Configuração da rotina' : 'Situação da rotina') + '</div>' +
             '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
             '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
-        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Regras (subcategoria → ação)</span>' +
             (ehAdmin ? '<button id="au-regra-add" class="btn btn-sm btn-primary">Nova regra</button>' : '') +
             '</div>' +
             '<div class="card-body" id="au-regras"></div></div>' +
-        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Logs</span>' +
-            '<span><input id="au-log-q" class="form-control" placeholder="Buscar chamado/motivo" ' +
-                'style="display:inline-block;width:220px;height:32px"> ' +
+            '<span><input id="au-log-q" class="form-control form-control-inline" ' +
+                'placeholder="Buscar chamado/motivo" style="min-width:220px"> ' +
             '<button id="au-log-refresh" class="btn btn-sm btn-secondary">Atualizar</button></span></div>' +
             '<div class="card-body" id="au-logs"></div></div>';
 
@@ -283,7 +289,7 @@ async function renderAutomacoes(c, S) {
                         '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
                         S.esc(cfg.ultima_execucao || '—') + '</div></div>' +
                 '</div>' +
-                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Rodar agora</button>' +
+                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Exec Now</button>' +
                 '<span class="text-muted" style="margin-left:10px">' +
                 'A configuração da rotina é do administrador.</span></div>';
             ligarBotaoRodar();
@@ -330,8 +336,7 @@ async function renderAutomacoes(c, S) {
                     (cfg.tem_credencial ? '•••••• (salva)' : 'informe para guardar') + '"></div>' +
             '</div>' +
             '<div class="mt-2"><button id="au-cfg-save" class="btn btn-primary">Salvar configuração</button> ' +
-            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Rodar agora</button> ' +
-            (cfg.tem_credencial ? '<button id="au-cred-clear" class="btn btn-danger" style="margin-left:8px">Remover credencial salva</button>' : '') +
+            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Exec Now</button> ' +
             '<span id="au-cfg-msg" class="text-muted" style="margin-left:10px"></span></div>';
 
         document.getElementById('au-cfg-save').onclick = async function () {
@@ -348,17 +353,6 @@ async function renderAutomacoes(c, S) {
                 document.getElementById('au-cfg-msg').textContent = 'Configuração salva.';
                 S.toast('Configuração salva.', 'success');
                 loadCfg();
-            } catch (e) { S.toast(e.message, 'error'); }
-        };
-        var clearBtn = document.getElementById('au-cred-clear');
-        if (clearBtn) clearBtn.onclick = async function () {
-            if (!confirm('Remover a credencial salva da automação?')) return;
-            try {
-                await S.api('/automacoes/config', { method: 'PUT', body: {
-                    enabled: document.getElementById('au-enabled').checked,
-                    limpar_credencial: true
-                }});
-                S.toast('Credencial removida.', 'success'); loadCfg();
             } catch (e) { S.toast(e.message, 'error'); }
         };
         ligarBotaoRodar();
@@ -494,7 +488,7 @@ async function renderMonitoramento(c, S) {
         '<h1 class="page-title">Monitoramento</h1>' +
         '<p class="text-muted">Saúde do servidor e dos serviços, e registro de falhas de API, ' +
             'integrações e automações.</p>' +
-        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Saúde</span>' +
             '<span><button id="mo-refresh" class="btn btn-sm btn-secondary">Atualizar</button> ' +
             '<button id="mo-checar" class="btn btn-sm btn-primary" style="margin-left:6px">Checar integrações</button></span>' +
@@ -503,16 +497,16 @@ async function renderMonitoramento(c, S) {
         '<div class="card mb-3" id="mo-check-card" style="display:none">' +
             '<div class="card-header">Resultado da checagem</div>' +
             '<div class="card-body" id="mo-check"></div></div>' +
-        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Falhas registradas</span>' +
             '<span>' +
-              '<select id="mo-sev" class="form-control" style="display:inline-block;width:130px;height:32px">' +
+              '<select id="mo-sev" class="form-control form-control-inline">' +
                 '<option value="">Todas</option><option value="erro">Erros</option>' +
                 '<option value="alerta">Alertas</option><option value="ok">OK</option></select> ' +
-              '<select id="mo-org" class="form-control" style="display:inline-block;width:150px;height:32px">' +
+              '<select id="mo-org" class="form-control form-control-inline">' +
                 '<option value="">Toda origem</option><option value="api">API</option>' +
                 '<option value="integracao">Integração</option><option value="automacao">Automação</option></select> ' +
-              '<input id="mo-q" class="form-control" placeholder="Buscar" style="display:inline-block;width:170px;height:32px"> ' +
+              '<input id="mo-q" class="form-control form-control-inline" placeholder="Buscar" style="min-width:170px"> ' +
               '<button id="mo-falhas-refresh" class="btn btn-sm btn-secondary">Filtrar</button>' +
             '</span></div>' +
             '<div class="card-body" id="mo-falhas"></div></div>';
@@ -641,14 +635,14 @@ async function renderAcessos(c, S) {
         '<p class="text-muted">Tentativas de acesso negadas e envio de alertas por e-mail.</p>' +
 
         '<div class="card mb-3"><div class="card-header" ' +
-            'style="display:flex;justify-content:space-between;align-items:center">' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Tentativas de acesso</span>' +
             '<span>' +
-              '<select id="ac-tipo" class="form-control" style="display:inline-block;width:230px;height:32px">' +
+              '<select id="ac-tipo" class="form-control form-control-inline">' +
                 '<option value="">Todas as tentativas</option>' +
                 '<option value="nao_autorizado" selected>Sem liberação de acesso</option>' +
                 '<option value="credencial">Credencial inválida</option></select> ' +
-              '<select id="ac-dias" class="form-control" style="display:inline-block;width:120px;height:32px">' +
+              '<select id="ac-dias" class="form-control form-control-inline">' +
                 '<option value="7">7 dias</option><option value="30" selected>30 dias</option>' +
                 '<option value="90">90 dias</option></select> ' +
               '<button id="ac-refresh" class="btn btn-sm btn-secondary">Atualizar</button>' +
@@ -660,7 +654,7 @@ async function renderAcessos(c, S) {
             '<div class="card-body" id="ac-pendentes"></div></div>' +
 
         '<div class="card mb-3"><div class="card-header" ' +
-            'style="display:flex;justify-content:space-between;align-items:center">' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Controle de Orçamento — trilha de acesso</span>' +
             '<button id="ac-orc-refresh" class="btn btn-sm btn-secondary">Atualizar</button>' +
             '</div><div class="card-body" id="ac-orcamento"></div></div>' +
@@ -1017,28 +1011,35 @@ async function renderClassifications(c, S) {
 }
 
 /* ── Valor-hora ─────────────────────────────────────────────────── */
-async function renderHourly(c, S) {
-    var d = await S.api('/parametros/valor-hora');
-    c.innerHTML =
-        '<h1 class="page-title">Valor-hora</h1>' +
-        '<div class="card">' +
-            '<div class="card-body">' +
-                '<div class="stat-value">' + S.money(d.valor) + '</div>' +
-                '<div class="form-group mt-2">' +
-                    '<label>Novo valor</label>' +
-                    '<input id="pm-rate" type="number" step="0.01" class="form-control" value="' + d.valor + '">' +
-                '</div>' +
-                '<button id="pm-rate-save" class="btn btn-primary mt-2">Salvar</button>' +
-            '</div>' +
-        '</div>';
+/* Valor-hora da Central de Reparos — mora dentro de Configuração Módulos. */
+async function _renderValorHora(S) {
+    var host = document.getElementById('cm-valor-hora');
+    if (!host) return;
+    var d;
+    try {
+        d = await S.api('/parametros/valor-hora');
+    } catch (e) {
+        host.innerHTML = '<div class="alert alert-danger">Não foi possível carregar o valor-hora: ' +
+            S.esc(e.message) + '</div>';
+        return;
+    }
+    host.innerHTML =
+        '<div class="stat-value">' + S.money(d.valor) + '</div>' +
+        '<div class="form-group mt-2" style="max-width:260px">' +
+            '<label>Novo valor</label>' +
+            '<input id="pm-rate" type="number" step="0.01" class="form-control" value="' + d.valor + '">' +
+        '</div>' +
+        '<button id="pm-rate-save" class="btn btn-primary mt-2">Salvar</button>';
 
     document.getElementById('pm-rate-save').onclick = async function () {
-        await S.api('/parametros/valor-hora', {
-            method: 'PUT',
-            body: { valor: +document.getElementById('pm-rate').value }
-        });
-        S.toast('Valor-hora atualizado.', 'success');
-        renderHourly(c, S);
+        try {
+            await S.api('/parametros/valor-hora', {
+                method: 'PUT',
+                body: { valor: +document.getElementById('pm-rate').value }
+            });
+            S.toast('Valor-hora atualizado.', 'success');
+            _renderValorHora(S);
+        } catch (e) { S.toast(e.message, 'error'); }
     };
 }
 
@@ -1358,28 +1359,30 @@ function renderAccount(c, S) {
         '<div class="card">' +
             '<div class="card-body">' +
                 '<p><span class="text-muted">Usuário:</span> <strong>' + S.esc(u.username) + '</strong></p>' +
-                '<p><span class="text-muted">Nome:</span> <strong>' + S.esc(u.display_name || '') + '</strong></p>' +
                 '<p><span class="text-muted">Perfil:</span> <strong>' + S.esc(u.role || '') + '</strong></p>' +
+                // Sem troca de senha: o acesso é só por Logon AD (SSO).
                 '<div class="form-grid cols-2">' +
-                    '<div class="form-group"><label>Senha atual</label>' +
-                        '<input id="pm-old" type="password" class="form-control"></div>' +
-                    '<div class="form-group"><label>Nova senha</label>' +
-                        '<input id="pm-new" type="password" class="form-control"></div>' +
+                    '<div class="form-group"><label>Nome de exibição</label>' +
+                        '<input id="pm-nome" class="form-control" maxlength="120" value="' +
+                        S.esc(u.display_name || '') + '"></div>' +
                 '</div>' +
-                '<button id="pm-pass" class="btn btn-primary mt-2">Alterar senha</button>' +
+                '<button id="pm-nome-save" class="btn btn-primary mt-2">Salvar nome</button>' +
+                '<span class="text-muted" style="margin-left:10px">' +
+                'A senha é a da rede — alterada só no AD.</span>' +
             '</div>' +
         '</div>';
 
-    document.getElementById('pm-pass').onclick = async function () {
+    document.getElementById('pm-nome-save').onclick = async function () {
+        var nome = document.getElementById('pm-nome').value.trim();
         try {
-            await S.api('/auth/change-password', {
-                method: 'POST',
-                body: {
-                    current_password: document.getElementById('pm-old').value,
-                    new_password:     document.getElementById('pm-new').value
-                }
-            });
-            S.toast('Senha alterada.', 'success');
+            var d = await S.api('/auth/meu-nome', { method: 'POST', body: { display_name: nome } });
+            u.display_name = d.display_name;
+            // o cabeçalho mostra o nome: atualiza sem precisar recarregar
+            var alvo = document.getElementById('topbar-user-name');
+            if (alvo) alvo.textContent = d.display_name;
+            var av = document.getElementById('topbar-user-avatar');
+            if (av && d.display_name) av.textContent = d.display_name[0].toUpperCase();
+            S.toast('Nome atualizado.', 'success');
         } catch (e) {
             S.toast(e.message, 'error');
         }
