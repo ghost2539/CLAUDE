@@ -333,8 +333,9 @@ class RegraIn(BaseModel):
 
 
 def _admin_automacoes(req: Request) -> dict:
-    """Quem configura a rotina: marcado em 'Administrar' no módulo Automações
-    (ou administrador do portal). Ver a aba não exige permissão nenhuma."""
+    """Quem mexe na CONFIGURAÇÃO da rotina (horários, cofre, credencial):
+    marcado em 'Administrar' no módulo Automações, ou administrador do portal.
+    Ver a aba e manter as REGRAS não exige permissão — é trabalho do time."""
     return require_permission(req, "automacoes", "admin")
 
 
@@ -348,29 +349,29 @@ def _pode_administrar(req: Request) -> bool:
 
 @router.get("/regras")
 def regras_list(req: Request):
-    # Listar é leitura: a aba Automações é de todos; criar, alterar e excluir
-    # regra exige "Administrar" no módulo.
+    # As regras (subcategoria → ação) são do time: qualquer usuário autenticado
+    # lista, cria, edita e exclui. Só a configuração da rotina é restrita.
     get_session(req)
     return {"regras": db.listar_regras()}
 
 
 @router.post("/regras")
 def regras_add(body: RegraIn, req: Request):
-    _admin_automacoes(req)
+    get_session(req)
     rid = db.salvar_regra(body.model_dump())
     return {"ok": True, "id": rid}
 
 
 @router.put("/regras/{rid}")
 def regras_edit(rid: int, body: RegraIn, req: Request):
-    _admin_automacoes(req)
+    get_session(req)
     db.salvar_regra(body.model_dump(), rid=rid)
     return {"ok": True}
 
 
 @router.delete("/regras/{rid}")
 def regras_del(rid: int, req: Request):
-    _admin_automacoes(req)
+    get_session(req)
     db.excluir_regra(rid)
     return {"ok": True}
 
