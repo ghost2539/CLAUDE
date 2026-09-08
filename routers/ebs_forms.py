@@ -15,6 +15,7 @@ import re
 import threading
 from functools import lru_cache
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -236,7 +237,8 @@ def _acesso_pagina(req: Request):
     com sessão e sem permissão, mostra a página de acesso não liberado."""
     sd = get_session(req, required=False)
     if not sd:
-        return RedirectResponse("/", status_code=302)
+        # o destino vai junto: depois do login o portal volta para esta tela
+        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
     try:
         require_permission(req, MODULO, "view")
     except HTTPException:
