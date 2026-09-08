@@ -22,7 +22,7 @@ from db.portal import (
     AccessLog, hash_password,
 )
 from core.security import get_session, require_permission, client_ip, check_rate_limit
-from routers.helpers import reapply_classification
+from routers.helpers import reapply_classification, reclassify_all
 
 _cfg = get_settings()
 MODULES = _cfg.MODULES
@@ -236,6 +236,15 @@ def classification_edit(id: int, body: ClassificationEditIn, req: Request):
     return {"ok": True, "atualizados": atualizados}
 
 
+@router.post("/classificacoes/aplicar-base")
+def classification_apply_all(req: Request):
+    """Reaplica todas as regras sobre a base de recebimento inteira."""
+    require_permission(req, "parametros", "admin")
+    check_rate_limit(req)
+    with SessionLocal.begin() as s:
+        return {"ok": True, **reclassify_all(s)}
+
+
 @router.delete("/classificacoes/{id}")
 def classification_delete(id: int, req: Request):
     require_permission(req, "parametros", "admin")
@@ -283,7 +292,7 @@ def get_setting(key: str, req: Request):
 @router.put("/config/{key}")
 def put_setting(key: str, payload: dict, req: Request):
     sd = get_session(req)
-    if key in ("visual", "tv", "correios") and not sd.get("is_admin"):
+    if key in ("visual", "tv", "correios", "dashboards") and not sd.get("is_admin"):
         raise HTTPException(403, "Permissão insuficiente.")
     with SessionLocal.begin() as s:
         x = s.get(Setting, key)
