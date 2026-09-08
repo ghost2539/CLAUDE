@@ -249,7 +249,7 @@ class Settings:
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms"
+        "orcamento_spare", "ebs_forms", "automacoes"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
