@@ -369,6 +369,27 @@ def sn_relogin(body: SNReloginIn, req: Request):
     return {"ok": True, "sn_active": True}
 
 
+class MeuNomeIn(BaseModel):
+    display_name: str
+
+
+@router.post("/meu-nome")
+def alterar_meu_nome(body: MeuNomeIn, req: Request):
+    """Cada um escreve o próprio nome de exibição. Como o acesso é por SSO,
+    o nome vindo do AD nem sempre é o que a pessoa usa no dia a dia."""
+    sd = get_session(req)
+    nome = " ".join(body.display_name.split())[:120]
+    if len(nome) < 2:
+        raise HTTPException(400, "Informe um nome com pelo menos 2 caracteres.")
+    with SessionLocal.begin() as s:
+        u = s.get(User, sd["user_id"])
+        if not u:
+            raise HTTPException(404, "Usuário não encontrado.")
+        u.display_name = nome
+    sd["display_name"] = nome          # a sessão em memória acompanha
+    return {"ok": True, "display_name": nome}
+
+
 @router.post("/change-password")
 def change_password(body: PasswordChangeIn, req: Request):
     sd = get_session(req)
