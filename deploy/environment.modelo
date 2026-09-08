@@ -53,6 +53,9 @@ COFRE_CORPORATIVO=nao
 # ── 1. Servidor ─────────────────────────────────────────────────────────
 HOST=0.0.0.0
 PORT=8901
+# A tela Consulta de Ativos — Times também atende na porta do aplicativo
+# antigo (:8502), no MESMO processo. 0 desliga esse espelho.
+CONSULTA_TIMES_PORTA=8502
 WORKERS=1
 SESSION_TTL_MINUTES=480
 UPLOAD_MAX_MB=50

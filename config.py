@@ -108,6 +108,10 @@ class Settings:
 
     HOST: str = _env("HOST", "0.0.0.0")
     PORT: int = int(_env("PORT", "8901"))
+    # A tela Consulta de Ativos — Times atendia em :8502 no aplicativo antigo.
+    # O mesmo processo abre esse segundo listener só para ela; 0 desliga.
+    CONSULTA_TIMES_PORTA: int = int(_env("CONSULTA_TIMES_PORTA", "8502"))
+    CONSULTA_TIMES_HOST: str = _env("CONSULTA_TIMES_HOST", "")
     WORKERS: int = int(_env("WORKERS", "1"))
 
     DEFAULT_HOURLY_RATE: float = float(_env("DEFAULT_VALOR_HORA", "150"))
