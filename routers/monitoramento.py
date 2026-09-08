@@ -168,6 +168,46 @@ def _status_geral(mem: dict, disco: dict, bancos: list[dict], res: dict) -> str:
     return "ok"
 
 
+# ── Recorte reaproveitável por outras telas ─────────────────────────────
+def saude_servidor(limite_falhas: int = 5, horas: int = 24) -> dict:
+    """Saúde do servidor em versão enxuta: memória, disco, carga, uptime e as
+    falhas CRÍTICAS mais recentes.
+
+    Existe para a tela de Status consumir sem duplicar a coleta daqui. Só
+    devolve recurso de máquina e falha de sistema — nada individualizado.
+    """
+    mem, disco = _memoria(), _disco()
+    criticas: list[dict] = []
+    try:
+        for e in db.listar(limit=max(1, int(limite_falhas or 5)), severidade="erro"):
+            criticas.append({
+                "quando": e.get("quando"),
+                "origem": e.get("origem"),
+                "alvo": e.get("alvo"),
+                "status_code": e.get("status_code"),
+                "detalhe": (e.get("detalhe") or "")[:300],
+            })
+    except Exception:  # noqa: BLE001 — monitoramento nunca derruba quem o consome
+        criticas = []
+
+    try:
+        total = int(db.resumo(horas).get("erros", 0))
+    except Exception:  # noqa: BLE001
+        total = len(criticas)
+
+    return {
+        "memoria": mem,
+        "disco": disco,
+        "carga": _carga(),
+        "uptime": _uptime(),
+        "horas": horas,
+        "total_criticas": total,
+        "falhas_criticas": criticas,
+        "limiares": {"disco_alerta": LIM_DISCO_ALERTA, "disco_critico": LIM_DISCO_CRITICO,
+                     "mem_alerta": LIM_MEM_ALERTA, "mem_critico": LIM_MEM_CRITICO},
+    }
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 @router.get("/saude")
 def saude(req: Request, horas: int = 24):
