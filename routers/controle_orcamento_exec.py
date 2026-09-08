@@ -31,6 +31,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -121,7 +122,9 @@ def _acesso_pagina(req: Request):
     com sessão e sem permissão, mostra a página de acesso não liberado."""
     sd = get_session(req, required=False)
     if not sd:
-        return RedirectResponse("/", status_code=302)
+        # Leva o destino junto: depois do login o portal volta para cá, em vez
+        # de largar quem digitou o endereço na tela de Bem-vindo.
+        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
     try:
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
