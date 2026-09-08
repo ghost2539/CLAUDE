@@ -8,6 +8,9 @@ entrada e a configuração.
 **Tudo roda num processo só**, na porta 8901: o servidor novo não tem root,
 então manter vários serviços não é opção. Telas que antes eram aplicativos
 separados (Consulta de Ativos dos times, na 8502) viraram router do portal.
+Para não quebrar os endereços salvos pelos times, o mesmo processo abre um
+segundo *listener* na 8502 servindo **só** essa tela (`CONSULTA_TIMES_PORTA`;
+0 desliga). Continua sendo um processo, um serviço e um deploy.
 
 ```
 main.py                  Ponto de entrada do portal (uvicorn main:app)

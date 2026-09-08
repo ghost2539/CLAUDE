@@ -22,7 +22,20 @@ _cfg = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # A tela Consulta de Ativos — Times também responde na porta antiga
+    # (:8502). É o mesmo processo: um listener a mais, serviço nenhum.
+    try:
+        from routers.consulta_times import iniciar_espelho
+        logging.getLogger("consulta_times").info("espelho: %s", await iniciar_espelho())
+    except Exception as exc:  # noqa: BLE001 — espelho é acessório
+        logging.getLogger("consulta_times").error(
+            "espelho na porta antiga NÃO subiu (portal segue normal): %s", exc)
     yield
+    try:
+        from routers.consulta_times import parar_espelho
+        await parar_espelho()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def create_app() -> FastAPI:
