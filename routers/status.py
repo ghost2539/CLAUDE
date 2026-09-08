@@ -36,15 +36,8 @@ def system_status(req: Request):
     except Exception as e:
         local = {"connected": False, "error": str(e)}
 
-    # EBS connectivity
-    ebs = {
-        "connected": (
-            bool(sd.get("ebs_auth")) if sd.get("auth_source") == "AD" else False
-        ),
-        "not_applicable": sd.get("auth_source") != "AD",
-    }
-
-    return {"ebs": ebs, "postgres": pg, "local": local}
+    return {"ebs": _ebs(sd), "postgres": pg, "local": local,
+            "servidor": _saude_servidor()}
 
 
 @router.get("/dashboard/summary")
@@ -78,3 +71,38 @@ def dashboard_summary(req: Request):
                 ) or 0
             ),
         }
+
+
+def _ebs(sd: dict) -> dict:
+    """Situação real do EBS.
+
+    As consultas do portal rodam com a conta de serviço (mesma que o módulo de
+    Monitoramento checa); a sessão EBS do próprio usuário só existe em login
+    por AD. Apurar só pela sessão do usuário fazia a tela dizer "N/A" mesmo com
+    as consultas funcionando.
+    """
+    if sd.get("auth_source") == "AD" and sd.get("ebs_auth"):
+        return {"connected": True, "not_applicable": False,
+                "modo": "sessão do usuário"}
+    try:
+        from routers.public_assets import _auth as _ebs_auth
+        ok = bool(_ebs_auth())
+        saida = {"connected": ok, "not_applicable": False,
+                 "modo": "conta de serviço"}
+        if not ok:
+            saida["error"] = "conta de serviço não autenticou"
+        return saida
+    except Exception as exc:  # noqa: BLE001
+        return {"connected": False, "not_applicable": False,
+                "modo": "conta de serviço", "error": str(exc)[:300]}
+
+
+def _saude_servidor() -> dict | None:
+    """Recorte de saúde vindo do Monitoramento (memória, disco, carga, uptime
+    e falhas críticas). Módulo ausente ou com defeito => bloco simplesmente não
+    aparece, sem quebrar a tela de Status."""
+    try:
+        from routers.monitoramento import saude_servidor
+        return saude_servidor(limite_falhas=5)
+    except Exception:  # noqa: BLE001
+        return None
