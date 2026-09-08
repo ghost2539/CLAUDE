@@ -312,6 +312,19 @@ button, input, select, textarea { font: inherit; }
 }
 textarea.form-control { resize: vertical; }
 
+/* Campo pequeno em cabeçalho de card (filtros ao lado do título).
+   Sem altura fixa: com box-sizing:border-box, 32px + padding cortava o texto
+   dos selects. A largura é mínima, então o rótulo mais longo cabe inteiro. */
+.form-control-inline {
+    display: inline-block;
+    width: auto;
+    min-width: 120px;
+    max-width: 100%;
+    padding: 5px 10px;
+    line-height: 1.4;
+}
+select.form-control-inline { padding-right: 26px; }
+
 .form-grid { display: grid; gap: 12px 16px; }
 .form-grid.cols-2 { grid-template-columns: 1fr 1fr; }
 
