@@ -253,7 +253,21 @@
             forcePasswordChange();
             return;
         }
+        var destino = destinoPedido();
+        if (destino) { location.replace(destino); return; }
         nav(location.hash.slice(1) || 'bemvindo');
+    }
+
+    // Telas fora do SPA (/controle-orcamento, /ebs-forms) mandam quem está sem
+    // sessão para "/?next=<a tela>". Depois de entrar, o portal volta para lá
+    // em vez de largar o usuário no Bem-vindo. Só caminho do próprio portal
+    // é aceito: "//outro-host" e "http://..." levariam para fora do domínio.
+    function destinoPedido() {
+        var next = '';
+        try {
+            next = new URLSearchParams(location.search).get('next') || '';
+        } catch (_) { return ''; }
+        return /^\/[^/\\]/.test(next) ? next : '';
     }
 
     // Troca de senha obrigatória no primeiro acesso (bloqueia o portal).
