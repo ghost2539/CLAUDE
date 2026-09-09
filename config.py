@@ -110,7 +110,11 @@ class Settings:
     PORT: int = int(_env("PORT", "8901"))
     # A tela Consulta de Ativos — Times atendia em :8502 no aplicativo antigo.
     # O mesmo processo abre esse segundo listener só para ela; 0 desliga.
-    CONSULTA_TIMES_PORTA: int = int(_env("CONSULTA_TIMES_PORTA", "8502"))
+    # DESLIGADO por padrão. Subir um segundo servidor uvicorn dentro do mesmo
+    # processo trava a partida quando o loop é uvloop: os dois ciclos de vida
+    # ficam se esperando e o portal nunca sai de "Waiting for application
+    # startup". Só ligue onde a subida for validada com o loop em uso.
+    CONSULTA_TIMES_PORTA: int = int(_env("CONSULTA_TIMES_PORTA", "0"))
     CONSULTA_TIMES_HOST: str = _env("CONSULTA_TIMES_HOST", "")
     WORKERS: int = int(_env("WORKERS", "1"))
 
