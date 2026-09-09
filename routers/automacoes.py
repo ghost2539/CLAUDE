@@ -37,15 +37,17 @@ from routers.servicenow import (
     INCIDENT_TABLE, DEFAULT_QUEUE,
 )
 from routers.encerramento import FIELDS as ENC_FIELDS, _estado_canonico, CLOSE_CODE, _display
-from routers.correios import consultar_rastreio
+from routers.correios import consultar_rastreio, evento_de_entrega
 
 _cfg = _config_mod.get_settings()
 _log = logging.getLogger("automacoes")
 
 router = APIRouter(prefix="/api/automacoes", tags=["Automações"])
 
-# Códigos de evento dos Correios que representam ENTREGUE ao destinatário.
-_DELIVERED_CODES = {"BDE", "BDI"}
+# O que conta como entrega vem de um lugar só (routers.correios): é o código
+# BDE/BDI/BDR **com o tipo de entrega ao destinatário**. Aqui ficava só a
+# lista de códigos, e por isso "Objeto ainda não chegou à unidade" (mesmo
+# código, outro tipo) era lido como entregue e o chamado era encerrado.
 
 
 # ── Credencial para a rotina 100% automática ────────────────────────────
@@ -191,8 +193,7 @@ def _ultimo_evento_entregue(rastreio: dict) -> tuple[bool, dict | None]:
     if not evs:
         return False, None
     latest = max(evs, key=lambda e: str(e.get("data") or ""))
-    code = str(latest.get("codigo") or "").upper()
-    return code in _DELIVERED_CODES, latest
+    return evento_de_entrega(latest), latest
 
 
 DEFAULT_TRACKING_FIELD = "sys_tags"
