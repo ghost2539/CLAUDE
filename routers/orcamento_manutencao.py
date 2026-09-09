@@ -439,13 +439,28 @@ def _ordenado(stmt):
     return stmt.order_by(R.mes_referencia.desc().nullslast(), R.id.desc())
 
 
+def _mes_do_filtro(mes: Optional[str], ano: int) -> Optional[str]:
+    """Aceita "AAAA-MM", "MM" ou "3"; devolve "AAAA-MM" ou None (ano inteiro)."""
+    texto = str(mes or "").strip()
+    if not texto or texto.lower() in ("todos", "ano"):
+        return None
+    if len(texto) >= 7 and texto[4] == "-" and texto[:4].isdigit() and texto[5:7].isdigit():
+        numero = int(texto[5:7])
+        return f"{int(texto[:4])}-{numero:02d}" if 1 <= numero <= 12 else None
+    if texto.isdigit() and 1 <= int(texto) <= 12:
+        return f"{ano}-{int(texto):02d}"
+    return None
+
+
 def _dinheiro(v) -> float:
     return round(float(v or 0), 2)
 
 
 # ── 5.1 Painel ──────────────────────────────────────────────────────────
 @router.get("/resumo")
-def resumo(req: Request, ano: Optional[int] = None):
+def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
+    """Painel. `mes` ("AAAA-MM" ou "01".."12") estreita cartões e quebras ao mês;
+    as séries mensais continuam mostrando o ano inteiro, para dar contexto."""
     _exigir(req, "view")
     with db.SessionLocal() as s:
         config = db.ler_config(s)
@@ -459,54 +474,134 @@ def resumo(req: Request, ano: Optional[int] = None):
             anos = {date.today().year}
         ano = ano or max(anos)
 
-        # Blocos mensais: agrupados pelo mês de referência do ano pedido.
+        mes_sel = _mes_do_filtro(mes, ano)
+        escopo = (R.mes_referencia == mes_sel) if mes_sel else R.mes_referencia.like(f"{ano}-%")
+
+        # ── Séries mensais (sempre o ano inteiro) ───────────────────────
         vazio = lambda: {"COLETOR": 0.0, "SLED": 0.0, "TOTAL": 0.0}  # noqa: E731
+        vazio_tipo = lambda: {"CONTRATO": 0.0, "AVULSA": 0.0, "TOTAL": 0.0}  # noqa: E731
         meses = {}
         for m in range(1, 13):
             meses[f"{ano}-{m:02d}"] = {
                 "consumo": vazio(), "reparados": vazio(),
                 "reprovados_valor": vazio(), "reprovados_qtde": vazio(),
+                "consumo_tipo": vazio_tipo(), "reparados_tipo": vazio_tipo(),
             }
         rows = s.execute(
-            select(R.mes_referencia, R.familia, R.status, func.count(R.id),
+            select(R.mes_referencia, R.familia, R.tipo_manutencao, R.status, func.count(R.id),
                    func.coalesce(func.sum(R.orcamento), 0),
                    func.coalesce(func.sum(R.valor_compra), 0))
             .where(R.mes_referencia.like(f"{ano}-%"), R.status.in_(("APROVADO", "REPROVADO")))
-            .group_by(R.mes_referencia, R.familia, R.status)
+            .group_by(R.mes_referencia, R.familia, R.tipo_manutencao, R.status)
         ).all()
-        for mes, familia, status, qtde, soma_orc, soma_vc in rows:
-            bloco = meses.get(mes)
+        for mes_ref, familia, tipo, status, qtde, soma_orc, soma_vc in rows:
+            bloco = meses.get(mes_ref)
             if bloco is None:
                 continue
+            qtde = int(qtde)
             if status == "APROVADO":
                 alvo_v, alvo_q, valor = bloco["consumo"], bloco["reparados"], float(soma_orc)
+                # Aprovados separam contrato de avulso: a cota mensal é do contrato.
+                if tipo in bloco["consumo_tipo"]:
+                    bloco["consumo_tipo"][tipo] += valor
+                    bloco["reparados_tipo"][tipo] += qtde
+                bloco["consumo_tipo"]["TOTAL"] += valor
+                bloco["reparados_tipo"]["TOTAL"] += qtde
             else:
                 alvo_v, alvo_q, valor = bloco["reprovados_valor"], bloco["reprovados_qtde"], float(soma_vc)
             if familia in alvo_v:
                 alvo_v[familia] += valor
-                alvo_q[familia] += int(qtde)
+                alvo_q[familia] += qtde
             alvo_v["TOTAL"] += valor
-            alvo_q["TOTAL"] += int(qtde)
+            alvo_q["TOTAL"] += qtde
 
         lista_meses = []
-        for mes, bloco in meses.items():
-            for chave in ("consumo", "reprovados_valor"):
+        for mes_ref, bloco in meses.items():
+            for chave in ("consumo", "reprovados_valor", "consumo_tipo"):
                 bloco[chave] = {k: _dinheiro(v) for k, v in bloco[chave].items()}
-            for chave in ("reparados", "reprovados_qtde"):
+            for chave in ("reparados", "reprovados_qtde", "reparados_tipo"):
                 bloco[chave] = {k: int(v) for k, v in bloco[chave].items()}
-            lista_meses.append({"mes": mes, **bloco})
-
-        gerais = {}
-        for fam in db.FAMILIAS:
-            consumo = _dinheiro(sum(b["consumo"][fam] for b in lista_meses))
-            reparados = sum(b["reparados"][fam] for b in lista_meses)
-            gerais[fam] = {"consumo": consumo, "reparados": reparados,
-                           "media": _dinheiro(consumo / reparados) if reparados else 0.0}
+            lista_meses.append({"mes": mes_ref, **bloco})
 
         com_consumo = [b for b in lista_meses if b["consumo"]["TOTAL"] > 0]
+
+        # ── Quebras do escopo (mês selecionado ou ano inteiro) ──────────
+        categorias: dict[tuple, dict] = {}
+        gerais = {f: {"consumo": 0.0, "reparados": 0} for f in db.FAMILIAS}
+        por_tipo = {t: {"consumo": 0.0, "reparados": 0} for t in db.TIPOS_ROTULOS}
+        totais = {"aprovados": 0, "aprovados_contrato": 0, "aprovados_avulsa": 0,
+                  "reprovados": 0, "pendentes": 0, "garantia": 0,
+                  "consumo": 0.0, "consumo_contrato": 0.0, "consumo_avulsa": 0.0,
+                  "reprovados_valor": 0.0}
+        for cat, fam, tipo, status, garantia, q, soma_orc, soma_vc in s.execute(
+            select(R.categoria, R.familia, R.tipo_manutencao, R.status, R.garantia,
+                   func.count(R.id), func.coalesce(func.sum(R.orcamento), 0),
+                   func.coalesce(func.sum(R.valor_compra), 0))
+            .where(escopo)
+            .group_by(R.categoria, R.familia, R.tipo_manutencao, R.status, R.garantia)
+        ).all():
+            c = categorias.setdefault((cat, fam), {
+                "categoria": cat, "familia": fam, "consumo": 0.0,
+                "consumo_contrato": 0.0, "consumo_avulsa": 0.0, "reparados": 0,
+                "reparados_contrato": 0, "reparados_avulsa": 0,
+                "reprovados_qtde": 0, "reprovados_valor": 0.0,
+            })
+            q, valor_orc, valor_vc = int(q), float(soma_orc), float(soma_vc)
+            sufixo = "contrato" if tipo == "CONTRATO" else "avulsa"
+            if status == "APROVADO":
+                c["consumo"] += valor_orc
+                c["reparados"] += q
+                c[f"consumo_{sufixo}"] += valor_orc
+                c[f"reparados_{sufixo}"] += q
+                gerais.setdefault(fam, {"consumo": 0.0, "reparados": 0})
+                gerais[fam]["consumo"] += valor_orc
+                gerais[fam]["reparados"] += q
+                por_tipo.setdefault(tipo, {"consumo": 0.0, "reparados": 0})
+                por_tipo[tipo]["consumo"] += valor_orc
+                por_tipo[tipo]["reparados"] += q
+                totais["aprovados"] += q
+                totais[f"aprovados_{sufixo}"] += q
+                totais["consumo"] += valor_orc
+                totais[f"consumo_{sufixo}"] += valor_orc
+                if garantia:
+                    totais["garantia"] += q
+            elif status == "REPROVADO":
+                c["reprovados_valor"] += valor_vc
+                c["reprovados_qtde"] += q
+                totais["reprovados"] += q
+                totais["reprovados_valor"] += valor_vc
+            else:
+                totais["pendentes"] += q
+
+        lista_categorias = sorted(categorias.values(), key=lambda x: -x["consumo"])
+        for c in lista_categorias:
+            for chave in ("consumo", "consumo_contrato", "consumo_avulsa", "reprovados_valor"):
+                c[chave] = _dinheiro(c[chave])
+        for bloco in (gerais, por_tipo):
+            for dados in bloco.values():
+                dados["consumo"] = _dinheiro(dados["consumo"])
+                dados["media"] = _dinheiro(dados["consumo"] / dados["reparados"]) if dados["reparados"] else 0.0
+        for chave in ("consumo", "consumo_contrato", "consumo_avulsa", "reprovados_valor"):
+            totais[chave] = _dinheiro(totais[chave])
+
+        # ── Cartões financeiros ────────────────────────────────────────
         cota = _dinheiro((config.get("cota_mensal") or {}).get(str(ano)))
-        cota_em_uso = com_consumo[-1]["mes"] if com_consumo else None
-        consumo_atual = com_consumo[-1]["consumo"]["TOTAL"] if com_consumo else 0.0
+        if mes_sel:
+            foco = next((b for b in lista_meses if b["mes"] == mes_sel), None)
+        else:
+            foco = com_consumo[-1] if com_consumo else None
+        cota_em_uso = foco["mes"] if foco else mes_sel
+        consumo_atual = foco["consumo"]["TOTAL"] if foco else 0.0
+        consumo_contrato = foco["consumo_tipo"]["CONTRATO"] if foco else 0.0
+        consumo_avulsa = foco["consumo_tipo"]["AVULSA"] if foco else 0.0
+
+        totais["meses_com_consumo"] = len(com_consumo)
+        total_ano = _dinheiro(sum(b["consumo"]["TOTAL"] for b in lista_meses))
+        totais["total_ano"] = total_ano
+        totais["media_mensal"] = _dinheiro(total_ano / len(com_consumo)) if com_consumo else 0.0
+        totais["cota_anual"] = _dinheiro(cota * 12)
+        # A cota mensal acompanha o contrato: o avulso é medido à parte.
+        totais["percentual_cota_mes"] = round(consumo_contrato / cota, 4) if cota else None
 
         # Cards: retrato de agora, sem filtro de ano.
         ag_aprovacao = [
@@ -535,57 +630,25 @@ def resumo(req: Request, ano: Optional[int] = None):
             if chave:
                 d[chave] += int(q)
 
-        # Quebra por categoria e totais do ano (para os cards e gráficos).
-        categorias: dict[tuple, dict] = {}
-        totais = {"aprovados": 0, "reprovados": 0, "pendentes": 0, "garantia": 0,
-                  "reprovados_valor": 0.0}
-        for cat, fam, status, garantia, q, soma_orc, soma_vc in s.execute(
-            select(R.categoria, R.familia, R.status, R.garantia, func.count(R.id),
-                   func.coalesce(func.sum(R.orcamento), 0),
-                   func.coalesce(func.sum(R.valor_compra), 0))
-            .where(R.mes_referencia.like(f"{ano}-%"))
-            .group_by(R.categoria, R.familia, R.status, R.garantia)
-        ).all():
-            c = categorias.setdefault((cat, fam), {
-                "categoria": cat, "familia": fam, "consumo": 0.0, "reparados": 0,
-                "reprovados_qtde": 0, "reprovados_valor": 0.0,
-            })
-            q = int(q)
-            if status == "APROVADO":
-                c["consumo"] += float(soma_orc)
-                c["reparados"] += q
-                totais["aprovados"] += q
-                if garantia:
-                    totais["garantia"] += q
-            elif status == "REPROVADO":
-                c["reprovados_valor"] += float(soma_vc)
-                c["reprovados_qtde"] += q
-                totais["reprovados"] += q
-                totais["reprovados_valor"] += float(soma_vc)
-            else:
-                totais["pendentes"] += q
-        lista_categorias = sorted(categorias.values(), key=lambda x: -x["consumo"])
-        for c in lista_categorias:
-            c["consumo"] = _dinheiro(c["consumo"])
-            c["reprovados_valor"] = _dinheiro(c["reprovados_valor"])
-        totais["reprovados_valor"] = _dinheiro(totais["reprovados_valor"])
-        totais["meses_com_consumo"] = len(com_consumo)
-        total_investido = _dinheiro(sum(b["consumo"]["TOTAL"] for b in lista_meses))
-        totais["media_mensal"] = _dinheiro(total_investido / len(com_consumo)) if com_consumo else 0.0
-        totais["cota_anual"] = _dinheiro(cota * 12)
-        totais["percentual_cota_mes"] = round(consumo_atual / cota, 4) if cota else None
-
     return {
         "ano": ano,
+        "mes": mes_sel,
         "anos_disponiveis": sorted(anos),
+        "meses_disponiveis": [
+            {"mes": b["mes"], "tem_dado": b["consumo"]["TOTAL"] > 0 or b["reprovados_qtde"]["TOTAL"] > 0}
+            for b in lista_meses
+        ],
         "cota_mensal": cota,
         "cota_em_uso": cota_em_uso,
         "consumo_atual": consumo_atual,
-        "residual": _dinheiro(cota - consumo_atual),
-        "total_investido": _dinheiro(sum(b["consumo"]["TOTAL"] for b in lista_meses)),
+        "consumo_atual_contrato": consumo_contrato,
+        "consumo_atual_avulsa": consumo_avulsa,
+        "residual": _dinheiro(cota - consumo_contrato),
+        "total_investido": totais["consumo"] if mes_sel else total_ano,
         "limiar_percentual": config["limiar_percentual"],
         "meses": lista_meses,
         "gerais": gerais,
+        "por_tipo": por_tipo,
         "aguardando_aprovacao": ag_aprovacao,
         "aguardando_devolucao": list(devolucao.values()),
         "categorias": lista_categorias,
