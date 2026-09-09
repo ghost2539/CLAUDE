@@ -30,6 +30,12 @@ CONSULTA_TIMES_PORTA=0
 # Sistemas internos usam certificado próprio.
 VERIFY_SSL=false
 
+# Recálculo periódico dos indicadores, em minutos. Comece em 0: sem saída
+# liberada para o ServiceNow, cada chamada fica pendurada até o timeout de
+# 45 s, dezenas de vezes, e a primeira subida parece travada. Ligue (2) só
+# depois de confirmar a rede e a conta de serviço.
+SN_INDIC_REFRESH_MIN=0
+
 # Saída direta, sem proxy. As três linhas ficam VAZIAS de propósito: variável
 # declarada e vazia é decisão e encerra a busca. Ausentes, o portal herdaria
 # um https_proxy do perfil do servidor e toda chamada de API iria para um
