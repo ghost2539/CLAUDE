@@ -1,31 +1,48 @@
-# Portal SPARE como serviço de USUÁRIO (sem root).
+# Portal SPARE — serviço de USUÁRIO (systemd --user), servidor novo.
 #
-# Instalar:
-#   mkdir -p ~/.config/systemd/user
-#   sed "s|__APP__|/var/www/vcreports/portal-spare|g" deploy/portal_spare.user.service \
-#       > ~/.config/systemd/user/portal-spare.service
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now portal-spare.service
+# Roda com a conta de rede de quem opera o portal; não existe usuário de
+# serviço. Reiniciar não pede root:
+#     systemctl --user restart portal-spare
 #
-# Para o serviço continuar no ar depois do logout, um administrador precisa
-# habilitar o "lingering" uma única vez:
-#   sudo loginctl enable-linger $USER
-# Sem isso, use deploy/portal.sh (nohup), que não depende de systemd.
+# Instalar (com a própria conta):
+#     mkdir -p ~/.config/systemd/user
+#     cp deploy/portal_spare.user.service ~/.config/systemd/user/portal-spare.service
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now portal-spare.service
+#
+# Para o portal continuar no ar depois do logout e voltar sozinho no boot, um
+# administrador habilita o lingering UMA vez:
+#     sudo loginctl enable-linger <sua conta>
+# Sem isso o serviço morre ao encerrar a sessão.
+#
+# Endurecimento: serviço de usuário não aceita ProtectSystem/ProtectHome —
+# eles exigem root. Fica o que é possível sem privilégio.
 
 [Unit]
-Description=Portal de Operacoes SPARE (usuario)
+Description=Portal de Operacoes SPARE
 After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=__APP__
-EnvironmentFile=%h/.config/portal-spare/environment
-ExecStart=__APP__/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
+WorkingDirectory=/var/www/vcreports/portal-spare
+
+# Configuração e cofre moram DENTRO da pasta do portal: nada é instalado ou
+# gravado fora dela.
+EnvironmentFile=/var/www/vcreports/portal-spare/data/environment
+Environment=PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
+
+# --proxy-headers: o portal fica atrás do proxy que publica
+# suporte.lojasrenner.com.br. Sem isso, a trilha de acessos registra o IP do
+# proxy em vez do IP de quem usou a tela. Troque IP_DO_PROXY pelo endereço
+# real; a lista aceita vários separados por vírgula.
+ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app \
+    --host 0.0.0.0 --port 8901 --workers 1 \
+    --proxy-headers --forwarded-allow-ips=IP_DO_PROXY
 Restart=on-failure
 RestartSec=5
-# Endurecimento possível sem root:
 NoNewPrivileges=true
 PrivateTmp=true
+UMask=0027
 
 [Install]
 WantedBy=default.target
