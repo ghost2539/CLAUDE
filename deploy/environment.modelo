@@ -107,18 +107,15 @@ SN_API_BASE=https://renner.service-now.com
 SN_PROXY=
 SN_API_PROXY=
 
-# Conta de serviço — usada SÓ para leitura. Escrita vai sempre como o
-# usuário logado, com os cookies da sessão dele.
+# Conta de serviço do ServiceNow (a conta do Zabbix) — usada SÓ para leitura.
+# Escrita vai sempre como o usuário logado, com os cookies da sessão dele.
 #
-# Está no cofre corporativo, mas o nome da chave ainda é desconhecido; por
-# ora guarde no cofre LOCAL com estes nomes:
+# NÃO existe linha para ela aqui, de propósito: o portal lê SN_API_USER e
+# SN_API_PASS direto do cofre (corporativo primeiro, depois o local cifrado).
+# Grave uma vez, no servidor, com o usuário do serviço:
 #     python3 scripts/cofre.py definir SN_API_USER
 #     python3 scripts/cofre.py definir SN_API_PASS
-# Quando descobrir o nome no corporativo (scripts/cofre.py sondar), troque
-# o marcador — ex.: SN_API_PASS=@cofre:SERVICENOW_SENHA@ — e apague a cópia
-# local com: scripts/cofre.py remover SN_API_PASS
-SN_API_USER=@cofre:SN_API_USER@                  # [COFRE local, por enquanto]
-SN_API_PASS=@cofre:SN_API_PASS@                  # [COFRE local, por enquanto]
+# Confira sem revelar o valor:  python3 scripts/cofre.py conferir
 
 # Estados numéricos do incident:
 #   1 Novo · 2 Em andamento · 3 Em espera · 6 Resolvido · 7 Encerrado · 8 Cancelado

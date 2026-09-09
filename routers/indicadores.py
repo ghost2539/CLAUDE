@@ -109,8 +109,9 @@ def _proxies():
 def _checar_conta():
     if not _cfg.SN_API_USER or not _cfg.SN_API_PASS:
         raise RuntimeError(
-            "Conta de serviço do ServiceNow não configurada "
-            "(defina SN_API_USER e SN_API_PASS no ambiente do serviço)."
+            "Conta de serviço do ServiceNow não configurada. Grave no cofre: "
+            "python3 scripts/cofre.py definir SN_API_USER  e  "
+            "python3 scripts/cofre.py definir SN_API_PASS."
         )
 
 
