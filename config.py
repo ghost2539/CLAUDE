@@ -7,16 +7,6 @@ _ROOT = Path(__file__).parent
 
 
 def _env(nome: str, default: str = "") -> str:
-    """Variável de ambiente com `@cofre:CHAVE@` já resolvido.
-
-    Deixa o `environment` legível e sem senha: a linha fica inteira lá, e só
-    o pedaço secreto vem do cofre. Ex.:
-
-        DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@host/base
-
-    O marcador usa `@` porque o arquivo é carregado com `. arquivo` pelos
-    scripts; `${...}` seria comido pelo bash e a variável chegaria vazia.
-    """
     bruto = os.getenv(nome, default)
     # Variável DECLARADA e vazia cai no padrão. No arquivo de ambiente é
     # natural deixar "CHAVE=" como "não configurei isto", mas os.getenv
