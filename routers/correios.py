@@ -14,6 +14,41 @@ router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
 
+# ── O que é, de fato, uma entrega ───────────────────────────────────────
+# BDE/BDI/BDR é a família "baixa de entrega" do SRO, e o código sozinho NÃO
+# quer dizer que o objeto chegou ao destinatário: quem diz isso é o TIPO.
+# Só o tipo 01 é "Objeto entregue ao destinatário". O mesmo BDE com tipo 23
+# é "Objeto ainda não chegou à unidade" e com tipo 02 é devolução ao
+# remetente — ambos estavam sendo lidos como entrega, o que pintava o objeto
+# de "Entregue" na tela e fazia a automação encerrar chamado indevidamente.
+CODIGOS_BAIXA = ("BDE", "BDI", "BDR")
+TIPOS_ENTREGA = {
+    t.strip().zfill(2)
+    for t in os.environ.get("CORREIOS_TIPOS_ENTREGA", "01").split(",")
+    if t.strip()
+}
+
+
+def _tipo_do_evento(ev: dict) -> str:
+    """Tipo do evento normalizado em dois dígitos ('1' e 1 viram '01')."""
+    tipo = ev.get("tipo", "")
+    tipo = "" if tipo is None else str(tipo).strip()
+    return tipo.zfill(2) if tipo else ""
+
+
+def evento_de_entrega(ev: dict) -> bool:
+    """True só quando o evento é entrega ao destinatário de verdade."""
+    if str(ev.get("codigo", "") or "").strip().upper() not in CODIGOS_BAIXA:
+        return False
+    tipo = _tipo_do_evento(ev)
+    if tipo:
+        return tipo in TIPOS_ENTREGA
+    # Evento antigo sem tipo: aceita só quando a própria descrição afirma a
+    # entrega ao destinatário — na dúvida, não é entrega.
+    desc = str(ev.get("descricao", "") or "").lower()
+    return "entregue ao destinat" in desc
+
+
 def _secret(nome: str, default: str = "") -> str:
     """Lê um segredo do cofre `vcreports_secrets` (servidor novo); se ele não
     estiver disponível, cai para variável de ambiente (servidor atual/transição).
@@ -256,7 +291,7 @@ def consultar_rastreio(codigo: str) -> dict:
             "uf": endereco.get("uf", ""),
         }
 
-        if ev_code in ("BDE", "BDI", "BDR") and not entrega:
+        if evento_de_entrega(ev) and not entrega:
             recebedor = ev.get("recebedor", {})
             recebedor = recebedor or {}
             entrega = {
@@ -318,7 +353,7 @@ def correios_comprovante(codigo: str, req: Request):
 
     obj = objetos[0]
     for ev in obj.get("eventos", []):
-        if ev.get("codigo", "") not in ("BDE", "BDI", "BDR"):
+        if not evento_de_entrega(ev):
             continue
 
         recebedor = ev.get("recebedor") or {}
