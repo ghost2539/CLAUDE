@@ -16,17 +16,37 @@ SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
 # ── O que é, de fato, uma entrega ───────────────────────────────────────
 # BDE/BDI/BDR é a família "baixa de entrega" do SRO, e o código sozinho NÃO
-# quer dizer que o objeto chegou ao destinatário: quem diz isso é o TIPO.
-# Só o tipo 01 é "Objeto entregue ao destinatário". O mesmo BDE com tipo 23
-# é "Objeto ainda não chegou à unidade" e com tipo 02 é devolução ao
-# remetente — ambos estavam sendo lidos como entrega, o que pintava o objeto
-# de "Entregue" na tela e fazia a automação encerrar chamado indevidamente.
+# quer dizer que o objeto chegou ao destinatário: "Objeto ainda não chegou à
+# unidade" e "Objeto entregue ao remetente" vêm com o mesmo código.
+#
+# Quem decide é a DESCRIÇÃO do evento, que é também o que a operação lê na
+# tela. O tipo (01 = entregue ao destinatário) não serve sozinho: os Correios
+# usam subtipos que variam por contrato e por produto, e amarrar a rotina ao
+# tipo deixava entrega de verdade marcada como "Em trânsito". O tipo ficou
+# como desempate para evento antigo, que vem sem descrição.
 CODIGOS_BAIXA = ("BDE", "BDI", "BDR")
 TIPOS_ENTREGA = {
     t.strip().zfill(2)
     for t in os.environ.get("CORREIOS_TIPOS_ENTREGA", "01").split(",")
     if t.strip()
 }
+
+# Ditas na própria descrição, estas situações NÃO são entrega ao destinatário
+# — nem quando o código é da família de baixa. Conferidas antes de qualquer
+# indício positivo: "Objeto não entregue" contém "entregue".
+DESCRICOES_NAO_ENTREGA = (
+    "nao chegou", "nao entregue", "entregue ao remetente", "tentativa de entrega",
+    "aguardando retirada", "devolvido", "devolucao", "extraviado", "roubo",
+    "furto", "avariado", "recusado", "endereco incorreto", "mudou-se",
+    "carteiro nao atendido", "nao procurado", "sem expediente",
+)
+
+
+def _sem_acento(texto: str) -> str:
+    """Minúsculas e sem acento: a descrição dos Correios varia na acentuação."""
+    import unicodedata
+    base = unicodedata.normalize("NFD", str(texto or "").lower())
+    return "".join(c for c in base if unicodedata.category(c) != "Mn")
 
 
 def _tipo_do_evento(ev: dict) -> str:
@@ -40,13 +60,14 @@ def evento_de_entrega(ev: dict) -> bool:
     """True só quando o evento é entrega ao destinatário de verdade."""
     if str(ev.get("codigo", "") or "").strip().upper() not in CODIGOS_BAIXA:
         return False
-    tipo = _tipo_do_evento(ev)
-    if tipo:
-        return tipo in TIPOS_ENTREGA
-    # Evento antigo sem tipo: aceita só quando a própria descrição afirma a
-    # entrega ao destinatário — na dúvida, não é entrega.
-    desc = str(ev.get("descricao", "") or "").lower()
-    return "entregue ao destinat" in desc
+    desc = _sem_acento(ev.get("descricao", ""))
+    if desc:
+        if any(marca in desc for marca in DESCRICOES_NAO_ENTREGA):
+            return False
+        if "entregue" in desc:
+            return True
+        # Descrição que não fala em entrega nenhuma: decide pelo tipo.
+    return _tipo_do_evento(ev) in TIPOS_ENTREGA
 
 
 def _secret(nome: str, default: str = "") -> str:
