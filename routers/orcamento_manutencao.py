@@ -535,6 +535,46 @@ def resumo(req: Request, ano: Optional[int] = None):
             if chave:
                 d[chave] += int(q)
 
+        # Quebra por categoria e totais do ano (para os cards e gráficos).
+        categorias: dict[tuple, dict] = {}
+        totais = {"aprovados": 0, "reprovados": 0, "pendentes": 0, "garantia": 0,
+                  "reprovados_valor": 0.0}
+        for cat, fam, status, garantia, q, soma_orc, soma_vc in s.execute(
+            select(R.categoria, R.familia, R.status, R.garantia, func.count(R.id),
+                   func.coalesce(func.sum(R.orcamento), 0),
+                   func.coalesce(func.sum(R.valor_compra), 0))
+            .where(R.mes_referencia.like(f"{ano}-%"))
+            .group_by(R.categoria, R.familia, R.status, R.garantia)
+        ).all():
+            c = categorias.setdefault((cat, fam), {
+                "categoria": cat, "familia": fam, "consumo": 0.0, "reparados": 0,
+                "reprovados_qtde": 0, "reprovados_valor": 0.0,
+            })
+            q = int(q)
+            if status == "APROVADO":
+                c["consumo"] += float(soma_orc)
+                c["reparados"] += q
+                totais["aprovados"] += q
+                if garantia:
+                    totais["garantia"] += q
+            elif status == "REPROVADO":
+                c["reprovados_valor"] += float(soma_vc)
+                c["reprovados_qtde"] += q
+                totais["reprovados"] += q
+                totais["reprovados_valor"] += float(soma_vc)
+            else:
+                totais["pendentes"] += q
+        lista_categorias = sorted(categorias.values(), key=lambda x: -x["consumo"])
+        for c in lista_categorias:
+            c["consumo"] = _dinheiro(c["consumo"])
+            c["reprovados_valor"] = _dinheiro(c["reprovados_valor"])
+        totais["reprovados_valor"] = _dinheiro(totais["reprovados_valor"])
+        totais["meses_com_consumo"] = len(com_consumo)
+        total_investido = _dinheiro(sum(b["consumo"]["TOTAL"] for b in lista_meses))
+        totais["media_mensal"] = _dinheiro(total_investido / len(com_consumo)) if com_consumo else 0.0
+        totais["cota_anual"] = _dinheiro(cota * 12)
+        totais["percentual_cota_mes"] = round(consumo_atual / cota, 4) if cota else None
+
     return {
         "ano": ano,
         "anos_disponiveis": sorted(anos),
@@ -548,6 +588,8 @@ def resumo(req: Request, ano: Optional[int] = None):
         "gerais": gerais,
         "aguardando_aprovacao": ag_aprovacao,
         "aguardando_devolucao": list(devolucao.values()),
+        "categorias": lista_categorias,
+        "totais": totais,
     }
 
 
