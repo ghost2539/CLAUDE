@@ -31,13 +31,14 @@ WorkingDirectory=/var/www/vcreports/portal-spare
 EnvironmentFile=/var/www/vcreports/portal-spare/data/environment
 Environment=PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
 
-# --proxy-headers: o portal fica atrás do proxy que publica
-# suporte.lojasrenner.com.br. Sem isso, a trilha de acessos registra o IP do
-# proxy em vez do IP de quem usou a tela. Troque IP_DO_PROXY pelo endereço
-# real; a lista aceita vários separados por vírgula.
-ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app \
-    --host 0.0.0.0 --port 8901 --workers 1 \
-    --proxy-headers --forwarded-allow-ips=IP_DO_PROXY
+# ExecStart em UMA linha só, de propósito: dentro de uma linha continuada
+# com "\", o systemd NÃO trata "#" como comentário — ele vira argumento do
+# comando e o serviço não sobe.
+#
+# Quando o IP do proxy for conhecido, acrescente ao fim da linha abaixo:
+#     --proxy-headers --forwarded-allow-ips=<IP do proxy>
+# Sem isso a trilha de acessos registra o IP do proxy, não o de quem usou.
+ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
