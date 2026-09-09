@@ -357,3 +357,95 @@ Cores e componentes: os do portal (`.card`, `.data-table`, `.badge-*`,
    aprovados por mês de referência.
 3. A **cota mensal** é uma só por ano ou varia por mês? Hoje: uma por ano.
 4. `LOJA` deve virar cadastro (nome da loja) ou fica só o número? Hoje: número.
+
+---
+
+## 8. Retorno de reparo, planilha do fornecedor e reincidência
+
+### 8.1 Colunas novas em `manut_reparo`
+
+| coluna | tipo | conteúdo |
+|---|---|---|
+| `origem_equipamento` | str(10) | `LOJA` ou `CD` — coluna ORIGEM da planilha do fornecedor |
+| `disponibilizacao` | Date, nulo | DISPONIBILIZAÇÃO: data em que o fornecedor enviou o orçamento |
+| `devolvido_em` | DateTime, nulo | quando o retorno foi confirmado no portal |
+| `devolvido_por` | str(80) | login de quem confirmou |
+| `po` | str(40) | PO da manutenção avulsa, quando houver |
+
+O banco de produção já existe: `init_db()` precisa acrescentar as colunas que
+faltarem (`ALTER TABLE ... ADD COLUMN`, uma por vez, ignorando as que já
+existem). Nunca recriar a tabela.
+
+### 8.2 Planilha do fornecedor (lote de reparo)
+
+Layout, verificado no arquivo real (aba `CONTRATO 464`, 1.678 linhas úteis):
+
+| coluna | destino |
+|---|---|
+| DISPONIBILIZAÇÃO | `disponibilizacao` (data) |
+| CATEGORIA | `categoria`: `Coletor - BlueBird` → **Coletor**; `Sled RFID` → **Sled RFID** |
+| SÉRIE | `serie` |
+| ORIGEM | `origem_equipamento` (`LOJA`/`CD`) |
+| RMA | `rma` (único) |
+| ORÇAMENTO | `orcamento` |
+| APROVADO VIA CONTRATO (ou STATUS) | `status` + `tipo_manutencao` + `mes_referencia` |
+
+O texto do status carrega três informações. Regras (sem acento, sem caixa):
+
+| texto | status | tipo | mês |
+|---|---|---|---|
+| `APROVADO VIA CONTRATO - MARÇO 2026` | `APROVADO` | `CONTRATO` | `2026-03` |
+| `APROVADO VIA PO EXTRA - AGOSTO 2026` | `APROVADO` | `AVULSA` | `2026-08` |
+| `APROVADO - PO EXTRA CAMICADO - SETEMBRO 2026` | `APROVADO` | `AVULSA` | `2026-09` (e `empresa = CAMICADO`) |
+| `REPROVADO` | `REPROVADO` | — | — |
+| `AGUARDANDO APROVAÇÃO` | `AGUARDANDO_APROVACAO` | — | — |
+| `validando orçamento` | `VALIDANDO_ORCAMENTO` | — | — |
+| `BONIFICADO` | `APROVADO` com `orcamento = 0` | — | — |
+| `GARANTIA` | `APROVADO`, `garantia = true`, `orcamento = 0` | — | — |
+| `... OUTUBRO / NOVEMBRO 2025` | vale o **primeiro** mês, com aviso | | |
+
+Mês por extenso em português (janeiro..dezembro) seguido do ano. Sem mês no
+status, `mes_referencia` sai do mês da DISPONIBILIZAÇÃO. `ano` sai do mês de
+referência. `status_original` guarda o texto como veio.
+
+A importação continua fazendo **upsert por RMA** e aceita a opção de
+substituir a base. Aceita também o campo opcional `aba`: sem ele, usa a
+primeira aba que tenha RMA, SÉRIE e CATEGORIA (ou RMA e S/N); a resposta
+informa `aba` usada e `abas_disponiveis`.
+
+Também é reconhecido o layout da aba `AVULSO` (RMA, S/N, VALOR,
+MÊS - CONTRATO, STATUS, PO): tipo `AVULSA`, `po` preenchido, `serie` de S/N,
+`orcamento` de VALOR, `mes_referencia` de MÊS - CONTRATO.
+
+### 8.3 Retorno de reparo (nova sub-aba)
+
+Tela para bipar RMAs em lote, no padrão da Consulta: uma caixa de texto que
+aceita separação por vírgula, ponto e vírgula, espaço ou uma por linha.
+
+- `POST /retorno/consultar` — `view`. Corpo `{"rmas": ["...", "..."]}`.
+  Devolve, na ordem digitada, `{"rma", "encontrado", "ja_devolvido", ...dados
+  do reparo}`. RMA fora da base vem com `encontrado: false`.
+- `POST /retorno/confirmar` — `edit`. Mesmo corpo. Marca
+  `status_retorno = DEVOLVIDO`, grava `devolvido_em`, `devolvido_por` e
+  `ano_devolucao` (ano corrente) nos que existem e ainda não estavam
+  devolvidos. Devolve `{"devolvidos": n, "ja_devolvidos": n,
+  "nao_encontrados": [...], "itens": [...]}`.
+
+Nada é criado por essa tela: RMA que não existe é apenas reportado.
+
+### 8.4 Reincidência
+
+Um equipamento é identificado pela **série**; o RMA é único por atendimento.
+Série com dois ou mais RMAs é reincidente.
+
+- `GET /reparos` passa a devolver, em cada item, `serie_reparos` (quantos
+  atendimentos aquela série tem na base) e `serie_custo` (soma dos orçamentos
+  aprovados da série). Novo filtro `min_reparos` (inteiro; 2 = só
+  reincidentes).
+- `GET /exportar.xlsx` aceita o mesmo filtro e traz as duas colunas.
+- `GET /reincidencia` — `view` — resumo por série: `serie`, `categoria`,
+  `familia`, `reparos`, `custo_total`, `custo_medio`, `primeiro`, `ultimo`,
+  `reprovados`, `lojas`. Filtros `min_reparos` (padrão 2), `familia`,
+  `categoria`, `ano`, `q`, `limit`, `offset`, ordenado por `reparos` e depois
+  `custo_total`, ambos decrescentes.
+- `GET /reincidencia.xlsx` — `export` — mesma consulta, sem paginação.
