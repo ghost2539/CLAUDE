@@ -52,29 +52,74 @@
 
     var STYLE =
         '<style>' +
-        '.om-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}' +
+        '.om-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
         '.om-top .page-title{margin:0;flex:1 1 auto}' +
         '.om-top label{font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:6px}' +
-        '.om-layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:start}' +
-        '.om-side,.om-main{display:flex;flex-direction:column;gap:16px;min-width:0}' +
-        '.om-kv{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 16px;border-top:1px solid var(--border-subtle)}' +
-        '.om-kv:first-child{border-top:0}' +
-        '.om-k{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.02em}' +
-        '.om-v{font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}' +
-        '.om-v.om-big{font-size:17px}' +
+        /* painel: pilha, KPIs e grades */
+        '.om-stack{display:flex;flex-direction:column;gap:14px;min-width:0}' +
+        '.om-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}' +
+        '.om-kpi{display:flex;flex-direction:column;min-width:0;padding:12px 16px 12px;background:var(--bg-panel);border:1px solid var(--border-subtle);border-top:3px solid var(--om-c,var(--color-primary));border-radius:var(--radius)}' +
+        '.om-kpi.om-go{cursor:pointer}' +
+        '.om-kpi.om-go:hover,.om-kpi.om-go:focus-visible{background:var(--bg-panel-alt);border-color:var(--border-light);border-top-color:var(--om-c);outline:0}' +
+        '.om-kpi-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}' +
+        '.om-kpi-ic{flex:0 0 32px;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--om-c);background:var(--om-cbg)}' +
+                '.om-kpi-l{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);line-height:1.3;padding-top:3px;min-width:0}' +
+        '.om-kpi-v{font-size:22px;font-weight:700;line-height:1.2;margin-top:6px;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+        '.om-kpi-v .text-muted{font-size:15px;font-weight:600}' +
+        '.om-kpi-s{font-size:12px;color:var(--text-muted);margin-top:3px;line-height:1.35}' +
+        '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}' +
+        '.om-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}' +
+        /* cards de gráfico */
+        '.om-chart{display:flex;flex-direction:column;min-width:0}' +
+        '.om-chart .card-header{font-size:13px;padding:10px 16px}' +
+        '.om-chart-body{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:14px 16px 6px;min-height:200px}' +
+        '.om-chart svg{display:block;width:100%;height:auto;max-height:280px;overflow:visible}' +
+        '.om-chart svg text{font-family:inherit;font-size:11px;fill:var(--text-muted)}' +
+        '.om-grid{stroke:rgba(255,255,255,.06);stroke-width:1;shape-rendering:crispEdges}' +
+        '.om-cota{stroke:var(--text-secondary);stroke-width:1.2;stroke-dasharray:5 4}' +
+        '.om-tk-cota{fill:var(--text-secondary)}' +
+        '.om-dtrack{fill:none;stroke:var(--bg-panel-alt);stroke-width:16}' +
+        '.om-dc{fill:var(--text-primary);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}' +
+        '.om-dc2{fill:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.04em}' +
+        '.om-legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:6px 16px 10px;font-size:12px;color:var(--text-secondary)}' +
+        '.om-sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}' +
+        '.om-sw-line{height:0;border-top:2px dashed var(--text-secondary);vertical-align:2px;border-radius:0}' +
+        '.om-foot{padding:8px 16px;border-top:1px solid var(--border-subtle);font-size:12px;color:var(--text-muted)}' +
+        '.om-foot b{color:var(--text-secondary);font-weight:600}' +
+        '.om-empty{color:var(--text-muted);font-size:12px;text-align:center;padding:24px 0}' +
+        /* donut + legenda à direita */
+        '.om-donut{display:flex;align-items:center;gap:18px;min-width:0}' +
+        '.om-donut svg{flex:0 0 150px;width:150px;height:150px}' +
+        '.om-dl{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:7px;font-size:12px}' +
+        '.om-dl-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto auto;gap:8px;align-items:center}' +
+        '.om-dl-row .om-sw{margin:0}' +
+        '.om-dl-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}' +
+        '.om-dl-v{color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}' +
+        '.om-dl-p{font-weight:600;min-width:46px;text-align:right;font-variant-numeric:tabular-nums}' +
+        /* barras horizontais empilhadas */
+        '.om-hb{display:flex;flex-direction:column;gap:12px;font-size:12px}' +
+        '.om-hb-row{display:grid;grid-template-columns:minmax(72px,112px) minmax(0,1fr) 36px;gap:10px;align-items:center}' +
+        '.om-hb-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+        '.om-hb-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;background:var(--bg-panel-alt)}' +
+        '.om-hb-seg{display:block;height:100%}' +
+        '.om-hb-t{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}' +
+        /* detalhamento mensal */
+        '.om-det-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
+        '.om-seg{display:flex;gap:6px;flex-wrap:wrap}' +
         '.om-pos{color:#5DD39E}.om-neg{color:#F27980}.om-flat{color:var(--text-muted)}' +
         '.om-scroll{overflow-x:auto}' +
-        '.om-gfam{padding:9px 16px 2px;font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--color-gold);border-top:1px solid var(--border-subtle)}' +
-        '.card-header+.om-gfam,.om-gfam+.om-kv{border-top:0}' +
         '.om-mtable{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}' +
         '.om-mtable th,.om-mtable td{padding:6px 10px;text-align:right;white-space:nowrap;border-top:1px solid var(--border-subtle)}' +
         '.om-mtable thead th{border-top:0;color:var(--text-secondary);font-size:11px;text-transform:uppercase;font-weight:600}' +
         '.om-mtable th:first-child,.om-mtable td:first-child{text-align:left;font-weight:600;position:sticky;left:0;background:var(--bg-panel);z-index:1}' +
+        '.om-mtable thead th:first-child{font-weight:600;text-transform:none;letter-spacing:0}' +
         '.om-mtable tr.om-total td{font-weight:700;background:var(--bg-panel-alt)}' +
         '.om-mtable td.om-dash{color:var(--text-muted)}' +
         '.om-trend{display:inline-block;width:12px;margin-left:4px;font-size:10px;text-align:center}' +
-        '.om-cards2{display:grid;grid-template-columns:1fr 1fr;gap:16px}' +
+        /* listas de pendências */
+        '.om-cards2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}' +
         '.om-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
+        /* reparos / importar / config */
         '.data-table .om-num,.om-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
         '.om-row-click{cursor:pointer}' +
         '.om-src{font-size:9px;padding:1px 5px;margin-left:5px;vertical-align:middle}' +
@@ -88,7 +133,8 @@
         '.om-tw td{white-space:nowrap}' +
         '.om-tw td.om-lote{white-space:normal;min-width:140px;max-width:260px}' +
         '.om-hint{font-size:12px;color:var(--text-muted);margin:4px 0 0}' +
-        '@media(max-width:1100px){.om-layout{grid-template-columns:1fr}.om-cards2{grid-template-columns:1fr}}' +
+        '@media(max-width:1100px){.om-g32,.om-g3,.om-cards2{grid-template-columns:1fr}.om-kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}}' +
+        '@media(max-width:560px){.om-donut{flex-direction:column;align-items:stretch}.om-donut svg{align-self:center}}' +
         '</style>';
 
     var S = null;   // window.SPARE, atribuído a cada render()
@@ -274,6 +320,19 @@
     }
 
     /* ── Painel ───────────────────────────────────────────────────── */
+    // Cores fixas por entidade (nunca por posição).
+    var FAM_COLOR = { COLETOR: '#F28C38', SLED: '#2FA39A' };
+    var CAT_COLOR = { 'Coletor': '#F28C38', 'Coletor HF550X': '#C79105', 'Sled RFID': '#2FA39A', 'Sled RFR901': '#4C8DFF' };
+    var CAT_OTHER = '#8A8F98';
+    var EST_COLOR = { ok: '#2FB56B', bad: '#E5484D', pend: '#FFC107', orc: '#4C8DFF' };
+    var DET_VIEWS = [
+        ['consumo',          'Consumo (R$)',                         true,  false],
+        ['reparados',        'Reparados',                            false, true],
+        ['reprovados_valor', 'Reprovados — valor de aquisição (R$)', true,  false],
+        ['reprovados_qtde',  'Reprovados (qtde)',                    false, false]
+    ];
+    function catColor(nome) { return CAT_COLOR[nome] || CAT_OTHER; }
+
     async function renderPainel(c) {
         c.innerHTML = STYLE +
             '<div class="om-top">' +
@@ -283,30 +342,59 @@
             '</div>' +
             '<div id="om-painel">' + SPIN + '</div>';
 
-        var sel = document.getElementById('om-ano');
+        var sel  = c.querySelector('#om-ano');
+        var host = c.querySelector('#om-painel');
         var anoSel = null;
 
         async function load() {
-            var host = document.getElementById('om-painel');
-            if (!host) return;
+            if (!host.isConnected) return;
             host.innerHTML = SPIN;
+            var d;
             try {
-                var d = await S.api(BASE + '/resumo' + qs({ ano: anoSel }));
-                anoSel = d.ano;
-                fillAnos(sel, d.anos_disponiveis, d.ano);
-                host.innerHTML = painelHtml(d);
-                host.querySelectorAll('.om-go').forEach(function (b) {
-                    b.onclick = function () { location.hash = ROUTE + '/' + b.getAttribute('data-go'); };
-                });
+                d = await S.api(BASE + '/resumo' + qs({ ano: anoSel }));
             } catch (e) {
+                if (!host.isConnected) return;
                 host.innerHTML = alertHtml(e.message);
                 S.toast(e.message, 'error');
+                return;
             }
+            if (!host.isConnected) return;
+            anoSel = d.ano;
+            fillAnos(sel, d.anos_disponiveis, d.ano);
+            host.innerHTML = painelHtml(d);
+            bindPainel(host, d);
         }
 
-        sel.onchange = function () { anoSel = sel.value; load(); };
-        document.getElementById('om-refresh').onclick = load;
+        sel.addEventListener('change', function () { anoSel = sel.value; load(); });
+        c.querySelector('#om-refresh').addEventListener('click', load);
         await load();
+    }
+
+    function bindPainel(host, d) {
+        function go(el) { location.hash = '#' + ROUTE + '/' + el.getAttribute('data-go'); }
+        host.querySelectorAll('.om-go').forEach(function (b) {
+            b.addEventListener('click', function () { go(b); });
+            if (b.tagName !== 'BUTTON') {
+                b.addEventListener('keydown', function (ev) {
+                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(b); }
+                });
+            }
+        });
+        // Controle segmentado do detalhamento mensal.
+        var seg = host.querySelector('.om-seg');
+        var tbl = host.querySelector('#om-det-table');
+        if (seg && tbl) {
+            seg.addEventListener('click', function (ev) {
+                var btn = ev.target.closest('button[data-key]');
+                if (!btn || !seg.contains(btn)) return;
+                seg.querySelectorAll('button').forEach(function (b) {
+                    var on = b === btn;
+                    b.classList.toggle('btn-primary', on);
+                    b.classList.toggle('btn-outline', !on);
+                });
+                tbl.innerHTML = monthTable(d, btn.getAttribute('data-key'));
+            });
+        }
     }
 
     function fillAnos(sel, anos, atual) {
@@ -319,80 +407,347 @@
         }).join('');
     }
 
-    function kv(k, v, big) {
-        return '<div class="om-kv"><span class="om-k">' + S.esc(k) + '</span>' +
-            '<span class="om-v' + (big ? ' om-big' : '') + '">' + v + '</span></div>';
+    /* ── formatação para gráficos ── */
+    // 1234567 → 'R$ 1,23 mi' · 110691 → 'R$ 110,7 mil' · 950 → 'R$ 950'
+    function abrev(v, dec) {
+        v = Number(v || 0);
+        var a = Math.abs(v);
+        function f(n, dg) { return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: dg }); }
+        if (a >= 1e6) return 'R$ ' + f(v / 1e6, dec != null ? dec : 2) + ' mi';
+        if (a >= 1e3) return 'R$ ' + f(v / 1e3, dec != null ? dec : 1) + ' mil';
+        return 'R$ ' + f(v, 0);
+    }
+    function pct1(x) {
+        return Number(x || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
+    }
+    // Passo "redondo" para que 4 linhas de grade cubram `max`.
+    function niceStep(raw, inteiro) {
+        if (!(raw > 0)) return 1;
+        if (inteiro && raw <= 1) return 1;
+        var p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+        var cands = inteiro && p < 10 ? [1, 2, 5, 10] : [1, 2, 2.5, 5, 10];
+        for (var i = 0; i < cands.length; i++) if (cands[i] * p >= raw - 1e-9) return cands[i] * p;
+        return 10 * p;
+    }
+    function sum(list, key) {
+        return (list || []).reduce(function (a, r) { return a + Number((r && r[key]) || 0); }, 0);
+    }
+    // Mapa 'AAAA-MM' → item de d.meses, sempre na ordem jan..dez do ano.
+    function mesesDoAno(d) {
+        var ano = Number(d.ano) || new Date().getFullYear();
+        var map = {};
+        (d.meses || []).forEach(function (m) { if (m && m.mes) map[String(m.mes).slice(0, 7)] = m; });
+        return MESES.map(function (_, i) {
+            var key = ano + '-' + pad2(i + 1);
+            return { key: key, item: map[key] || {} };
+        });
+    }
+    function blkVal(m, key, fam) {
+        var blk = (m && m[key]) || {};
+        if (fam === 'TOTAL' && blk.TOTAL == null) return Number(blk.COLETOR || 0) + Number(blk.SLED || 0);
+        return Number(blk[fam] || 0);
+    }
+    // Totais do ano com fallback (API antiga sem `totais`).
+    function totaisDe(d) {
+        var t = d.totais || {};
+        var g = d.gerais || {};
+        var meses = mesesDoAno(d);
+        var aprov = t.aprovados != null ? Number(t.aprovados) : Number((g.COLETOR || {}).reparados || 0) + Number((g.SLED || {}).reparados || 0);
+        var reprov = t.reprovados != null ? Number(t.reprovados)
+            : meses.reduce(function (a, m) { return a + blkVal(m.item, 'reprovados_qtde', 'TOTAL'); }, 0);
+        var reprovV = t.reprovados_valor != null ? Number(t.reprovados_valor)
+            : meses.reduce(function (a, m) { return a + blkVal(m.item, 'reprovados_valor', 'TOTAL'); }, 0);
+        var pend = t.pendentes != null ? Number(t.pendentes) : sum(d.aguardando_aprovacao, 'qtde');
+        var mc = t.meses_com_consumo != null ? Number(t.meses_com_consumo)
+            : meses.filter(function (m) { return blkVal(m.item, 'consumo', 'TOTAL') > 0; }).length;
+        var media = t.media_mensal != null ? Number(t.media_mensal) : (mc ? Number(d.total_investido || 0) / mc : 0);
+        var cota = Number(d.cota_mensal || 0);
+        var pctMes = t.percentual_cota_mes != null ? Number(t.percentual_cota_mes)
+            : (cota > 0 ? Number(d.consumo_atual || 0) / cota : null);
+        return {
+            aprovados: aprov, reprovados: reprov, reprovados_valor: reprovV, pendentes: pend,
+            garantia: Number(t.garantia || 0), meses_com_consumo: mc, media_mensal: media,
+            cota_anual: t.cota_anual != null ? Number(t.cota_anual) : cota * 12,
+            percentual_cota_mes: pctMes
+        };
+    }
+
+    /* ── ícones (SVG monocromático, currentColor) ── */
+    var ICON = {
+        cota:   '<path d="M4 6h16v12H4z"/><circle cx="12" cy="12" r="2.5"/><path d="M7 9v6M17 9v6"/>',
+        consumo:'<path d="M4 18V6M4 18h16"/><path d="M7 14l3-4 3 2 4-6"/>',
+        residual:'<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9h9"/>',
+        total:  '<path d="M5 20V10M10 20V4M15 20v-7M20 20v-4"/>',
+        reparo: '<path d="M14.5 4.5a4 4 0 0 0-5 5L4 15l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2-2z"/>',
+        reprov: '<circle cx="12" cy="12" r="8"/><path d="M9 9l6 6M15 9l-6 6"/>',
+        aprov:  '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+        devol:  '<path d="M4 12a8 8 0 1 1 3 6.2"/><path d="M4 18v-6h6"/>'
+    };
+    function iconSvg(name) {
+        return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            (ICON[name] || ICON.total) + '</svg>';
+    }
+
+    /* ── componentes ── */
+    function kpiCard(o) {
+        var go = o.go ? ' om-go" role="button" tabindex="0" data-go="' + S.esc(o.go) : '';
+        return '<div class="om-kpi' + go + '" style="--om-c:' + o.color + ';--om-cbg:' + o.color + '26"' +
+                (o.title ? ' title="' + S.esc(o.title) + '"' : '') + '>' +
+            '<div class="om-kpi-top"><div class="om-kpi-l">' + S.esc(o.label) + '</div>' +
+                '<div class="om-kpi-ic">' + iconSvg(o.icon) + '</div></div>' +
+            '<div class="om-kpi-v">' + o.value + '</div>' +
+            '<div class="om-kpi-s">' + o.sub + '</div>' +
+            '</div>';
+    }
+    function chartCard(titulo, body, legend, total) {
+        return '<div class="card om-chart">' +
+            '<div class="card-header">' + S.esc(titulo) + '</div>' +
+            '<div class="om-chart-body">' + body + '</div>' +
+            (legend ? '<div class="om-legend">' + legend + '</div>' : '') +
+            (total != null ? '<div class="om-foot">Total: <b>' + total + '</b></div>' : '') +
+            '</div>';
+    }
+    function legendItem(color, label) {
+        return '<span><i class="om-sw" style="background:' + color + '"></i>' + S.esc(label) + '</span>';
+    }
+    function emptyHtml(msg) { return '<div class="om-empty">' + S.esc(msg) + '</div>'; }
+
+    function kpisHtml(d, t) {
+        var e = S.esc;
+        var cota = Number(d.cota_mensal || 0);
+        var semCota = !(cota > 0);
+        var residual = Number(d.residual || 0);
+        var g = d.gerais || {};
+        var agAprQ = sum(d.aguardando_aprovacao, 'qtde'), agAprV = sum(d.aguardando_aprovacao, 'valor');
+        var agDevT = sum(d.aguardando_devolucao, 'total'), agDevM = sum(d.aguardando_devolucao, 'ag_manutencao');
+        var mesLbl = d.cota_em_uso ? 'Consumo · ' + fmtMes(d.cota_em_uso) : 'Consumo do mês';
+
+        var cards = [
+            kpiCard({ icon: 'cota', color: '#C79105', label: 'Cota mensal',
+                value: semCota ? '<span class="text-muted">não configurada</span>' : money(cota),
+                sub: semCota ? 'defina na aba Configuração' : 'cota anual ' + e(money(t.cota_anual)),
+                title: semCota ? 'Defina a cota do ano na aba Configuração' : '' }),
+            kpiCard({ icon: 'consumo', color: '#F28C38', label: mesLbl,
+                value: money(d.consumo_atual),
+                sub: semCota ? 'cota não definida'
+                    : (t.percentual_cota_mes != null ? e(pct1(t.percentual_cota_mes * 100)) + ' da cota' : 'sem consumo no mês') }),
+            kpiCard({ icon: 'residual', color: semCota ? '#8A8F98' : (residual >= 0 ? '#2FB56B' : '#E5484D'),
+                label: 'Residual do mês',
+                value: semCota ? '<span class="text-muted">–</span>' : money(residual),
+                sub: semCota ? 'cota não definida' : (residual >= 0 ? 'sobra' : 'acima da cota') }),
+            kpiCard({ icon: 'total', color: '#2FA39A', label: 'Total investido no ano',
+                value: money(d.total_investido),
+                sub: t.meses_com_consumo
+                    ? 'média ' + e(money(t.media_mensal)) + ' em ' + fmtInt(t.meses_com_consumo) + (t.meses_com_consumo === 1 ? ' mês' : ' meses')
+                    : 'sem consumo no ano' }),
+            kpiCard({ icon: 'reparo', color: '#2FB56B', label: 'Equipamentos reparados',
+                value: fmtInt(t.aprovados),
+                sub: 'COLETOR ' + fmtInt((g.COLETOR || {}).reparados) + ' · SLED ' + fmtInt((g.SLED || {}).reparados) +
+                     (t.garantia > 0 ? ' · ' + fmtInt(t.garantia) + ' em garantia' : '') }),
+            kpiCard({ icon: 'reprov', color: '#E5484D', label: 'Reprovados',
+                value: fmtInt(t.reprovados),
+                sub: e(money(t.reprovados_valor)) + ' em valor de aquisição' }),
+            kpiCard({ icon: 'aprov', color: '#FFC107', label: 'Aguardando aprovação',
+                value: fmtInt(agAprQ), sub: e(money(agAprV)) + ' em orçamentos',
+                go: 'reparos?status=AGUARDANDO_APROVACAO', title: 'Ver reparos aguardando aprovação' }),
+            kpiCard({ icon: 'devol', color: '#4C8DFF', label: 'Aguardando devolução',
+                value: fmtInt(agDevT), sub: fmtInt(agDevM) + ' aprovados em manutenção',
+                go: 'reparos?status_retorno=EM_MANUTENCAO', title: 'Ver reparos em manutenção' })
+        ];
+        return '<div class="om-kpis">' + cards.join('') + '</div>';
+    }
+
+    // Barras empilhadas COLETOR+SLED por mês, com linha da cota.
+    function consumoChart(d) {
+        var meses = mesesDoAno(d);
+        var cota = Number(d.cota_mensal || 0);
+        var vals = meses.map(function (m) {
+            return { key: m.key, c: blkVal(m.item, 'consumo', 'COLETOR'), s: blkVal(m.item, 'consumo', 'SLED') };
+        });
+        var totalAno = d.total_investido != null ? Number(d.total_investido) : vals.reduce(function (a, v) { return a + v.c + v.s; }, 0);
+        var max = Math.max.apply(null, vals.map(function (v) { return v.c + v.s; }).concat([cota]));
+        if (!(max > 0)) return chartCard('Consumo mensal × cota', emptyHtml('Sem consumo registrado no ano.'), null, money(0));
+
+        var W = 720, H = 260, L = 66, R = 14, T = 18, B = 28, iw = W - L - R, ih = H - T - B;
+        var step = niceStep(max * 1.05 / 4), top = step * 4;
+        function y(v) { return T + ih - (v / top) * ih; }
+        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Consumo mensal por família">';
+        for (var k = 0; k <= 4; k++) {
+            var yy = y(k * step).toFixed(1);
+            s += '<line class="om-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>' +
+                 '<text class="om-tk" x="' + (L - 8) + '" y="' + yy + '" dy="4" text-anchor="end">' + (k ? abrev(k * step, 1) : '0') + '</text>';
+        }
+        var slot = iw / 12, bw = Math.round(slot * 0.58);
+        vals.forEach(function (v, i) {
+            var x = (L + i * slot + (slot - bw) / 2).toFixed(1);
+            s += '<text class="om-tk" x="' + (L + i * slot + slot / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + MESES[i] + '</text>';
+            var base = 0;
+            [['COLETOR', v.c], ['SLED', v.s]].forEach(function (p) {
+                if (!(p[1] > 0)) return;
+                var y1 = y(base + p[1]), y0 = y(base);
+                var hgt = Math.max(1, y0 - y1);
+                s += '<rect x="' + x + '" y="' + (y0 - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) + '" fill="' + FAM_COLOR[p[0]] + '">' +
+                     '<title>' + S.esc(fmtMes(v.key) + ' · ' + p[0] + ' · ' + money(p[1])) + '</title></rect>';
+                base += p[1];
+            });
+        });
+        if (cota > 0) {
+            var yc = y(cota).toFixed(1);
+            s += '<line class="om-cota" x1="' + L + '" x2="' + (W - R) + '" y1="' + yc + '" y2="' + yc + '"/>' +
+                 '<text class="om-tk om-tk-cota" x="' + (W - R) + '" y="' + yc + '" dy="-5" text-anchor="end">cota ' + S.esc(abrev(cota, 1)) + '</text>';
+        }
+        s += '</svg>';
+        var legend = legendItem(FAM_COLOR.COLETOR, 'COLETOR') + legendItem(FAM_COLOR.SLED, 'SLED') +
+            (cota > 0 ? '<span><i class="om-sw om-sw-line"></i>cota mensal</span>' : '');
+        return chartCard('Consumo mensal × cota', s, legend, money(totalAno));
+    }
+
+    // Barras finas agrupadas: reparados (verde) × reprovados (vermelho) por mês.
+    function qtdeChart(d) {
+        var meses = mesesDoAno(d);
+        var vals = meses.map(function (m) {
+            return { key: m.key, a: blkVal(m.item, 'reparados', 'TOTAL'), r: blkVal(m.item, 'reprovados_qtde', 'TOTAL') };
+        });
+        var max = Math.max.apply(null, vals.map(function (v) { return Math.max(v.a, v.r); }));
+        var totA = vals.reduce(function (a, v) { return a + v.a; }, 0), totR = vals.reduce(function (a, v) { return a + v.r; }, 0);
+        if (!(max > 0)) return chartCard('Reparados × reprovados por mês', emptyHtml('Sem reparos registrados no ano.'), null, '0');
+
+        var W = 380, H = 220, L = 40, R = 8, T = 14, B = 24, iw = W - L - R, ih = H - T - B;
+        var step = niceStep(max * 1.05 / 4, true), top = step * 4;
+        function y(v) { return T + ih - (v / top) * ih; }
+        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Reparados e reprovados por mês">';
+        for (var k = 0; k <= 4; k++) {
+            var yy = y(k * step).toFixed(1);
+            s += '<line class="om-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>' +
+                 '<text class="om-tk" x="' + (L - 6) + '" y="' + yy + '" dy="4" text-anchor="end">' + fmtInt(k * step) + '</text>';
+        }
+        var slot = iw / 12, bw = Math.max(4, Math.floor(slot * 0.28)), gap = 2;
+        vals.forEach(function (v, i) {
+            var cx = L + i * slot + slot / 2;
+            s += '<text class="om-tk" x="' + cx.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + MESES[i] + '</text>';
+            [[v.a, EST_COLOR.ok, 'reparados', cx - gap / 2 - bw], [v.r, EST_COLOR.bad, 'reprovados', cx + gap / 2]].forEach(function (p) {
+                if (!(p[0] > 0)) return;
+                var hgt = Math.max(1, y(0) - y(p[0]));
+                s += '<rect x="' + p[3].toFixed(1) + '" y="' + (y(0) - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) + '" fill="' + p[1] + '" rx="1">' +
+                     '<title>' + S.esc(fmtMes(v.key) + ' · ' + p[2] + ' · ' + fmtInt(p[0])) + '</title></rect>';
+            });
+        });
+        s += '</svg>';
+        var legend = legendItem(EST_COLOR.ok, 'Reparados') + legendItem(EST_COLOR.bad, 'Reprovados');
+        return chartCard('Reparados × reprovados por mês', s, legend, fmtInt(totA) + ' reparados · ' + fmtInt(totR) + ' reprovados');
+    }
+
+    // Donut genérico: items = [{label, value, color, fmt}], centro = texto grande.
+    function donutHtml(items, centro, centroSub, fmtVal) {
+        var total = items.reduce(function (a, it) { return a + it.value; }, 0);
+        var used = items.filter(function (it) { return it.value > 0; });
+        var size = 150, cx = 75, cy = 75, r = 56, C = 2 * Math.PI * r, gap = used.length > 1 ? 2.5 : 0;
+        var s = '<svg viewBox="0 0 ' + size + ' ' + size + '" role="img">' +
+            '<circle class="om-dtrack" cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
+            '<g transform="rotate(-90 ' + cx + ' ' + cy + ')">';
+        var off = 0;
+        used.forEach(function (it) {
+            var len = C * it.value / total;
+            var dash = Math.max(0.5, len - gap);
+            s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + it.color + '" stroke-width="16"' +
+                 ' stroke-dasharray="' + dash.toFixed(2) + ' ' + (C - dash).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '">' +
+                 '<title>' + S.esc(it.label + ' · ' + fmtVal(it.value) + ' · ' + pct1(it.value / total * 100)) + '</title></circle>';
+            off += len;
+        });
+        s += '</g>' +
+            '<text class="om-dc" x="' + cx + '" y="' + cy + '" dy="' + (centroSub ? 2 : 5) + '" text-anchor="middle">' + S.esc(centro) + '</text>' +
+            (centroSub ? '<text class="om-dc2" x="' + cx + '" y="' + cy + '" dy="16" text-anchor="middle">' + S.esc(centroSub) + '</text>' : '') +
+            '</svg>';
+        var leg = items.map(function (it) {
+            return '<div class="om-dl-row"><i class="om-sw" style="background:' + it.color + '"></i>' +
+                '<span class="om-dl-n" title="' + S.esc(it.label) + '">' + S.esc(it.label) + '</span>' +
+                '<span class="om-dl-v">' + S.esc(fmtVal(it.value)) + '</span>' +
+                '<span class="om-dl-p">' + S.esc(total ? pct1(it.value / total * 100) : '–') + '</span></div>';
+        }).join('');
+        return '<div class="om-donut">' + s + '<div class="om-dl">' + leg + '</div></div>';
+    }
+
+    function categoriaChart(d) {
+        var cats = (d.categorias || []).map(function (r) {
+            return { label: r.categoria || '—', value: Number(r.consumo || 0), color: catColor(r.categoria) };
+        }).filter(function (it) { return it.value > 0; })
+          .sort(function (a, b) { return b.value - a.value; });
+        var total = cats.reduce(function (a, it) { return a + it.value; }, 0);
+        var body = cats.length ? donutHtml(cats, abrev(total), 'consumo', money) : emptyHtml('Sem consumo por categoria no ano.');
+        return chartCard('Consumo por categoria', body, null, money(total));
+    }
+
+    function resultadoChart(t) {
+        var items = [
+            { label: 'Aprovados',  value: t.aprovados,  color: EST_COLOR.ok },
+            { label: 'Reprovados', value: t.reprovados, color: EST_COLOR.bad },
+            { label: 'Pendentes',  value: t.pendentes,  color: EST_COLOR.pend }
+        ];
+        var total = items.reduce(function (a, it) { return a + it.value; }, 0);
+        var body = total ? donutHtml(items, fmtInt(total), 'orçamentos', fmtInt) : emptyHtml('Sem orçamentos no ano.');
+        return chartCard('Resultado dos orçamentos no ano', body, null, fmtInt(total) + ' orçamentos');
+    }
+
+    // Barras horizontais empilhadas por categoria (aguardando devolução).
+    function devolucaoChart(list) {
+        list = (list || []).filter(function (r) { return Number(r.total || 0) > 0; })
+            .sort(function (a, b) { return Number(b.total || 0) - Number(a.total || 0); });
+        var SEGS = [['ag_manutencao', EST_COLOR.ok, 'Ag. manutenção'], ['ag_orcamento', EST_COLOR.orc, 'Ag. orçamento'],
+                    ['ag_aprovacao', EST_COLOR.pend, 'Ag. aprovação'], ['reprovado', EST_COLOR.bad, 'Reprovado']];
+        var total = sum(list, 'total');
+        if (!list.length) return chartCard('Aguardando devolução por categoria', emptyHtml('Nenhum equipamento aguardando devolução'), null, '0');
+        var max = Math.max.apply(null, list.map(function (r) { return Number(r.total || 0); }));
+        var rows = list.map(function (r) {
+            var tot = Number(r.total || 0);
+            var segs = SEGS.map(function (sg) {
+                var v = Number(r[sg[0]] || 0);
+                if (!(v > 0)) return '';
+                return '<span class="om-hb-seg" style="width:' + (v / max * 100).toFixed(2) + '%;background:' + sg[1] + '"' +
+                       ' title="' + S.esc((r.categoria || '—') + ' · ' + sg[2] + ' · ' + fmtInt(v)) + '"></span>';
+            }).join('');
+            return '<div class="om-hb-row"><span class="om-hb-n" title="' + S.esc(r.categoria || '—') + '">' + S.esc(r.categoria || '—') + '</span>' +
+                '<span class="om-hb-bar">' + segs + '</span><span class="om-hb-t">' + fmtInt(tot) + '</span></div>';
+        }).join('');
+        var legend = SEGS.map(function (sg) { return legendItem(sg[1], sg[2]); }).join('');
+        return chartCard('Aguardando devolução por categoria', '<div class="om-hb">' + rows + '</div>', legend, fmtInt(total) + ' equipamentos');
+    }
+
+    function detalhamentoHtml(d) {
+        var seg = DET_VIEWS.map(function (v, i) {
+            return '<button class="btn btn-sm ' + (i === 0 ? 'btn-primary' : 'btn-outline') + '" data-key="' + v[0] + '">' + S.esc(v[1]) + '</button>';
+        }).join('');
+        return '<div class="card">' +
+            '<div class="om-det-head"><span>Detalhamento mensal</span><div class="om-seg">' + seg + '</div></div>' +
+            '<div id="om-det-table" class="om-scroll">' + monthTable(d, DET_VIEWS[0][0]) + '</div></div>';
     }
 
     function painelHtml(d) {
-        var e = S.esc;
-        var residual = Number(d.residual || 0);
-        var semCota = !(Number(d.cota_mensal) > 0);
-        var fin = '<div class="card"><div class="card-header">FINANCEIRO</div>' +
-            kv('Cota mensal', semCota
-                ? '<span class="text-muted" title="Defina a cota do ano na aba Configuração">não configurada</span>'
-                : money(d.cota_mensal)) +
-            kv('Cota em uso (mês)', e(fmtMes(d.cota_em_uso))) +
-            kv('Consumo atual', money(d.consumo_atual)) +
-            kv('Residual', semCota
-                ? '<span class="text-muted">–</span>'
-                : '<span class="' + (residual >= 0 ? 'om-pos' : 'om-neg') + '">' + money(d.residual) + '</span>', true) +
-            kv('Total investido', money(d.total_investido)) +
+        var t = totaisDe(d);
+        return '<div class="om-stack">' +
+            kpisHtml(d, t) +
+            '<div class="om-g32">' + consumoChart(d) + categoriaChart(d) + '</div>' +
+            '<div class="om-g3">' + qtdeChart(d) + resultadoChart(t) + devolucaoChart(d.aguardando_devolucao) + '</div>' +
+            detalhamentoHtml(d) +
+            '<div class="om-cards2">' + aprovacaoHtml(d.aguardando_aprovacao) + devolucaoHtml(d.aguardando_devolucao) + '</div>' +
             '</div>';
-
-        var g = d.gerais || {};
-        function geraisFam(rotulo, x) {
-            x = x || {};
-            return '<div class="om-gfam">' + S.esc(rotulo) + '</div>' +
-                kv('Consumo', money(x.consumo)) +
-                kv('Equipamentos reparados', fmtInt(x.reparados)) +
-                kv('Média por reparo', money(x.media));
-        }
-        var gerais = '<div class="card"><div class="card-header">INFORMAÇÕES GERAIS</div>' +
-            geraisFam('COLETOR', g.COLETOR) +
-            geraisFam('SLED', g.SLED) +
-            (d.limiar_percentual != null
-                ? '<div class="om-kv"><span class="om-k">Limiar da regra</span><span class="om-v">' + e(fmtPct(d.limiar_percentual)) + '</span></div>'
-                : '') +
-            '</div>';
-
-        var tabelas =
-            monthTable('Consumo mês a mês (R$)', d, 'consumo', true, false) +
-            monthTable('Equipamentos reparados', d, 'reparados', false, true) +
-            monthTable('Reprovados — valor de aquisição (R$)', d, 'reprovados_valor', true, false) +
-            monthTable('Equipamentos reprovados', d, 'reprovados_qtde', false, false);
-
-        return '<div class="om-layout">' +
-                '<div class="om-side">' + fin + gerais + '</div>' +
-                '<div class="om-main">' + tabelas + '</div>' +
-            '</div>' +
-            '<div class="om-cards2">' + aprovacaoHtml(d.aguardando_aprovacao) + devolucaoHtml(d.aguardando_devolucao) + '</div>';
     }
 
-    // Tabela JAN..DEZ × COLETOR/SLED/TOTAL. goodUp: subir é bom (reparados).
-    function monthTable(titulo, d, key, isMoney, goodUp) {
-        var ano = Number(d.ano) || new Date().getFullYear();
-        var map = {};
-        (d.meses || []).forEach(function (m) {
-            if (m && m.mes) map[String(m.mes).slice(0, 7)] = m;
-        });
+    // Tabela JAN..DEZ × COLETOR/SLED/TOTAL para a chave `key` de d.meses[].
+    function monthTable(d, key) {
+        var view = DET_VIEWS.filter(function (v) { return v[0] === key; })[0] || DET_VIEWS[0];
+        var isMoney = view[2], goodUp = view[3];
+        var meses = mesesDoAno(d);
         var fams = ['COLETOR', 'SLED', 'TOTAL'];
         var vals = {};
         fams.forEach(function (f) {
-            vals[f] = MESES.map(function (_, i) {
-                var m = map[ano + '-' + pad2(i + 1)];
-                var blk = (m && m[key]) || {};
-                if (f === 'TOTAL' && blk.TOTAL == null) {
-                    return Number(blk.COLETOR || 0) + Number(blk.SLED || 0);
-                }
-                return Number(blk[f] || 0);
-            });
+            vals[f] = meses.map(function (m) { return blkVal(m.item, key, f); });
         });
 
         function cell(v, extra) {
             if (!v) return '<td class="om-dash">–</td>';
             return '<td>' + (isMoney ? fmtDec(v) : fmtInt(v)) + (extra || '') + '</td>';
         }
+        // ▲▼▬ na linha TOTAL: verde quando a variação é boa (goodUp: subir é bom).
         function trend(cur, prev, i) {
             if (!cur || i === 0) return '<span class="om-trend"></span>';
             var diff = cur - prev;
@@ -402,8 +757,7 @@
             return '<span class="om-trend ' + (good ? 'om-pos' : 'om-neg') + '">' + (up ? '▲' : '▼') + '</span>';
         }
 
-        var h = '<div class="card"><div class="card-header">' + S.esc(titulo) + '</div>' +
-            '<div class="om-scroll"><table class="om-mtable"><thead><tr><th></th>' +
+        var h = '<table class="om-mtable"><thead><tr><th>' + S.esc(view[1]) + '</th>' +
             MESES.map(function (m) { return '<th>' + m + '</th>'; }).join('') +
             '</tr></thead><tbody>';
         fams.forEach(function (f) {
@@ -414,7 +768,7 @@
             });
             h += '</tr>';
         });
-        return h + '</tbody></table></div></div>';
+        return h + '</tbody></table>';
     }
 
     function aprovacaoHtml(list) {
