@@ -242,9 +242,26 @@ def diagnostico_corporativo() -> tuple[bool, str]:
     mod = _resolver_modulo()
     if mod is not None:
         fn = _funcao_do_modulo(mod)
-        if fn:
-            return True, f"{_modulo_via}, função {fn.__name__}()"
-        return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
+        if not fn:
+            return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
+        # Módulo carregado NÃO é o mesmo que cofre respondendo: o loader pode
+        # existir e mesmo assim não devolver nada (arquivo sem permissão para
+        # este usuário, chave com outro nome). Só uma leitura de verdade
+        # decide — e sem ela o diagnóstico dava "FUNCIONA" para um cofre mudo.
+        chave = os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
+        try:
+            valor = fn(chave)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{_modulo_via}, mas {fn.__name__}('{chave}') falhou: {exc}"
+        if valor:
+            return True, (f"{_modulo_via}, função {fn.__name__}() — leitura "
+                          f"confirmada com a chave '{chave}'")
+        return False, (
+            f"{_modulo_via}, função {fn.__name__}(), mas não devolveu valor para "
+            f"'{chave}'. Ou a chave tem outro nome (python3 scripts/cofre.py sondar), "
+            f"ou este usuário não alcança o cofre. Para testar com outra chave: "
+            f"COFRE_CHAVE_TESTE=NOME python3 scripts/cofre.py acesso"
+        )
     if _ler_arquivo_cofre():
         return True, f"arquivo lido direto ({CAMINHO_ARQUIVO})"
     if os.path.exists(CAMINHO_ARQUIVO):
