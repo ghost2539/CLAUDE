@@ -27,10 +27,17 @@ echo "-- Python $VER"
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' || {
     echo "ERRO: é necessário Python 3.10 ou superior (encontrado $VER)."; exit 1; }
 
+# --system-site-packages: o cofre corporativo (vcreports_secrets) fica
+# instalado no Python do SISTEMA. Sem esta opção o venv não o enxerga e as
+# credenciais dos Correios somem, mesmo estando no cofre.
 if [ ! -x "$APP_DIR/venv/bin/python" ]; then
-    echo "-- Criando o venv"
-    python3 -m venv "$APP_DIR/venv" || {
+    echo "-- Criando o venv (enxergando os pacotes do sistema)"
+    python3 -m venv --system-site-packages "$APP_DIR/venv" || {
         echo "ERRO: falha ao criar o venv. Falta o pacote python3-venv?"; exit 1; }
+elif ! grep -q "include-system-site-packages = true" "$APP_DIR/venv/pyvenv.cfg" 2>/dev/null; then
+    echo "-- Ajustando o venv para enxergar os pacotes do sistema"
+    sed -i "s|include-system-site-packages = false|include-system-site-packages = true|" \
+        "$APP_DIR/venv/pyvenv.cfg" 2>/dev/null || true
 fi
 "$APP_DIR/venv/bin/pip" install -q --upgrade pip
 echo "-- Instalando dependências (pode demorar)"
@@ -46,40 +53,28 @@ chmod 700 "$ENVDIR"
 if [ -f "$ENVFILE" ]; then
     echo "-- Arquivo de ambiente já existe (mantido): $ENVFILE"
 else
-    echo "-- Gerando $ENVFILE"
-    SEGREDO="$("$APP_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
-    cat > "$ENVFILE" <<EOF
-# Ambiente do Portal SPARE — NÃO versionar. Gerado em $(date '+%d/%m/%Y %H:%M').
-
-# Banco principal. Em produção é Postgres:
-#   DATABASE_URL=postgresql+psycopg2://usuario:senha@host:5432/portal_spare
-# Para TESTE sem servidor de banco, o SQLite abaixo já funciona:
-DATABASE_URL=sqlite:///$APP_DIR/data/db/portal.db
-
-PORTAL_SESSION_SECRET=$SEGREDO
-
-HOST=0.0.0.0
-PORT=8901
-WORKERS=1
-
-# Primeiro administrador: coloque aqui o SEU login de rede, senão ninguém
-# consegue liberar o acesso de mais ninguém.
-INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
-
-# ── Integrações (preencher conforme for testando) ──
-# EBS_LOGIN_URL=
-# SN_API_USER=
-# SN_API_PASSWORD=
-# CORREIOS_USUARIO=
-# CORREIOS_CHAVE=
-
-# ── Alertas por e-mail (opcional) ──
-# SMTP_HOST=
-# SMTP_PORT=25
-# ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
-EOF
+    echo "-- Gerando $ENVFILE a partir de deploy/environment.modelo"
+    cp "$APP_DIR/deploy/environment.modelo" "$ENVFILE"
     chmod 600 "$ENVFILE"
-    echo "   >> AJUSTE o INITIAL_ADMIN_LOGIN antes de subir."
+
+    # O segredo de sessão nasce NO COFRE: o environment é lido por qualquer
+    # um que abra o arquivo e entra em backup.
+    SEGREDO="$("$APP_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    if "$APP_DIR/venv/bin/python" "$APP_DIR/scripts/cofre.py" definir \
+            PORTAL_SESSION_SECRET --valor "$SEGREDO" >/dev/null 2>&1; then
+        echo "   segredo de sessão gerado e guardado no cofre"
+    else
+        echo "   AVISO: não consegui gravar no cofre; gravando no arquivo."
+        sed -i "s|^PORTAL_SESSION_SECRET=.*|PORTAL_SESSION_SECRET=$SEGREDO|" "$ENVFILE"
+    fi
+    unset SEGREDO
+
+    # Banco: SQLite local já preenchido, para o portal subir sem servidor de
+    # banco. Trocar para Postgres é editar uma linha.
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=sqlite:///$APP_DIR/data/db/portal.db|" "$ENVFILE"
+
+    echo "   >> Falta preencher o que está marcado com [PREENCHER]:"
+    grep -n "\[PREENCHER\]" "$ENVFILE" | sed 's/^/      /' | head -20
 fi
 
 # ── 4. Conferência: o app carrega? ──────────────────────────────────────────
@@ -112,6 +107,18 @@ print(f"   OK — {len(anda(main.app.routes, set()))} rotas registradas.")
 PY
 [ $? -eq 0 ] || { echo "ERRO: a aplicação não subiu. Verifique o log acima."; exit 1; }
 
+# ── 5. Cofre corporativo ────────────────────────────────────────────────
+echo "-- Cofre corporativo (vcreports_secrets)"
+if "$APP_DIR/venv/bin/python" -c "import vcreports_secrets" 2>/dev/null; then
+    echo "   disponível — Correios e demais chaves saem dele"
+elif python3 -c "import vcreports_secrets" 2>/dev/null; then
+    echo "   ATENÇÃO: o Python do sistema enxerga o cofre, mas o venv NÃO."
+    echo "   Corrija com:"
+    echo "     rm -rf $APP_DIR/venv && bash $APP_DIR/deploy/instalar_usuario.sh"
+else
+    echo "   indisponível neste servidor — os segredos ficam no cofre local"
+fi
+
 chmod +x "$APP_DIR/deploy/portal.sh" 2>/dev/null
 
 cat <<EOF
@@ -119,6 +126,9 @@ cat <<EOF
 == Pronto ==
 
   1. Revise o ambiente:   $ENVFILE
+     Segredos NÃO vão nele — guarde no cofre:
+        $APP_DIR/venv/bin/python scripts/cofre.py definir NOME
+        $APP_DIR/venv/bin/python scripts/cofre.py conferir
   2. Suba o portal:       $APP_DIR/deploy/portal.sh start
   3. Confira:             $APP_DIR/deploy/portal.sh status
   4. Acompanhe o log:     $APP_DIR/deploy/portal.sh logs

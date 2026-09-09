@@ -9,11 +9,11 @@
 #  É SOMENTE LEITURA no sistema — não altera nada da aplicação.
 #
 #  Agendar diariamente às 02h (crontab -e):
-#    0 2 * * * /opt/portal-spare-v2/scripts/backup.sh >> $HOME/backup-portal.log 2>&1
+#    0 2 * * * /var/www/vcreports/portal-spare/scripts/backup.sh >> $HOME/backup-portal.log 2>&1
 # ============================================================================
 set -uo pipefail
 
-APP_DIR="${PORTAL_APP_DIR:-/opt/portal-spare-v2}"
+APP_DIR="${PORTAL_APP_DIR:-/var/www/vcreports/portal-spare}"
 ENVFILE="${PORTAL_ENVFILE:-/etc/portal_operacoes_spare/environment}"
 DEST="${1:-$HOME/backups-portal-spare}"
 RET_DAYS="${BACKUP_RETENTION_DAYS:-30}"

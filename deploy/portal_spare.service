@@ -1,27 +1,48 @@
 [Unit]
-Description=Portal de Operacoes - SPARE v2
-After=network-online.target postgresql.service
+# Portal de Operações SPARE — serviço do sistema (servidor novo).
+#
+# Instalar em /etc/systemd/system/portal-spare.service e:
+#   systemctl daemon-reload && systemctl enable --now portal-spare
+#
+# O portal usa SQLite em data/db/ por padrão; não depende de banco externo.
+# Se um dia passar a usar PostgreSQL na mesma máquina, acrescente
+# "After=postgresql.service" — NUNCA "Requires=", que impede a subida
+# quando o banco está fora e não é o caso hoje.
+Description=Portal de Operacoes SPARE
+After=network-online.target
 Wants=network-online.target
-Requires=postgresql.service
 
 [Service]
 Type=simple
 User=portalspare
 Group=portalspare
-WorkingDirectory=/opt/portal-spare-v2
+WorkingDirectory=/var/www/vcreports/portal-spare
+
+# Só configuração aqui. NENHUM segredo: usuário e senha ficam no cofre
+# (veja Environment=PORTAL_COFRE_DIR abaixo). Permissão 640 root:portalspare.
 EnvironmentFile=/etc/portal_operacoes_spare/environment
-ExecStart=/opt/portal-spare-v2/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8901 --workers 1
+
+# Onde mora o cofre local cifrado. Fora do diretório da aplicação (git,
+# pacote de deploy e cópia da pasta não levam o cofre junto) e fora de
+# /home, porque ProtectHome=yes esconde /home do serviço — com o padrão
+# ~/.config/portal-spare o portal subiria sem enxergar segredo nenhum.
+Environment=PORTAL_COFRE_DIR=/etc/portal_operacoes_spare/cofre
+
+ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app \
+    --host 0.0.0.0 --port 8901 --workers 1
 Restart=on-failure
 RestartSec=5
-# Credenciais protegidas via systemd
-LoadCredentialEncrypted=ebs_public_username:/etc/portal_operacoes_spare/credentials/ebs_public_username
-LoadCredentialEncrypted=ebs_public_password:/etc/portal_operacoes_spare/credentials/ebs_public_password
-# Seguranca de processo
+
+# Segurança de processo
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/portal-spare-v2/data
 PrivateTmp=yes
+UMask=0027
+# Únicos caminhos graváveis: os dados do portal (bancos SQLite, uploads,
+# capturas) e o cofre, que o CLI regrava ao definir um segredo.
+ReadWritePaths=/var/www/vcreports/portal-spare/data
+ReadWritePaths=/etc/portal_operacoes_spare/cofre
 
 [Install]
 WantedBy=multi-user.target
