@@ -222,6 +222,41 @@ def _match_regra(subcategoria: str, regras: list[dict]) -> dict | None:
     return None
 
 
+def _aplicar(session, sys_id: str, campos: dict, conferir: dict | None = None) -> dict:
+    """Grava campos no incidente e CONFERE relendo o registro.
+
+    O JSONv2 devolve 200 com o registro mesmo quando a instância DESCARTA o
+    campo enviado — ACL de escrita do usuário, regra de negócio que devolve o
+    grupo, valor de referência recusado. Como `_sn_update` só olha para o
+    status e para a presença de `records`, a rotina anunciava "encaminhado"
+    com o chamado parado na fila de origem. Relendo, o log passa a dizer a
+    verdade: erro com o que foi enviado e o que o ServiceNow manteve.
+
+    `conferir` é {campo: (valores aceitos,)}; sem ele, só grava.
+    """
+    _sn_update(session, INCIDENT_TABLE, sys_id, campos)
+    if not conferir:
+        return {}
+    # display_value=False: precisamos do valor cru (sys_id do grupo, número do
+    # estado), não do rótulo traduzido que o usuário vê na tela.
+    recs = _sn_query(session, INCIDENT_TABLE, f"sys_id={sys_id}",
+                     ",".join(conferir.keys()), 1, display_value=False)
+    if not recs:
+        raise RuntimeError(
+            "ServiceNow aceitou a escrita mas o chamado não pôde ser relido "
+            "para conferência (sys_id=%s)" % sys_id)
+    atual = recs[0]
+    divergencias = []
+    for campo, aceitos in conferir.items():
+        ficou = str(_display(atual.get(campo)) or "").strip()
+        if ficou not in [str(a).strip() for a in aceitos]:
+            divergencias.append("%s: enviado '%s', ServiceNow manteve '%s'"
+                                % (campo, campos.get(campo, ""), ficou))
+    if divergencias:
+        raise RuntimeError("ServiceNow não aplicou a alteração — " + "; ".join(divergencias))
+    return atual
+
+
 def _grupo_sys_id(session, nome: str) -> str:
     recs = _sn_query(session, "sys_user_group", f"name={nome}", "sys_id,name", 1, display_value=False)
     if recs:
@@ -277,30 +312,41 @@ def _rodar(session, origem: str, usuario: str) -> dict:
         acao = regra.get("acao", "encerrar")
         try:
             if acao == "encaminhar":
-                gid = _grupo_sys_id(session, regra.get("fila_destino", ""))
+                destino = regra.get("fila_destino", "")
+                gid = _grupo_sys_id(session, destino)
                 if not gid:
-                    raise RuntimeError("fila destino não encontrada: %s" % regra.get("fila_destino"))
-                _sn_update(session, INCIDENT_TABLE, sys_id, {
+                    raise RuntimeError("fila destino não encontrada: %s" % destino)
+                estado = _estado_canonico(str(_display(inc.get("state")) or ""))
+                if estado == "on_hold":
+                    # Em Espera costuma recusar a troca de grupo; o ramo de
+                    # encerrar já usa essa mesma transição antes de agir.
+                    _aplicar(session, sys_id, {"state": "2"})
+                _aplicar(session, sys_id, {
                     "assignment_group": gid,
+                    # Responsável que não pertence à fila destino faz a regra de
+                    # negócio devolver o grupo — quem encaminha na mão limpa.
+                    "assigned_to": "",
                     "work_notes": regra.get("mensagem", ""),
-                })
+                }, {"assignment_group": (gid,)})
                 resumo["encaminhados"] += 1
                 db.add_log(origem=origem, usuario=usuario, number=number, sys_id=sys_id,
                            subcategoria=subcat, acao="encaminhar", fila_origem=queue,
-                           fila_destino=regra.get("fila_destino", ""), resultado="ok",
-                           detalhe="Encaminhado (%s)" % regra.get("nome", ""))
+                           fila_destino=destino, resultado="ok",
+                           detalhe="Encaminhado para '%s' (%s)" % (destino, regra.get("nome", "")))
                 resumo["acoes"].append({"number": number, "acao": "encaminhar",
                                         "fila_destino": regra.get("fila_destino", "")})
             else:  # encerrar (transição 3->2->6)
                 estado = _estado_canonico(str(_display(inc.get("state")) or ""))
                 if estado == "on_hold":
-                    _sn_update(session, INCIDENT_TABLE, sys_id, {"state": "2"})
-                _sn_update(session, INCIDENT_TABLE, sys_id, {
+                    _aplicar(session, sys_id, {"state": "2"})
+                # Tolerância no 7 (Closed): a instância pode avançar sozinha de
+                # Resolved para Closed, e isso não é erro.
+                _aplicar(session, sys_id, {
                     "state": "6",
                     "u_caused_by_change": "no",
                     "close_code": CLOSE_CODE,
                     "close_notes": regra.get("mensagem", ""),
-                })
+                }, {"state": ("6", "7")})
                 resumo["encerrados"] += 1
                 db.add_log(origem=origem, usuario=usuario, number=number, sys_id=sys_id,
                            subcategoria=subcat, acao="encerrar", fila_origem=queue,
