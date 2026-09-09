@@ -1,0 +1,49 @@
+# ============================================================================
+#  Portal de Operações SPARE — ambiente do servidor novo.
+#
+#  Lugar: /var/www/vcreports/portal-spare/data/environment   (permissão 600)
+#
+#  REGRA: nenhuma senha aqui. Segredo é o marcador @cofre:NOME@ — ou nem tem
+#  linha, quando o portal busca o valor direto no cofre.
+#
+#  ATENÇÃO: este arquivo é lido pelo systemd (EnvironmentFile=). Comentário
+#  SÓ em linha própria: texto depois do valor entraria no valor.
+#
+#  O que NÃO está aqui tem padrão no código ou se ajusta pela tela do portal.
+#  Acrescentar variável só quando a máquina exigir algo diferente do padrão.
+# ============================================================================
+
+# ── Cofre ───────────────────────────────────────────────────────────────
+# Ordem de busca de todo segredo: cofre corporativo, cofre local cifrado,
+# variável de ambiente.
+COFRE_CORPORATIVO=sim
+# Cofre local dentro da pasta do portal, sob data/ — nada é gravado fora.
+PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
+
+# ── Servidor ────────────────────────────────────────────────────────────
+HOST=0.0.0.0
+PORT=8901
+# Tela "Consulta de Ativos — Times" também na porta do aplicativo antigo,
+# no MESMO processo. 0 desliga o espelho.
+CONSULTA_TIMES_PORTA=8502
+# Sistemas internos usam certificado próprio.
+VERIFY_SSL=false
+
+# Saída direta, sem proxy. As três linhas ficam VAZIAS de propósito: variável
+# declarada e vazia é decisão e encerra a busca. Ausentes, o portal herdaria
+# um https_proxy do perfil do servidor e toda chamada de API iria para um
+# endereço que não existe aqui.
+HTTPS_PROXY=
+SN_PROXY=
+SN_API_PROXY=
+
+# ── Banco ───────────────────────────────────────────────────────────────
+DATABASE_URL=sqlite:////var/www/vcreports/portal-spare/data/db/portal.db
+
+# ── Sessão e primeiro administrador ─────────────────────────────────────
+PORTAL_SESSION_SECRET=@cofre:PORTAL_SESSION_SECRET@
+INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@
+
+# ── EBS — API REST ──────────────────────────────────────────────────────
+EBS_LOGIN_URL=https://suporte.lojasrenner.com.br/ebs/api/auth/login
+EBS_SEARCH_URL=https://suporte.lojasrenner.com.br/ebs/api/estoque/busca-imobilizado
