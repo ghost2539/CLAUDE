@@ -147,6 +147,19 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Orçamento de Manutenção (reparo de coletores e SLEDs) — banco próprio
+    # Acesso pelo módulo de permissão "orcamento_manutencao".
+    try:
+        import db.orcamento_manutencao as _db_orc_manut
+        _db_orc_manut.init_db()
+        from routers.orcamento_manutencao import router as orcamento_manutencao_router
+        app.include_router(orcamento_manutencao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("orcamento_manutencao").error(
+            "Módulo Orçamento Manutenção NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
     # Aditivo: só observa. Falha aqui nunca derruba o portal.
     try:

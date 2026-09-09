@@ -209,7 +209,7 @@
         raw.forEach(function (x) {
             var v, l;
             if (x && typeof x === 'object') {
-                v = x.value != null ? x.value : (x.codigo != null ? x.codigo : (x.id != null ? x.id : x.nome));
+                v = x.valor != null ? x.valor : (x.value != null ? x.value : (x.codigo != null ? x.codigo : (x.id != null ? x.id : x.nome)));
                 l = x.label || x.rotulo || x.nome || v;
             } else {
                 v = x;
@@ -327,11 +327,16 @@
     function painelHtml(d) {
         var e = S.esc;
         var residual = Number(d.residual || 0);
+        var semCota = !(Number(d.cota_mensal) > 0);
         var fin = '<div class="card"><div class="card-header">FINANCEIRO</div>' +
-            kv('Cota mensal', money(d.cota_mensal)) +
+            kv('Cota mensal', semCota
+                ? '<span class="text-muted" title="Defina a cota do ano na aba Configuração">não configurada</span>'
+                : money(d.cota_mensal)) +
             kv('Cota em uso (mês)', e(fmtMes(d.cota_em_uso))) +
             kv('Consumo atual', money(d.consumo_atual)) +
-            kv('Residual', '<span class="' + (residual >= 0 ? 'om-pos' : 'om-neg') + '">' + money(d.residual) + '</span>', true) +
+            kv('Residual', semCota
+                ? '<span class="text-muted">–</span>'
+                : '<span class="' + (residual >= 0 ? 'om-pos' : 'om-neg') + '">' + money(d.residual) + '</span>', true) +
             kv('Total investido', money(d.total_investido)) +
             '</div>';
 
