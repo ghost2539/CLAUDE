@@ -57,7 +57,7 @@
         '.om-top label{font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:6px}' +
         /* painel: pilha, KPIs e grades */
         '.om-stack{display:flex;flex-direction:column;gap:14px;min-width:0}' +
-        '.om-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}' +
+        '.om-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}' +
         '.om-kpi{display:flex;flex-direction:column;min-width:0;padding:12px 16px 12px;background:var(--bg-panel);border:1px solid var(--border-subtle);border-top:3px solid var(--om-c,var(--color-primary));border-radius:var(--radius)}' +
         '.om-kpi.om-go{cursor:pointer}' +
         '.om-kpi.om-go:hover,.om-kpi.om-go:focus-visible{background:var(--bg-panel-alt);border-color:var(--border-light);border-top-color:var(--om-c);outline:0}' +
@@ -70,10 +70,17 @@
         '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}' +
         '.om-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}' +
         /* cards de gráfico */
-        '.om-chart{display:flex;flex-direction:column;min-width:0}' +
+        '.om-chart{display:flex;flex-direction:column;min-width:0;position:relative}' +
+        '.om-sub{padding:0 16px 2px;font-size:11px;color:var(--text-muted);line-height:1.4}' +
+        '.om-tip{position:absolute;left:0;top:0;z-index:6;pointer-events:none;max-width:calc(100% - 8px);' +
+        'padding:5px 9px;border:1px solid var(--border-light);border-radius:var(--radius);' +
+        'background:var(--bg-panel-alt);color:var(--text-primary);font-size:12px;line-height:1.3;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
         '.om-chart .card-header{font-size:13px;padding:10px 16px}' +
         '.om-chart-body{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:14px 16px 6px;min-height:200px}' +
         '.om-chart svg{display:block;width:100%;height:auto;max-height:280px;overflow:visible}' +
+        '.om-chart rect,.om-chart circle[data-tip],.om-hb-seg,.om-dl-row[data-tip]{cursor:default}' +
+        '.om-dim{opacity:.42}' +
         '.om-chart svg text{font-family:inherit;font-size:11px;fill:var(--text-muted)}' +
         '.om-grid{stroke:rgba(255,255,255,.06);stroke-width:1;shape-rendering:crispEdges}' +
         '.om-cota{stroke:var(--text-secondary);stroke-width:1.2;stroke-dasharray:5 4}' +
@@ -84,6 +91,7 @@
         '.om-legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:6px 16px 10px;font-size:12px;color:var(--text-secondary)}' +
         '.om-sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}' +
         '.om-sw-line{height:0;border-top:2px dashed var(--text-secondary);vertical-align:2px;border-radius:0}' +
+        '.om-sw-hatch{background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.5) 0 2px,transparent 2px 4px)}' +
         '.om-foot{padding:8px 16px;border-top:1px solid var(--border-subtle);font-size:12px;color:var(--text-muted)}' +
         '.om-foot b{color:var(--text-secondary);font-weight:600}' +
         '.om-empty{color:var(--text-muted);font-size:12px;text-align:center;padding:24px 0}' +
@@ -116,6 +124,9 @@
         '.om-mtable tr.om-total td{font-weight:700;background:var(--bg-panel-alt)}' +
         '.om-mtable td.om-dash{color:var(--text-muted)}' +
         '.om-trend{display:inline-block;width:12px;margin-left:4px;font-size:10px;text-align:center}' +
+        '.om-mtable tr.om-hi td{background:rgba(76,141,255,.10)}' +
+        '.om-mtable tr.om-hi td:first-child{background:rgba(76,141,255,.10)}' +
+        '.om-mtable th.om-hi-col{color:var(--text-primary)}' +
         /* listas de pendências */
         '.om-cards2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}' +
         '.om-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
@@ -321,37 +332,51 @@
 
     /* ── Painel ───────────────────────────────────────────────────── */
     // Cores fixas por entidade (nunca por posição).
-    var FAM_COLOR = { COLETOR: '#F28C38', SLED: '#2FA39A' };
+    var TIPO_COLOR = { CONTRATO: '#4C8DFF', AVULSA: '#C79105' };
     var CAT_COLOR = { 'Coletor': '#F28C38', 'Coletor HF550X': '#C79105', 'Sled RFID': '#2FA39A', 'Sled RFR901': '#4C8DFF' };
     var CAT_OTHER = '#8A8F98';
-    var EST_COLOR = { ok: '#2FB56B', bad: '#E5484D', pend: '#FFC107', orc: '#4C8DFF' };
+    var EST_COLOR = { ok: '#2FB56B', ok2: '#7BD3A0', bad: '#E5484D', pend: '#FFC107', orc: '#4C8DFF' };
+    var TIPO_NOME = { CONTRATO: 'Contrato', AVULSA: 'Avulso' };
+    var HATCH_ID  = 'om-hatch-avulso';
+    // [chave, rótulo, é dinheiro?, subir é bom?, famílias das linhas]
+    var FAM_ROWS  = ['COLETOR', 'SLED', 'TOTAL'];
+    var TIPO_ROWS = ['CONTRATO', 'AVULSA', 'TOTAL'];
     var DET_VIEWS = [
-        ['consumo',          'Consumo (R$)',                         true,  false],
-        ['reparados',        'Reparados',                            false, true],
-        ['reprovados_valor', 'Reprovados — valor de aquisição (R$)', true,  false],
-        ['reprovados_qtde',  'Reprovados (qtde)',                    false, false]
+        ['consumo',           'Consumo (R$)',                         true,  false, FAM_ROWS,  'consumo'],
+        ['consumo_contrato',  'Consumo — contrato (R$)',              true,  false, TIPO_ROWS, 'consumo_tipo'],
+        ['consumo_avulso',    'Consumo — avulso (R$)',                true,  false, TIPO_ROWS, 'consumo_tipo'],
+        ['reparados',         'Reparados',                            false, true,  FAM_ROWS,  'reparados'],
+        ['reprovados_valor',  'Reprovados — valor de aquisição (R$)', true,  false, FAM_ROWS,  'reprovados_valor'],
+        ['reprovados_qtde',   'Reprovados (qtde)',                    false, false, FAM_ROWS,  'reprovados_qtde']
     ];
+    var DET_FOCUS = { consumo_contrato: 'CONTRATO', consumo_avulso: 'AVULSA' };
     function catColor(nome) { return CAT_COLOR[nome] || CAT_OTHER; }
 
-    async function renderPainel(c) {
+    async function renderPainel(c, p, preset) {
+        var anoSel = (preset && preset.ano) ? String(preset.ano) : '';
+        var mesSel = (preset && preset.mes) ? String(preset.mes) : '';
+
         c.innerHTML = STYLE +
             '<div class="om-top">' +
                 '<h1 class="page-title">Orçamento de Manutenção — Coletores e SLEDs</h1>' +
                 '<label>Ano <select id="om-ano" class="form-control form-control-inline"></select></label>' +
+                '<label>Mês <select id="om-mes" class="form-control form-control-inline"></select></label>' +
                 '<button id="om-refresh" class="btn btn-outline btn-sm">Atualizar</button>' +
             '</div>' +
             '<div id="om-painel">' + SPIN + '</div>';
 
-        var sel  = c.querySelector('#om-ano');
+        var selA = c.querySelector('#om-ano');
+        var selM = c.querySelector('#om-mes');
         var host = c.querySelector('#om-painel');
-        var anoSel = null;
+        var cleanup = null;
 
-        async function load() {
+        async function load(retry) {
             if (!host.isConnected) return;
+            if (cleanup) { cleanup(); cleanup = null; }
             host.innerHTML = SPIN;
             var d;
             try {
-                d = await S.api(BASE + '/resumo' + qs({ ano: anoSel }));
+                d = await S.api(BASE + '/resumo' + qs({ ano: anoSel, mes: mesSel }));
             } catch (e) {
                 if (!host.isConnected) return;
                 host.innerHTML = alertHtml(e.message);
@@ -359,15 +384,43 @@
                 return;
             }
             if (!host.isConnected) return;
-            anoSel = d.ano;
-            fillAnos(sel, d.anos_disponiveis, d.ano);
+            anoSel = String(d.ano != null ? d.ano : anoSel);
+            // Mês pedido não existe no ano escolhido → volta para "Ano inteiro".
+            if (mesSel && !retry && !mesDisponivel(d, mesSel)) {
+                mesSel = '';
+                return load(true);
+            }
+            mesSel = d.mes ? String(d.mes) : '';
+            fillAnos(selA, d.anos_disponiveis, d.ano);
+            fillMeses(selM, d, mesSel);
+            syncHash(anoSel, mesSel);
             host.innerHTML = painelHtml(d);
-            bindPainel(host, d);
+            cleanup = bindPainel(host, d);
         }
 
-        sel.addEventListener('change', function () { anoSel = sel.value; load(); });
-        c.querySelector('#om-refresh').addEventListener('click', load);
+        selA.addEventListener('change', function () {
+            anoSel = selA.value;
+            // Mantém o mês escolhido no novo ano (o load corrige se não existir lá).
+            if (mesSel) mesSel = anoSel + '-' + mesSel.slice(5, 7);
+            load();
+        });
+        selM.addEventListener('change', function () { mesSel = selM.value; load(); });
+        c.querySelector('#om-refresh').addEventListener('click', function () { load(); });
         await load();
+    }
+
+    function mesDisponivel(d, mes) {
+        var list = d.meses_disponiveis;
+        if (!Array.isArray(list) || !list.length) return true;   // API sem a lista: confia no backend
+        return list.some(function (m) { return m && String(m.mes) === mes && m.tem_dado !== false; });
+    }
+
+    // Escopo na hash, sem disparar hashchange (F5 preserva a seleção).
+    function syncHash(ano, mes) {
+        var want = '#' + ROUTE + '/painel' + qs({ ano: ano, mes: mes });
+        if (location.hash === want) return;
+        try { history.replaceState(null, '', location.pathname + location.search + want); }
+        catch (_) { /* navegação bloqueada: mantém a hash atual */ }
     }
 
     function bindPainel(host, d) {
@@ -385,7 +438,7 @@
         var tbl = host.querySelector('#om-det-table');
         if (seg && tbl) {
             seg.addEventListener('click', function (ev) {
-                var btn = ev.target.closest('button[data-key]');
+                var btn = ev.target.closest ? ev.target.closest('button[data-key]') : null;
                 if (!btn || !seg.contains(btn)) return;
                 seg.querySelectorAll('button').forEach(function (b) {
                     var on = b === btn;
@@ -395,6 +448,89 @@
                 tbl.innerHTML = monthTable(d, btn.getAttribute('data-key'));
             });
         }
+        // Gráficos: desenho conforme a largura + tooltip próprio.
+        var ro = window.ResizeObserver ? new ResizeObserver(function (entries) {
+            if (!host.isConnected) { ro.disconnect(); return; }
+            entries.forEach(function (en) { drawChart(en.target, d, Math.round(en.contentRect.width)); });
+        }) : null;
+        host.querySelectorAll('.om-chart-body[data-chart]').forEach(function (body) {
+            drawChart(body, d, body.clientWidth || 0);
+            if (ro) ro.observe(body);
+        });
+        host.querySelectorAll('.om-chart').forEach(bindTip);
+        armTouchDismiss();
+        return function () { if (ro) ro.disconnect(); };
+    }
+
+    /* ── tooltip próprio (.om-tip) ── */
+    function drawChart(body, d, w) {
+        var fn = CHARTS[body.getAttribute('data-chart')];
+        if (!fn) return;
+        if (!(w > 0)) w = body.clientWidth || 320;
+        if (Number(body.getAttribute('data-w')) === w) return;
+        body.setAttribute('data-w', String(w));
+        body.innerHTML = fn(d, w);
+        var card = body.closest ? body.closest('.om-chart') : null;
+        var tip = card && card.querySelector('.om-tip');
+        if (tip) tip.hidden = true;
+    }
+
+    function bindTip(card) {
+        if (card.querySelector('.om-tip')) return;
+        var tip = document.createElement('div');
+        tip.className = 'om-tip';
+        tip.hidden = true;
+        card.appendChild(tip);
+
+        function target(ev) {
+            var t = ev.target;
+            if (!t || !t.closest) return null;
+            var el = t.closest('[data-tip]');
+            return el && card.contains(el) ? el : null;
+        }
+        function place(x, y) {
+            var r = card.getBoundingClientRect();
+            var tw = tip.offsetWidth, th = tip.offsetHeight;
+            var lx = x - r.left + 14, ly = y - r.top - th - 12;
+            lx = Math.max(4, Math.min(lx, Math.max(4, r.width - tw - 4)));
+            ly = Math.max(4, Math.min(ly, Math.max(4, r.height - th - 4)));
+            tip.style.left = lx.toFixed(0) + 'px';
+            tip.style.top = ly.toFixed(0) + 'px';
+        }
+        function show(el, x, y) {
+            tip.textContent = el.getAttribute('data-tip') || '';
+            tip.hidden = false;
+            place(x, y);
+        }
+        function hide() { tip.hidden = true; }
+
+        card.addEventListener('mouseover', function (ev) {
+            var el = target(ev);
+            if (el) show(el, ev.clientX, ev.clientY); else hide();
+        });
+        card.addEventListener('mousemove', function (ev) {
+            var el = target(ev);
+            if (el) show(el, ev.clientX, ev.clientY); else hide();
+        });
+        card.addEventListener('mouseleave', hide);
+        card.addEventListener('touchstart', function (ev) {
+            var el = target(ev);
+            if (!el) return;
+            var t = ev.touches && ev.touches[0];
+            show(el, t ? t.clientX : 0, t ? t.clientY : 0);
+        }, { passive: true });
+    }
+
+    // Um toque fora de qualquer segmento fecha os tooltips abertos.
+    var touchArmed = false;
+    function armTouchDismiss() {
+        if (touchArmed) return;
+        touchArmed = true;
+        document.addEventListener('touchstart', function (ev) {
+            var t = ev.target;
+            if (t && t.closest && t.closest('[data-tip]')) return;
+            document.querySelectorAll('.om-tip').forEach(function (x) { x.hidden = true; });
+        }, { passive: true });
     }
 
     function fillAnos(sel, anos, atual) {
@@ -405,6 +541,31 @@
         sel.innerHTML = list.map(function (a) {
             return '<option value="' + a + '"' + (a === cur ? ' selected' : '') + '>' + a + '</option>';
         }).join('');
+    }
+
+    // "Ano inteiro" + JAN..DEZ; meses sem dado ficam desabilitados.
+    function fillMeses(sel, d, mesSel) {
+        var ano = Number(d.ano) || new Date().getFullYear();
+        var disp = {};
+        if (Array.isArray(d.meses_disponiveis) && d.meses_disponiveis.length) {
+            d.meses_disponiveis.forEach(function (m) {
+                if (m && m.mes) disp[String(m.mes).slice(0, 7)] = m.tem_dado !== false;
+            });
+        } else {
+            mesesDoAno(d).forEach(function (m) {
+                disp[m.key] = blkVal(m.item, 'consumo', 'TOTAL') > 0 || blkVal(m.item, 'reparados', 'TOTAL') > 0;
+            });
+        }
+        var h = '<option value=""' + (mesSel ? '' : ' selected') + '>Ano inteiro</option>';
+        for (var i = 0; i < 12; i++) {
+            var key = ano + '-' + pad2(i + 1);
+            var on = disp[key] !== false;
+            var sel1 = (key === mesSel);
+            h += '<option value="' + key + '"' + (sel1 ? ' selected' : '') +
+                 (on || sel1 ? '' : ' disabled') + '>' + MESES[i] + '/' + ano +
+                 (on ? '' : ' · sem dado') + '</option>';
+        }
+        sel.innerHTML = h;
     }
 
     /* ── formatação para gráficos ── */
@@ -442,17 +603,43 @@
             return { key: key, item: map[key] || {} };
         });
     }
-    function blkVal(m, key, fam) {
+    function blkVal(m, key, fam, rows) {
         var blk = (m && m[key]) || {};
-        if (fam === 'TOTAL' && blk.TOTAL == null) return Number(blk.COLETOR || 0) + Number(blk.SLED || 0);
+        if (fam === 'TOTAL' && blk.TOTAL == null) {
+            return (rows || FAM_ROWS).reduce(function (a, f) {
+                return f === 'TOTAL' ? a : a + Number(blk[f] || 0);
+            }, 0);
+        }
         return Number(blk[fam] || 0);
     }
-    // Totais do ano com fallback (API antiga sem `totais`).
+    // Consumo/qtde do mês por tipo, com fallback para API sem `*_tipo`.
+    function tipoVal(m, key, tipo, fallbackKey) {
+        var blk = m && m[key];
+        if (blk && blk[tipo] != null) return Number(blk[tipo] || 0);
+        if (blk && (blk.CONTRATO != null || blk.AVULSA != null)) return Number(blk[tipo] || 0);
+        return tipo === 'CONTRATO' ? blkVal(m, fallbackKey, 'TOTAL') : 0;
+    }
+    // Escopo textual: mês selecionado ou o ano inteiro.
+    function sufEscopo(d) { return d && d.mes ? ' — ' + fmtMes(d.mes) : ''; }
+    function noEscopo(d) { return d && d.mes ? 'no mês' : 'no ano'; }
+    // Link para a aba Reparos, sempre carregando o escopo atual.
+    function linkReparos(d, extra) {
+        var o = { ano: (d && d.ano) || '', mes: (d && d.mes) || '' };
+        Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+        return 'reparos' + qs(o);
+    }
+
+    // Totais do escopo com fallback (API antiga sem `totais`/`por_tipo`).
     function totaisDe(d) {
         var t = d.totais || {};
         var g = d.gerais || {};
+        var pt = d.por_tipo || {};
         var meses = mesesDoAno(d);
         var aprov = t.aprovados != null ? Number(t.aprovados) : Number((g.COLETOR || {}).reparados || 0) + Number((g.SLED || {}).reparados || 0);
+        var aprovC = t.aprovados_contrato != null ? Number(t.aprovados_contrato)
+            : ((pt.CONTRATO || {}).reparados != null ? Number(pt.CONTRATO.reparados) : aprov);
+        var aprovA = t.aprovados_avulsa != null ? Number(t.aprovados_avulsa)
+            : Number((pt.AVULSA || {}).reparados || 0);
         var reprov = t.reprovados != null ? Number(t.reprovados)
             : meses.reduce(function (a, m) { return a + blkVal(m.item, 'reprovados_qtde', 'TOTAL'); }, 0);
         var reprovV = t.reprovados_valor != null ? Number(t.reprovados_valor)
@@ -460,13 +647,22 @@
         var pend = t.pendentes != null ? Number(t.pendentes) : sum(d.aguardando_aprovacao, 'qtde');
         var mc = t.meses_com_consumo != null ? Number(t.meses_com_consumo)
             : meses.filter(function (m) { return blkVal(m.item, 'consumo', 'TOTAL') > 0; }).length;
-        var media = t.media_mensal != null ? Number(t.media_mensal) : (mc ? Number(d.total_investido || 0) / mc : 0);
+        var totalAno = t.total_ano != null ? Number(t.total_ano) : Number(d.total_investido || 0);
+        var media = t.media_mensal != null ? Number(t.media_mensal) : (mc ? totalAno / mc : 0);
         var cota = Number(d.cota_mensal || 0);
+        var consC = d.consumo_atual_contrato != null ? Number(d.consumo_atual_contrato) : Number(d.consumo_atual || 0);
+        var consA = d.consumo_atual_avulsa != null ? Number(d.consumo_atual_avulsa) : 0;
         var pctMes = t.percentual_cota_mes != null ? Number(t.percentual_cota_mes)
-            : (cota > 0 ? Number(d.consumo_atual || 0) / cota : null);
+            : (cota > 0 ? consC / cota : null);
+        var resid = d.residual != null ? Number(d.residual) : (cota > 0 ? cota - consC : 0);
         return {
-            aprovados: aprov, reprovados: reprov, reprovados_valor: reprovV, pendentes: pend,
+            aprovados: aprov, aprovados_contrato: aprovC, aprovados_avulsa: aprovA,
+            reprovados: reprov, reprovados_valor: reprovV, pendentes: pend,
             garantia: Number(t.garantia || 0), meses_com_consumo: mc, media_mensal: media,
+            total_ano: totalAno,
+            consumo_contrato: t.consumo_contrato != null ? Number(t.consumo_contrato) : Number((pt.CONTRATO || {}).consumo || 0),
+            consumo_avulsa: t.consumo_avulsa != null ? Number(t.consumo_avulsa) : Number((pt.AVULSA || {}).consumo || 0),
+            consumo_atual_contrato: consC, consumo_atual_avulsa: consA, residual: resid,
             cota_anual: t.cota_anual != null ? Number(t.cota_anual) : cota * 12,
             percentual_cota_mes: pctMes
         };
@@ -476,6 +672,7 @@
     var ICON = {
         cota:   '<path d="M4 6h16v12H4z"/><circle cx="12" cy="12" r="2.5"/><path d="M7 9v6M17 9v6"/>',
         consumo:'<path d="M4 18V6M4 18h16"/><path d="M7 14l3-4 3 2 4-6"/>',
+        avulso: '<path d="M4 18V6M4 18h16"/><path d="M8 15l3-5 3 3 3-6"/><circle cx="18" cy="6" r="1.6"/>',
         residual:'<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9h9"/>',
         total:  '<path d="M5 20V10M10 20V4M15 20v-7M20 20v-4"/>',
         reparo: '<path d="M14.5 4.5a4 4 0 0 0-5 5L4 15l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2-2z"/>',
@@ -499,95 +696,124 @@
             '<div class="om-kpi-s">' + o.sub + '</div>' +
             '</div>';
     }
-    function chartCard(titulo, body, legend, total) {
+    // `chave` liga o corpo ao desenho responsivo (CHARTS[chave]).
+    function chartCard(titulo, sub, chave, body, legend, total) {
         return '<div class="card om-chart">' +
             '<div class="card-header">' + S.esc(titulo) + '</div>' +
-            '<div class="om-chart-body">' + body + '</div>' +
+            (sub ? '<div class="om-sub">' + S.esc(sub) + '</div>' : '') +
+            '<div class="om-chart-body"' + (chave ? ' data-chart="' + chave + '"' : '') + '>' + (body || '') + '</div>' +
             (legend ? '<div class="om-legend">' + legend + '</div>' : '') +
             (total != null ? '<div class="om-foot">Total: <b>' + total + '</b></div>' : '') +
             '</div>';
     }
-    function legendItem(color, label) {
-        return '<span><i class="om-sw" style="background:' + color + '"></i>' + S.esc(label) + '</span>';
+    function legendItem(color, label, cls) {
+        return '<span><i class="om-sw' + (cls ? ' ' + cls : '') + '" style="background:' + color + '"></i>' + S.esc(label) + '</span>';
     }
     function emptyHtml(msg) { return '<div class="om-empty">' + S.esc(msg) + '</div>'; }
+    function tipAttr(txt) { return ' data-tip="' + S.esc(txt) + '"'; }
 
     function kpisHtml(d, t) {
         var e = S.esc;
         var cota = Number(d.cota_mensal || 0);
         var semCota = !(cota > 0);
-        var residual = Number(d.residual || 0);
-        var g = d.gerais || {};
+        var residual = t.residual;
+        var mes = d.mes ? fmtMes(d.mes) : (d.cota_em_uso ? fmtMes(d.cota_em_uso) : '');
+        var per = mes ? ' · ' + mes : '';
         var agAprQ = sum(d.aguardando_aprovacao, 'qtde'), agAprV = sum(d.aguardando_aprovacao, 'valor');
         var agDevT = sum(d.aguardando_devolucao, 'total'), agDevM = sum(d.aguardando_devolucao, 'ag_manutencao');
-        var mesLbl = d.cota_em_uso ? 'Consumo · ' + fmtMes(d.cota_em_uso) : 'Consumo do mês';
 
         var cards = [
             kpiCard({ icon: 'cota', color: '#C79105', label: 'Cota mensal',
                 value: semCota ? '<span class="text-muted">não configurada</span>' : money(cota),
                 sub: semCota ? 'defina na aba Configuração' : 'cota anual ' + e(money(t.cota_anual)),
                 title: semCota ? 'Defina a cota do ano na aba Configuração' : '' }),
-            kpiCard({ icon: 'consumo', color: '#F28C38', label: mesLbl,
-                value: money(d.consumo_atual),
-                sub: semCota ? 'cota não definida'
-                    : (t.percentual_cota_mes != null ? e(pct1(t.percentual_cota_mes * 100)) + ' da cota' : 'sem consumo no mês') }),
+            kpiCard({ icon: 'consumo', color: TIPO_COLOR.CONTRATO, label: 'Consumo contrato' + per,
+                value: money(t.consumo_atual_contrato),
+                sub: semCota ? 'cota não configurada'
+                    : (t.percentual_cota_mes != null ? e(pct1(t.percentual_cota_mes * 100)) + ' da cota' : 'sem consumo no período') }),
+            kpiCard({ icon: 'avulso', color: TIPO_COLOR.AVULSA, label: 'Consumo avulso' + per,
+                value: money(t.consumo_atual_avulsa),
+                sub: 'fora da cota — outra linha do orçamento' }),
             kpiCard({ icon: 'residual', color: semCota ? '#8A8F98' : (residual >= 0 ? '#2FB56B' : '#E5484D'),
-                label: 'Residual do mês',
+                label: 'Residual' + per,
                 value: semCota ? '<span class="text-muted">–</span>' : money(residual),
-                sub: semCota ? 'cota não definida' : (residual >= 0 ? 'sobra' : 'acima da cota') }),
-            kpiCard({ icon: 'total', color: '#2FA39A', label: 'Total investido no ano',
+                sub: semCota ? 'cota não configurada' : 'cota − contrato · ' + (residual >= 0 ? 'sobra' : 'acima da cota') }),
+            kpiCard({ icon: 'total', color: '#2FA39A', label: 'Total investido ' + (d.mes ? 'no mês' : 'no ano'),
                 value: money(d.total_investido),
-                sub: t.meses_com_consumo
-                    ? 'média ' + e(money(t.media_mensal)) + ' em ' + fmtInt(t.meses_com_consumo) + (t.meses_com_consumo === 1 ? ' mês' : ' meses')
-                    : 'sem consumo no ano' }),
-            kpiCard({ icon: 'reparo', color: '#2FB56B', label: 'Equipamentos reparados',
+                sub: d.mes
+                    ? 'contrato ' + e(abrev(t.consumo_contrato)) + ' · avulso ' + e(abrev(t.consumo_avulsa))
+                    : (t.meses_com_consumo
+                        ? 'média ' + e(money(t.media_mensal)) + ' em ' + fmtInt(t.meses_com_consumo) + (t.meses_com_consumo === 1 ? ' mês' : ' meses')
+                        : 'sem consumo no ano') }),
+            kpiCard({ icon: 'reparo', color: '#2FB56B', label: 'Equipamentos reparados ' + noEscopo(d),
                 value: fmtInt(t.aprovados),
-                sub: 'COLETOR ' + fmtInt((g.COLETOR || {}).reparados) + ' · SLED ' + fmtInt((g.SLED || {}).reparados) +
+                sub: 'contrato ' + fmtInt(t.aprovados_contrato) + ' · avulso ' + fmtInt(t.aprovados_avulsa) +
                      (t.garantia > 0 ? ' · ' + fmtInt(t.garantia) + ' em garantia' : '') }),
-            kpiCard({ icon: 'reprov', color: '#E5484D', label: 'Reprovados',
+            kpiCard({ icon: 'reprov', color: '#E5484D', label: 'Reprovados ' + noEscopo(d),
                 value: fmtInt(t.reprovados),
                 sub: e(money(t.reprovados_valor)) + ' em valor de aquisição' }),
             kpiCard({ icon: 'aprov', color: '#FFC107', label: 'Aguardando aprovação',
                 value: fmtInt(agAprQ), sub: e(money(agAprV)) + ' em orçamentos',
-                go: 'reparos?status=AGUARDANDO_APROVACAO', title: 'Ver reparos aguardando aprovação' }),
+                go: linkReparos(d, { status: 'AGUARDANDO_APROVACAO' }), title: 'Ver reparos aguardando aprovação' }),
             kpiCard({ icon: 'devol', color: '#4C8DFF', label: 'Aguardando devolução',
                 value: fmtInt(agDevT), sub: fmtInt(agDevM) + ' aprovados em manutenção',
-                go: 'reparos?status_retorno=EM_MANUTENCAO', title: 'Ver reparos em manutenção' })
+                go: linkReparos(d, { status_retorno: 'EM_MANUTENCAO' }), title: 'Ver reparos em manutenção' })
         ];
         return '<div class="om-kpis">' + cards.join('') + '</div>';
     }
 
-    // Barras empilhadas COLETOR+SLED por mês, com linha da cota.
-    function consumoChart(d) {
+    /* ── gráficos (desenhados conforme a largura do card) ── */
+    // Rótulos de mês: completos, 1 a cada 2 ou só a inicial em telas estreitas.
+    function mesLabel(i, w) {
+        if (w < 340) return MESES[i].charAt(0);
+        if (w < 560) return i % 2 === 0 ? MESES[i] : '';
+        return MESES[i];
+    }
+    function hatchDefs(color) {
+        return '<defs><pattern id="' + HATCH_ID + '" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+            '<rect width="6" height="6" fill="' + color + '"/>' +
+            '<line x1="0" y1="0" x2="0" y2="6" stroke="rgba(0,0,0,.45)" stroke-width="2.5"/></pattern></defs>';
+    }
+
+    // Barras empilhadas CONTRATO+AVULSO por mês, com a linha da cota (só contrato).
+    function consumoSvg(d, w) {
         var meses = mesesDoAno(d);
         var cota = Number(d.cota_mensal || 0);
         var vals = meses.map(function (m) {
-            return { key: m.key, c: blkVal(m.item, 'consumo', 'COLETOR'), s: blkVal(m.item, 'consumo', 'SLED') };
+            return { key: m.key,
+                     c: tipoVal(m.item, 'consumo_tipo', 'CONTRATO', 'consumo'),
+                     a: tipoVal(m.item, 'consumo_tipo', 'AVULSA', 'consumo') };
         });
-        var totalAno = d.total_investido != null ? Number(d.total_investido) : vals.reduce(function (a, v) { return a + v.c + v.s; }, 0);
-        var max = Math.max.apply(null, vals.map(function (v) { return v.c + v.s; }).concat([cota]));
-        if (!(max > 0)) return chartCard('Consumo mensal × cota', emptyHtml('Sem consumo registrado no ano.'), null, money(0));
+        var max = Math.max.apply(null, vals.map(function (v) { return v.c + v.a; }).concat([cota]));
+        if (!(max > 0)) return emptyHtml('Sem consumo registrado no ano.');
 
-        var W = 720, H = 260, L = 66, R = 14, T = 18, B = 28, iw = W - L - R, ih = H - T - B;
+        var W = Math.max(320, Math.round(w) || 720), H = 260;
+        var L = W < 460 ? 44 : 66, R = 14, T = 18, B = 28, iw = W - L - R, ih = H - T - B;
         var step = niceStep(max * 1.05 / 4), top = step * 4;
         function y(v) { return T + ih - (v / top) * ih; }
-        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Consumo mensal por família">';
+        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Consumo mensal por tipo de manutenção">' +
+                hatchDefs(TIPO_COLOR.AVULSA);
         for (var k = 0; k <= 4; k++) {
             var yy = y(k * step).toFixed(1);
             s += '<line class="om-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>' +
                  '<text class="om-tk" x="' + (L - 8) + '" y="' + yy + '" dy="4" text-anchor="end">' + (k ? abrev(k * step, 1) : '0') + '</text>';
         }
-        var slot = iw / 12, bw = Math.round(slot * 0.58);
+        var slot = iw / 12, bw = Math.max(3, Math.round(slot * 0.58));
         vals.forEach(function (v, i) {
             var x = (L + i * slot + (slot - bw) / 2).toFixed(1);
-            s += '<text class="om-tk" x="' + (L + i * slot + slot / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + MESES[i] + '</text>';
+            var lbl = mesLabel(i, W);
+            var dim = d.mes && d.mes !== v.key ? ' class="om-dim"' : '';
+            if (lbl) {
+                s += '<text class="om-tk"' + (d.mes === v.key ? ' fill="var(--text-primary)"' : '') +
+                     ' x="' + (L + i * slot + slot / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + lbl + '</text>';
+            }
             var base = 0;
-            [['COLETOR', v.c], ['SLED', v.s]].forEach(function (p) {
+            [['CONTRATO', v.c, TIPO_COLOR.CONTRATO], ['AVULSA', v.a, 'url(#' + HATCH_ID + ')']].forEach(function (p) {
                 if (!(p[1] > 0)) return;
                 var y1 = y(base + p[1]), y0 = y(base);
                 var hgt = Math.max(1, y0 - y1);
-                s += '<rect x="' + x + '" y="' + (y0 - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) + '" fill="' + FAM_COLOR[p[0]] + '">' +
-                     '<title>' + S.esc(fmtMes(v.key) + ' · ' + p[0] + ' · ' + money(p[1])) + '</title></rect>';
+                s += '<rect' + dim + ' x="' + x + '" y="' + (y0 - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) +
+                     '" fill="' + p[2] + '"' + tipAttr(fmtMes(v.key) + ' · ' + TIPO_NOME[p[0]] + ' · ' + money(p[1])) + '></rect>';
                 base += p[1];
             });
         });
@@ -596,62 +822,93 @@
             s += '<line class="om-cota" x1="' + L + '" x2="' + (W - R) + '" y1="' + yc + '" y2="' + yc + '"/>' +
                  '<text class="om-tk om-tk-cota" x="' + (W - R) + '" y="' + yc + '" dy="-5" text-anchor="end">cota ' + S.esc(abrev(cota, 1)) + '</text>';
         }
-        s += '</svg>';
-        var legend = legendItem(FAM_COLOR.COLETOR, 'COLETOR') + legendItem(FAM_COLOR.SLED, 'SLED') +
-            (cota > 0 ? '<span><i class="om-sw om-sw-line"></i>cota mensal</span>' : '');
-        return chartCard('Consumo mensal × cota', s, legend, money(totalAno));
+        return s + '</svg>';
+    }
+    function consumoChart(d) {
+        var t = totaisDe(d);
+        var totalAno = t.total_ano;
+        var vazio = !(totalAno > 0) && !(Number(d.cota_mensal || 0) > 0);
+        var legend = legendItem(TIPO_COLOR.CONTRATO, 'Contrato') +
+            legendItem(TIPO_COLOR.AVULSA, 'Avulso', 'om-sw-hatch') +
+            (Number(d.cota_mensal || 0) > 0 ? '<span><i class="om-sw om-sw-line"></i>cota mensal</span>' : '');
+        return chartCard('Consumo mensal × cota — ' + (d.ano || ''),
+            'a cota mensal acompanha o contrato; o avulso sai de outra linha do orçamento',
+            'consumo', SPIN, vazio ? null : legend, money(totalAno));
     }
 
-    // Barras finas agrupadas: reparados (verde) × reprovados (vermelho) por mês.
-    function qtdeChart(d) {
+    // Reparados (contrato+avulso, empilhado) × reprovados (unificado) por mês.
+    function qtdeSvg(d, w) {
         var meses = mesesDoAno(d);
         var vals = meses.map(function (m) {
-            return { key: m.key, a: blkVal(m.item, 'reparados', 'TOTAL'), r: blkVal(m.item, 'reprovados_qtde', 'TOTAL') };
+            return { key: m.key,
+                     ac: tipoVal(m.item, 'reparados_tipo', 'CONTRATO', 'reparados'),
+                     aa: tipoVal(m.item, 'reparados_tipo', 'AVULSA', 'reparados'),
+                     r: blkVal(m.item, 'reprovados_qtde', 'TOTAL') };
         });
-        var max = Math.max.apply(null, vals.map(function (v) { return Math.max(v.a, v.r); }));
-        var totA = vals.reduce(function (a, v) { return a + v.a; }, 0), totR = vals.reduce(function (a, v) { return a + v.r; }, 0);
-        if (!(max > 0)) return chartCard('Reparados × reprovados por mês', emptyHtml('Sem reparos registrados no ano.'), null, '0');
+        var max = Math.max.apply(null, vals.map(function (v) { return Math.max(v.ac + v.aa, v.r); }));
+        if (!(max > 0)) return emptyHtml('Sem reparos registrados no ano.');
 
-        var W = 380, H = 220, L = 40, R = 8, T = 14, B = 24, iw = W - L - R, ih = H - T - B;
+        var W = Math.max(300, Math.round(w) || 380), H = 220;
+        var L = W < 420 ? 32 : 40, R = 8, T = 14, B = 24, iw = W - L - R, ih = H - T - B;
         var step = niceStep(max * 1.05 / 4, true), top = step * 4;
         function y(v) { return T + ih - (v / top) * ih; }
-        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Reparados e reprovados por mês">';
+        var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Reparados e reprovados por mês">';
         for (var k = 0; k <= 4; k++) {
             var yy = y(k * step).toFixed(1);
             s += '<line class="om-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>' +
                  '<text class="om-tk" x="' + (L - 6) + '" y="' + yy + '" dy="4" text-anchor="end">' + fmtInt(k * step) + '</text>';
         }
-        var slot = iw / 12, bw = Math.max(4, Math.floor(slot * 0.28)), gap = 2;
+        var slot = iw / 12, bw = Math.max(3, Math.floor(slot * 0.28)), gap = 2;
         vals.forEach(function (v, i) {
             var cx = L + i * slot + slot / 2;
-            s += '<text class="om-tk" x="' + cx.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + MESES[i] + '</text>';
-            [[v.a, EST_COLOR.ok, 'reparados', cx - gap / 2 - bw], [v.r, EST_COLOR.bad, 'reprovados', cx + gap / 2]].forEach(function (p) {
-                if (!(p[0] > 0)) return;
-                var hgt = Math.max(1, y(0) - y(p[0]));
-                s += '<rect x="' + p[3].toFixed(1) + '" y="' + (y(0) - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) + '" fill="' + p[1] + '" rx="1">' +
-                     '<title>' + S.esc(fmtMes(v.key) + ' · ' + p[2] + ' · ' + fmtInt(p[0])) + '</title></rect>';
+            var lbl = mesLabel(i, W);
+            var dim = d.mes && d.mes !== v.key ? ' class="om-dim"' : '';
+            if (lbl) s += '<text class="om-tk" x="' + cx.toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + lbl + '</text>';
+            var xa = cx - gap / 2 - bw, base = 0;
+            [['Reparados — contrato', v.ac, EST_COLOR.ok], ['Reparados — avulso', v.aa, EST_COLOR.ok2]].forEach(function (p) {
+                if (!(p[1] > 0)) return;
+                var hgt = Math.max(1, y(base) - y(base + p[1]));
+                s += '<rect' + dim + ' x="' + xa.toFixed(1) + '" y="' + (y(base) - hgt).toFixed(1) + '" width="' + bw + '" height="' + hgt.toFixed(1) +
+                     '" fill="' + p[2] + '" rx="1"' + tipAttr(fmtMes(v.key) + ' · ' + p[0] + ' · ' + fmtInt(p[1])) + '></rect>';
+                base += p[1];
             });
+            if (v.r > 0) {
+                var hr = Math.max(1, y(0) - y(v.r));
+                s += '<rect' + dim + ' x="' + (cx + gap / 2).toFixed(1) + '" y="' + (y(0) - hr).toFixed(1) + '" width="' + bw + '" height="' + hr.toFixed(1) +
+                     '" fill="' + EST_COLOR.bad + '" rx="1"' + tipAttr(fmtMes(v.key) + ' · Reprovados · ' + fmtInt(v.r)) + '></rect>';
+            }
         });
-        s += '</svg>';
-        var legend = legendItem(EST_COLOR.ok, 'Reparados') + legendItem(EST_COLOR.bad, 'Reprovados');
-        return chartCard('Reparados × reprovados por mês', s, legend, fmtInt(totA) + ' reparados · ' + fmtInt(totR) + ' reprovados');
+        return s + '</svg>';
+    }
+    function qtdeChart(d) {
+        var meses = mesesDoAno(d);
+        var totA = 0, totR = 0;
+        meses.forEach(function (m) {
+            totA += blkVal(m.item, 'reparados', 'TOTAL');
+            totR += blkVal(m.item, 'reprovados_qtde', 'TOTAL');
+        });
+        var legend = legendItem(EST_COLOR.ok, 'Reparados — contrato') +
+            legendItem(EST_COLOR.ok2, 'Reparados — avulso') + legendItem(EST_COLOR.bad, 'Reprovados');
+        return chartCard('Reparados × reprovados por mês — ' + (d.ano || ''), null, 'qtde', SPIN,
+            totA + totR ? legend : null, fmtInt(totA) + ' reparados · ' + fmtInt(totR) + ' reprovados');
     }
 
-    // Donut genérico: items = [{label, value, color, fmt}], centro = texto grande.
+    // Donut genérico: items = [{label, value, color, tip}], centro = texto grande.
     function donutHtml(items, centro, centroSub, fmtVal) {
         var total = items.reduce(function (a, it) { return a + it.value; }, 0);
         var used = items.filter(function (it) { return it.value > 0; });
         var size = 150, cx = 75, cy = 75, r = 56, C = 2 * Math.PI * r, gap = used.length > 1 ? 2.5 : 0;
-        var s = '<svg viewBox="0 0 ' + size + ' ' + size + '" role="img">' +
+        var s = '<svg viewBox="0 0 ' + size + ' ' + size + '" preserveAspectRatio="xMidYMid meet" role="img">' +
             '<circle class="om-dtrack" cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>' +
             '<g transform="rotate(-90 ' + cx + ' ' + cy + ')">';
         var off = 0;
         used.forEach(function (it) {
             var len = C * it.value / total;
             var dash = Math.max(0.5, len - gap);
+            var tip = it.tip || (it.label + ' · ' + fmtVal(it.value) + ' · ' + pct1(it.value / total * 100));
             s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + it.color + '" stroke-width="16"' +
-                 ' stroke-dasharray="' + dash.toFixed(2) + ' ' + (C - dash).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '">' +
-                 '<title>' + S.esc(it.label + ' · ' + fmtVal(it.value) + ' · ' + pct1(it.value / total * 100)) + '</title></circle>';
+                 ' stroke-dasharray="' + dash.toFixed(2) + ' ' + (C - dash).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"' +
+                 tipAttr(tip) + '></circle>';
             off += len;
         });
         s += '</g>' +
@@ -659,65 +916,103 @@
             (centroSub ? '<text class="om-dc2" x="' + cx + '" y="' + cy + '" dy="16" text-anchor="middle">' + S.esc(centroSub) + '</text>' : '') +
             '</svg>';
         var leg = items.map(function (it) {
-            return '<div class="om-dl-row"><i class="om-sw" style="background:' + it.color + '"></i>' +
-                '<span class="om-dl-n" title="' + S.esc(it.label) + '">' + S.esc(it.label) + '</span>' +
+            var tip = it.tip || (it.label + ' · ' + fmtVal(it.value) + ' · ' + pct1(total ? it.value / total * 100 : 0));
+            return '<div class="om-dl-row"' + tipAttr(tip) + '><i class="om-sw" style="background:' + it.color + '"></i>' +
+                '<span class="om-dl-n">' + S.esc(it.label) + '</span>' +
                 '<span class="om-dl-v">' + S.esc(fmtVal(it.value)) + '</span>' +
                 '<span class="om-dl-p">' + S.esc(total ? pct1(it.value / total * 100) : '–') + '</span></div>';
         }).join('');
         return '<div class="om-donut">' + s + '<div class="om-dl">' + leg + '</div></div>';
     }
 
-    function categoriaChart(d) {
-        var cats = (d.categorias || []).map(function (r) {
-            return { label: r.categoria || '—', value: Number(r.consumo || 0), color: catColor(r.categoria) };
+    function catItems(d) {
+        return (d.categorias || []).map(function (r) {
+            var v = Number(r.consumo || 0);
+            var c = r.consumo_contrato != null ? Number(r.consumo_contrato) : null;
+            var a = r.consumo_avulsa != null ? Number(r.consumo_avulsa) : null;
+            var tip = (r.categoria || '—') + ' · ' + money(v);
+            if (c != null || a != null) {
+                tip = (r.categoria || '—') + ' · Contrato ' + money(c || 0) + ' · Avulso ' + money(a || 0);
+            }
+            return { label: r.categoria || '—', value: v, color: catColor(r.categoria), tip: tip };
         }).filter(function (it) { return it.value > 0; })
           .sort(function (a, b) { return b.value - a.value; });
+    }
+    function categoriaBody(d) {
+        var cats = catItems(d);
+        if (!cats.length) return emptyHtml('Sem consumo por categoria ' + noEscopo(d) + '.');
         var total = cats.reduce(function (a, it) { return a + it.value; }, 0);
-        var body = cats.length ? donutHtml(cats, abrev(total), 'consumo', money) : emptyHtml('Sem consumo por categoria no ano.');
-        return chartCard('Consumo por categoria', body, null, money(total));
+        return donutHtml(cats, abrev(total), 'consumo', money);
+    }
+    function categoriaChart(d) {
+        var total = catItems(d).reduce(function (a, it) { return a + it.value; }, 0);
+        return chartCard('Consumo por categoria' + (d.mes ? sufEscopo(d) : ''), null, 'categoria', SPIN, null, money(total));
     }
 
-    function resultadoChart(t) {
-        var items = [
-            { label: 'Aprovados',  value: t.aprovados,  color: EST_COLOR.ok },
-            { label: 'Reprovados', value: t.reprovados, color: EST_COLOR.bad },
-            { label: 'Pendentes',  value: t.pendentes,  color: EST_COLOR.pend }
+    function resultadoItems(d) {
+        var t = totaisDe(d);
+        return [
+            { label: 'Aprovado — contrato', value: t.aprovados_contrato, color: EST_COLOR.ok },
+            { label: 'Aprovado — avulso',   value: t.aprovados_avulsa,   color: EST_COLOR.ok2 },
+            { label: 'Reprovado',           value: t.reprovados,         color: EST_COLOR.bad },
+            { label: 'Pendente',            value: t.pendentes,          color: EST_COLOR.pend }
         ];
+    }
+    function resultadoBody(d) {
+        var items = resultadoItems(d);
         var total = items.reduce(function (a, it) { return a + it.value; }, 0);
-        var body = total ? donutHtml(items, fmtInt(total), 'orçamentos', fmtInt) : emptyHtml('Sem orçamentos no ano.');
-        return chartCard('Resultado dos orçamentos no ano', body, null, fmtInt(total) + ' orçamentos');
+        return total ? donutHtml(items, fmtInt(total), 'orçamentos', fmtInt) : emptyHtml('Sem orçamentos ' + noEscopo(d) + '.');
+    }
+    function resultadoChart(d) {
+        var total = resultadoItems(d).reduce(function (a, it) { return a + it.value; }, 0);
+        return chartCard('Resultado dos orçamentos' + (d.mes ? sufEscopo(d) : ' no ano'), null, 'resultado', SPIN, null,
+            fmtInt(total) + ' orçamentos');
     }
 
     // Barras horizontais empilhadas por categoria (aguardando devolução).
-    function devolucaoChart(list) {
-        list = (list || []).filter(function (r) { return Number(r.total || 0) > 0; })
-            .sort(function (a, b) { return Number(b.total || 0) - Number(a.total || 0); });
-        var SEGS = [['ag_manutencao', EST_COLOR.ok, 'Ag. manutenção'], ['ag_orcamento', EST_COLOR.orc, 'Ag. orçamento'],
+    var DEV_SEGS = [['ag_manutencao', EST_COLOR.ok, 'Ag. manutenção'], ['ag_orcamento', EST_COLOR.orc, 'Ag. orçamento'],
                     ['ag_aprovacao', EST_COLOR.pend, 'Ag. aprovação'], ['reprovado', EST_COLOR.bad, 'Reprovado']];
-        var total = sum(list, 'total');
-        if (!list.length) return chartCard('Aguardando devolução por categoria', emptyHtml('Nenhum equipamento aguardando devolução'), null, '0');
+    function devList(d) {
+        return (d.aguardando_devolucao || []).filter(function (r) { return Number(r.total || 0) > 0; })
+            .sort(function (a, b) { return Number(b.total || 0) - Number(a.total || 0); });
+    }
+    function devolucaoBody(d) {
+        var list = devList(d);
+        if (!list.length) return emptyHtml('Nenhum equipamento aguardando devolução');
         var max = Math.max.apply(null, list.map(function (r) { return Number(r.total || 0); }));
         var rows = list.map(function (r) {
             var tot = Number(r.total || 0);
-            var segs = SEGS.map(function (sg) {
+            var segs = DEV_SEGS.map(function (sg) {
                 var v = Number(r[sg[0]] || 0);
                 if (!(v > 0)) return '';
                 return '<span class="om-hb-seg" style="width:' + (v / max * 100).toFixed(2) + '%;background:' + sg[1] + '"' +
-                       ' title="' + S.esc((r.categoria || '—') + ' · ' + sg[2] + ' · ' + fmtInt(v)) + '"></span>';
+                       tipAttr((r.categoria || '—') + ' · ' + sg[2] + ' · ' + fmtInt(v)) + '></span>';
             }).join('');
             return '<div class="om-hb-row"><span class="om-hb-n" title="' + S.esc(r.categoria || '—') + '">' + S.esc(r.categoria || '—') + '</span>' +
                 '<span class="om-hb-bar">' + segs + '</span><span class="om-hb-t">' + fmtInt(tot) + '</span></div>';
         }).join('');
-        var legend = SEGS.map(function (sg) { return legendItem(sg[1], sg[2]); }).join('');
-        return chartCard('Aguardando devolução por categoria', '<div class="om-hb">' + rows + '</div>', legend, fmtInt(total) + ' equipamentos');
+        return '<div class="om-hb">' + rows + '</div>';
     }
+    function devolucaoChart(d) {
+        var total = sum(d.aguardando_devolucao, 'total');
+        var legend = devList(d).length ? DEV_SEGS.map(function (sg) { return legendItem(sg[1], sg[2]); }).join('') : null;
+        return chartCard('Aguardando devolução por categoria', null, 'devolucao', SPIN, legend, fmtInt(total) + ' equipamentos');
+    }
+
+    var CHARTS = {
+        consumo:   consumoSvg,
+        qtde:      qtdeSvg,
+        categoria: categoriaBody,
+        resultado: resultadoBody,
+        devolucao: devolucaoBody
+    };
 
     function detalhamentoHtml(d) {
         var seg = DET_VIEWS.map(function (v, i) {
             return '<button class="btn btn-sm ' + (i === 0 ? 'btn-primary' : 'btn-outline') + '" data-key="' + v[0] + '">' + S.esc(v[1]) + '</button>';
         }).join('');
         return '<div class="card">' +
-            '<div class="om-det-head"><span>Detalhamento mensal</span><div class="om-seg">' + seg + '</div></div>' +
+            '<div class="om-det-head"><span>Detalhamento mensal — ' + S.esc(String(d.ano || '')) + '</span><div class="om-seg">' + seg + '</div></div>' +
             '<div id="om-det-table" class="om-scroll">' + monthTable(d, DET_VIEWS[0][0]) + '</div></div>';
     }
 
@@ -726,22 +1021,28 @@
         return '<div class="om-stack">' +
             kpisHtml(d, t) +
             '<div class="om-g32">' + consumoChart(d) + categoriaChart(d) + '</div>' +
-            '<div class="om-g3">' + qtdeChart(d) + resultadoChart(t) + devolucaoChart(d.aguardando_devolucao) + '</div>' +
+            '<div class="om-g3">' + qtdeChart(d) + resultadoChart(d) + devolucaoChart(d) + '</div>' +
             detalhamentoHtml(d) +
-            '<div class="om-cards2">' + aprovacaoHtml(d.aguardando_aprovacao) + devolucaoHtml(d.aguardando_devolucao) + '</div>' +
+            '<div class="om-cards2">' + aprovacaoHtml(d) + devolucaoHtml(d) + '</div>' +
             '</div>';
     }
 
-    // Tabela JAN..DEZ × COLETOR/SLED/TOTAL para a chave `key` de d.meses[].
+    // Tabela JAN..DEZ × COLETOR/SLED/TOTAL (ou CONTRATO/AVULSA/TOTAL) para a view `key`.
     function monthTable(d, key) {
         var view = DET_VIEWS.filter(function (v) { return v[0] === key; })[0] || DET_VIEWS[0];
-        var isMoney = view[2], goodUp = view[3];
+        var isMoney = view[2], goodUp = view[3], rows = view[4], src = view[5];
+        var foco = DET_FOCUS[key] || null;
         var meses = mesesDoAno(d);
-        var fams = ['COLETOR', 'SLED', 'TOTAL'];
         var vals = {};
-        fams.forEach(function (f) {
-            vals[f] = meses.map(function (m) { return blkVal(m.item, key, f); });
+        rows.forEach(function (f) {
+            vals[f] = meses.map(function (m) {
+                if (src === 'consumo_tipo') return tipoVal(m.item, 'consumo_tipo', f, 'consumo');
+                return blkVal(m.item, src, f, rows);
+            });
         });
+        if (src === 'consumo_tipo') {
+            vals.TOTAL = meses.map(function (m, i) { return vals.CONTRATO[i] + vals.AVULSA[i]; });
+        }
 
         function cell(v, extra) {
             if (!v) return '<td class="om-dash">–</td>';
@@ -758,11 +1059,15 @@
         }
 
         var h = '<table class="om-mtable"><thead><tr><th>' + S.esc(view[1]) + '</th>' +
-            MESES.map(function (m) { return '<th>' + m + '</th>'; }).join('') +
+            MESES.map(function (m, i) {
+                var on = d.mes === (Number(d.ano) + '-' + pad2(i + 1));
+                return '<th' + (on ? ' class="om-hi-col"' : '') + '>' + m + '</th>';
+            }).join('') +
             '</tr></thead><tbody>';
-        fams.forEach(function (f) {
+        rows.forEach(function (f) {
             var total = f === 'TOTAL';
-            h += '<tr' + (total ? ' class="om-total"' : '') + '><td>' + (total ? 'TOTAL' : f) + '</td>';
+            var cls = total ? ' class="om-total"' : (foco === f ? ' class="om-hi"' : '');
+            h += '<tr' + cls + '><td>' + (total ? 'TOTAL' : (TIPO_NOME[f] ? TIPO_NOME[f].toUpperCase() : f)) + '</td>';
             vals[f].forEach(function (v, i) {
                 h += cell(v, total ? trend(v, vals[f][i - 1] || 0, i) : '');
             });
@@ -771,8 +1076,8 @@
         return h + '</tbody></table>';
     }
 
-    function aprovacaoHtml(list) {
-        list = list || [];
+    function aprovacaoHtml(d) {
+        var list = d.aguardando_aprovacao || [];
         var tq = 0, tv = 0;
         var rows = list.map(function (r) {
             tq += Number(r.qtde || 0); tv += Number(r.valor || 0);
@@ -785,14 +1090,14 @@
         else rows += '<tr><td><b>TOTAL</b></td><td class="om-num"><b>' + fmtInt(tq) + '</b></td>' +
             '<td class="om-num"><b>' + money(tv) + '</b></td></tr>';
         return '<div class="card"><div class="om-card-head"><span>Aguardando aprovação</span>' +
-            '<button class="btn btn-sm btn-outline om-go" data-go="reparos?status=AGUARDANDO_APROVACAO">ver reparos</button></div>' +
+            '<button class="btn btn-sm btn-outline om-go" data-go="' + S.esc(linkReparos(d, { status: 'AGUARDANDO_APROVACAO' })) + '">ver reparos</button></div>' +
             '<div class="table-wrapper" style="border:0"><table class="data-table"><thead><tr>' +
             '<th>Categoria</th><th class="om-num">Qtde</th><th class="om-num">Valor</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table></div></div>';
     }
 
-    function devolucaoHtml(list) {
-        list = list || [];
+    function devolucaoHtml(d) {
+        var list = d.aguardando_devolucao || [];
         var t = { total: 0, ag_manutencao: 0, ag_orcamento: 0, ag_aprovacao: 0, reprovado: 0 };
         var cols = ['total', 'ag_manutencao', 'ag_orcamento', 'ag_aprovacao', 'reprovado'];
         var rows = list.map(function (r) {
@@ -805,7 +1110,7 @@
         else rows += '<tr><td><b>TOTAL</b></td>' +
             cols.map(function (k) { return '<td class="om-num"><b>' + fmtInt(t[k]) + '</b></td>'; }).join('') + '</tr>';
         return '<div class="card"><div class="om-card-head"><span>Aguardando devolução</span>' +
-            '<button class="btn btn-sm btn-outline om-go" data-go="reparos?status_retorno=EM_MANUTENCAO">ver reparos</button></div>' +
+            '<button class="btn btn-sm btn-outline om-go" data-go="' + S.esc(linkReparos(d, { status_retorno: 'EM_MANUTENCAO' })) + '">ver reparos</button></div>' +
             '<div class="table-wrapper" style="border:0"><table class="data-table"><thead><tr>' +
             '<th>Categoria</th><th class="om-num">Total</th><th class="om-num">Ag. manutenção</th>' +
             '<th class="om-num">Ag. orçamento</th><th class="om-num">Ag. aprovação</th><th class="om-num">Reprovado</th>' +
