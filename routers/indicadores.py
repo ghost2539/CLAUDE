@@ -430,9 +430,20 @@ def _recalcular_e_salvar() -> None:
 
 def _scheduler_loop() -> None:
     time.sleep(15)  # deixa o app terminar de subir
+    sem_conta = False
     while True:
         try:
+            # Sem a conta de serviço, cada um dos ~60 indicadores falharia
+            # sozinho e o terminal viraria uma parede de erros idênticos —
+            # foi o que aconteceu na primeira subida do servidor novo. Uma
+            # mensagem por rodada basta, e a primeira já diz o que fazer.
+            _checar_conta()
+            sem_conta = False
             _recalcular_e_salvar()
+        except RuntimeError as exc:
+            if not sem_conta:
+                _log.warning("Indicadores: recálculo adiado — %s", exc)
+                sem_conta = True
         except Exception as exc:  # noqa: BLE001
             _log.error("Agendador de indicadores falhou: %s", exc, exc_info=True)
         time.sleep(max(1, REFRESH_MIN) * 60)
