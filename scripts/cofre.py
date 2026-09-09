@@ -321,6 +321,15 @@ def cmd_remover(args) -> int:
     return 1
 
 
+# Segredos que o portal busca no cofre sem passar pelo environment — hoje a
+# conta de serviço do ServiceNow. Ficam listados aqui para o `conferir` cobrar
+# a presença deles: como não têm linha no arquivo, ninguém notaria a falta.
+DIRETO_DO_COFRE = (
+    ("SN_API_USER", "conta de serviço do ServiceNow (leitura)"),
+    ("SN_API_PASS", "senha dessa conta"),
+)
+
+
 def cmd_conferir(args) -> int:
     print(f"Diretório do cofre: {cofre.DIR}")
     print(f"  chave:  {cofre.ARQ_CHAVE} {'(existe)' if cofre.ARQ_CHAVE.exists() else '(ainda não criada)'}")
@@ -351,11 +360,26 @@ def cmd_conferir(args) -> int:
     for p in problemas:
         print(f"  ! {p}")
 
+    # Segredos que o portal lê DIRETO do cofre, sem linha no environment.
+    # Sem esta conferência eles passariam batido justamente por não estarem
+    # no arquivo — que é o motivo de terem saído de lá.
+    print("\nSegredos lidos direto do cofre (não aparecem no environment):")
+    direto_faltando = []
+    for nome, para_que in DIRETO_DO_COFRE:
+        tem = bool(cofre.obter(nome))
+        print(f"  {nome:28s} {'OK' if tem else 'FALTANDO'}   {para_que}")
+        if not tem:
+            direto_faltando.append(nome)
+    if direto_faltando:
+        print("  Para gravar:")
+        for f in direto_faltando:
+            print(f"    python3 scripts/cofre.py definir {f}")
+
     envfile = Path(args.env or os.environ.get(
         "PORTAL_ENVFILE", Path.home() / ".config" / "portal-spare" / "environment"))
     if not envfile.is_file():
         print(f"\nArquivo de ambiente não encontrado: {envfile}")
-        return 0 if ok else 1
+        return 0 if (ok and not direto_faltando) else 1
 
     print(f"\nReferências ao cofre em {envfile}:")
     faltando = []
@@ -377,8 +401,7 @@ def cmd_conferir(args) -> int:
         print("\nSegredos citados no ambiente e ausentes do cofre:")
         for f in sorted(set(faltando)):
             print(f"  python3 scripts/cofre.py definir {f}")
-        return 1
-    return 0 if ok else 1
+    return 0 if (ok and not faltando and not direto_faltando) else 1
 
 
 def cmd_importar_env(args) -> int:

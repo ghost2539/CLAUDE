@@ -134,8 +134,12 @@ class Settings:
     # Conta de serviço do ServiceNow (API REST) — usada só para LEITURA.
     # A senha nunca fica no repositório; vem do ambiente / systemd-creds.
     SN_API_BASE: str = _env("SN_API_BASE", "https://renner.service-now.com")
-    SN_API_USER: str = _env("SN_API_USER", "")
-    SN_API_PASS: str = _env("SN_API_PASS", "")
+    # A conta de serviço vem do COFRE (corporativo, depois local cifrado) e
+    # só cai para variável de ambiente em emergência. Assim o `environment`
+    # entregue à infraestrutura não tem usuário nem senha em texto claro —
+    # nem quando alguém abre o arquivo, nem no backup dele.
+    SN_API_USER: str = _segredo("SN_API_USER")
+    SN_API_PASS: str = _segredo("SN_API_PASS")
     # Proxy de saída para o ServiceNow (senha do @ escapada como %40).
     #
     # Declarar SN_PROXY= ou SN_API_PROXY= VAZIO no environment significa
