@@ -46,16 +46,37 @@ class PublicQueryIn(BaseModel):
 
 # ── Internal helpers ──────────────────────────────────────────────
 
+# A conta de leitura do EBS vinha de arquivo em disco, entregue pelo
+# LoadCredentialEncrypted da unit de SISTEMA. Como o portal agora roda como
+# serviço de usuário, esse mecanismo não existe mais e a consulta quebrava
+# com 500. Passa pelo cofre, como todo o resto; o diretório continua valendo
+# para não quebrar instalação antiga.
+_CHAVES_COFRE = {
+    "ebs_public_username": ("EBS_PUBLIC_USER", "EBS_PUBLIC_USERNAME"),
+    "ebs_public_password": ("EBS_PUBLIC_PASS", "EBS_PUBLIC_PASSWORD"),
+}
+
+
 def _credential(name: str) -> str:
+    from core.cofre import obter
+    for chave in _CHAVES_COFRE.get(name, (name.upper(),)):
+        valor = obter(chave, "")
+        if valor:
+            return valor
+
     directory = _cfg.CREDENTIALS_DIRECTORY
     path = os.path.join(directory, name) if directory else ""
-    if not path or not os.path.isfile(path):
-        raise RuntimeError(f"Credencial protegida não carregada: {name}")
-    with open(path, "r", encoding="utf-8") as handle:
-        value = handle.read().strip()
-    if not value:
-        raise RuntimeError(f"Credencial protegida vazia: {name}")
-    return value
+    if path and os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+        if value:
+            return value
+
+    chaves = " ou ".join(_CHAVES_COFRE.get(name, (name.upper(),)))
+    raise RuntimeError(
+        f"Credencial do EBS ausente ({name}). Grave no cofre: "
+        f"python3 scripts/cofre.py definir {chaves.split(' ou ')[0]}"
+    )
 
 
 def _auth(force: bool = False):
