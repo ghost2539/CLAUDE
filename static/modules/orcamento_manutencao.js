@@ -1017,7 +1017,10 @@
             '<div class="om-top"><h1 class="page-title">Orçamento de Manutenção — Configuração</h1></div>' +
             '<div id="om-cfg">' + SPIN + '</div>';
 
-        var host = document.getElementById('om-cfg');
+        var host = c.querySelector('#om-cfg');
+        // Busca sempre dentro deste host: a tela pode ser renderizada duas vezes
+        // (clique + hashchange) e a cópia antiga não pode mexer na nova.
+        function q(id) { return host.querySelector('#' + id); }
         var cfg;
         try {
             cfg = await S.api(BASE + '/config') || {};
@@ -1026,6 +1029,7 @@
             S.toast(e.message, 'error');
             return;
         }
+        if (!host.isConnected) return;  // renderização substituída por outra
 
         var limiar = cfg.limiar_percentual == null ? 0.6 : Number(cfg.limiar_percentual);
         host.innerHTML =
@@ -1053,8 +1057,8 @@
                 '<span id="om-cfg-msg" class="text-muted"></span>' +
             '</div>';
 
-        var cotaRows = document.getElementById('om-cota-rows');
-        var vcpRows = document.getElementById('om-vcp-rows');
+        var cotaRows = q('om-cota-rows');
+        var vcpRows = q('om-vcp-rows');
 
         function rowHtmlKV(k, v, phK, tipoK) {
             return '<div class="om-kvrow">' +
@@ -1096,15 +1100,15 @@
         fill(cotaRows, cfg.cota_mensal, 'Ano', 'number', true);
         fill(vcpRows, cfg.valor_compra_padrao, 'Categoria', 'text', false);
 
-        document.getElementById('om-cota-add').onclick = function () {
+        q('om-cota-add').onclick = function () {
             var anos = Object.keys(collect(cotaRows)).map(Number);
             var prox = anos.length ? Math.max.apply(null, anos) + 1 : new Date().getFullYear();
             add(cotaRows, 'Ano', 'number', String(prox));
         };
-        document.getElementById('om-vcp-add').onclick = function () { add(vcpRows, 'Categoria', 'text'); };
+        q('om-vcp-add').onclick = function () { add(vcpRows, 'Categoria', 'text'); };
 
-        document.getElementById('om-cfg-save').onclick = async function () {
-            var pct = Number(String(document.getElementById('om-limiar').value).replace(',', '.'));
+        q('om-cfg-save').onclick = async function () {
+            var pct = Number(String(q('om-limiar').value).replace(',', '.'));
             if (isNaN(pct) || pct <= 0 || pct > 100) { S.toast('Limiar inválido: informe um percentual entre 0 e 100.', 'warning'); return; }
             var body = {
                 cota_mensal: collect(cotaRows),
@@ -1119,19 +1123,19 @@
                     if (r.valor_compra_padrao) fill(vcpRows, r.valor_compra_padrao, 'Categoria', 'text', false);
                 }
                 S.toast('Configuração salva.', 'success');
-                document.getElementById('om-cfg-msg').textContent = 'Salvo em ' + new Date().toLocaleString('pt-BR') + '.';
+                q('om-cfg-msg').textContent = 'Salvo em ' + new Date().toLocaleString('pt-BR') + '.';
             } catch (e) {
                 S.toast(e.message, 'error');
             }
         };
 
-        document.getElementById('om-recalc').onclick = async function () {
+        q('om-recalc').onclick = async function () {
             if (!window.confirm('Recalcular percentual e avaliação de todos os reparos e aplicar a regra dos 60 % nos pendentes?')) return;
             try {
                 var r = await busy(function () { return S.api(BASE + '/recalcular', { method: 'POST' }); });
                 var txt = 'Recálculo concluído — ' + resumoNumerico(r);
                 S.toast(txt, 'success');
-                document.getElementById('om-cfg-msg').textContent = txt;
+                q('om-cfg-msg').textContent = txt;
             } catch (e) {
                 S.toast(e.message, 'error');
             }
