@@ -11,7 +11,10 @@ from core.security import require_permission
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
-SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
+# Proxy de saída: VAZIO por padrão. O servidor novo sai direto para a rede;
+# só preencha SN_PROXY onde a saída exigir proxy. Um proxy fixo aqui fazia
+# toda chamada aos Correios tentar um endereço que não existe no destino.
+SN_PROXY = os.environ.get("SN_PROXY", "")
 
 
 # ── O que é, de fato, uma entrega ───────────────────────────────────────
@@ -71,25 +74,23 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Lê um segredo do cofre `vcreports_secrets` (servidor novo); se ele não
-    estiver disponível, cai para variável de ambiente (servidor atual/transição).
+    """Segredo pelo caminho único do projeto (`core.cofre`): cofre
+    corporativo, cofre local cifrado e, por último, variável de ambiente.
 
-    No servidor novo as credenciais dos Correios NÃO ficam em variável de
-    ambiente nem em arquivo — vêm somente do cofre, que só a aplicação lê.
+    As credenciais dos Correios NÃO devem ficar em variável de ambiente nem
+    em arquivo de configuração — só no cofre, que apenas a aplicação lê.
     """
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        val = vcreports_secret(nome)
-        if val:
-            return str(val)
-    except Exception:
-        pass
-    return os.environ.get(nome, default)
+    from core.cofre import obter
+    return obter(nome, default)
 
 
 def _correios_creds():
     """Retorna as credenciais dos Correios no momento do uso (não guarda em
     global), buscando do cofre a cada chamada de autenticação."""
+    # Chaves do cofre corporativo (loader oficial: `s(chave)`):
+    #     s('CORREIOS_USUARIO')
+    #     s('CORREIOS_CHAVE')
+    #     s('CORREIOS_CARTOES').split(',')
     usuario = _secret("CORREIOS_USUARIO")
     chave = _secret("CORREIOS_CHAVE")
     cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
@@ -135,9 +136,9 @@ def _check_credenciais():
     if not usuario or not chave:
         raise HTTPException(
             500,
-            "Credenciais dos Correios ausentes. No servidor novo elas vêm do "
-            "cofre (vcreports_secret: CORREIOS_USUARIO, CORREIOS_CHAVE, "
-            "CORREIOS_CARTOES); no servidor atual, do ambiente.",
+            "Credenciais dos Correios ausentes. Elas vêm do cofre corporativo "
+            "(chaves CORREIOS_USUARIO, CORREIOS_CHAVE, "
+            "CORREIOS_CARTOES). Confira com: python3 scripts/cofre.py conferir",
         )
 
 

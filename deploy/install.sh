@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
  
-INSTALL_DIR="/opt/portal-spare-v2"
+INSTALL_DIR="/var/www/vcreports/portal-spare"
 CONFIG_DIR="/etc/portal_operacoes_spare"
 SERVICE_USER="portalspare"
 PORT=8901

@@ -2,7 +2,7 @@
 #
 # Instalar:
 #   mkdir -p ~/.config/systemd/user
-#   sed "s|__APP__|$HOME/portal-spare|g" deploy/portal_spare.user.service \
+#   sed "s|__APP__|/var/www/vcreports/portal-spare|g" deploy/portal_spare.user.service \
 #       > ~/.config/systemd/user/portal-spare.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now portal-spare.service

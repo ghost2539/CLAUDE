@@ -29,23 +29,26 @@ db/                      Camada de dados — um módulo por banco, todos isolado
   monitoramento.py       Eventos de saúde/falha e configuração de alertas
   orcamento_exec.py      Controle de Orçamento — execução CAPEX
   orcamento_spare.py     Orçamento do SPARE (CAPEX da área)
+  ebs_forms.py           EBS Forms (RPA): execuções, roteiros e ativos coletados
 
 routers/                 As APIs do portal — uma por área funcional
   auth · consulta · recebimento · reparos · status · parametros
   identificacao · servicenow · correios · encerramento · rastreio (tv)
   indicadores · automacoes · monitoramento
   controle_orcamento_exec · orcamento_spare · public_assets · helpers
-  consulta_times · cockpit (telas de TV)
+  consulta_times · cockpit (telas de TV) · ebs_forms (RPA)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_service.py         API REST do EBS
   ebs_oracle.py          Consultas diretas na base Oracle do EBS
   ebs_logged.py          Raspagem autenticada do EBS
+  ebs_forms.py           RPA sobre o cliente Oracle Forms do EBS (SSO → jnlp → JVM)
+  ebs_forms_java/        LancadorForms.java — JVM própria que substitui o Java Web Start
 
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css · modules/*.js
   controle-orcamento-exec/ · indicadores/ · identificacao/ · cockpit/
-  consulta-times/
+  consulta-times/ · ebs-forms/ (tela de administração do RPA)
 
 frontend/                Fontes React dos painéis; o build sai em static/
 
@@ -53,6 +56,8 @@ data/                    TUDO que é gravado em disco (fora do repositório)
   db/                    Bancos SQLite dos módulos isolados
   uploads/               Arquivos enviados pelos usuários
   referencias/           Cadastros de apoio versionados (ex.: locations_sn.json)
+  ebs_forms/             RPA do Forms: bin/ (classes), jars/ (cache), capturas/,
+                         logs/ (jvm-*.log, xvfb.log, javac.log), depuracao/ (HTML do SSO)
 
 deploy/                  Instalação e serviços systemd
   portal_spare.service        serviço de sistema (com root)
@@ -65,6 +70,8 @@ scripts/                 Utilitários de operação
   backup.sh              Backup total (Postgres + SQLite + env + uploads)
   restaurar.sh           Restauração do pacote no servidor novo
   migrar_pg_para_mysql.py
+  cofre.py               Segredos: definir | conferir | listar
+  ebs_forms_preparar.sh  Confere/instala/compila o RPA do Forms; `testar` abre o Forms
 
 docs/                    Documentação
 ```
@@ -79,6 +86,7 @@ docs/                    Documentação
 | Monitoramento | `data/db/monitoramento.db` | `MONITORAMENTO_DATABASE_URL` |
 | Controle de Orçamento — CAPEX | `data/db/controle_orcamento_exec.db` | `ORCAMENTO_EXEC_DATABASE_URL` |
 | Orçamento do SPARE | `data/db/orcamento_spare.db` | `ORCAMENTO_SPARE_DATABASE_URL` |
+| EBS Forms (RPA) | `data/db/ebs_forms.db` | `EBS_FORMS_DATABASE_URL` |
 
 Nenhum módulo isolado escreve no banco do portal, e vice-versa. Toda URL sai
 de `config.py`; nenhum módulo monta caminho por conta própria.
@@ -108,6 +116,7 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/parametros` | parametros | `/api/public-assets` | public_assets |
 | `/api/lotes` `/api/dashboard` | helpers | `/api/controle-orcamento-exec` | controle_orcamento_exec |
 | `/api/orcamento-spare` | orcamento_spare | `/api/cockpit` | cockpit (público) |
+| `/api/ebs-forms` | ebs_forms | | |
 
 As páginas que não são API (`/`, `/indicadores`, `/controle-orcamento`) são
 servidas pelos seus próprios routers, com o HTML em `static/`.
@@ -119,6 +128,36 @@ acesso). Cada abertura de tela e cada gravação ficam registradas na tabela
 `budget_acessos`, consultável em Parâmetros → Acessos & Alertas.
 
 `/api/orcamento-spare` segue o mesmo desenho, com o módulo `orcamento_spare`.
+
+`/api/ebs-forms` usa o módulo `ebs_forms` (`view` acompanha execuções e
+capturas, `create` dispara consultas, `admin` edita roteiros e roda o teste
+de abertura). É o RPA sobre o cliente Oracle Forms do EBS: roda em segundo
+plano numa tela virtual (Xvfb) dentro do mesmo processo do portal — nada de
+serviço à parte. Guia operacional em `docs/EBS_FORMS.md`.
+
+## Variáveis de ambiente do EBS Forms
+
+Todas com prefixo `EBS_FORMS_`, declaradas em `config.py` e no
+`deploy/environment.modelo`. Usuário e senha do robô (`EBS_FORMS_USER`,
+`EBS_FORMS_PASS`) ficam **só no cofre** — nunca no environment.
+
+| Variável | Padrão | Papel |
+|---|---|---|
+| `EBS_FORMS_DATABASE_URL` | `data/db/ebs_forms.db` | Banco isolado do módulo |
+| `EBS_FORMS_HOME_URL` | `http://ebscorporativo…/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE` | Home do EBS (entrada do SSO) |
+| `EBS_FORMS_FUNCAO_URL` | vazio | Link `RF.jsp?function_id=…` da função (recomendado) |
+| `EBS_FORMS_FUNCAO` | `Informações Financeiras` | Nome da função procurado na home se a URL faltar |
+| `EBS_FORMS_RESPONSABILIDADE` | `RENNER_FA_CONSULTA` | Responsabilidade (informativa, aparece no status) |
+| `EBS_FORMS_LIVROS` | `FA_RENNER,FA_RENNER_FIS` | Livros tentados nessa ordem |
+| `EBS_FORMS_PROXY` | vazio | Proxy HTTP do SSO; vazio ignora o proxy do ambiente |
+| `EBS_FORMS_VERIFY` | `false` | Verificar TLS no SSO |
+| `EBS_FORMS_TIMEOUT` | `40` | Timeout (s) das requisições HTTP |
+| `EBS_FORMS_DISPLAY` | `:99` | Display do Xvfb |
+| `EBS_FORMS_TELA` | `1280x900x24` | Tamanho da tela virtual |
+| `EBS_FORMS_JAVA` / `EBS_FORMS_JAVAC` | vazio (`PATH`) | Binários do Java a usar |
+| `EBS_FORMS_JAVA_OPCOES` | vazio | Opções extras para a JVM |
+| `EBS_FORMS_CLASSE` | `oracle.forms.engine.Main` | Classe do applet Forms |
+| `EBS_FORMS_ESPERA_JVM` | `180` | Segundos até o lançador responder "pronto" |
 
 ## Telas de TV (públicas)
 

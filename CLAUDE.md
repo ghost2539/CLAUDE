@@ -47,8 +47,12 @@ normativo.
   prévia por um administrador (`allowed`).
 - Escrita no ServiceNow sempre **como o usuário logado** (cookies da
   sessão); leitura pode usar a conta de serviço.
-- Segredo nunca no código nem no git: cofre primeiro, senão store cifrado
-  (`core/notificador.py` e `routers/automacoes.py` são os modelos).
+- **Segredo nunca em texto claro** — nem no código, nem no git, nem no
+  arquivo de ambiente. Todo acesso passa por `core/cofre.py`, nesta ordem:
+  cofre corporativo → cofre local cifrado → variável de ambiente.
+  No `environment`, segredo vira o marcador `@cofre:NOME@` (com `@`, não
+  `${}`: o arquivo é carregado com `. arquivo` e o bash comeria `${...}`).
+  Gerência pelo CLI: `python3 scripts/cofre.py definir|conferir|listar`.
 - CSP é `script-src 'self'`: **`<script>` inline é bloqueado**. JS de página
   sempre em arquivo externo.
 

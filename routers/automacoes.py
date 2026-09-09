@@ -51,18 +51,14 @@ router = APIRouter(prefix="/api/automacoes", tags=["Automações"])
 
 
 # ── Credencial para a rotina 100% automática ────────────────────────────
-# Preferência: cofre (vcreports_secret) no servidor novo. Enquanto não há
+# Preferência: cofre corporativo no servidor novo. Enquanto não há
 # cofre, guardamos a senha CRIPTOGRAFADA no banco de automações (chave
 # derivada do SESSION_SECRET). Nunca em texto puro.
 def _secret(nome: str, default: str = "") -> str:
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        v = vcreports_secret(nome)
-        if v:
-            return str(v)
-    except Exception:  # noqa: BLE001
-        pass
-    return os.environ.get(nome, default)
+    """Segredo pelo caminho único do projeto (`core.cofre`): cofre
+    corporativo, cofre local cifrado e, por último, variável de ambiente."""
+    from core.cofre import obter
+    return obter(nome, default)
 
 
 DEFAULT_COFRE_USER_KEY = "SN_AUTOMACAO_USUARIO"
