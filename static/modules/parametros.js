@@ -1089,7 +1089,7 @@ async function renderPermissions(c, S) {
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
         'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
-        'orcamento_spare'];
+        'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         identificacao: 'Identificação', servicenow: 'ServiceNow', rastreio: 'Correios',
@@ -1097,6 +1097,7 @@ async function renderPermissions(c, S) {
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
         orcamento_spare: 'Orçamento SPARE',        // CAPEX da área
+        orcamento_manutencao: 'Orçamento (manutenção)',  // coletores e SLEDs (na sidebar)
         ebs_forms: 'EBS Forms (RPA)',
         // A aba é de todos; "Administrar" é quem configura a rotina e as regras
         automacoes: 'Automações'
