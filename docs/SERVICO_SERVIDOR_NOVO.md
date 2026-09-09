@@ -70,10 +70,13 @@ e, quando não consegue, o que precisa ser pedido.
 
 | Porta | Uso |
 |---|---|
-| 8901 | Portal |
-| 8502 | Tela "Consulta de Ativos — Times" (endereço do sistema antigo, mesmo processo) |
+| 8901 | Portal — **todas** as telas |
 
-Ambas acima de 1024 — o serviço abre sozinho, sem privilégio.
+Só uma porta. A tela "Consulta de Ativos — Times", que no sistema antigo
+atendia na 8502, agora é um endereço do próprio portal
+(`/consulta-times`) — não há segundo serviço nem segunda porta.
+
+A 8901 está acima de 1024, então o serviço a abre sem privilégio.
 
 ## 6. Saída de rede — sem proxy
 
@@ -119,7 +122,7 @@ O TLS fica no proxy; o portal atende em HTTP na rede interna.
 ```bash
 systemctl --user is-active portal-spare
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8901/
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8502/consulta-times
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8901/consulta-times
 journalctl --user -u portal-spare -n 30 --no-pager
 
 # nenhuma senha em texto claro na configuração:

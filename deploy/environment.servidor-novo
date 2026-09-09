@@ -23,9 +23,10 @@ PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
 # ── Servidor ────────────────────────────────────────────────────────────
 HOST=0.0.0.0
 PORT=8901
-# Tela "Consulta de Ativos — Times" também na porta do aplicativo antigo,
-# no MESMO processo. 0 desliga o espelho.
-CONSULTA_TIMES_PORTA=8502
+# Espelho da tela dos times numa segunda porta: DESLIGADO. Um segundo
+# servidor uvicorn no mesmo processo trava a partida sob uvloop. Tudo
+# atende na 8901; o endereço antigo é resolvido no proxy.
+CONSULTA_TIMES_PORTA=0
 # Sistemas internos usam certificado próprio.
 VERIFY_SSL=false
 
