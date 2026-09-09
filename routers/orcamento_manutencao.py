@@ -22,10 +22,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 import db.orcamento_manutencao as db
@@ -486,6 +486,7 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
                 "consumo": vazio(), "reparados": vazio(),
                 "reprovados_valor": vazio(), "reprovados_qtde": vazio(),
                 "consumo_tipo": vazio_tipo(), "reparados_tipo": vazio_tipo(),
+                "consumo_contrato": vazio(), "consumo_avulso": vazio(),
             }
         rows = s.execute(
             select(R.mes_referencia, R.familia, R.tipo_manutencao, R.status, func.count(R.id),
@@ -505,6 +506,11 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
                 if tipo in bloco["consumo_tipo"]:
                     bloco["consumo_tipo"][tipo] += valor
                     bloco["reparados_tipo"][tipo] += qtde
+                # A mesma quebra por família das demais visões, por tipo.
+                por_fam = bloco["consumo_avulso" if tipo == "AVULSA" else "consumo_contrato"]
+                if familia in por_fam:
+                    por_fam[familia] += valor
+                por_fam["TOTAL"] += valor
                 bloco["consumo_tipo"]["TOTAL"] += valor
                 bloco["reparados_tipo"]["TOTAL"] += qtde
             else:
@@ -517,7 +523,8 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
 
         lista_meses = []
         for mes_ref, bloco in meses.items():
-            for chave in ("consumo", "reprovados_valor", "consumo_tipo"):
+            for chave in ("consumo", "reprovados_valor", "consumo_tipo",
+                          "consumo_contrato", "consumo_avulso"):
                 bloco[chave] = {k: _dinheiro(v) for k, v in bloco[chave].items()}
             for chave in ("reparados", "reprovados_qtde", "reparados_tipo"):
                 bloco[chave] = {k: int(v) for k, v in bloco[chave].items()}
@@ -935,7 +942,10 @@ def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str) -> dict:
 
 
 @router.post("/importar")
-def importar(req: Request, file: UploadFile = File(...)):
+def importar(req: Request, file: UploadFile = File(...),
+             substituir: bool = Form(False)):
+    """`substituir=true`: a planilha vira a base. Linhas importadas antes que
+    não estão no arquivo são removidas; o que foi digitado no portal fica."""
     sd = _exigir(req, "admin")
     check_rate_limit(req, "api")
     usuario = _usuario(sd)
@@ -954,6 +964,9 @@ def importar(req: Request, file: UploadFile = File(...)):
     avisos = Counter(status_nao_reconhecido=0, tipo_nao_reconhecido=0,
                      empresa_vazia=0, mes_referencia_nulo=0)
     novos, alterados, vistos = [], [], set()
+    # Todo RMA que aparece no arquivo, mesmo em linha rejeitada: com
+    # `substituir`, um erro de formato não pode apagar o que já existe.
+    no_arquivo: set[str] = set()
     lidas = 0
 
     def rejeitar(linha: int, motivo: str) -> None:
@@ -981,6 +994,7 @@ def importar(req: Request, file: UploadFile = File(...)):
             if not rma:
                 rejeitar(idx, "RMA vazio")
                 continue
+            no_arquivo.add(rma)
             if rma in vistos:
                 rejeitar(idx, f"RMA repetido na planilha: {rma}")
                 continue
@@ -1046,16 +1060,30 @@ def importar(req: Request, file: UploadFile = File(...)):
         for i in range(0, len(alterados), 500):
             s.execute(update(R), alterados[i:i + 500])
 
+        removidas = 0
+        if substituir:
+            # Só sai o que veio de planilha: o que foi digitado no portal fica.
+            sobrando = [
+                rid for rid, rma in s.execute(
+                    select(R.id, R.rma).where(R.origem == "PLANILHA")).all()
+                if rma not in no_arquivo
+            ]
+            for i in range(0, len(sobrando), 500):
+                s.execute(delete(R).where(R.id.in_(sobrando[i:i + 500])))
+            removidas = len(sobrando)
+
         rejeitadas = lidas - len(novos) - len(alterados)
         s.add(db.Importacao(
             arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
             atualizadas=len(alterados), rejeitadas=rejeitadas,
-            detalhes=json.dumps(detalhes, ensure_ascii=False),
+            detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
+                                 "rejeicoes": detalhes}, ensure_ascii=False),
         ))
 
     return {
         "lidas": lidas, "incluidas": len(novos), "atualizadas": len(alterados),
-        "rejeitadas": rejeitadas, "detalhes": detalhes,
+        "rejeitadas": rejeitadas, "removidas": removidas,
+        "substituiu": bool(substituir), "detalhes": detalhes,
         "avisos": dict(avisos), "avisos_detalhes": avisos_detalhes,
     }
 

@@ -111,6 +111,8 @@
         '.om-hb-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;background:var(--bg-panel-alt)}' +
         '.om-hb-seg{display:block;height:100%}' +
         '.om-hb-t{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}' +
+        '.om-check{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;font-size:.9rem}' +
+        '.om-check input{width:15px;height:15px;accent-color:var(--color-primary);cursor:pointer}' +
         /* detalhamento mensal */
         '.om-det-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
         '.om-seg{display:flex;gap:6px;flex-wrap:wrap}' +
@@ -343,13 +345,13 @@
     var TIPO_ROWS = ['CONTRATO', 'AVULSA', 'TOTAL'];
     var DET_VIEWS = [
         ['consumo',           'Consumo (R$)',                         true,  false, FAM_ROWS,  'consumo'],
-        ['consumo_contrato',  'Consumo — contrato (R$)',              true,  false, TIPO_ROWS, 'consumo_tipo'],
-        ['consumo_avulso',    'Consumo — avulso (R$)',                true,  false, TIPO_ROWS, 'consumo_tipo'],
+        ['consumo_contrato',  'Consumo — contrato (R$)',              true,  false, FAM_ROWS,  'consumo_contrato'],
+        ['consumo_avulso',    'Consumo — avulso (R$)',                true,  false, FAM_ROWS,  'consumo_avulso'],
         ['reparados',         'Reparados',                            false, true,  FAM_ROWS,  'reparados'],
         ['reprovados_valor',  'Reprovados — valor de aquisição (R$)', true,  false, FAM_ROWS,  'reprovados_valor'],
         ['reprovados_qtde',   'Reprovados (qtde)',                    false, false, FAM_ROWS,  'reprovados_qtde']
     ];
-    var DET_FOCUS = { consumo_contrato: 'CONTRATO', consumo_avulso: 'AVULSA' };
+    var DET_FOCUS = {};
     function catColor(nome) { return CAT_COLOR[nome] || CAT_OTHER; }
 
     async function renderPainel(c, p, preset) {
@@ -611,6 +613,12 @@
             }, 0);
         }
         return Number(blk[fam] || 0);
+    }
+    // Consumo do mês por tipo E família (contrato/avulso × COLETOR/SLED).
+    // API sem a quebra: contrato herda o consumo total do mês, avulso fica zero.
+    function tipoFamVal(m, key, fam, rows) {
+        if (m && m[key]) return blkVal(m, key, fam, rows);
+        return key === 'consumo_contrato' ? blkVal(m, 'consumo', fam, rows) : 0;
     }
     // Consumo/qtde do mês por tipo, com fallback para API sem `*_tipo`.
     function tipoVal(m, key, tipo, fallbackKey) {
@@ -1037,6 +1045,9 @@
         rows.forEach(function (f) {
             vals[f] = meses.map(function (m) {
                 if (src === 'consumo_tipo') return tipoVal(m.item, 'consumo_tipo', f, 'consumo');
+                if (src === 'consumo_contrato' || src === 'consumo_avulso') {
+                    return tipoFamVal(m.item, src, f, rows);
+                }
                 return blkVal(m.item, src, f, rows);
             });
         });
@@ -1563,6 +1574,11 @@
                         '<input id="om-imp-file" type="file" accept=".xlsx,.csv" class="form-control" style="max-width:420px">' +
                         '<button id="om-imp-btn" class="btn btn-primary">Importar</button>' +
                     '</div>' +
+                    '<label class="om-check"><input id="om-imp-subst" type="checkbox"> ' +
+                    'Substituir a base pela planilha</label>' +
+                    '<p id="om-imp-subst-nota" class="om-hint">Marcado, o arquivo passa a ser a base: reparos importados ' +
+                    'antes que não estiverem nele são removidos. Reparos digitados no portal e linhas rejeitadas por erro ' +
+                    'de formato são preservados. Desmarcado, só atualiza e inclui.</p>' +
                     '<div id="om-imp-result" class="mt-3"></div>' +
                 '</div>' +
             '</div>' +
@@ -1580,8 +1596,14 @@
             var inp = document.getElementById('om-imp-file');
             var file = inp.files && inp.files[0];
             if (!file) { S.toast('Selecione uma planilha (.xlsx ou .csv).', 'warning'); return; }
+            var subst = !!(document.getElementById('om-imp-subst') || {}).checked;
+            if (subst && !window.confirm(
+                'Substituir a base pela planilha "' + file.name + '"?\n\n' +
+                'Os reparos importados antes que não estiverem nela serão removidos. ' +
+                'O que foi digitado no portal é preservado.')) return;
             var fd = new FormData();
             fd.append('file', file);
+            fd.append('substituir', subst ? 'true' : 'false');
             var out = document.getElementById('om-imp-result');
             out.innerHTML = SPIN;
             try {
@@ -1590,7 +1612,8 @@
                 });
                 out.innerHTML = importResultHtml(r || {});
                 S.toast('Importação concluída: ' + fmtInt(r.incluidas) + ' incluída(s), ' +
-                    fmtInt(r.atualizadas) + ' atualizada(s), ' + fmtInt(r.rejeitadas) + ' rejeitada(s).', 'success');
+                    fmtInt(r.atualizadas) + ' atualizada(s), ' + fmtInt(r.rejeitadas) + ' rejeitada(s)' +
+                    (Number(r.removidas) ? ', ' + fmtInt(r.removidas) + ' removida(s)' : '') + '.', 'success');
             } catch (e) {
                 out.innerHTML = alertHtml(e.message);
                 S.toast(e.message, 'error');
@@ -1626,7 +1649,12 @@
             statCard(fmtInt(r.incluidas), 'Incluídas', 'green') +
             statCard(fmtInt(r.atualizadas), 'Atualizadas', 'gold') +
             statCard(fmtInt(r.rejeitadas), 'Rejeitadas', 'orange') +
+            (r.substituiu ? statCard(fmtInt(r.removidas), 'Removidas', 'orange') : '') +
             '</div>';
+        if (r.substituiu) {
+            h += '<div class="alert alert-warning mb-3">A planilha substituiu a base: ' +
+                fmtInt(r.removidas) + ' reparo(s) que não estavam nela foram removidos.</div>';
+        }
         var avisos = r.avisos || {};
         var avKeys = Object.keys(avisos).filter(function (k) { return Number(avisos[k]) > 0; });
         if (avKeys.length) {
