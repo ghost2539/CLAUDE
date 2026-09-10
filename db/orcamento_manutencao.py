@@ -14,11 +14,11 @@ import copy
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, Integer, Numeric, String, Text,
-    create_engine, event, select,
+    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, Text,
+    create_engine, event, select, text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -126,6 +126,9 @@ class Reparo(Base):
     categoria: Mapped[str] = mapped_column(String(40), default="", index=True)
     familia: Mapped[str] = mapped_column(String(10), default="", index=True)
     empresa: Mapped[str] = mapped_column(String(20), default="")
+    # 8.1 — vêm da planilha do fornecedor (lote de reparo).
+    origem_equipamento: Mapped[str] = mapped_column(String(10), default="")
+    disponibilizacao: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     orcamento: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False), default=0)
     garantia: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -143,7 +146,11 @@ class Reparo(Base):
     ano: Mapped[int] = mapped_column(Integer, index=True)
     mes_referencia: Mapped[str | None] = mapped_column(String(7), nullable=True, index=True)
     ano_devolucao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 8.3 — confirmação do retorno pelo portal.
+    devolvido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    devolvido_por: Mapped[str] = mapped_column(String(80), default="")
     lote_prime: Mapped[str] = mapped_column(String(200), default="")
+    po: Mapped[str] = mapped_column(String(40), default="")
     qtde: Mapped[int] = mapped_column(Integer, default=1)
     observacao: Mapped[str] = mapped_column(Text, default="")
 
@@ -162,6 +169,8 @@ class Reparo(Base):
         return {
             "id": self.id, "rma": self.rma, "serie": self.serie, "loja": self.loja,
             "categoria": self.categoria, "familia": self.familia, "empresa": self.empresa,
+            "origem_equipamento": self.origem_equipamento or "",
+            "disponibilizacao": _dt(self.disponibilizacao),
             "orcamento": float(self.orcamento or 0), "garantia": bool(self.garantia),
             "valor_compra": _f(self.valor_compra), "valor_compra_fonte": self.valor_compra_fonte or "",
             "percentual": _f(self.percentual), "avaliacao": self.avaliacao or "",
@@ -170,7 +179,9 @@ class Reparo(Base):
             "tipo_manutencao": self.tipo_manutencao, "tipo_original": self.tipo_original or "",
             "status_retorno": self.status_retorno,
             "ano": self.ano, "mes_referencia": self.mes_referencia,
-            "ano_devolucao": self.ano_devolucao, "lote_prime": self.lote_prime or "",
+            "ano_devolucao": self.ano_devolucao, "devolvido_em": _dt(self.devolvido_em),
+            "devolvido_por": self.devolvido_por or "",
+            "lote_prime": self.lote_prime or "", "po": self.po or "",
             "qtde": int(self.qtde or 1), "observacao": self.observacao or "",
             "ebs_consultado_em": _dt(self.ebs_consultado_em), "ebs_erro": self.ebs_erro or "",
             "criado_em": _dt(self.criado_em), "atualizado_em": _dt(self.atualizado_em),
@@ -223,13 +234,72 @@ class Importacao(Base):
 _init_lock = threading.Lock()
 _ready = False
 
+# Colunas acrescentadas depois que o banco de produção já existia (8.1).
+# `create_all` só cria tabela nova: em banco antigo elas entram por ALTER.
+COLUNAS_MIGRAVEIS: dict[str, tuple[str, ...]] = {
+    "manut_reparo": ("origem_equipamento", "disponibilizacao", "devolvido_em",
+                     "devolvido_por", "po"),
+}
+
+
+def _colunas_existentes(conn, tabela: str) -> set[str]:
+    """Colunas que a tabela tem hoje, pelo catálogo do banco em uso.
+    Conjunto vazio significa "tabela ausente" — aí não há o que migrar."""
+    if conn.dialect.name == "sqlite":
+        # PRAGMA não aceita parâmetro; o nome vem só de COLUNAS_MIGRAVEIS.
+        linhas = conn.exec_driver_sql(f"PRAGMA table_info({tabela})").all()
+        return {str(l[1]) for l in linhas}
+    linhas = conn.execute(
+        text("SELECT column_name FROM information_schema.columns "
+             "WHERE table_name = :t AND table_schema = current_schema()"),
+        {"t": tabela},
+    ).all()
+    return {str(l[0]) for l in linhas}
+
+
+def migrar_colunas(engine) -> list[str]:
+    """Acrescenta as colunas que faltarem, uma por vez e cada uma na sua
+    transação. NUNCA recria nem apaga tabela: falha vira log e a próxima
+    coluna segue. Devolve as colunas efetivamente acrescentadas."""
+    acrescentadas: list[str] = []
+    for tabela, nomes in COLUNAS_MIGRAVEIS.items():
+        try:
+            with engine.connect() as conn:
+                existentes = _colunas_existentes(conn, tabela)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("migração: não consegui ler as colunas de %s: %s", tabela, exc)
+            continue
+        if not existentes:
+            continue
+        modelo = Base.metadata.tables[tabela]
+        for nome in nomes:
+            if nome in existentes:
+                continue
+            coluna = modelo.c[nome]
+            tipo = coluna.type.compile(engine.dialect)
+            # O default do modelo é do Python; repeti-lo no ALTER preenche as
+            # linhas que já existem em vez de deixá-las nulas.
+            padrao = getattr(coluna.default, "arg", None)
+            sufixo = f" DEFAULT '{padrao}'" if isinstance(padrao, str) else ""
+            try:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {tabela} ADD COLUMN {nome} {tipo}{sufixo}")
+                acrescentadas.append(f"{tabela}.{nome}")
+                _log.info("migração: coluna %s.%s acrescentada", tabela, nome)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("migração: falha ao acrescentar %s.%s: %s", tabela, nome, exc)
+    return acrescentadas
+
 
 def init_db() -> None:
     global _ready
     with _init_lock:
         if _ready:
             return
-        Base.metadata.create_all(get_engine())
+        engine = get_engine()
+        Base.metadata.create_all(engine)
+        migrar_colunas(engine)
         _ready = True
 
 

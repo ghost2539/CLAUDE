@@ -17,7 +17,7 @@ import numbers
 import re
 import unicodedata
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -25,7 +25,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, func, insert, or_, select, update
+from sqlalchemy import case, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 import db.orcamento_manutencao as db
@@ -42,6 +42,9 @@ R = db.Reparo
 # Categorias com rótulo canônico (3.1); qualquer outra vai por família.
 CATEGORIAS_CANONICAS = {
     "coletor": ("Coletor", "COLETOR"),
+    # A planilha do fornecedor chama o Coletor pelo fabricante (8.2).
+    "coletor - bluebird": ("Coletor", "COLETOR"),
+    "coletor bluebird": ("Coletor", "COLETOR"),
     "coletor hf550x": ("Coletor HF550X", "COLETOR"),
     "coletor s70": ("Coletor S70", "COLETOR"),
     "sled rfid": ("Sled RFID", "SLED"),
@@ -155,6 +158,12 @@ def normalizar_status(texto) -> tuple[str, bool]:
         return "AGUARDANDO_ORCAMENTO", True
     if chave.startswith("validando"):
         return "VALIDANDO_ORCAMENTO", True
+    # 8.2: o fornecedor fecha o reparo sem cobrar — decidido, e sem custo.
+    if chave.startswith("bonificado") or chave.startswith("garantia"):
+        return "APROVADO", True
+    # Faturado só acontece depois de aprovado: a nota já saiu.
+    if chave.startswith("faturado"):
+        return "APROVADO", True
     return "AGUARDANDO_ORCAMENTO", False
 
 
@@ -214,6 +223,71 @@ def mes_referencia(valor) -> Optional[str]:
     if m and 1 <= int(m.group(2)) <= 12:
         return f"{m.group(1)}-{m.group(2)}"
     return None
+
+
+def data_celula(valor) -> Optional[date]:
+    """Célula de data → `date`; texto "AAAA-MM-DD"/"DD/MM/AAAA" também; outro → None."""
+    if _vazio(valor):
+        return None
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if hasattr(valor, "to_pydatetime"):  # pandas.Timestamp
+        try:
+            return valor.to_pydatetime().date()
+        except (TypeError, ValueError):
+            return None
+    texto = _texto(valor)[:10]
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+# ── 8.2 — o status da planilha do fornecedor carrega mais de uma coisa ──
+MESES_PT = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
+    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+}
+_RE_MES_PT = re.compile(r"\b(" + "|".join(MESES_PT) + r")\b")
+_RE_ANO = re.compile(r"\b(20\d{2})\b")
+
+
+def meses_por_extenso(texto) -> list[int]:
+    """Meses citados por extenso, na ordem em que aparecem. A comparação é sem
+    acento, então "MARÇO" e "marco" valem o mesmo."""
+    return [MESES_PT[m] for m in _RE_MES_PT.findall(_sem_acento(texto))]
+
+
+def mes_por_extenso(texto) -> Optional[str]:
+    """Primeiro "<mês por extenso> ... <ano>" do texto → "AAAA-MM".
+    "OUTUBRO / NOVEMBRO 2025" vale o primeiro mês: "2025-10"."""
+    meses = meses_por_extenso(texto)
+    anos = _RE_ANO.findall(_sem_acento(texto))
+    return f"{anos[0]}-{meses[0]:02d}" if meses and anos else None
+
+
+def interpretar_status_fornecedor(texto) -> tuple:
+    """Lê o texto de status do fornecedor (8.2), que junta até quatro coisas:
+    "APROVADO - PO EXTRA CAMICADO - SETEMBRO 2026" é status APROVADO, tipo
+    AVULSA, empresa CAMICADO e mês 2026-09.
+
+    Devolve `(status, tipo|None, mes|None, empresa|None, garantia, zerar_orcamento)`.
+    `None` quer dizer "o texto não fala disso" — quem chama mantém o que já tem.
+    Sem mês, sem tipo e sem empresa o resultado é o de `normalizar_status`
+    sozinho, então `Aprovado Via Contrato` da base antiga segue APROVADO com
+    tipo CONTRATO e sem mês, como sempre foi.
+    """
+    chave = _sem_acento(texto)
+    status, _ = normalizar_status(texto)
+    tipo, tipo_ok = normalizar_tipo(texto)
+    garantia = chave.startswith("garantia")
+    zerar = garantia or chave.startswith("bonificado")
+    return (status, tipo if tipo_ok else None, mes_por_extenso(texto),
+            normalizar_empresa(texto) or None, garantia, zerar)
 
 
 def calcular(r, limiar: float) -> bool:
@@ -411,7 +485,14 @@ def _mes_entrada(v) -> Optional[str]:
 
 # ── Filtros e serialização ──────────────────────────────────────────────
 def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None,
-             status_retorno=None, empresa=None, tipo_manutencao=None, q=None):
+             status_retorno=None, empresa=None, tipo_manutencao=None, q=None,
+             min_reparos=None):
+    if min_reparos and int(min_reparos) > 1:
+        # Reincidência (8.4): só as séries com N atendimentos ou mais. Uma
+        # subconsulta agrupada, para valer igual na lista e na contagem.
+        reincidentes = (select(R.serie).where(R.serie != "").group_by(R.serie)
+                        .having(func.count(R.id) >= int(min_reparos)).scalar_subquery())
+        stmt = stmt.where(R.serie.in_(reincidentes))
     if ano:
         stmt = stmt.where(R.ano == ano)
     if mes:
@@ -454,6 +535,35 @@ def _mes_do_filtro(mes: Optional[str], ano: int) -> Optional[str]:
 
 def _dinheiro(v) -> float:
     return round(float(v or 0), 2)
+
+
+# ── 8.4 Reincidência — a série é o equipamento, o RMA é o atendimento ────
+_CUSTO_APROVADO = func.coalesce(
+    func.sum(case((R.status == "APROVADO", R.orcamento), else_=0)), 0)
+
+
+def _agregado_series(s, series=None) -> dict:
+    """`{série: (atendimentos, custo aprovado)}` numa consulta agregada só —
+    nunca uma consulta por linha. `series=None` agrega a base inteira; uma
+    lista agrega só aquelas, em blocos que cabem no limite de parâmetros."""
+    saida: dict[str, tuple[int, float]] = {}
+    base = select(R.serie, func.count(R.id), _CUSTO_APROVADO).where(R.serie != "").group_by(R.serie)
+    if series is None:
+        blocos = [base]
+    else:
+        lista = [x for x in dict.fromkeys(series) if x]
+        blocos = [base.where(R.serie.in_(lista[i:i + 400])) for i in range(0, len(lista), 400)]
+    for stmt in blocos:
+        for serie, qtde, custo in s.execute(stmt).all():
+            saida[serie] = (int(qtde), _dinheiro(custo))
+    return saida
+
+
+def _com_reincidencia(itens: list[dict], agregado: dict) -> list[dict]:
+    for item in itens:
+        qtde, custo = agregado.get(item.get("serie") or "", (1, 0.0))
+        item["serie_reparos"], item["serie_custo"] = qtde, custo
+    return itens
 
 
 # ── 5.1 Painel ──────────────────────────────────────────────────────────
@@ -669,18 +779,23 @@ def listar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
            familia: Optional[str] = None, categoria: Optional[str] = None,
            status: Optional[str] = None, status_retorno: Optional[str] = None,
            empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
-           q: Optional[str] = None, limit: int = 100, offset: int = 0):
+           q: Optional[str] = None, min_reparos: Optional[int] = None,
+           limit: int = 100, offset: int = 0):
+    """`min_reparos=2` deixa só o que é reincidente (8.4). Cada item leva
+    `serie_reparos` e `serie_custo` — o histórico da série na base inteira."""
     _exigir(req, "view")
     limit = max(1, min(int(limit or 100), 1000))
     offset = max(0, int(offset or 0))
     filtros = dict(ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
                    status_retorno=status_retorno, empresa=empresa,
-                   tipo_manutencao=tipo_manutencao, q=q)
+                   tipo_manutencao=tipo_manutencao, q=q, min_reparos=min_reparos)
     with db.SessionLocal() as s:
         total = s.scalar(_filtrar(select(func.count(R.id)), **filtros)) or 0
         itens = s.scalars(_ordenado(_filtrar(select(R), **filtros))
                           .limit(limit).offset(offset)).all()
-        return {"total": int(total), "itens": [r.to_dict() for r in itens]}
+        saida = [r.to_dict() for r in itens]
+        _com_reincidencia(saida, _agregado_series(s, [r.serie for r in itens]))
+        return {"total": int(total), "itens": saida}
 
 
 # ── 5.3 Inclusão ────────────────────────────────────────────────────────
@@ -890,79 +1005,169 @@ def _gravar_ebs(resultados: list, usuario: str, sobrescrever_manual: bool) -> di
 
 
 # ── 5.7 Importação ──────────────────────────────────────────────────────
+# Nomes de coluna que identificam a série em cada layout: a planilha histórica
+# diz SÉRIE, a aba AVULSO do fornecedor diz S/N (8.2).
+COLUNAS_SERIE = ("serie", "numero de serie", "n serie", "serial")
+COLUNAS_SN = ("s/n", "sn")
+
 ALIASES = {
-    "serie": ["serie", "numero de serie", "n serie", "serial"],
+    "serie": [*COLUNAS_SERIE, *COLUNAS_SN],
     "loja": ["loja"],
     "rma": ["rma"],
     "categoria": ["categoria"],
-    "orcamento": ["orcamento", "valor orcamento", "valor"],
+    "orcamento": ["orcamento", "valor orcamento", "valor", "total"],
     "razao": ["60% orcamento", "percentual", "60%"],
     "ano": ["ano"],
     "lote_prime": ["lote prime", "lote"],
-    "status": ["status orcamento", "status"],
-    "mes_contrato": ["mes contrato", "mes", "mes referencia", "mes_referencia"],
+    "status": ["status orcamento", "status", "aprovado via contrato"],
+    "mes_contrato": ["mes contrato", "mes - contrato", "mes", "mes referencia", "mes_referencia"],
     "tipo": ["tipo de manutencao", "tipo manutencao", "tipo"],
     "status_retorno": ["status de retorno", "status retorno"],
     "ano_devolucao": ["ano devolucao"],
     "avaliacao": ["avaliacao orcamento", "avaliacao"],  # recalculada; só mapeada
     "qtde": ["qtde", "quantidade"],
     "empresa": ["empresa"],
+    # 8.2 — planilha do fornecedor
+    "disponibilizacao": ["disponibilizacao", "disponibilização", "data disponibilizacao"],
+    "origem_equipamento": ["origem"],
+    "po": ["po", "pedido"],
 }
 OBRIGATORIAS = ("rma", "serie", "categoria")
+# Colunas que só existem se o arquivo as trouxer. A planilha do fornecedor tem
+# meia dúzia de colunas (8.2): gravá-las mesmo assim apagaria loja, lote e —
+# pior — o DEVOLVIDO que a tela de retorno acabou de marcar. Sem a coluna, o
+# upsert não mexe no que está gravado.
+CAMPOS_OPCIONAIS = ("loja", "lote_prime", "qtde", "status_retorno", "ano_devolucao",
+                    "origem_equipamento", "disponibilizacao", "po")
 
 
-def _ler_planilha(conteudo: bytes, nome: str):
+def _mapear_colunas(colunas) -> dict:
+    """{destino: nome da coluna no arquivo}; None para o que não veio."""
+    cmap = {_sem_acento(c): c for c in colunas}
+    return {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
+            for k, al in ALIASES.items()}
+
+
+def _layout_da_aba(colunas) -> str:
+    """"CONTRATO" (RMA + SÉRIE + CATEGORIA), "AVULSO" (RMA + S/N) ou "" quando
+    o cabeçalho não serve para importar."""
+    cmap = {_sem_acento(c) for c in colunas}
+    if not any(_sem_acento(a) in cmap for a in ALIASES["rma"]):
+        return ""
+    if any(a in cmap for a in COLUNAS_SERIE) and any(
+            _sem_acento(a) in cmap for a in ALIASES["categoria"]):
+        return "CONTRATO"
+    if any(a in cmap for a in COLUNAS_SN):
+        return "AVULSO"
+    return ""
+
+
+def _ler_planilha(conteudo: bytes, nome: str, aba: Optional[str] = None):
+    """Devolve `(df, aba usada, abas do arquivo)`. Sem `aba`, escolhe a primeira
+    cujo cabeçalho case com um dos layouts conhecidos (8.2); nenhuma servindo,
+    devolve 400 dizendo o que cada aba tem."""
     import pandas as pd
     sufixo = Path(nome or "").suffix.lower()
-    try:
-        if sufixo == ".csv":
+    if sufixo == ".csv":
+        try:
             try:
-                return pd.read_csv(io.BytesIO(conteudo), dtype=object, sep=None,
-                                   engine="python", encoding="utf-8-sig")
+                df = pd.read_csv(io.BytesIO(conteudo), dtype=object, sep=None,
+                                 engine="python", encoding="utf-8-sig")
             except UnicodeDecodeError:
-                return pd.read_csv(io.BytesIO(conteudo), dtype=object, sep=None,
-                                   engine="python", encoding="latin-1")
-        return pd.read_excel(io.BytesIO(conteudo), sheet_name=0, dtype=object)
+                df = pd.read_csv(io.BytesIO(conteudo), dtype=object, sep=None,
+                                 engine="python", encoding="latin-1")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, f"Arquivo inválido: {exc}")
+        return df, "", []
+
+    try:
+        xls = pd.ExcelFile(io.BytesIO(conteudo))
+        abas = [str(a) for a in xls.sheet_names]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(400, f"Arquivo inválido: {exc}")
 
+    if not _vazio(aba):
+        alvo = _sem_acento(aba)
+        escolhida = next((a for a in abas if _sem_acento(a) == alvo), None)
+        if escolhida is None:
+            raise HTTPException(400, f"Aba {_texto(aba)!r} não existe neste arquivo. "
+                                     f"Abas disponíveis: {', '.join(abas)}")
+    else:
+        # Só o cabeçalho de cada aba: ler 1.700 linhas de cada uma para
+        # descobrir qual serve sairia caro.
+        cabecalhos: dict[str, list] = {}
+        escolhida = None
+        for nome_aba in abas:
+            try:
+                cabecalhos[nome_aba] = list(
+                    pd.read_excel(xls, sheet_name=nome_aba, dtype=object, nrows=0).columns)
+            except Exception:  # noqa: BLE001
+                cabecalhos[nome_aba] = []
+            if _layout_da_aba(cabecalhos[nome_aba]):
+                escolhida = nome_aba
+                break
+        if escolhida is None:
+            detalhe = "; ".join(
+                f"{a}: {', '.join(map(str, cols))[:200] or '(sem cabeçalho)'}"
+                for a, cols in cabecalhos.items())
+            raise HTTPException(400, "Nenhuma aba tem as colunas necessárias "
+                                     "(RMA + SÉRIE + CATEGORIA, ou RMA + S/N). " + detalhe)
 
-def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str) -> dict:
-    return {
-        "rma": d.rma, "serie": d.serie, "loja": d.loja, "categoria": d.categoria,
+    try:
+        df = pd.read_excel(xls, sheet_name=escolhida, dtype=object)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Arquivo inválido: {exc}")
+    return df, escolhida, abas
+
+
+def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str,
+                       extras: tuple[str, ...] = ()) -> dict:
+    """Colunas a gravar. O bloco fixo é o que toda planilha define; `extras`
+    são os campos que só entram quando o arquivo trouxe a coluna, para o upsert
+    não apagar o que ele nem menciona (ver CAMPOS_OPCIONAIS)."""
+    cols = {
+        "rma": d.rma, "serie": d.serie, "categoria": d.categoria,
         "familia": d.familia, "empresa": d.empresa, "orcamento": d.orcamento,
         "garantia": d.garantia, "valor_compra": d.valor_compra,
         "valor_compra_fonte": d.valor_compra_fonte, "percentual": d.percentual,
         "avaliacao": d.avaliacao, "status": d.status, "status_original": d.status_original,
         "tipo_manutencao": d.tipo_manutencao, "tipo_original": d.tipo_original,
-        "status_retorno": d.status_retorno, "ano": d.ano, "mes_referencia": d.mes_referencia,
-        "ano_devolucao": d.ano_devolucao, "lote_prime": d.lote_prime, "qtde": d.qtde,
+        "ano": d.ano, "mes_referencia": d.mes_referencia,
         "atualizado_em": agora, "atualizado_por": usuario,
     }
+    for campo in extras:
+        cols[campo] = getattr(d, campo)
+    return cols
 
 
 @router.post("/importar")
 def importar(req: Request, file: UploadFile = File(...),
-             substituir: bool = Form(False)):
+             substituir: bool = Form(False), aba: str = Form("")):
     """`substituir=true`: a planilha vira a base. Linhas importadas antes que
-    não estão no arquivo são removidas; o que foi digitado no portal fica."""
+    não estão no arquivo são removidas; o que foi digitado no portal fica.
+    `aba`: qual aba do xlsx ler; sem ela, a primeira que servir (8.2)."""
     sd = _exigir(req, "admin")
     check_rate_limit(req, "api")
     usuario = _usuario(sd)
     nome = Path(file.filename or "planilha.xlsx").name[:200]
-    df = _ler_planilha(file.file.read(), nome)
+    df, aba_usada, abas_disponiveis = _ler_planilha(file.file.read(), nome, aba)
 
-    cmap = {_sem_acento(c): c for c in df.columns}
-    colunas = {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
-               for k, al in ALIASES.items()}
-    faltando = [k for k in OBRIGATORIAS if not colunas[k]]
+    colunas = _mapear_colunas(df.columns)
+    layout = _layout_da_aba(df.columns)
+    # A aba AVULSO não tem CATEGORIA: exigi-la rejeitaria o arquivo inteiro.
+    obrigatorias = ("rma", "serie") if layout == "AVULSO" else OBRIGATORIAS
+    faltando = [k for k in obrigatorias if not colunas[k]]
     if faltando:
         raise HTTPException(400, "Colunas obrigatórias ausentes: " + ", ".join(faltando)
                             + f". Colunas encontradas: {', '.join(map(str, df.columns))}")
+    extras = tuple(c for c in CAMPOS_OPCIONAIS if colunas.get(c))
+    tem_categoria = bool(colunas["categoria"])
 
     detalhes, avisos_detalhes = [], []
     avisos = Counter(status_nao_reconhecido=0, tipo_nao_reconhecido=0,
-                     empresa_vazia=0, mes_referencia_nulo=0)
+                     tipo_assumido_contrato=0,
+                     empresa_vazia=0, mes_referencia_nulo=0,
+                     mes_ambiguo=0, status_do_fornecedor=0)
     novos, alterados, vistos = [], [], set()
     # Todo RMA que aparece no arquivo, mesmo em linha rejeitada: com
     # `substituir`, um erro de formato não pode apagar o que já existe.
@@ -977,9 +1182,12 @@ def importar(req: Request, file: UploadFile = File(...),
         config = db.ler_config(s)
         limiar = config["limiar_percentual"]
         # Um SELECT só: o que já existe, com o que a ordem 3.4 precisa preservar.
+        # Um SELECT só, com o que o upsert precisa preservar quando o arquivo
+        # não traz a coluna.
         existentes = {
-            rma: (rid, vc, fonte) for rid, rma, vc, fonte in s.execute(
-                select(R.id, R.rma, R.valor_compra, R.valor_compra_fonte)).all()
+            linha.rma: linha for linha in s.execute(
+                select(R.id, R.rma, R.valor_compra, R.valor_compra_fonte, R.categoria,
+                       R.familia, R.empresa, R.tipo_manutencao, R.tipo_original)).all()
         }
         agora = db.utcnow()
 
@@ -1002,10 +1210,15 @@ def importar(req: Request, file: UploadFile = File(...),
             if not serie:
                 rejeitar(idx, "série vazia")
                 continue
-            categoria, familia = normalizar_categoria(val("categoria"))
-            if not categoria:
-                rejeitar(idx, "categoria vazia")
-                continue
+            ant = existentes.get(rma)
+            if tem_categoria:
+                categoria, familia = normalizar_categoria(val("categoria"))
+                if not categoria:
+                    rejeitar(idx, "categoria vazia")
+                    continue
+            else:
+                # Sem coluna CATEGORIA (aba AVULSO): mantém a que já existe.
+                categoria, familia = (ant.categoria, ant.familia) if ant else ("", "OUTRO")
             try:
                 orcamento, garantia = interpretar_orcamento(val("orcamento"))
             except ValueError as exc:
@@ -1013,30 +1226,64 @@ def importar(req: Request, file: UploadFile = File(...),
                 continue
             vistos.add(rma)
 
+            # O texto do status do fornecedor também diz tipo, mês e empresa (8.2).
             status_txt = _texto(val("status"), 60)
             status, ok = normalizar_status(status_txt)
             if not ok:
                 avisos["status_nao_reconhecido"] += 1
                 if len(avisos_detalhes) < 200:
                     avisos_detalhes.append({"linha": idx, "motivo": f"status não reconhecido: {status_txt!r}"})
-            tipo_txt = _texto(val("tipo"), 60)
-            tipo, ok = normalizar_tipo(tipo_txt)
-            if not ok:
-                avisos["tipo_nao_reconhecido"] += 1
+            (status, tipo_status, mes_status, empresa_status,
+             garantia_status, zerar) = interpretar_status_fornecedor(status_txt)
+            if zerar:
+                orcamento = 0.0
+            garantia = garantia or garantia_status
+            if len(set(meses_por_extenso(status_txt))) > 1:
+                avisos["mes_ambiguo"] += 1
                 if len(avisos_detalhes) < 200:
-                    avisos_detalhes.append({"linha": idx, "motivo": f"tipo não reconhecido: {tipo_txt!r}"})
-            empresa = normalizar_empresa(val("empresa"))
+                    avisos_detalhes.append({"linha": idx, "motivo": f"mais de um mês no status, vale o primeiro: {status_txt!r}"})
+
+            # Tipo: a coluna manda; sem ela, o texto do status; sem os dois, a
+            # aba AVULSO já diz que a manutenção é avulsa.
+            tipo_txt = _texto(val("tipo"), 60)
+            tipo, ok_tipo = normalizar_tipo(tipo_txt)
+            usou_status = bool(mes_status)
+            if not ok_tipo and tipo_status:
+                tipo, ok_tipo, usou_status = tipo_status, True, True
+            if not ok_tipo and layout == "AVULSO":
+                tipo, ok_tipo = "AVULSA", True
+            if not ok_tipo:
+                if ant:  # ninguém falou do tipo: o que já estava gravado vale
+                    tipo, tipo_txt = ant.tipo_manutencao, ant.tipo_original or ""
+                if tipo_txt and not ant:
+                    # Só é "não reconhecido" quando havia texto para reconhecer.
+                    avisos["tipo_nao_reconhecido"] += 1
+                    if len(avisos_detalhes) < 200:
+                        avisos_detalhes.append({"linha": idx, "motivo": f"tipo não reconhecido: {tipo_txt!r}"})
+                elif not ant:
+                    # Planilha sem coluna de tipo e reparo novo: assume contrato.
+                    avisos["tipo_assumido_contrato"] += 1
+            if usou_status:
+                avisos["status_do_fornecedor"] += 1
+
+            # A empresa do status só vale quando a planilha não trouxe a coluna.
+            empresa = (normalizar_empresa(val("empresa")) or (empresa_status or "")
+                       or (ant.empresa if ant and not colunas["empresa"] else ""))
             if not empresa:
                 avisos["empresa_vazia"] += 1
-            mes = mes_referencia(val("mes_contrato"))
+            # Mês: o do status manda; senão o da coluna de contrato; senão o
+            # da disponibilização.
+            disponibilizacao = data_celula(val("disponibilizacao"))
+            mes = (mes_status or mes_referencia(val("mes_contrato"))
+                   or mes_referencia(disponibilizacao))
             if not mes:
                 avisos["mes_referencia_nulo"] += 1
 
-            ant = existentes.get(rma)
             d = SimpleNamespace(
                 rma=rma, serie=serie, loja=_inteiro(val("loja")), categoria=categoria,
                 familia=familia, empresa=empresa, orcamento=orcamento, garantia=garantia,
-                valor_compra=ant[1] if ant else None, valor_compra_fonte=(ant[2] if ant else "") or "",
+                valor_compra=ant.valor_compra if ant else None,
+                valor_compra_fonte=(ant.valor_compra_fonte if ant else "") or "",
                 percentual=None, avaliacao="", status=status,
                 status_original=status_txt or db.STATUS_ROTULOS[status],
                 tipo_manutencao=tipo, tipo_original=tipo_txt,
@@ -1044,13 +1291,15 @@ def importar(req: Request, file: UploadFile = File(...),
                 ano=_inteiro(val("ano")) or (int(mes[:4]) if mes else date.today().year),
                 mes_referencia=mes, ano_devolucao=_inteiro(val("ano_devolucao")),
                 lote_prime=_texto(val("lote_prime"), 200), qtde=_inteiro(val("qtde")) or 1,
+                origem_equipamento=_texto(val("origem_equipamento"), 10).upper(),
+                disponibilizacao=disponibilizacao, po=_texto(val("po"), 40),
             )
             d.valor_compra, d.valor_compra_fonte = _valor_compra_para(d, config, razao=_numero(val("razao")))
             calcular(d, limiar)
 
-            cols = _linha_para_colunas(d, agora, usuario)
+            cols = _linha_para_colunas(d, agora, usuario, extras)
             if ant:
-                alterados.append({"id": ant[0], **cols})
+                alterados.append({"id": ant.id, **cols})
             else:
                 novos.append({**cols, "observacao": "", "ebs_erro": "", "ebs_consultado_em": None,
                               "criado_em": agora, "criado_por": usuario, "origem": "PLANILHA"})
@@ -1077,34 +1326,68 @@ def importar(req: Request, file: UploadFile = File(...),
             arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
             atualizadas=len(alterados), rejeitadas=rejeitadas,
             detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
-                                 "rejeicoes": detalhes}, ensure_ascii=False),
+                                 "aba": aba_usada, "rejeicoes": detalhes}, ensure_ascii=False),
         ))
 
     return {
         "lidas": lidas, "incluidas": len(novos), "atualizadas": len(alterados),
         "rejeitadas": rejeitadas, "removidas": removidas,
         "substituiu": bool(substituir), "detalhes": detalhes,
+        "aba": aba_usada, "abas_disponiveis": abas_disponiveis, "layout": layout,
         "avisos": dict(avisos), "avisos_detalhes": avisos_detalhes,
     }
 
 
 # ── 5.8 Exportação ──────────────────────────────────────────────────────
+def _xlsx(colunas: list, linhas: list, titulo: str, nome: str) -> StreamingResponse:
+    """Padrão de planilha do módulo: cabeçalho AB4807 branco e negrito, congela
+    A2, filtro automático e largura pelo conteúdo. `colunas` é
+    `[(título, função que lê a linha)]`."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = titulo
+    ws.append([c for c, _ in colunas])
+    for cell in ws[1]:
+        cell.fill = PatternFill("solid", fgColor="AB4807")
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    for linha in linhas:
+        ws.append([fn(linha) for _, fn in colunas])
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for coluna in ws.columns:
+        largura = max(len(str(c.value or "")) for c in coluna) + 2
+        ws.column_dimensions[coluna[0].column_letter].width = min(45, max(12, largura))
+
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
 @router.get("/exportar.xlsx")
 def exportar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
              familia: Optional[str] = None, categoria: Optional[str] = None,
              status: Optional[str] = None, status_retorno: Optional[str] = None,
              empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
-             q: Optional[str] = None):
+             q: Optional[str] = None, min_reparos: Optional[int] = None):
     _exigir(req, "export")
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
-
     with db.SessionLocal() as s:
         config = db.ler_config(s)
         itens = s.scalars(_ordenado(_filtrar(
             select(R), ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
-            status_retorno=status_retorno, empresa=empresa, tipo_manutencao=tipo_manutencao, q=q,
+            status_retorno=status_retorno, empresa=empresa, tipo_manutencao=tipo_manutencao,
+            q=q, min_reparos=min_reparos,
         ))).all()
+        # Sem paginação a exportação pode levar a base toda: um agregado só.
+        agregado = _agregado_series(s)
 
     lim = f"{config['limiar_percentual'] * 100:g}".replace(".", ",")
     aval = {"DENTRO": f"Dentro dos {lim}%", "FORA": f"Fora dos {lim}%", "": ""}
@@ -1123,34 +1406,16 @@ def exportar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
         ("QTDE", lambda r: r.qtde), ("EMPRESA", lambda r: r.empresa),
         ("VALOR COMPRA", lambda r: r.valor_compra), ("FONTE VALOR", lambda r: r.valor_compra_fonte),
         ("PERCENTUAL", lambda r: round(r.percentual * 100, 2) if r.percentual is not None else None),
-        ("FAMÍLIA", lambda r: r.familia), ("OBSERVAÇÃO", lambda r: r.observacao),
+        ("FAMÍLIA", lambda r: r.familia),
+        ("ORIGEM EQUIPAMENTO", lambda r: r.origem_equipamento or ""),
+        ("DISPONIBILIZAÇÃO", lambda r: r.disponibilizacao),
+        ("PO", lambda r: r.po or ""),
+        ("REPAROS DA SÉRIE", lambda r: agregado.get(r.serie, (1, 0.0))[0]),
+        ("CUSTO ACUMULADO DA SÉRIE", lambda r: agregado.get(r.serie, (1, 0.0))[1]),
+        ("OBSERVAÇÃO", lambda r: r.observacao),
     ]
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Manutenção"
-    ws.append([c for c, _ in colunas])
-    for cell in ws[1]:
-        cell.fill = PatternFill("solid", fgColor="AB4807")
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(horizontal="center")
-    for r in itens:
-        ws.append([fn(r) for _, fn in colunas])
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    for coluna in ws.columns:
-        largura = max(len(str(c.value or "")) for c in coluna) + 2
-        ws.column_dimensions[coluna[0].column_letter].width = min(45, max(12, largura))
-
-    stream = io.BytesIO()
-    wb.save(stream)
-    stream.seek(0)
-    nome = f"orcamento_manutencao_{ano or 'todos'}.xlsx"
-    return StreamingResponse(
-        stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
-    )
+    return _xlsx(colunas, itens, "Manutenção", f"orcamento_manutencao_{ano or 'todos'}.xlsx")
 
 
 # ── 5.9 Configuração ────────────────────────────────────────────────────
@@ -1243,3 +1508,210 @@ def opcoes(req: Request):
         "lotes": lotes,
         "limiar_percentual": config["limiar_percentual"],
     }
+
+
+# ── 8.3 Retorno de reparo ───────────────────────────────────────────────
+class RetornoIn(BaseModel):
+    """Lista de RMAs bipados na tela de retorno. A caixa de texto da tela já
+    separa por vírgula, ponto e vírgula, espaço ou linha; aqui só chega a lista."""
+    model_config = ConfigDict(extra="ignore")
+    rmas: list[Any] = []
+
+
+RETORNO_MAX = 500
+
+
+def _rmas_do_corpo(body: RetornoIn) -> list[str]:
+    """Limpa (inclusive `\\xa0`), descarta vazios e repetidos preservando a
+    ordem digitada, e recusa lote grande demais."""
+    vistos, saida = set(), []
+    for bruto in (body.rmas or []):
+        rma = _texto_rma(bruto)
+        if not rma or rma in vistos:
+            continue
+        vistos.add(rma)
+        saida.append(rma)
+    if not saida:
+        raise HTTPException(422, "Informe ao menos um RMA.")
+    if len(saida) > RETORNO_MAX:
+        raise HTTPException(422, f"No máximo {RETORNO_MAX} RMAs por vez; vieram {len(saida)}.")
+    return saida
+
+
+def _item_retorno(r) -> dict:
+    return {
+        "rma": r.rma, "encontrado": True,
+        "ja_devolvido": r.status_retorno == "DEVOLVIDO",
+        "id": r.id, "serie": r.serie, "categoria": r.categoria, "familia": r.familia,
+        "loja": r.loja, "empresa": r.empresa, "orcamento": float(r.orcamento or 0),
+        "status": r.status, "status_rotulo": db.STATUS_ROTULOS.get(r.status, r.status),
+        "status_retorno": r.status_retorno, "mes_referencia": r.mes_referencia,
+        "lote_prime": r.lote_prime or "",
+        "devolvido_em": r.devolvido_em.isoformat() if r.devolvido_em else None,
+    }
+
+
+def _itens_retorno(rmas: list[str], achados: dict) -> list[dict]:
+    """Na ordem digitada; o que não está na base vem só como não encontrado."""
+    return [_item_retorno(achados[rma]) if rma in achados else {"rma": rma, "encontrado": False}
+            for rma in rmas]
+
+
+@router.post("/retorno/consultar")
+def retorno_consultar(body: RetornoIn, req: Request):
+    """Mostra o que a base sabe dos RMAs bipados. Não altera nada."""
+    _exigir(req, "view")
+    rmas = _rmas_do_corpo(body)
+    with db.SessionLocal() as s:
+        # Uma consulta para o lote inteiro, não uma por RMA.
+        achados = {r.rma: r for r in s.scalars(select(R).where(R.rma.in_(rmas))).all()}
+        itens = _itens_retorno(rmas, achados)
+    encontrados = [i for i in itens if i["encontrado"]]
+    return {
+        "itens": itens, "total": len(itens), "encontrados": len(encontrados),
+        "nao_encontrados": len(itens) - len(encontrados),
+        "ja_devolvidos": sum(1 for i in encontrados if i["ja_devolvido"]),
+    }
+
+
+@router.post("/retorno/confirmar")
+def retorno_confirmar(body: RetornoIn, req: Request):
+    """Marca os RMAs como devolvidos. Nada é criado: RMA fora da base só é
+    reportado, e o status do orçamento não é tocado."""
+    sd = _exigir(req, "edit")
+    check_rate_limit(req, "api")
+    rmas = _rmas_do_corpo(body)
+    usuario = _usuario(sd)
+    agora = db.utcnow()
+    devolvidos = ja_devolvidos = 0
+    with db.SessionLocal.begin() as s:
+        achados = {r.rma: r for r in s.scalars(select(R).where(R.rma.in_(rmas))).all()}
+        for r in achados.values():
+            if r.status_retorno == "DEVOLVIDO":
+                ja_devolvidos += 1
+                continue
+            r.status_retorno = "DEVOLVIDO"
+            r.devolvido_em = agora
+            r.devolvido_por = usuario
+            r.ano_devolucao = date.today().year
+            r.atualizado_por = usuario
+            devolvidos += 1
+        s.flush()
+        itens = _itens_retorno(rmas, achados)
+    return {
+        "devolvidos": devolvidos, "ja_devolvidos": ja_devolvidos,
+        "nao_encontrados": [rma for rma in rmas if rma not in achados],
+        "itens": itens, "total": len(itens), "encontrados": len(achados),
+    }
+
+
+# ── 8.4 Reincidência ────────────────────────────────────────────────────
+def _filtrar_serie(stmt, familia=None, categoria=None, ano=None, q=None):
+    """Filtros do resumo por série. Aqui `q` procura só na série."""
+    if familia:
+        stmt = stmt.where(R.familia == familia.strip().upper())
+    if categoria:
+        stmt = stmt.where(R.categoria == normalizar_categoria(categoria)[0])
+    if ano:
+        stmt = stmt.where(R.ano == int(ano))
+    if q and q.strip():
+        stmt = stmt.where(R.serie.like(f"%{q.strip().upper()}%"))
+    return stmt
+
+
+def _resumo_series(s, min_reparos: int, familia=None, categoria=None, ano=None,
+                   q=None, limit: Optional[int] = None, offset: int = 0):
+    """`(total, resumo, itens)` do resumo por série. Os filtros valem para o
+    que é contado: pedir `familia=SLED` conta os reparos de SLED da série.
+    Duas consultas — a agregada e a dos detalhes da página (categoria mais
+    recente e lojas) —, nunca uma por série."""
+    reparos = func.count(R.id).label("reparos")
+    custo = _CUSTO_APROVADO.label("custo_total")
+    reprovados = func.coalesce(
+        func.sum(case((R.status == "REPROVADO", 1), else_=0)), 0).label("reprovados")
+    grupo = (_filtrar_serie(
+        select(R.serie.label("serie"), reparos, custo, reprovados,
+               func.min(R.mes_referencia).label("primeiro"),
+               func.max(R.mes_referencia).label("ultimo")),
+        familia, categoria, ano, q)
+        .where(R.serie != "").group_by(R.serie)
+        .having(func.count(R.id) >= min_reparos))
+
+    sub = grupo.subquery()
+    total, soma_reparos, soma_custo = s.execute(
+        select(func.count(), func.coalesce(func.sum(sub.c.reparos), 0),
+               func.coalesce(func.sum(sub.c.custo_total), 0)).select_from(sub)).one()
+
+    ordenado = grupo.order_by(reparos.desc(), custo.desc(), R.serie)
+    if limit is not None:
+        ordenado = ordenado.limit(limit).offset(offset)
+    linhas = s.execute(ordenado).all()
+
+    series = [l.serie for l in linhas]
+    detalhes: dict[str, dict] = {}
+    for i in range(0, len(series), 400):
+        for serie, cat, fam, loja in s.execute(
+            _filtrar_serie(select(R.serie, R.categoria, R.familia, R.loja),
+                           familia, categoria, ano, q)
+            .where(R.serie.in_(series[i:i + 400]))
+            .order_by(R.serie, R.mes_referencia.asc().nullsfirst(), R.id)
+        ).all():
+            d = detalhes.setdefault(serie, {"categoria": "", "familia": "", "lojas": []})
+            if cat:  # em ordem crescente de mês: sobra a categoria mais recente
+                d["categoria"], d["familia"] = cat, fam
+            if loja is not None and loja not in d["lojas"]:
+                d["lojas"].append(loja)
+
+    itens = []
+    for l in linhas:
+        d = detalhes.get(l.serie) or {}
+        qtde = int(l.reparos)
+        total_custo = _dinheiro(l.custo_total)
+        itens.append({
+            "serie": l.serie, "categoria": d.get("categoria", ""),
+            "familia": d.get("familia", ""), "reparos": qtde,
+            "custo_total": total_custo,
+            "custo_medio": _dinheiro(total_custo / qtde) if qtde else 0.0,
+            "primeiro": l.primeiro, "ultimo": l.ultimo,
+            "reprovados": int(l.reprovados), "lojas": (d.get("lojas") or [])[:10],
+        })
+    resumo = {"series": int(total), "reparos": int(soma_reparos),
+              "custo_total": _dinheiro(soma_custo)}
+    return int(total), resumo, itens
+
+
+@router.get("/reincidencia")
+def reincidencia(req: Request, min_reparos: int = 2, familia: Optional[str] = None,
+                 categoria: Optional[str] = None, ano: Optional[int] = None,
+                 q: Optional[str] = None, limit: int = 100, offset: int = 0):
+    """Séries que voltaram para reparo (8.4), das que mais voltaram para as que
+    menos voltaram e, no empate, das mais caras para as mais baratas."""
+    _exigir(req, "view")
+    min_reparos = max(1, int(min_reparos or 2))
+    limit = max(1, min(int(limit or 100), 1000))
+    offset = max(0, int(offset or 0))
+    with db.SessionLocal() as s:
+        total, resumo, itens = _resumo_series(
+            s, min_reparos, familia, categoria, ano, q, limit, offset)
+    return {"total": total, "itens": itens, "resumo": resumo}
+
+
+@router.get("/reincidencia.xlsx")
+def reincidencia_xlsx(req: Request, min_reparos: int = 2, familia: Optional[str] = None,
+                      categoria: Optional[str] = None, ano: Optional[int] = None,
+                      q: Optional[str] = None):
+    _exigir(req, "export")
+    min_reparos = max(1, int(min_reparos or 2))
+    with db.SessionLocal() as s:
+        _, _, itens = _resumo_series(s, min_reparos, familia, categoria, ano, q)
+    colunas = [
+        ("SÉRIE", lambda i: i["serie"]), ("CATEGORIA", lambda i: i["categoria"]),
+        ("FAMÍLIA", lambda i: i["familia"]), ("REPAROS DA SÉRIE", lambda i: i["reparos"]),
+        ("CUSTO ACUMULADO DA SÉRIE", lambda i: i["custo_total"]),
+        ("CUSTO MÉDIO", lambda i: i["custo_medio"]),
+        ("PRIMEIRO MÊS", lambda i: i["primeiro"] or ""),
+        ("ÚLTIMO MÊS", lambda i: i["ultimo"] or ""),
+        ("REPROVADOS", lambda i: i["reprovados"]),
+        ("LOJAS", lambda i: ", ".join(str(x) for x in i["lojas"])),
+    ]
+    return _xlsx(colunas, itens, "Reincidência", f"reincidencia_{ano or 'todos'}.xlsx")
