@@ -34,7 +34,8 @@ window.SPARE_MODULES.consulta = {
             { key: 'categoria',     label: 'Categoria' },
             { key: 'modelo',        label: 'Modelo' },
             { key: 'fonte',         label: 'Fonte' },
-            { key: 'erro',          label: 'Erro' }
+            { key: 'erro',          label: 'Erro' },
+            { key: 'local_atribuido', label: 'Local Atribuído' }
         ];
 
         function barraProgresso() {
