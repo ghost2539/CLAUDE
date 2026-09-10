@@ -1650,17 +1650,29 @@ def _resumo_series(s, min_reparos: int, familia=None, categoria=None, ano=None,
     series = [l.serie for l in linhas]
     detalhes: dict[str, dict] = {}
     for i in range(0, len(series), 400):
-        for serie, cat, fam, loja in s.execute(
-            _filtrar_serie(select(R.serie, R.categoria, R.familia, R.loja),
+        for (serie, cat, fam, loja, rid, rma, mes, status,
+             orcamento, retorno) in s.execute(
+            _filtrar_serie(select(R.serie, R.categoria, R.familia, R.loja, R.id,
+                                  R.rma, R.mes_referencia, R.status, R.orcamento,
+                                  R.status_retorno),
                            familia, categoria, ano, q)
             .where(R.serie.in_(series[i:i + 400]))
             .order_by(R.serie, R.mes_referencia.asc().nullsfirst(), R.id)
         ).all():
-            d = detalhes.setdefault(serie, {"categoria": "", "familia": "", "lojas": []})
+            d = detalhes.setdefault(serie, {"categoria": "", "familia": "",
+                                            "lojas": [], "atendimentos": []})
             if cat:  # em ordem crescente de mês: sobra a categoria mais recente
                 d["categoria"], d["familia"] = cat, fam
             if loja is not None and loja not in d["lojas"]:
                 d["lojas"].append(loja)
+            # Os RMAs que compõem a reincidência: é por eles que se chega ao
+            # atendimento, na tela e na planilha de análise.
+            d["atendimentos"].append({
+                "id": rid, "rma": rma, "mes": mes, "status": status,
+                "status_rotulo": db.STATUS_ROTULOS.get(status, status),
+                "orcamento": _dinheiro(orcamento), "status_retorno": retorno,
+                "loja": loja,
+            })
 
     itens = []
     for l in linhas:
@@ -1674,6 +1686,9 @@ def _resumo_series(s, min_reparos: int, familia=None, categoria=None, ano=None,
             "custo_medio": _dinheiro(total_custo / qtde) if qtde else 0.0,
             "primeiro": l.primeiro, "ultimo": l.ultimo,
             "reprovados": int(l.reprovados), "lojas": (d.get("lojas") or [])[:10],
+            "atendimentos": (d.get("atendimentos") or [])[:50],
+            "rmas": [a["rma"] for a in (d.get("atendimentos") or [])],
+            "ultimo_rma": (d.get("atendimentos") or [{}])[-1].get("rma", ""),
         })
     resumo = {"series": int(total), "reparos": int(soma_reparos),
               "custo_total": _dinheiro(soma_custo)}
@@ -1713,5 +1728,7 @@ def reincidencia_xlsx(req: Request, min_reparos: int = 2, familia: Optional[str]
         ("ÚLTIMO MÊS", lambda i: i["ultimo"] or ""),
         ("REPROVADOS", lambda i: i["reprovados"]),
         ("LOJAS", lambda i: ", ".join(str(x) for x in i["lojas"])),
+        ("ÚLTIMO RMA", lambda i: i.get("ultimo_rma", "")),
+        ("RMAS DA SÉRIE", lambda i: ", ".join(i.get("rmas") or [])),
     ]
     return _xlsx(colunas, itens, "Reincidência", f"reincidencia_{ano or 'todos'}.xlsx")
