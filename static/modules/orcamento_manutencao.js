@@ -1567,6 +1567,17 @@
         var outraWrap = f.querySelector('#om-f-categoria-outra-wrap');
         catSel.onchange = function () { outraWrap.hidden = catSel.value !== '__outra__'; };
 
+        // Garantia marcada: reparo sem custo e aprovado. Reflete na hora — o
+        // servidor aplica a mesma regra ao salvar.
+        var garCheck = f.querySelector('#om-f-garantia');
+        var statusSel = f.querySelector('#om-f-status');
+        var orcInput = f.querySelector('#om-f-orcamento');
+        if (garCheck) garCheck.addEventListener('change', function () {
+            if (!garCheck.checked) return;
+            if (statusSel) statusSel.value = 'APROVADO';
+            if (orcInput) orcInput.value = '';
+        });
+
         var botoes = [];
         if (!ro) {
             botoes.push(S.el('button', { className: 'btn btn-primary', textContent: isEdit ? 'Salvar' : 'Incluir', onClick: salvar }));
