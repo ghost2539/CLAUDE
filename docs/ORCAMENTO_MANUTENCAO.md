@@ -149,6 +149,9 @@ avaliacao  = "DENTRO" se percentual <= limiar   (limiar padrão 0.60)
              ""       se percentual nulo
 ```
 
+**Garantia**: com a marcação de garantia, o reparo entra como `APROVADO`
+(reparo sem custo, já resolvido), e a regra dos 60 % não se aplica a ele.
+
 **Reprovação automática**: quando `avaliacao == "FORA"` e o `status` está
 em `AGUARDANDO_APROVACAO`, `AGUARDANDO_ORCAMENTO` ou `VALIDANDO_ORCAMENTO`,
 o status vira `REPROVADO` e `status_original` recebe

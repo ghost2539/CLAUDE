@@ -304,6 +304,13 @@ def calcular(r, limiar: float) -> bool:
     else:
         r.percentual = None
         r.avaliacao = ""
+    # Garantia é reparo sem custo e já resolvido: entra como aprovado, e a
+    # regra dos 60 % nem chega a olhar para ele.
+    if r.garantia:
+        if r.status != "APROVADO":
+            r.status = "APROVADO"
+            r.status_original = "Aprovado — garantia"
+        return antes != (r.percentual, r.avaliacao, r.status, r.status_original)
     if r.avaliacao == "FORA" and r.status in db.STATUS_PENDENTES:
         r.status = "REPROVADO"
         pct = f"{perc * 100:.1f}".replace(".", ",")
