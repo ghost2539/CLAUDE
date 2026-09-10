@@ -1,7 +1,7 @@
 /* ================================================================
    Módulo: Orçamento de Manutenção — Coletores e SLEDs
    Contrato: docs/ORCAMENTO_MANUTENCAO.md  (API /api/orcamento-manutencao)
-   Sub-abas: painel · reparos · importar (admin) · config (admin)
+   Sub-abas: painel · reparos · retorno · importar (admin) · config (admin)
    ================================================================ */
 (function () {
     'use strict';
@@ -33,7 +33,11 @@
     var AVISO_LABEL = {
         status_nao_reconhecido: 'Status não reconhecido',
         tipo_nao_reconhecido:   'Tipo de manutenção não reconhecido',
-        empresa_vazia:          'Empresa vazia (o EBS pode completar)'
+        tipo_assumido_contrato: 'Sem tipo na planilha, assumido contrato',
+        mes_referencia_nulo:    'Sem mês de referência',
+        empresa_vazia:          'Empresa vazia (o EBS pode completar)',
+        mes_ambiguo:            'Mês ambíguo no status',
+        status_do_fornecedor:   'Mês/tipo deduzidos do texto do status'
     };
 
     // Usados quando GET /opcoes falha ou não traz a lista.
@@ -47,6 +51,12 @@
         lotes:          [],
         anos:           []
     };
+
+    var REINC_OPTS = [
+        { value: '2', label: '2 ou mais reparos' },
+        { value: '3', label: '3 ou mais' },
+        { value: '5', label: '5 ou mais' }
+    ];
 
     var SPIN = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando...</div>';
 
@@ -146,6 +156,32 @@
         '.om-tw td{white-space:nowrap}' +
         '.om-tw td.om-lote{white-space:normal;min-width:140px;max-width:260px}' +
         '.om-hint{font-size:12px;color:var(--text-muted);margin:4px 0 0}' +
+        /* retorno de reparo */
+        '.om-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.02em}' +
+        'textarea.om-mono{resize:vertical;min-height:150px;line-height:1.5}' +
+        '.om-ret-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);gap:14px;align-items:start}' +
+        '.om-ret-grid .form-group{margin-bottom:0}' +
+        '.om-ret-side{display:flex;flex-direction:column;gap:8px;min-width:0}' +
+        '.om-cnt{font-size:13px;font-weight:600;color:var(--text-secondary);font-variant-numeric:tabular-nums;' +
+        'background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:var(--radius);padding:8px 10px;text-align:center}' +
+        '.om-ret-copy{margin-left:10px;vertical-align:middle}' +
+        '.data-table tr.om-nf td{background:rgba(220,53,69,.12)}' +
+        '.data-table tr.om-nf td:first-child{color:#F27980;font-weight:600}' +
+        '.om-msg-nf{color:#F27980;font-weight:600}' +
+        '.om-msg-warn{color:#E8B94A}' +
+        '.om-stat-danger::before{background:var(--color-danger)}' +
+        '.om-stat-danger .stat-value{color:#F27980}' +
+        /* reincidencia */
+        '.om-reinc{font-variant-numeric:tabular-nums;min-width:26px;text-align:center}' +
+        '.om-resumo{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;margin-bottom:10px;padding:8px 12px;' +
+        'border:1px solid var(--border-subtle);border-left:3px solid var(--color-gold);border-radius:var(--radius);' +
+        'background:var(--bg-panel-alt);font-size:12px;color:var(--text-secondary)}' +
+        '.om-resumo b{color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums}' +
+        '.om-resumo.om-resumo-erro{border-left-color:var(--color-danger)}' +
+        /* importar */
+        '.om-imp-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}' +
+        '.om-imp-row .form-group{margin-bottom:0;flex:1 1 260px;max-width:420px;min-width:0}' +
+        '@media(max-width:900px){.om-ret-grid{grid-template-columns:1fr}}' +
         '@media(max-width:1100px){.om-g32,.om-g3,.om-cards2{grid-template-columns:1fr}.om-kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}}' +
         '@media(max-width:560px){.om-donut{flex-direction:column;align-items:stretch}.om-donut svg{align-self:center}}' +
         '</style>';
@@ -162,13 +198,17 @@
             var tab = parsed.tab;
 
             var TABS = [['painel', 'Painel'], ['reparos', 'Reparos']];
+            // Retorno aparece na barra para quem edita; quem só lê chega por link e vê em consulta.
+            if (p.edit) TABS.push(['retorno', 'Retorno de Reparo']);
             if (p.admin) TABS.push(['importar', 'Importar'], ['config', 'Configuração']);
-            if (!TABS.some(function (t) { return t[0] === tab; })) tab = 'painel';
+            var VALIDAS = { painel: 1, reparos: 1, retorno: 1, importar: !!p.admin, config: !!p.admin };
+            if (!VALIDAS[tab]) tab = 'painel';
             S.tabs(TABS, tab, ROUTE);
 
             var handlers = {
                 painel:   renderPainel,
                 reparos:  renderReparos,
+                retorno:  renderRetorno,
                 importar: renderImportar,
                 config:   renderConfig
             };
@@ -226,6 +266,7 @@
     function fmtDec(n) {
         return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
+    function plural(n, um, muitos) { return Number(n) === 1 ? um : muitos; }
     function fmtPct(p) {
         if (p == null || p === '' || isNaN(Number(p))) return '—';
         return (Number(p) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
@@ -237,6 +278,14 @@
         if (!/^\d{4}-\d{2}/.test(m)) return m;
         var i = parseInt(m.slice(5, 7), 10) - 1;
         return (MESES[i] || m.slice(5, 7)) + '/' + m.slice(0, 4);
+    }
+    // '2026-08-14T09:12:00' → '14/08/2026' (sem depender do fuso do navegador)
+    function fmtData(x) {
+        if (!x) return '';
+        var m = String(x).match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return m[3] + '/' + m[2] + '/' + m[1];
+        var d = new Date(x);
+        return isNaN(d.getTime()) ? String(x) : d.toLocaleDateString('pt-BR');
     }
     function fmtDateTime(x) {
         if (!x) return '';
@@ -251,9 +300,9 @@
     function badgeHtml(text, cls, extraCls) {
         return '<span class="badge badge-' + cls + (extraCls ? ' ' + extraCls : '') + '">' + S.esc(text) + '</span>';
     }
-    function statusBadge(st) {
-        if (!st) return '<span class="text-muted">—</span>';
-        return badgeHtml(STATUS_LABEL[st] || st, STATUS_CLS[st] || 'default');
+    function statusBadge(st, rotulo) {
+        if (!st) return rotulo ? badgeHtml(rotulo, 'default') : '<span class="text-muted">—</span>';
+        return badgeHtml(STATUS_LABEL[st] || rotulo || st, STATUS_CLS[st] || 'default');
     }
     function avalBadge(av) {
         if (av === 'DENTRO') return badgeHtml('DENTRO', 'success');
@@ -1131,7 +1180,7 @@
     /* ── Reparos ──────────────────────────────────────────────────── */
     async function renderReparos(c, p, preset) {
         var FILTROS = ['ano', 'mes', 'familia', 'categoria', 'status', 'status_retorno',
-                       'empresa', 'tipo_manutencao', 'q'];
+                       'empresa', 'tipo_manutencao', 'min_reparos', 'q'];
         var filtros = {};
         FILTROS.forEach(function (k) { filtros[k] = preset && preset[k] != null ? preset[k] : ''; });
         var offset = 0, total = 0, itens = [], opcoes = {};
@@ -1141,6 +1190,7 @@
                 '<h1 class="page-title">Orçamento de Manutenção — Reparos</h1>' +
                 (p.create ? '<button id="om-novo" class="btn btn-primary btn-sm">Novo reparo</button>' : '') +
                 (p.exportar ? '<button id="om-export" class="btn btn-outline btn-sm">Exportar</button>' : '') +
+                (p.exportar ? '<button id="om-export-reinc" class="btn btn-outline btn-sm">Exportar reincidência (por série)</button>' : '') +
             '</div>' +
             '<div class="card mb-3"><div class="card-body">' +
                 '<div id="om-filtros" class="filter-grid">' + SPIN + '</div>' +
@@ -1150,6 +1200,7 @@
                     '<span id="om-total" class="text-muted"></span>' +
                 '</div>' +
             '</div></div>' +
+            '<div id="om-reinc-resumo"></div>' +
             '<div id="om-lista">' + SPIN + '</div>' +
             '<div id="om-pager" class="om-pager"></div>';
 
@@ -1184,6 +1235,7 @@
                 selectHtml('om-fl-status_retorno', 'Status de retorno', opts(opcoes, 'status_retorno', RETORNO_LABEL), filtros.status_retorno, 'Todos') +
                 selectHtml('om-fl-empresa', 'Empresa', opts(opcoes, 'empresas'), filtros.empresa, 'Todas') +
                 selectHtml('om-fl-tipo_manutencao', 'Tipo de manutenção', opts(opcoes, 'tipos', TIPO_LABEL), filtros.tipo_manutencao, 'Todos') +
+                selectHtml('om-fl-min_reparos', 'Reincidência', REINC_OPTS, filtros.min_reparos, 'Todos') +
                 '<div class="form-group"><label>Busca (RMA, série, lote)</label><input id="om-fl-q" class="form-control" placeholder="RMA, série ou lote" value="' + e(filtros.q) + '"></div>';
             document.getElementById('om-fl-q').onkeydown = function (ev) {
                 if (ev.key === 'Enter') aplicar();
@@ -1199,10 +1251,46 @@
 
         function aplicar() { lerFiltros(); offset = 0; load(); }
 
+        // Filtros que o /reincidencia entende (min_reparos cai para 2 quando o select está em "Todos").
+        function filtrosReinc() {
+            return {
+                min_reparos: filtros.min_reparos || 2,
+                familia:     filtros.familia,
+                categoria:   filtros.categoria,
+                ano:         filtros.ano,
+                q:           filtros.q
+            };
+        }
+
+        // Linha "N séries reincidentes · M atendimentos · R$ X acumulados", só com o filtro ligado.
+        async function loadResumoReinc() {
+            var host = document.getElementById('om-reinc-resumo');
+            if (!host) return;
+            if (!filtros.min_reparos) { host.innerHTML = ''; return; }
+            host.innerHTML = '<div class="om-resumo">Somando reincidências…</div>';
+            try {
+                var d = await S.api(BASE + '/reincidencia' + qs(filtrosReinc()));
+                if (!host.isConnected) return;
+                var r = (d && d.resumo) || {};
+                var series = r.series != null ? r.series : (d && d.total) || 0;
+                host.innerHTML = '<div class="om-resumo">' +
+                    '<span><b>' + fmtInt(series) + '</b> ' + plural(series, 'série reincidente', 'séries reincidentes') + '</span><span>·</span>' +
+                    '<span><b>' + fmtInt(r.reparos) + '</b> ' + plural(r.reparos, 'atendimento', 'atendimentos') + '</span><span>·</span>' +
+                    '<span><b>' + S.esc(money(r.custo_total)) + '</b> ' + plural(r.custo_total, 'acumulado', 'acumulados') + '</span>' +
+                    '<span class="text-muted">(séries com ' + fmtInt(filtros.min_reparos) + ' ou mais reparos)</span>' +
+                    '</div>';
+            } catch (e) {
+                if (!host.isConnected) return;
+                host.innerHTML = '<div class="om-resumo om-resumo-erro">Não foi possível carregar o resumo de reincidência: ' +
+                    S.esc(e.message) + '</div>';
+            }
+        }
+
         async function load() {
             var host = document.getElementById('om-lista');
             if (!host) return;
             host.innerHTML = SPIN;
+            loadResumoReinc();
             try {
                 var d = await S.api(BASE + '/reparos' + qs(Object.assign({}, filtros, { limit: PAGE, offset: offset })));
                 itens = d.itens || [];
@@ -1250,6 +1338,16 @@
             }).catch(function (e) { S.toast(e.message, 'error'); });
         };
 
+        var expR = document.getElementById('om-export-reinc');
+        if (expR) expR.onclick = function () {
+            lerFiltros();
+            busy(async function () {
+                var r = await S.api(BASE + '/reincidencia.xlsx' + qs(filtrosReinc()));
+                if (!r || typeof r.blob !== 'function') throw new Error('Resposta inesperada da exportação.');
+                download(await r.blob(), 'reincidencia_series.xlsx');
+            }).catch(function (e) { S.toast(e.message, 'error'); });
+        };
+
         // Clique na linha / botões de ação (delegação: a tabela é recriada a cada load)
         document.getElementById('om-lista').addEventListener('click', function (ev) {
             var btn = ev.target.closest('.om-act');
@@ -1274,13 +1372,14 @@
     function listaHtml(itens, p) {
         var acoes = p.edit || p.admin;
         var h = '<div class="table-wrapper om-tw"><table class="data-table"><thead><tr>' +
-            '<th>RMA</th><th>Série</th><th class="om-num">Loja</th><th>Categoria</th><th>Empresa</th>' +
+            '<th>RMA</th><th>Série</th><th class="om-num">Reparos da série</th><th class="om-num">Custo acumulado</th>' +
+            '<th class="om-num">Loja</th><th>Categoria</th><th>Empresa</th>' +
             '<th class="om-num">Orçamento</th><th class="om-num">Valor compra</th><th class="om-num">%</th>' +
             '<th>Status</th><th>Retorno</th><th>Mês</th><th>Tipo</th><th>Lote</th>' +
             (acoes ? '<th>Ações</th>' : '') +
             '</tr></thead><tbody>';
         if (!itens.length) {
-            h += '<tr><td colspan="' + (acoes ? 14 : 13) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
+            h += '<tr><td colspan="' + (acoes ? 16 : 15) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
         } else {
             itens.forEach(function (r, i) { h += rowHtml(r, i, p); });
         }
@@ -1306,6 +1405,8 @@
         return '<tr data-i="' + i + '" class="om-row-click">' +
             '<td>' + e(r.rma) + '</td>' +
             '<td>' + e(r.serie) + '</td>' +
+            '<td class="om-num">' + reincHtml(r) + '</td>' +
+            '<td class="om-num">' + (r.serie_custo == null ? '<span class="text-muted">—</span>' : money(r.serie_custo)) + '</td>' +
             '<td class="om-num">' + (r.loja == null ? '' : e(r.loja)) + '</td>' +
             '<td>' + e(r.categoria) +
                 (r.familia ? ' <span class="text-muted">(' + e(FAMILIA_LABEL[r.familia] || r.familia) + ')</span>' : '') + '</td>' +
@@ -1320,6 +1421,15 @@
             '<td class="om-lote">' + e(r.lote_prime || '') + '</td>' +
             (p.edit || p.admin ? '<td class="om-acoes">' + acoes + '</td>' : '') +
             '</tr>';
+    }
+
+    // Série com 2+ atendimentos é reincidente: badge de atenção no número.
+    function reincHtml(r) {
+        if (r.serie_reparos == null || r.serie_reparos === '') return '<span class="text-muted">—</span>';
+        var n = Number(r.serie_reparos) || 0;
+        if (n < 2) return fmtInt(n);
+        return '<span class="badge badge-warning om-reinc" title="Série reincidente — ' +
+            S.esc(fmtInt(n)) + ' atendimentos">' + fmtInt(n) + '</span>';
     }
 
     /* ── Modal novo/editar ────────────────────────────────────────── */
@@ -1558,6 +1668,305 @@
         }).catch(function (e) { S.toast(e.message, 'error'); });
     }
 
+    /* ── Retorno de reparo ────────────────────────────────────────── */
+    // "A, B\nC; D" → ['A','B','C','D'] — na ordem digitada, sem repetir.
+    function parseRmas(txt) {
+        var out = [], seen = {};
+        String(txt == null ? '' : txt).split(/[\s,;]+/).forEach(function (x) {
+            var v = x.trim();
+            if (!v) return;
+            var k = v.toUpperCase();
+            if (seen[k]) return;
+            seen[k] = 1;
+            out.push(v);
+        });
+        return out;
+    }
+
+    // Aceita tanto {"nao_encontrados": 3} quanto {"nao_encontrados": ["A","B","C"]}.
+    function cont(v) { return Array.isArray(v) ? v.length : Number(v || 0); }
+
+    // Reordena a resposta pela lista digitada e inventa a linha do RMA que a API não devolveu.
+    function retLinhas(rmas, itens) {
+        var by = {};
+        (itens || []).forEach(function (x) {
+            if (!x) return;
+            var k = String(x.rma == null ? '' : x.rma).toUpperCase();
+            if (k && !(k in by)) by[k] = x;
+        });
+        return rmas.map(function (rma) {
+            var x = by[String(rma).toUpperCase()];
+            if (!x) return { rma: rma, encontrado: false, ja_devolvido: false };
+            var o = Object.assign({}, x, { rma: rma });
+            o.encontrado = x.encontrado !== false;
+            o.ja_devolvido = !!x.ja_devolvido;
+            return o;
+        });
+    }
+
+    function retResultadoHtml(itens, resumo) {
+        var enc = 0, jad = 0, nf = 0;
+        itens.forEach(function (r) {
+            if (!r.encontrado) { nf++; return; }
+            enc++;
+            if (r.ja_devolvido) jad++;
+        });
+        var total = itens.length || cont(resumo && resumo.total);
+        var h = '<div class="stats-grid mb-3">' +
+            statCard(fmtInt(total), 'Bipados', 'teal') +
+            statCard(fmtInt(enc), 'Encontrados', 'green') +
+            statCard(fmtInt(jad), 'Já devolvidos', 'gold') +
+            statCard(fmtInt(nf), 'Não constam', '', 'om-stat-danger') +
+            '</div>';
+        if (nf) {
+            h += '<div class="alert alert-warning mb-3"><b>' + fmtInt(nf) + ' RMA(s) não constam na base.</b> ' +
+                'Confira a leitura ou devolva a lista ao fornecedor.' +
+                '<button id="om-ret-copy" class="btn btn-sm btn-outline om-ret-copy">Copiar RMAs não encontrados</button></div>';
+        }
+        h += '<div class="table-wrapper om-tw"><table class="data-table"><thead><tr>' +
+            '<th>RMA</th><th>Série</th><th>Categoria</th><th class="om-num">Loja</th><th>Empresa</th>' +
+            '<th class="om-num">Orçamento</th><th>Status do orçamento</th><th>Retorno atual</th><th>Situação</th>' +
+            '</tr></thead><tbody>' +
+            itens.map(retRowHtml).join('') +
+            '</tbody></table></div>';
+        return h;
+    }
+
+    function retRowHtml(r) {
+        var e = S.esc;
+        var dash = '<span class="text-muted">—</span>';
+        var cls = '', sit;
+        if (!r.encontrado) {
+            cls = ' class="om-nf"';
+            sit = '<span class="om-msg-nf">RMA não consta na base</span>';
+        } else if (r._agora) {
+            sit = badgeHtml('Devolvido agora', 'success') +
+                (r.devolvido_em ? ' <span class="text-muted">' + e(fmtData(r.devolvido_em)) + '</span>' : '');
+        } else if (r.ja_devolvido) {
+            sit = '<span class="om-msg-warn">já estava devolvido' +
+                (r.devolvido_em ? ' em ' + e(fmtData(r.devolvido_em)) : '') + '</span>';
+        } else {
+            sit = '<span class="text-muted">será marcado como devolvido</span>';
+        }
+        return '<tr' + cls + '>' +
+            '<td class="om-mono">' + e(r.rma) + '</td>' +
+            '<td>' + (r.serie ? e(r.serie) : dash) + '</td>' +
+            '<td>' + (r.categoria ? e(r.categoria) : dash) + '</td>' +
+            '<td class="om-num">' + (r.loja == null || r.loja === '' ? dash : e(r.loja)) + '</td>' +
+            '<td>' + (r.empresa ? e(r.empresa) : dash) + '</td>' +
+            '<td class="om-num">' + (r.encontrado ? money(r.orcamento) : dash) + '</td>' +
+            '<td>' + (r.encontrado ? statusBadge(r.status, r.status_rotulo) : dash) + '</td>' +
+            '<td>' + (r.encontrado ? e(RETORNO_LABEL[r.status_retorno] || r.status_retorno || '—') : dash) + '</td>' +
+            '<td>' + sit + '</td>' +
+            '</tr>';
+    }
+
+    async function renderRetorno(c, p) {
+        var podeConfirmar = !!p.edit;
+        var itens = [];       // linhas na ordem digitada
+        var enviados = [];    // lista exata mandada ao /retorno/consultar
+        var resumoApi = {};
+
+        c.innerHTML = STYLE +
+            '<div class="om-top"><h1 class="page-title">Orçamento de Manutenção — Retorno de Reparo</h1></div>' +
+            '<div class="card mb-3">' +
+                '<div class="card-header">RMAs devolvidos pelo fornecedor</div>' +
+                '<div class="card-body">' +
+                    '<p class="text-muted" style="margin-top:0">Bipe ou cole os RMAs devolvidos pelo fornecedor. ' +
+                    'Aceita um por linha, separados por vírgula, ponto e vírgula ou espaço.</p>' +
+                    '<div class="om-ret-grid">' +
+                        '<div class="form-group"><label for="om-ret-rmas">RMAs</label>' +
+                            '<textarea id="om-ret-rmas" class="form-control om-mono" rows="8" spellcheck="false" ' +
+                            'placeholder="202609124321&#10;202609124322, 202609124323"></textarea></div>' +
+                        '<div class="om-ret-side">' +
+                            '<div class="form-group"><label for="om-ret-bip">Bipar com o leitor</label>' +
+                                '<input id="om-ret-bip" class="form-control om-mono" autocomplete="off" placeholder="bipe o RMA aqui"></div>' +
+                            '<p class="om-hint">Cada leitura entra na lista ao lado. Na caixa de RMAs o Enter só quebra a linha — ' +
+                            'use <b>Ctrl+Enter</b> para consultar.</p>' +
+                            '<div id="om-ret-count" class="om-cnt">0 RMA(s)</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="btn-row mt-2">' +
+                        '<button id="om-ret-go" class="btn btn-primary">Consultar</button>' +
+                        '<button id="om-ret-clear" class="btn btn-outline">Limpar</button>' +
+                        (podeConfirmar
+                            ? '<button id="om-ret-confirm" class="btn btn-success" disabled>Confirmar devolução (0)</button>'
+                            : '<span class="om-hint">Perfil de consulta: a devolução é confirmada por quem tem permissão de edição.</span>') +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div id="om-ret-out"></div>';
+
+        var elTxt   = c.querySelector('#om-ret-rmas');
+        var elBip   = c.querySelector('#om-ret-bip');
+        var elCount = c.querySelector('#om-ret-count');
+        var elOut   = c.querySelector('#om-ret-out');
+        var btnGo   = c.querySelector('#om-ret-go');
+        var btnClr  = c.querySelector('#om-ret-clear');
+        var btnConf = c.querySelector('#om-ret-confirm');
+
+        function lista() { return parseRmas(elTxt.value); }
+
+        function contar() {
+            var n = lista().length;
+            elCount.textContent = fmtInt(n) + ' RMA(s)';
+            return n;
+        }
+
+        function pendentes() {
+            return itens.filter(function (r) { return r.encontrado && !r.ja_devolvido; });
+        }
+
+        function syncConfirm() {
+            if (!btnConf) return;
+            var n = pendentes().length;
+            btnConf.textContent = 'Confirmar devolução (' + fmtInt(n) + ')';
+            btnConf.disabled = !n;
+        }
+
+        function desenha() {
+            elOut.innerHTML = itens.length ? retResultadoHtml(itens, resumoApi) : '';
+            syncConfirm();
+        }
+
+        async function consultar() {
+            var rmas = lista();
+            if (!rmas.length) { S.toast('Informe ao menos um RMA.', 'warning'); return; }
+            elOut.innerHTML = SPIN;
+            try {
+                var d = await busy(function () {
+                    return S.api(BASE + '/retorno/consultar', { method: 'POST', body: { rmas: rmas } });
+                });
+                if (!elOut.isConnected) return;
+                enviados = rmas;
+                resumoApi = d || {};
+                itens = retLinhas(rmas, (d && d.itens) || []);
+                desenha();
+                var nf = itens.filter(function (r) { return !r.encontrado; }).length;
+                if (nf) S.toast(fmtInt(nf) + ' RMA(s) não constam na base.', 'warning');
+            } catch (e) {
+                if (!elOut.isConnected) return;
+                itens = [];
+                elOut.innerHTML = alertHtml(e.message);
+                S.toast(e.message, 'error');
+                syncConfirm();
+            }
+        }
+
+        // A API recebe a lista inteira (contrato 8.3) e decide o que muda; o aviso conta só os pendentes.
+        async function confirmar() {
+            var pend = pendentes();
+            if (!pend.length) { S.toast('Nenhum RMA pendente de devolução.', 'warning'); return; }
+            var rmas = enviados.length ? enviados : lista();
+            if (!window.confirm('Confirmar a devolução de ' + fmtInt(pend.length) + ' RMA(s)?\n\n' +
+                'Eles passam para "Devolvido" com a data de hoje. RMAs já devolvidos e os que não constam ' +
+                'na base não são alterados.')) return;
+            try {
+                var d = await busy(function () {
+                    return S.api(BASE + '/retorno/confirmar', { method: 'POST', body: { rmas: rmas } });
+                });
+                if (!elOut.isConnected) return;
+                aplicaConfirmacao(d || {});
+                S.toast('Devolução confirmada: ' + fmtInt(cont(d && d.devolvidos)) + ' devolvido(s), ' +
+                    fmtInt(cont(d && d.ja_devolvidos)) + ' já devolvido(s), ' +
+                    fmtInt(cont(d && d.nao_encontrados)) + ' não encontrado(s).', 'success');
+                elBip.focus();
+            } catch (e) {
+                S.toast(e.message, 'error');
+            }
+        }
+
+        function aplicaConfirmacao(d) {
+            var novos = {};
+            (d.itens || []).forEach(function (x) {
+                if (x && x.rma != null) novos[String(x.rma).toUpperCase()] = x;
+            });
+            var temItens = Object.keys(novos).length > 0;
+            var nao = {};
+            (Array.isArray(d.nao_encontrados) ? d.nao_encontrados : []).forEach(function (x) {
+                nao[String(x).toUpperCase()] = 1;
+            });
+            var agora = new Date().toISOString();
+            itens = itens.map(function (r) {
+                var k = String(r.rma).toUpperCase();
+                var novo = novos[k];
+                // Sem `itens` na resposta, marca localmente o que estava pendente e não voltou como ausente.
+                if (!novo && (temItens || !r.encontrado || r.ja_devolvido || nao[k])) return r;
+                var o = Object.assign({}, r, novo || {}, { rma: r.rma });
+                o.encontrado = true;
+                o._agora = !r.ja_devolvido;
+                o.ja_devolvido = true;
+                o.status_retorno = 'DEVOLVIDO';
+                if (!o.devolvido_em) o.devolvido_em = agora;
+                return o;
+            });
+            desenha();
+        }
+
+        function copiarNaoEncontrados() {
+            var list = itens.filter(function (r) { return !r.encontrado; })
+                            .map(function (r) { return r.rma; });
+            if (!list.length) { S.toast('Nenhum RMA não encontrado para copiar.', 'info'); return; }
+            var txt = list.join('\n');
+            var ok = function () { S.toast(fmtInt(list.length) + ' RMA(s) copiado(s).', 'success'); };
+            var recuo = function () {
+                var ta = document.createElement('textarea');
+                ta.value = txt;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.left = '-2000px';
+                document.body.appendChild(ta);
+                ta.select();
+                var copiou = false;
+                try { copiou = document.execCommand('copy'); } catch (_) { copiou = false; }
+                ta.remove();
+                if (copiou) ok();
+                else S.toast('Não foi possível copiar automaticamente. Selecione os RMAs na tabela.', 'warning');
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(txt).then(ok, recuo);
+            } else {
+                recuo();
+            }
+        }
+
+        elTxt.addEventListener('input', contar);
+        elTxt.addEventListener('keydown', function (ev) {
+            // Enter só quebra linha; Ctrl+Enter (ou Cmd+Enter) consulta.
+            if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); consultar(); }
+        });
+        // Campo de foco do coletor: cada leitura termina em Enter e cai na lista.
+        elBip.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Enter') return;
+            ev.preventDefault();
+            var v = elBip.value.trim();
+            elBip.value = '';
+            if (!v) return;
+            var atual = elTxt.value;
+            elTxt.value = (!atual || /\n$/.test(atual)) ? atual + v : atual + '\n' + v;
+            contar();
+        });
+        btnGo.addEventListener('click', consultar);
+        btnClr.addEventListener('click', function () {
+            elTxt.value = '';
+            elBip.value = '';
+            itens = [];
+            enviados = [];
+            resumoApi = {};
+            elOut.innerHTML = '';
+            contar();
+            syncConfirm();
+            elBip.focus();
+        });
+        if (btnConf) btnConf.addEventListener('click', confirmar);
+        elOut.addEventListener('click', function (ev) {
+            if (ev.target && ev.target.closest && ev.target.closest('#om-ret-copy')) copiarNaoEncontrados();
+        });
+
+        contar();
+        elBip.focus();
+    }
+
     /* ── Importar (admin) ─────────────────────────────────────────── */
     async function renderImportar(c, p) {
         if (!p.admin) { c.innerHTML = STYLE + alertHtml('Acesso restrito ao administrador.', 'warning'); return; }
@@ -1566,12 +1975,17 @@
             '<div class="card mb-3">' +
                 '<div class="card-header">Importar planilha de manutenção</div>' +
                 '<div class="card-body">' +
-                    '<p class="text-muted" style="margin-top:0">Aceita .xlsx ou .csv com as colunas da planilha ' +
+                    '<p class="text-muted" style="margin-top:0">Aceita .xlsx ou .csv nos dois layouts: a <b>planilha de controle</b> ' +
                     '(RMA, SÉRIE, LOJA, CATEGORIA, EMPRESA, ORÇAMENTO, 60% Orçamento, STATUS ORÇAMENTO, TIPO DE MANUTENÇÃO, ' +
-                    'STATUS DE RETORNO, ANO, MÊS CONTRATO, ANO DEVOLUÇÃO, LOTE PRIME, QTDE). ' +
+                    'STATUS DE RETORNO, ANO, MÊS CONTRATO, ANO DEVOLUÇÃO, LOTE PRIME, QTDE) e a <b>planilha de lote do fornecedor</b> ' +
+                    '(DISPONIBILIZAÇÃO, CATEGORIA, SÉRIE, ORIGEM, RMA, ORÇAMENTO, APROVADO VIA CONTRATO — deste último saem status, ' +
+                    'tipo de manutenção e mês de referência). ' +
                     'RMA já cadastrado é atualizado; o restante é incluído. O EBS não é consultado nesta etapa.</p>' +
-                    '<div class="form-row-inline">' +
-                        '<input id="om-imp-file" type="file" accept=".xlsx,.csv" class="form-control" style="max-width:420px">' +
+                    '<div class="om-imp-row">' +
+                        '<div class="form-group"><label for="om-imp-file">Planilha</label>' +
+                            '<input id="om-imp-file" type="file" accept=".xlsx,.csv" class="form-control"></div>' +
+                        '<div class="form-group"><label for="om-imp-aba">Aba da planilha</label>' +
+                            '<input id="om-imp-aba" class="form-control" placeholder="deixe vazio para detectar automaticamente"></div>' +
                         '<button id="om-imp-btn" class="btn btn-primary">Importar</button>' +
                     '</div>' +
                     '<label class="om-check"><input id="om-imp-subst" type="checkbox"> ' +
@@ -1601,9 +2015,11 @@
                 'Substituir a base pela planilha "' + file.name + '"?\n\n' +
                 'Os reparos importados antes que não estiverem nela serão removidos. ' +
                 'O que foi digitado no portal é preservado.')) return;
+            var aba = String(((document.getElementById('om-imp-aba') || {}).value) || '').trim();
             var fd = new FormData();
             fd.append('file', file);
             fd.append('substituir', subst ? 'true' : 'false');
+            if (aba) fd.append('aba', aba);
             var out = document.getElementById('om-imp-result');
             out.innerHTML = SPIN;
             try {
@@ -1636,8 +2052,8 @@
         };
     }
 
-    function statCard(valor, rotulo, accent) {
-        return '<div class="stat-card' + (accent ? ' accent-' + accent : '') + '">' +
+    function statCard(valor, rotulo, accent, extraCls) {
+        return '<div class="stat-card' + (accent ? ' accent-' + accent : '') + (extraCls ? ' ' + extraCls : '') + '">' +
             '<div class="stat-value">' + valor + '</div>' +
             '<div class="stat-label">' + S.esc(rotulo) + '</div></div>';
     }
@@ -1651,6 +2067,13 @@
             statCard(fmtInt(r.rejeitadas), 'Rejeitadas', 'orange') +
             (r.substituiu ? statCard(fmtInt(r.removidas), 'Removidas', 'orange') : '') +
             '</div>';
+        var abas = Array.isArray(r.abas_disponiveis) ? r.abas_disponiveis : [];
+        if (r.aba || abas.length) {
+            h += '<div class="alert alert-info mb-3">' +
+                (r.aba ? 'Aba lida: <b>' + e(r.aba) + '</b>' : 'A API não informou qual aba foi lida') +
+                (abas.length ? ' · Abas disponíveis: ' + abas.map(function (x) { return e(x); }).join(', ') : '') +
+                '</div>';
+        }
         if (r.substituiu) {
             h += '<div class="alert alert-warning mb-3">A planilha substituiu a base: ' +
                 fmtInt(r.removidas) + ' reparo(s) que não estavam nela foram removidos.</div>';

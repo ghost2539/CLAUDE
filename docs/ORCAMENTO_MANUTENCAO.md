@@ -402,11 +402,15 @@ O texto do status carrega três informações. Regras (sem acento, sem caixa):
 | `validando orçamento` | `VALIDANDO_ORCAMENTO` | — | — |
 | `BONIFICADO` | `APROVADO` com `orcamento = 0` | — | — |
 | `GARANTIA` | `APROVADO`, `garantia = true`, `orcamento = 0` | — | — |
+| `FATURADO` (aba AVULSO) | `APROVADO` — a nota já saiu | `AVULSA` | do MÊS - CONTRATO |
 | `... OUTUBRO / NOVEMBRO 2025` | vale o **primeiro** mês, com aviso | | |
 
 Mês por extenso em português (janeiro..dezembro) seguido do ano. Sem mês no
 status, `mes_referencia` sai do mês da DISPONIBILIZAÇÃO. `ano` sai do mês de
 referência. `status_original` guarda o texto como veio.
+
+Planilha sem coluna de tipo e reparo novo: assume `CONTRATO` e conta o
+aviso `tipo_assumido_contrato`. Reparo que já existe mantém o tipo gravado.
 
 A importação continua fazendo **upsert por RMA** e aceita a opção de
 substituir a base. Aceita também o campo opcional `aba`: sem ele, usa a
