@@ -452,4 +452,13 @@ Série com dois ou mais RMAs é reincidente.
   `reprovados`, `lojas`. Filtros `min_reparos` (padrão 2), `familia`,
   `categoria`, `ano`, `q`, `limit`, `offset`, ordenado por `reparos` e depois
   `custo_total`, ambos decrescentes.
-- `GET /reincidencia.xlsx` — `export` — mesma consulta, sem paginação.
+  Cada série traz também os RMAs que compõem a reincidência: `rmas` (só os
+  números, na ordem dos meses), `ultimo_rma` e `atendimentos` (até 50, com
+  `id`, `rma`, `mes`, `status`, `orcamento`, `status_retorno` e `loja`) —
+  é por eles que se chega ao atendimento.
+- `GET /reincidencia.xlsx` — `export` — mesma consulta, sem paginação, com
+  as colunas ÚLTIMO RMA e RMAS DA SÉRIE.
+
+Na tela, o RMA é link: em Reparos abre o reparo, no Retorno de Reparo abre
+o RMA na lista. A série de um equipamento reincidente também é link e filtra
+a lista pelos atendimentos daquela série.

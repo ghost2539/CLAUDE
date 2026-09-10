@@ -121,6 +121,8 @@
         '.om-hb-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;background:var(--bg-panel-alt)}' +
         '.om-hb-seg{display:block;height:100%}' +
         '.om-hb-t{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}' +
+        '.om-link{color:#7FB2FF;cursor:pointer;text-decoration:none;border-bottom:1px dotted rgba(127,178,255,.5)}' +
+        '.om-link:hover{color:#A9CCFF;border-bottom-style:solid}' +
         '.om-check{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;font-size:.9rem}' +
         '.om-check input{width:15px;height:15px;accent-color:var(--color-primary);cursor:pointer}' +
         /* detalhamento mensal */
@@ -1350,6 +1352,15 @@
 
         // Clique na linha / botões de ação (delegação: a tabela é recriada a cada load)
         document.getElementById('om-lista').addEventListener('click', function (ev) {
+            var sl = ev.target.closest('.om-serie-link');
+            if (sl) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                var campo = document.getElementById('om-fl-q');
+                if (campo) campo.value = sl.getAttribute('data-serie');
+                aplicar();
+                return;
+            }
             var btn = ev.target.closest('.om-act');
             if (btn) {
                 ev.stopPropagation();
@@ -1364,6 +1375,14 @@
                 var item = itens[+tr.getAttribute('data-i')];
                 if (item) openForm(item, p, opcoes, load);
             }
+        });
+        document.getElementById('om-lista').addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            var link = ev.target.closest('.om-link[data-i]');
+            if (!link) return;
+            ev.preventDefault();
+            var item = itens[+link.getAttribute('data-i')];
+            if (item) openForm(item, p, opcoes, load);
         });
 
         await load();
@@ -1402,9 +1421,17 @@
         var acoes = '';
         if (p.edit)  acoes += '<button class="btn btn-sm btn-outline om-act" data-act="edit" data-i="' + i + '">Editar</button> ';
         if (p.admin) acoes += '<button class="btn btn-sm btn-outline-danger om-act" data-act="del" data-i="' + i + '">Excluir</button>';
+        // O RMA é o identificador do atendimento: vira link para o reparo.
+        // A série reincidente leva à lista dos RMAs daquele equipamento.
+        var serieHtml = (Number(r.serie_reparos) > 1 && r.serie)
+            ? '<a class="om-link om-serie-link" data-serie="' + e(r.serie) +
+              '" title="ver os ' + e(r.serie_reparos) + ' atendimentos desta série">' +
+              e(r.serie) + '</a>'
+            : e(r.serie);
         return '<tr data-i="' + i + '" class="om-row-click">' +
-            '<td>' + e(r.rma) + '</td>' +
-            '<td>' + e(r.serie) + '</td>' +
+            '<td><a class="om-link om-mono" data-i="' + i + '" role="button" tabindex="0" ' +
+                'title="abrir o reparo">' + e(r.rma) + '</a></td>' +
+            '<td>' + serieHtml + '</td>' +
             '<td class="om-num">' + reincHtml(r) + '</td>' +
             '<td class="om-num">' + (r.serie_custo == null ? '<span class="text-muted">—</span>' : money(r.serie_custo)) + '</td>' +
             '<td class="om-num">' + (r.loja == null ? '' : e(r.loja)) + '</td>' +
@@ -1748,8 +1775,12 @@
         } else {
             sit = '<span class="text-muted">será marcado como devolvido</span>';
         }
+        var rmaHtml = r.encontrado
+            ? '<a class="om-link om-mono" href="#' + ROUTE + '/reparos' + qs({ q: r.rma }) +
+              '" title="abrir este RMA na aba Reparos">' + e(r.rma) + '</a>'
+            : '<span class="om-mono">' + e(r.rma) + '</span>';
         return '<tr' + cls + '>' +
-            '<td class="om-mono">' + e(r.rma) + '</td>' +
+            '<td>' + rmaHtml + '</td>' +
             '<td>' + (r.serie ? e(r.serie) : dash) + '</td>' +
             '<td>' + (r.categoria ? e(r.categoria) : dash) + '</td>' +
             '<td class="om-num">' + (r.loja == null || r.loja === '' ? dash : e(r.loja)) + '</td>' +
