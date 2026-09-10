@@ -412,8 +412,8 @@ referência. `status_original` guarda o texto como veio.
 Planilha sem coluna de tipo e reparo novo: assume `CONTRATO` e conta o
 aviso `tipo_assumido_contrato`. Reparo que já existe mantém o tipo gravado.
 
-A importação continua fazendo **upsert por RMA** e aceita a opção de
-substituir a base. Aceita também o campo opcional `aba`: sem ele, usa a
+A importação faz **upsert por RMA**: atualiza o que já existe e inclui o
+resto. Não remove nada — a base só cresce. Aceita também o campo opcional `aba`: sem ele, usa a
 primeira aba que tenha RMA, SÉRIE e CATEGORIA (ou RMA e S/N); a resposta
 informa `aba` usada e `abas_disponiveis`.
 
@@ -459,6 +459,6 @@ Série com dois ou mais RMAs é reincidente.
 - `GET /reincidencia.xlsx` — `export` — mesma consulta, sem paginação, com
   as colunas ÚLTIMO RMA e RMAS DA SÉRIE.
 
-Na tela, o RMA é link: em Reparos abre o reparo, no Retorno de Reparo abre
-o RMA na lista. A série de um equipamento reincidente também é link e filtra
+Na tela, o RMA do Retorno de Reparo é link e abre aquele RMA na lista de
+Reparos. Em Reparos, a edição abre só pelo botão Editar. A série de um equipamento reincidente também é link e filtra
 a lista pelos atendimentos daquela série.

@@ -146,7 +146,6 @@
         '.om-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
         /* reparos / importar / config */
         '.data-table .om-num,.om-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
-        '.om-row-click{cursor:pointer}' +
         '.om-src{font-size:9px;padding:1px 5px;margin-left:5px;vertical-align:middle}' +
         '.om-acoes{white-space:nowrap}' +
         '.om-pager{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)}' +
@@ -1370,22 +1369,18 @@
                 else openForm(it, p, opcoes, load);
                 return;
             }
-            var tr = ev.target.closest('tr[data-i]');
-            if (tr) {
-                var item = itens[+tr.getAttribute('data-i')];
-                if (item) openForm(item, p, opcoes, load);
-            }
-        });
-        document.getElementById('om-lista').addEventListener('keydown', function (ev) {
-            if (ev.key !== 'Enter' && ev.key !== ' ') return;
-            var link = ev.target.closest('.om-link[data-i]');
-            if (!link) return;
-            ev.preventDefault();
-            var item = itens[+link.getAttribute('data-i')];
-            if (item) openForm(item, p, opcoes, load);
+            // A edição abre só pelo botão Editar: clicar na linha não altera nada.
         });
 
         await load();
+    }
+
+    // Data em que o equipamento voltou. Reparo antigo só tem o ano gravado.
+    function dataDevolucaoHtml(r) {
+        if (r.devolvido_em) return S.esc(fmtData(r.devolvido_em));
+        if (r.ano_devolucao) return '<span class="text-muted" title="importado sem a data">' +
+            S.esc(r.ano_devolucao) + '</span>';
+        return '<span class="text-muted">—</span>';
     }
 
     function listaHtml(itens, p) {
@@ -1394,11 +1389,11 @@
             '<th>RMA</th><th>Série</th><th class="om-num">Reparos da série</th><th class="om-num">Custo acumulado</th>' +
             '<th class="om-num">Loja</th><th>Categoria</th><th>Empresa</th>' +
             '<th class="om-num">Orçamento</th><th class="om-num">Valor compra</th><th class="om-num">%</th>' +
-            '<th>Status</th><th>Retorno</th><th>Mês</th><th>Tipo</th><th>Lote</th>' +
+            '<th>Status</th><th>Retorno</th><th>Data devolução</th><th>Mês</th><th>Tipo</th><th>Lote</th>' +
             (acoes ? '<th>Ações</th>' : '') +
             '</tr></thead><tbody>';
         if (!itens.length) {
-            h += '<tr><td colspan="' + (acoes ? 16 : 15) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
+            h += '<tr><td colspan="' + (acoes ? 17 : 16) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
         } else {
             itens.forEach(function (r, i) { h += rowHtml(r, i, p); });
         }
@@ -1428,9 +1423,8 @@
               '" title="ver os ' + e(r.serie_reparos) + ' atendimentos desta série">' +
               e(r.serie) + '</a>'
             : e(r.serie);
-        return '<tr data-i="' + i + '" class="om-row-click">' +
-            '<td><a class="om-link om-mono" data-i="' + i + '" role="button" tabindex="0" ' +
-                'title="abrir o reparo">' + e(r.rma) + '</a></td>' +
+        return '<tr data-i="' + i + '">' +
+            '<td class="om-mono">' + e(r.rma) + '</td>' +
             '<td>' + serieHtml + '</td>' +
             '<td class="om-num">' + reincHtml(r) + '</td>' +
             '<td class="om-num">' + (r.serie_custo == null ? '<span class="text-muted">—</span>' : money(r.serie_custo)) + '</td>' +
@@ -1443,6 +1437,7 @@
             '<td class="om-num">' + pct + '</td>' +
             '<td>' + statusBadge(r.status) + '</td>' +
             '<td>' + e(RETORNO_LABEL[r.status_retorno] || r.status_retorno || '—') + '</td>' +
+            '<td>' + dataDevolucaoHtml(r) + '</td>' +
             '<td>' + e(fmtMes(r.mes_referencia)) + '</td>' +
             '<td>' + e(TIPO_LABEL[r.tipo_manutencao] || r.tipo_manutencao || '—') + '</td>' +
             '<td class="om-lote">' + e(r.lote_prime || '') + '</td>' +
@@ -2019,11 +2014,6 @@
                             '<input id="om-imp-aba" class="form-control" placeholder="deixe vazio para detectar automaticamente"></div>' +
                         '<button id="om-imp-btn" class="btn btn-primary">Importar</button>' +
                     '</div>' +
-                    '<label class="om-check"><input id="om-imp-subst" type="checkbox"> ' +
-                    'Substituir a base pela planilha</label>' +
-                    '<p id="om-imp-subst-nota" class="om-hint">Marcado, o arquivo passa a ser a base: reparos importados ' +
-                    'antes que não estiverem nele são removidos. Reparos digitados no portal e linhas rejeitadas por erro ' +
-                    'de formato são preservados. Desmarcado, só atualiza e inclui.</p>' +
                     '<div id="om-imp-result" class="mt-3"></div>' +
                 '</div>' +
             '</div>' +
@@ -2041,15 +2031,9 @@
             var inp = document.getElementById('om-imp-file');
             var file = inp.files && inp.files[0];
             if (!file) { S.toast('Selecione uma planilha (.xlsx ou .csv).', 'warning'); return; }
-            var subst = !!(document.getElementById('om-imp-subst') || {}).checked;
-            if (subst && !window.confirm(
-                'Substituir a base pela planilha "' + file.name + '"?\n\n' +
-                'Os reparos importados antes que não estiverem nela serão removidos. ' +
-                'O que foi digitado no portal é preservado.')) return;
             var aba = String(((document.getElementById('om-imp-aba') || {}).value) || '').trim();
             var fd = new FormData();
             fd.append('file', file);
-            fd.append('substituir', subst ? 'true' : 'false');
             if (aba) fd.append('aba', aba);
             var out = document.getElementById('om-imp-result');
             out.innerHTML = SPIN;
