@@ -42,9 +42,11 @@ from config import get_settings
 from db.orcamento_exec import (
     BudgetCategory, BudgetProject, SessionLocal, ensure_db, utcnow,
     listar_acessos, registrar_acesso,
+    NIVEIS_MODULO, nivel_do_login, listar_permissoes_modulo,
+    definir_permissao_modulo, remover_permissao_modulo,
 )
 from core.security import (
-    check_rate_limit, client_ip, get_session, require_permission,
+    check_rate_limit, client_ip, get_session,
 )
 
 _cfg = get_settings()
@@ -129,19 +131,57 @@ def _acesso_pagina(req: Request):
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
         pass
-    try:
-        require_permission(req, MODULO, "view")
-    except HTTPException:
+    if not _pode(sd, "view"):
         registrar_acesso(sd.get("username", ""), client_ip(req), "negado",
-                         "sem permissão do módulo orcamento")
+                         "sem acesso liberado ao módulo")
         return HTMLResponse(_SEM_PERMISSAO, status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
     return _page()
 
 
+# Ações da API mapeadas ao nível mínimo próprio do módulo.
+_NIVEL_ORDEM = {"view": 1, "edit": 2, "admin": 3}
+_ACAO_NIVEL = {"view": "view", "export": "view",
+               "create": "edit", "edit": "edit", "admin": "admin"}
+
+
+def _admin_portal(sd: dict) -> bool:
+    """ADMIN do módulo vem do portal (Parâmetros): is_admin ou can_admin em
+    'orcamento'. É quem pode liberar acessos deste módulo."""
+    if sd.get("is_admin"):
+        return True
+    return bool((sd.get("permission_map") or {}).get(MODULO, {}).get("can_admin"))
+
+
+def _nivel_efetivo(sd: dict) -> str:
+    """Maior nível do usuário: admin do portal → admin; senão a liberação
+    própria do módulo (por login); e, por compatibilidade, a permissão antiga
+    do portal para 'orcamento' — assim ninguém perde acesso na migração."""
+    if _admin_portal(sd):
+        return "admin"
+    niveis = []
+    n = nivel_do_login(sd.get("username", ""))
+    if n:
+        niveis.append(n)
+    perms = (sd.get("permission_map") or {}).get(MODULO, {})
+    if perms.get("can_edit"):
+        niveis.append("edit")
+    elif perms.get("can_view"):
+        niveis.append("view")
+    return max(niveis, key=lambda x: _NIVEL_ORDEM.get(x, 0)) if niveis else ""
+
+
+def _pode(sd: dict, acao: str) -> bool:
+    alvo = _ACAO_NIVEL.get(acao, "view")
+    return _NIVEL_ORDEM.get(_nivel_efetivo(sd), 0) >= _NIVEL_ORDEM[alvo]
+
+
 def _exigir(req: Request, acao: str, registro: str = "", detalhe: str = "") -> dict:
-    """Permissão de API + trilha de acesso da operação."""
-    sd = require_permission(req, MODULO, acao)
+    """Permissão PRÓPRIA do módulo (não a grade do portal) + trilha de acesso.
+    O login continua vindo do SSO; aqui só decidimos o que ele pode fazer."""
+    sd = get_session(req)  # exige sessão (login via SSO)
+    if not _pode(sd, acao):
+        raise HTTPException(403, "Permissão insuficiente para este módulo.")
     if registro:
         registrar_acesso(sd.get("username", ""), client_ip(req), registro, detalhe)
     return sd
@@ -606,7 +646,11 @@ def sessao(req: Request):
     sd = get_session(req, required=False)
     if not sd:
         return {"usuario": None}
-    return {"usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")}}
+    return {
+        "usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")},
+        "nivel": _nivel_efetivo(sd),          # view | edit | admin | ""
+        "admin_modulo": _admin_portal(sd),    # pode liberar acessos deste módulo
+    }
 
 
 @router.get("/api/controle-orcamento-exec/acessos")
@@ -615,6 +659,53 @@ def acessos(req: Request, limit: int = 300, usuario: str = "", acao: str = ""):
     """Trilha de acesso da tela — quem abriu e quem alterou o quê."""
     _exigir(req, "admin")
     return {"acessos": listar_acessos(limit=limit, usuario=usuario, acao=acao)}
+
+
+# ── Liberações de acesso PRÓPRIAS do módulo ─────────────────────────────
+class PermissaoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    login: str
+    nivel: str = "view"
+    nome: str = ""
+
+
+def _exigir_admin_modulo(req: Request) -> dict:
+    """Só o ADMIN do módulo (marcado em Parâmetros) gerencia as liberações."""
+    sd = get_session(req)
+    if not _admin_portal(sd):
+        raise HTTPException(403, "Apenas o administrador do módulo pode liberar acessos.")
+    return sd
+
+
+@router.get("/api/controle-orcamento-exec/permissoes")
+@_com_banco
+def listar_permissoes(req: Request):
+    _exigir_admin_modulo(req)
+    return {"permissoes": listar_permissoes_modulo(), "niveis": list(NIVEIS_MODULO)}
+
+
+@router.post("/api/controle-orcamento-exec/permissoes", status_code=201)
+@_com_banco
+def salvar_permissao(body: PermissaoIn, req: Request):
+    sd = _exigir_admin_modulo(req)
+    check_rate_limit(req, "api")
+    try:
+        p = definir_permissao_modulo(body.login, body.nivel, body.nome, sd.get("username", ""))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    registrar_acesso(sd.get("username", ""), client_ip(req), "liberar",
+                     f"{p['login']} → {p['nivel']}")
+    return p
+
+
+@router.delete("/api/controle-orcamento-exec/permissoes/{login}")
+@_com_banco
+def excluir_permissao(login: str, req: Request):
+    sd = _exigir_admin_modulo(req)
+    if not remover_permissao_modulo(login):
+        raise HTTPException(404, "Liberação não encontrada.")
+    registrar_acesso(sd.get("username", ""), client_ip(req), "revogar", login)
+    return {"ok": True}
 
 
 @router.get("/api/controle-orcamento-exec/projetos")

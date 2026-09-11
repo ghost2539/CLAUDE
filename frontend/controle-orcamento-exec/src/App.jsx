@@ -510,7 +510,6 @@ const FILTROS_INICIAIS = { ano: "Todos", tipo: "Todos", area: "Todas", categoria
 const NAV = [
   { view: "geral", label: "Visão Geral", icon: Icon.home },
   { view: "portfolio", label: "Portfólio", icon: Icon.grid },
-  { view: "demandas", label: "Demandas", icon: Icon.list },
   { view: "relatorios", label: "Relatórios", icon: Icon.report },
   { view: "config", label: "Configurações", icon: Icon.gear },
 ];
@@ -562,6 +561,11 @@ export default function App() {
   const [ultimoSalvo, setUltimoSalvo] = useState(null);
   const [view, setView] = useState("geral");        // seção do menu lateral
   const [colapsado, setColapsado] = useState(false);
+  const [adminModulo, setAdminModulo] = useState(false);  // pode liberar acessos deste módulo
+  const [permissoes, setPermissoes] = useState([]);       // liberações próprias do módulo
+  const [novoAc, setNovoAc] = useState({ login: "", nome: "", nivel: "view" });
+  const [acBusy, setAcBusy] = useState(false);
+  const [acMsg, setAcMsg] = useState("");
 
   /* Barra de inclusão de projetos (Número puxa do EBS) */
   const [inc, setInc] = useState({ numero: "", tipo: "CAPEX", projeto_demanda: "", categoria: "", area: "" });
@@ -575,8 +579,48 @@ export default function App() {
 
   /* Usuário logado no portal, se houver (a tela é pública) */
   useEffect(() => {
-    api(API_BASE + "/sessao").then((d) => d.usuario && setUser(d.usuario)).catch(() => {});
+    api(API_BASE + "/sessao").then((d) => {
+      if (d.usuario) setUser(d.usuario);
+      setAdminModulo(!!d.admin_modulo);
+    }).catch(() => {});
   }, []);
+
+  /* ── Acessos próprios do módulo (só o admin do módulo gerencia) ── */
+  const carregarPermissoes = useCallback(async () => {
+    try {
+      const d = await api(API_BASE + "/permissoes");
+      setPermissoes(d.permissoes || []);
+    } catch { /* sem permissão: ignora */ }
+  }, []);
+  useEffect(() => {
+    if (adminModulo && view === "config") carregarPermissoes();
+  }, [adminModulo, view, carregarPermissoes]);
+
+  const salvarAcesso = async (login, nivel, nome) => {
+    setAcBusy(true); setAcMsg("");
+    try {
+      await api(API_BASE + "/permissoes", { method: "POST", body: JSON.stringify({ login, nivel, nome }) });
+      setNovoAc({ login: "", nome: "", nivel: "view" });
+      await carregarPermissoes();
+      setAcMsg("Acesso liberado.");
+    } catch (e) {
+      setAcMsg("Falha: " + e.message);
+    } finally {
+      setAcBusy(false);
+    }
+  };
+  const removerAcesso = async (login) => {
+    if (!window.confirm(`Revogar o acesso de "${login}" a este módulo?`)) return;
+    setAcBusy(true); setAcMsg("");
+    try {
+      await api(API_BASE + "/permissoes/" + encodeURIComponent(login), { method: "DELETE" });
+      await carregarPermissoes();
+    } catch (e) {
+      setAcMsg("Falha: " + e.message);
+    } finally {
+      setAcBusy(false);
+    }
+  };
 
   /* ── Carga inicial ──────────────────────────────────────────── */
   const carregar = useCallback(async () => {
@@ -1219,16 +1263,16 @@ export default function App() {
         {/* ── Portfólio ───────────────────────────────────────────── */}
         {view === "portfolio" && (
           <>
-            {cabecalho("Portfólio de Projetos", "Filtre e edite os projetos; a trava impede alteração pelo Atualizar (EBS)")}
-            {filtrosBar}
-            {tabela}
-          </>
-        )}
-
-        {/* ── Demandas ────────────────────────────────────────────── */}
-        {view === "demandas" && (
-          <>
-            {cabecalho("Demandas", "Inclua novos projetos pelo número (puxa do EBS) e acompanhe os filtrados")}
+            {cabecalho("Portfólio de Projetos", "Cards, gráficos e a tabela; a trava impede alteração pelo Atualizar (EBS)")}
+            {kpis}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <ChartCard title="Situação do Orçamento (R$)" footer={`Total Orçado: ${fmtBRL(totalOrcamento)}`}>
+                <DonutChart data={situacao} colors={SITUACAO_CORES} />
+              </ChartCard>
+              <ChartCard title="Prazo por Projeto" footer={`Total: ${visiveis.length} projeto(s)`}>
+                <DonutChart data={prazo} colors={PRAZO_CORES} />
+              </ChartCard>
+            </section>
             {barraInclusao}
             {filtrosBar}
             {tabela}
@@ -1261,7 +1305,91 @@ export default function App() {
         {/* ── Configurações ───────────────────────────────────────── */}
         {view === "config" && (
           <>
-            {cabecalho("Configurações do módulo", "Categorias de projeto e informações do módulo")}
+            {cabecalho("Configurações do módulo", "Acessos, categorias e informações do módulo")}
+
+            {/* Controle de acesso PRÓPRIO do módulo — só o admin do módulo vê */}
+            {adminModulo ? (
+              <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <h2 className="text-sm font-semibold text-gray-800">Acesso ao módulo</h2>
+                  <span className="text-[11px] text-gray-500">Liberação por login (SSO/ServiceNow), exclusiva deste módulo.</span>
+                </div>
+                <p className="text-[11px] text-gray-500 mb-3">
+                  O login continua sendo o da rede (ServiceNow). Estas liberações valem só para o Controle
+                  de Orçamento e não dependem da grade de permissões do portal.
+                </p>
+                <div className="flex flex-wrap items-end gap-2 mb-3">
+                  <label className="block">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Login (rede)</span>
+                    <input value={novoAc.login} onChange={(e) => setNovoAc({ ...novoAc, login: e.target.value })}
+                           placeholder="ex.: 001200660"
+                           className="w-[150px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Nome (opcional)</span>
+                    <input value={novoAc.nome} onChange={(e) => setNovoAc({ ...novoAc, nome: e.target.value })}
+                           placeholder="Nome do colaborador"
+                           className="w-[190px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Nível</span>
+                    <div className="select-wrap">
+                      <select value={novoAc.nivel} onChange={(e) => setNovoAc({ ...novoAc, nivel: e.target.value })}
+                              className="w-[130px] appearance-none bg-white border border-gray-300 rounded-md px-2.5 py-1.5 pr-7 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                        <option value="view">Somente ver</option>
+                        <option value="edit">Ver e editar</option>
+                        <option value="admin">Administrador</option>
+                      </select>
+                    </div>
+                  </label>
+                  <button onClick={() => salvarAcesso(novoAc.login.trim(), novoAc.nivel, novoAc.nome.trim())}
+                          disabled={acBusy || !novoAc.login.trim()}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+                    {Icon.plus} Liberar acesso
+                  </button>
+                  {acMsg && <span className="text-[11px] text-gray-600">{acMsg}</span>}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[520px] w-full text-[12px] border-collapse">
+                    <thead className="bg-gray-50 text-gray-600 text-[11px]">
+                      <tr><th className="th text-left">Login</th><th className="th text-left">Nome</th><th className="th">Nível</th><th className="th text-left">Liberado por</th><th className="th">Ações</th></tr>
+                    </thead>
+                    <tbody>
+                      {permissoes.length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-500 text-xs">
+                          Nenhum acesso liberado. O admin do portal e quem já tinha permissão do portal continuam com acesso.
+                        </td></tr>
+                      )}
+                      {permissoes.map((p) => (
+                        <tr key={p.login} className="border-t border-gray-100">
+                          <td className="td font-medium text-gray-700">{p.login}</td>
+                          <td className="td">{p.nome || "—"}</td>
+                          <td className="td text-center">
+                            <div className="select-wrap inline-block">
+                              <select value={p.nivel} onChange={(e) => salvarAcesso(p.login, e.target.value, p.nome)}
+                                      className="cell-input min-w-[120px]">
+                                <option value="view">Somente ver</option>
+                                <option value="edit">Ver e editar</option>
+                                <option value="admin">Administrador</option>
+                              </select>
+                            </div>
+                          </td>
+                          <td className="td text-gray-500">{p.criado_por || "—"}</td>
+                          <td className="td text-center">
+                            <button title="Revogar" onClick={() => removerAcesso(p.login)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : (
+              <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 text-[11px] text-gray-500">
+                A liberação de acessos deste módulo é feita pelo administrador do módulo (definido em Parâmetros).
+              </section>
+            )}
+
             <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-sm font-semibold text-gray-800">Categorias</h2>
