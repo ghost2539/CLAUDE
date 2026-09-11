@@ -234,23 +234,35 @@ class OpexItem(Base):
     conta_contabil: Mapped[str] = mapped_column(String(60), default="")   # só LATAM
     conta_descricao: Mapped[str] = mapped_column(String(200), default="")
     tipo_despesa: Mapped[str] = mapped_column(String(80), default="")      # só BR
-    meses: Mapped[str] = mapped_column(Text, default="{}")                 # JSON: {"1": v, ...}
+    # Duas séries mensais em JSON ({"1": v, ... "12": v}): o orçado do mês e o
+    # realizado do mês. `meses` é a coluna antiga (orçado) mantida por herança.
+    meses: Mapped[str] = mapped_column(Text, default="{}")
+    orcado_meses: Mapped[str] = mapped_column(Text, default="{}")
+    realizado_meses: Mapped[str] = mapped_column(Text, default="{}")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
     def to_dict(self) -> dict:
-        try:
-            meses = {str(k): float(v or 0) for k, v in (json.loads(self.meses or "{}")).items()}
-        except (ValueError, TypeError):
-            meses = {}
+        def _m(bruto):
+            try:
+                return {str(k): float(v or 0) for k, v in (json.loads(bruto or "{}")).items()}
+            except (ValueError, TypeError):
+                return {}
+        # Herança: se orçado ainda estiver vazio, usa a coluna antiga `meses`
+        # (os dados que já existiam eram o orçado).
+        orcado = _m(self.orcado_meses) or _m(self.meses)
+        realizado = _m(self.realizado_meses)
         return {
             "id": self.id, "regiao": self.regiao, "pais": self.pais, "ano": self.ano,
             "bu": self.bu, "fornecedor": self.fornecedor,
             "conta_contabil": self.conta_contabil, "conta_descricao": self.conta_descricao,
-            "tipo_despesa": self.tipo_despesa, "meses": meses,
-            "total": round(sum(meses.values()), 2), "ordem": self.sort_order,
+            "tipo_despesa": self.tipo_despesa,
+            "orcado_meses": orcado, "realizado_meses": realizado,
+            "total_orcado": round(sum(orcado.values()), 2),
+            "total_realizado": round(sum(realizado.values()), 2),
+            "ordem": self.sort_order,
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
             "atualizado_por": self.atualizado_por,
         }
@@ -405,6 +417,18 @@ def _ensure_coluna_a_realizar() -> None:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN synced_at TIMESTAMP NULL"))
         if "locked" not in cols:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN locked BOOLEAN DEFAULT 0"))
+    # OPEX: duas séries mensais (orçado e realizado). Bancos que subiram com a
+    # coluna única `meses` ganham as duas novas, e o orçado herda o que existia.
+    if "opex_itens" in insp.get_table_names():
+        ocols = {c["name"] for c in insp.get_columns("opex_itens")}
+        with eng.begin() as conn:
+            if "orcado_meses" not in ocols:
+                conn.execute(sa_text("ALTER TABLE opex_itens ADD COLUMN orcado_meses TEXT DEFAULT '{}'"))
+                conn.execute(sa_text("UPDATE opex_itens SET orcado_meses = meses "
+                                     "WHERE (orcado_meses IS NULL OR orcado_meses = '{}' OR orcado_meses = '') "
+                                     "AND meses IS NOT NULL AND meses <> '{}'"))
+            if "realizado_meses" not in ocols:
+                conn.execute(sa_text("ALTER TABLE opex_itens ADD COLUMN realizado_meses TEXT DEFAULT '{}'"))
 
 
 def criar_tabelas() -> None:
