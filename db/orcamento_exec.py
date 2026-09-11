@@ -16,6 +16,7 @@ criação de tabela só acontecem na primeira requisição ao módulo.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import threading
 from datetime import date, datetime, timezone
@@ -23,8 +24,8 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, create_engine,
-    event, func, select,
+    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, Text,
+    UniqueConstraint, create_engine, event, func, select,
 )
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -193,6 +194,65 @@ class Acesso(Base):
             "quando": self.quando.isoformat() if self.quando else None,
             "usuario": self.usuario, "ip": self.ip,
             "acao": self.acao, "detalhe": self.detalhe,
+        }
+
+
+class OpexOrcado(Base):
+    """Orçado do OPEX por país e ano, na moeda local (BR=R$, AR=ARS, UY=UYU).
+    Sem conversão: cada país fica na sua moeda."""
+    __tablename__ = "opex_orcado"
+    __table_args__ = (UniqueConstraint("pais", "ano", name="uq_opex_orcado_pais_ano"),)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    pais: Mapped[str] = mapped_column(String(4), index=True)   # BR | AR | UY
+    ano: Mapped[int] = mapped_column(Integer, index=True)
+    valor: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    atualizado_por: Mapped[str] = mapped_column(String(120), default="")
+
+    def to_dict(self) -> dict:
+        return {"pais": self.pais, "ano": self.ano, "valor": float(self.valor or 0)}
+
+
+class OpexItem(Base):
+    """Linha de gasto OPEX, incluída manualmente (não puxa do EBS).
+
+    BR e LATAM usam colunas um pouco diferentes; guardamos todas e a tela
+    mostra o que cada região usa. Os gastos mensais ficam em JSON
+    ({"1": valor, ... "12": valor}) para o ano indicado.
+    """
+    __tablename__ = "opex_itens"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    regiao: Mapped[str] = mapped_column(String(6), default="BR", index=True)   # BR | LATAM
+    pais: Mapped[str] = mapped_column(String(4), default="BR", index=True)     # BR | AR | UY
+    ano: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    bu: Mapped[str] = mapped_column(String(120), default="")
+    fornecedor: Mapped[str] = mapped_column(String(200), default="")
+    conta_contabil: Mapped[str] = mapped_column(String(60), default="")   # só LATAM
+    conta_descricao: Mapped[str] = mapped_column(String(200), default="")
+    tipo_despesa: Mapped[str] = mapped_column(String(80), default="")      # só BR
+    meses: Mapped[str] = mapped_column(Text, default="{}")                 # JSON: {"1": v, ...}
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    atualizado_por: Mapped[str] = mapped_column(String(120), default="")
+
+    def to_dict(self) -> dict:
+        try:
+            meses = {str(k): float(v or 0) for k, v in (json.loads(self.meses or "{}")).items()}
+        except (ValueError, TypeError):
+            meses = {}
+        return {
+            "id": self.id, "regiao": self.regiao, "pais": self.pais, "ano": self.ano,
+            "bu": self.bu, "fornecedor": self.fornecedor,
+            "conta_contabil": self.conta_contabil, "conta_descricao": self.conta_descricao,
+            "tipo_despesa": self.tipo_despesa, "meses": meses,
+            "total": round(sum(meses.values()), 2), "ordem": self.sort_order,
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
+            "atualizado_por": self.atualizado_por,
         }
 
 

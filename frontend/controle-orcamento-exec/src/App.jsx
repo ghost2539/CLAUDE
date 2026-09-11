@@ -480,15 +480,20 @@ function CategoriasModal({ categorias, emUso, onCriar, onAtualizar, onExcluir, o
 
 function CategoriaLinha({ categoria, usos, onSalvar, onExcluir }) {
   const [nome, setNome] = useState(categoria.nome);
+  const [cor, setCor] = useState(categoria.cor);
   useEffect(() => setNome(categoria.nome), [categoria.nome]);
+  useEffect(() => setCor(categoria.cor), [categoria.cor]);
   const salvarNome = () => {
     const v = nome.trim();
     if (!v) { setNome(categoria.nome); return; }
     if (v !== categoria.nome) onSalvar({ nome: v });
   };
+  // O seletor de cor dispara onChange a cada instante enquanto arrastado; só
+  // gravamos quando ele fecha (onBlur), para não estourar o limite de requisições.
+  const salvarCor = () => { if (cor && cor !== categoria.cor) onSalvar({ cor }); };
   return (
     <div className="flex items-center gap-2 py-1">
-      <input type="color" value={categoria.cor} title="Cor" onChange={(e) => onSalvar({ cor: e.target.value })}
+      <input type="color" value={cor} title="Cor" onChange={(e) => setCor(e.target.value)} onBlur={salvarCor}
              className="h-8 w-10 p-0.5 border border-gray-300 rounded bg-white cursor-pointer" />
       <input value={nome} maxLength={60} onChange={(e) => setNome(e.target.value)} onBlur={salvarNome}
              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setNome(categoria.nome); }}
@@ -509,10 +514,270 @@ const FILTROS_INICIAIS = { ano: "Todos", tipo: "Todos", area: "Todas", categoria
 /* Itens do menu lateral. `view` casa com o estado que troca a tela. */
 const NAV = [
   { view: "geral", label: "Visão Geral", icon: Icon.home },
-  { view: "portfolio", label: "Portfólio", icon: Icon.grid },
+  { view: "portfolio", label: "CAPEX", icon: Icon.grid },
+  { view: "opex", label: "OPEX", icon: Icon.list },
   { view: "relatorios", label: "Relatórios", icon: Icon.report },
   { view: "config", label: "Configurações", icon: Icon.gear },
 ];
+
+/* ── OPEX: cada país na sua moeda, sem conversão ─────────────────── */
+const OPEX_MOEDA = { BR: "BRL", AR: "ARS", UY: "UYU" };
+const OPEX_PAIS_NOME = { BR: "Brasil", AR: "Argentina", UY: "Uruguai" };
+const OPEX_PAIS_COR = { BR: "#22c55e", AR: "#2563eb", UY: "#8b5cf6" };
+const MESES3 = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const OPEX_ALERTA = {
+  acima:     { txt: "Acima do orçado", bg: "#fee2e2", fg: "#b91c1c" },
+  atencao:   { txt: "Acima do ritmo",  bg: "#fef3c7", fg: "#b45309" },
+  abaixo:    { txt: "Abaixo do ritmo", bg: "#e0f2fe", fg: "#075985" },
+  ok:        { txt: "No ritmo",        bg: "#dcfce7", fg: "#166534" },
+  sem_orcado:{ txt: "Sem orçado",      bg: "#f3f4f6", fg: "#6b7280" },
+};
+
+function fmtMoeda(v, moeda, dec = 0) {
+  const n = Number(v || 0);
+  try {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: moeda || "BRL", minimumFractionDigits: dec, maximumFractionDigits: dec }).format(n);
+  } catch {
+    return (moeda === "BRL" ? "R$" : "$") + " " + n.toLocaleString("pt-BR", { maximumFractionDigits: dec });
+  }
+}
+
+/* Célula monetária editável de um mês do OPEX. Salva ao sair do campo. */
+function CelulaMes({ value, moeda, onCommit, disabled }) {
+  const [foco, setFoco] = useState(false);
+  const [draft, setDraft] = useState("");
+  const num = Number(value || 0);
+  const parse = (s) => {
+    const limpo = String(s).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+    const n = parseFloat(limpo);
+    return isNaN(n) ? 0 : n;
+  };
+  return (
+    <input
+      className={"cell-input text-right tabular-nums w-[76px] " + (num ? "" : "text-gray-300")}
+      disabled={disabled}
+      value={foco ? draft : (num ? num.toLocaleString("pt-BR", { maximumFractionDigits: 0 }) : "")}
+      placeholder="0"
+      onFocus={(e) => { setFoco(true); setDraft(num ? String(num) : ""); e.target.select(); }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setFoco(false); const n = parse(draft); if (n !== num) onCommit(n); }}
+    />
+  );
+}
+
+function OpexResumoCard({ r }) {
+  const al = OPEX_ALERTA[r.alerta] || OPEX_ALERTA.ok;
+  const pct = r.pct == null ? null : r.pct;
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 relative overflow-hidden">
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: OPEX_PAIS_COR[r.pais] }} />
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+          {OPEX_PAIS_NOME[r.pais]} <span className="text-gray-400">· {r.moeda}</span>
+        </div>
+        <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: al.bg, color: al.fg }}>{al.txt}</span>
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        <div>
+          <div className="text-[10px] text-gray-500">Realizado</div>
+          <div className="text-lg font-bold text-gray-900 tabular-nums leading-tight">{fmtMoeda(r.realizado, r.moeda)}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] text-gray-500">Orçado</div>
+          <div className="text-sm font-semibold text-gray-700 tabular-nums">{fmtMoeda(r.orcado, r.moeda)}</div>
+        </div>
+      </div>
+      <div className="mt-2">
+        <div className="h-2 w-full bg-gray-100 rounded overflow-hidden">
+          <div className="h-full rounded" style={{ width: `${Math.min(100, (pct || 0) * 100)}%`, background: r.alerta === "acima" ? "#ef4444" : OPEX_PAIS_COR[r.pais] }} />
+        </div>
+        <div className="mt-1 flex justify-between text-[10px] text-gray-500 tabular-nums">
+          <span>{pct == null ? "—" : (pct * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "% do orçado"}</span>
+          <span>Residual: {fmtMoeda(r.residual, r.moeda)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OpexView({ podeEditar, onResumo }) {
+  const [ano, setAno] = useState(null);
+  const [dados, setDados] = useState({ itens: [], resumo: {}, anos: [] });
+  const [aba, setAba] = useState("BR");
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const timers = useRef({});
+
+  const carregar = useCallback(async (a) => {
+    setCarregando(true); setErro("");
+    try {
+      const d = await api(API_BASE + "/opex" + (a ? "?ano=" + a : ""));
+      setDados(d); setAno(d.ano);
+      if (onResumo) onResumo(d.resumo);
+    } catch (e) { setErro("Falha ao carregar OPEX: " + e.message); }
+    finally { setCarregando(false); }
+  }, [onResumo]);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const orcado = (pais) => dados.resumo?.[pais]?.orcado || 0;
+  const salvarOrcado = async (pais, valor) => {
+    try { await api(API_BASE + "/opex/orcado", { method: "PUT", body: JSON.stringify({ pais, ano, valor }) }); carregar(ano); }
+    catch (e) { setErro("Falha ao salvar orçado: " + e.message); }
+  };
+  const incluir = async (pais) => {
+    try {
+      await api(API_BASE + "/opex", { method: "POST", body: JSON.stringify({ pais, ano, bu: "", fornecedor: "" }) });
+      carregar(ano);
+    } catch (e) { setErro("Falha ao incluir linha: " + e.message); }
+  };
+  const excluir = async (id) => {
+    if (!window.confirm("Excluir esta linha?")) return;
+    try { await api(API_BASE + "/opex/" + id, { method: "DELETE" }); carregar(ano); }
+    catch (e) { setErro("Falha ao excluir: " + e.message); }
+  };
+  const patch = (id, campos, recarregar) => {
+    setDados((prev) => ({ ...prev, itens: prev.itens.map((it) => it.id === id ? { ...it, ...campos, ...(campos.meses ? { total: Object.values(campos.meses).reduce((a, b) => a + Number(b || 0), 0) } : {}) } : it) }));
+    clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(async () => {
+      try { await api(API_BASE + "/opex/" + id, { method: "PATCH", body: JSON.stringify(campos) }); if (recarregar) carregar(ano); }
+      catch (e) { setErro("Falha ao salvar: " + e.message); }
+    }, 500);
+  };
+  const setMes = (it, mes, valor) => {
+    const meses = { ...(it.meses || {}), [String(mes)]: valor };
+    patch(it.id, { meses }, true);
+  };
+
+  const itensAba = dados.itens.filter((it) => (aba === "BR" ? it.pais === "BR" : it.pais !== "BR"));
+  const totalMes = (m) => itensAba.reduce((a, it) => a + Number((it.meses || {})[String(m)] || 0), 0);
+  const totalGeral = itensAba.reduce((a, it) => a + Number(it.total || 0), 0);
+  const moedaAba = aba === "BR" ? "BRL" : null;   // LATAM tem AR e UY juntos
+
+  const inputCls = "cell-input min-w-[90px]";
+  const paises = aba === "BR" ? ["BR"] : ["AR", "UY"];
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold leading-tight text-gray-900">OPEX — Orçado e Realizado</h1>
+          <p className="text-xs text-gray-500">Brasil e Latam · cada país na sua moeda, sem conversão · inclusão manual</p>
+        </div>
+        <label className="ml-auto text-xs text-gray-600 flex items-center gap-2">
+          Ano
+          <div className="select-wrap">
+            <select value={ano || ""} onChange={(e) => carregar(Number(e.target.value))}
+                    className="appearance-none bg-white border border-gray-300 rounded-md px-2.5 py-1.5 pr-7 text-xs">
+              {(dados.anos || []).map((a) => <option key={a} value={a}>{a}</option>)}
+              {ano && !(dados.anos || []).includes(ano) && <option value={ano}>{ano}</option>}
+            </select>
+          </div>
+        </label>
+      </div>
+
+      {erro && <div className="mb-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2.5 text-xs">{erro}</div>}
+
+      {/* Orçado × Realizado por país (moeda local) */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        {["BR", "AR", "UY"].map((p) => {
+          const r = dados.resumo?.[p] || { pais: p, moeda: OPEX_MOEDA[p], orcado: 0, realizado: 0, pct: null, residual: 0, alerta: "sem_orcado" };
+          return (
+            <div key={p}>
+              <OpexResumoCard r={r} />
+              {podeEditar && (
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+                  <span>Orçado {OPEX_MOEDA[p]}:</span>
+                  <input type="number" defaultValue={r.orcado || ""} placeholder="0"
+                         onBlur={(e) => { const v = Number(e.target.value || 0); if (v !== r.orcado) salvarOrcado(p, v); }}
+                         className="w-[130px] border border-gray-300 rounded px-2 py-1 text-right tabular-nums" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+
+      {/* Sub-abas BR / LATAM */}
+      <div className="flex items-center gap-1 mb-3">
+        {[["BR", "Brasil"], ["LATAM", "Latam (AR/UY)"]].map(([v, l]) => (
+          <button key={v} onClick={() => setAba(v)}
+                  className={"text-xs font-medium rounded-md px-3 py-1.5 border " + (aba === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50")}>{l}</button>
+        ))}
+        {podeEditar && (
+          <button onClick={() => incluir(aba === "BR" ? "BR" : "AR")}
+                  className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5">
+            {Icon.plus} Nova linha
+          </button>
+        )}
+      </div>
+
+      <section className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
+        <table className="min-w-[1100px] w-full text-[12px] border-collapse">
+          <thead className="bg-gray-50 text-gray-600 text-[11px]">
+            <tr>
+              {aba !== "BR" && <th className="th">País</th>}
+              <th className="th text-left">BU</th>
+              <th className="th text-left">Fornecedor</th>
+              {aba !== "BR" && <th className="th">Conta Contábil</th>}
+              <th className="th text-left">Conta Descrição</th>
+              {aba === "BR" && <th className="th">Tipo</th>}
+              {MESES3.map((m) => <th key={m} className="th text-right">{m}</th>)}
+              <th className="th text-right">Total</th>
+              <th className="th">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!carregando && itensAba.length === 0 && (
+              <tr><td colSpan={aba === "BR" ? 17 : 18} className="px-4 py-8 text-center text-gray-500 text-xs">
+                Nenhuma linha para {aba === "BR" ? "o Brasil" : "a Latam"} em {ano}. {podeEditar ? "Use \"Nova linha\" para incluir." : ""}
+              </td></tr>
+            )}
+            {itensAba.map((it) => {
+              const moeda = OPEX_MOEDA[it.pais] || "BRL";
+              return (
+                <tr key={it.id} className="border-t border-gray-100 hover:bg-blue-50/30">
+                  {aba !== "BR" && (
+                    <td className="td text-center">
+                      <div className="select-wrap">
+                        <select className="cell-input min-w-[64px]" value={it.pais} disabled={!podeEditar}
+                                onChange={(e) => patch(it.id, { pais: e.target.value }, true)}>
+                          <option value="AR">AR</option><option value="UY">UY</option>
+                        </select>
+                      </div>
+                    </td>
+                  )}
+                  <td className="td"><input className={inputCls} disabled={!podeEditar} value={it.bu} placeholder="BU" onChange={(e) => patch(it.id, { bu: e.target.value })} /></td>
+                  <td className="td"><input className={inputCls + " min-w-[150px]"} disabled={!podeEditar} value={it.fornecedor} placeholder="Fornecedor" onChange={(e) => patch(it.id, { fornecedor: e.target.value })} /></td>
+                  {aba !== "BR" && <td className="td"><input className="cell-input w-[90px]" disabled={!podeEditar} value={it.conta_contabil} placeholder="Conta" onChange={(e) => patch(it.id, { conta_contabil: e.target.value })} /></td>}
+                  <td className="td"><input className={inputCls + " min-w-[150px]"} disabled={!podeEditar} value={it.conta_descricao} placeholder="Descrição" onChange={(e) => patch(it.id, { conta_descricao: e.target.value })} /></td>
+                  {aba === "BR" && <td className="td"><input className="cell-input min-w-[110px]" disabled={!podeEditar} value={it.tipo_despesa} placeholder="Tipo" onChange={(e) => patch(it.id, { tipo_despesa: e.target.value })} /></td>}
+                  {MESES3.map((_, i) => (
+                    <td key={i} className="td"><CelulaMes value={(it.meses || {})[String(i + 1)]} moeda={moeda} disabled={!podeEditar} onCommit={(v) => setMes(it, i + 1, v)} /></td>
+                  ))}
+                  <td className="td text-right tabular-nums font-semibold">{fmtMoeda(it.total, moeda)}</td>
+                  <td className="td text-center">
+                    {podeEditar && <button title="Excluir" onClick={() => excluir(it.id)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {itensAba.length > 0 && (
+            <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold text-gray-800">
+              <tr>
+                <td colSpan={aba === "BR" ? 4 : 5} className="td text-right text-gray-600">Totais ({itensAba.length})</td>
+                {MESES3.map((_, i) => <td key={i} className="td text-right tabular-nums">{totalMes(i + 1).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>)}
+                <td className="td text-right tabular-nums">{moedaAba ? fmtMoeda(totalGeral, moedaAba) : totalGeral.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
+                <td className="td" />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </section>
+      {aba !== "BR" && <p className="mt-2 text-[11px] text-gray-500">Latam soma AR e UY em moedas diferentes: os totais por mês são apenas de contagem; use os cards por país acima para o valor em cada moeda.</p>}
+    </>
+  );
+}
 
 function Sidebar({ view, onView, colapsado, onToggle }) {
   return (
@@ -562,6 +827,8 @@ export default function App() {
   const [view, setView] = useState("geral");        // seção do menu lateral
   const [colapsado, setColapsado] = useState(false);
   const [adminModulo, setAdminModulo] = useState(false);  // pode liberar acessos deste módulo
+  const [nivelAcesso, setNivelAcesso] = useState("");     // view | edit | admin
+  const [opexResumo, setOpexResumo] = useState(null);     // resumo OPEX para a Visão Geral
   const [permissoes, setPermissoes] = useState([]);       // liberações próprias do módulo
   const [novoAc, setNovoAc] = useState({ login: "", nome: "", nivel: "view" });
   const [acBusy, setAcBusy] = useState(false);
@@ -582,8 +849,12 @@ export default function App() {
     api(API_BASE + "/sessao").then((d) => {
       if (d.usuario) setUser(d.usuario);
       setAdminModulo(!!d.admin_modulo);
+      setNivelAcesso(d.nivel || "");
     }).catch(() => {});
+    // Resumo do OPEX para a Visão Geral (ano corrente por padrão).
+    api(API_BASE + "/opex").then((d) => setOpexResumo(d.resumo)).catch(() => {});
   }, []);
+  const podeEditar = nivelAcesso === "edit" || nivelAcesso === "admin" || adminModulo;
 
   /* ── Acessos próprios do módulo (só o admin do módulo gerencia) ── */
   const carregarPermissoes = useCallback(async () => {
@@ -1250,17 +1521,44 @@ export default function App() {
             {cabecalho("Visão Geral do Portfólio", "Cards, situação do orçamento e prazo dos projetos")}
             {kpis}
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              <ChartCard title="Situação do Orçamento (R$)" footer={`Total Orçado: ${fmtBRL(totalOrcamento)}`}>
+              <ChartCard title="Situação do Orçamento CAPEX (R$)" footer={`Total Orçado: ${fmtBRL(totalOrcamento)}`}>
                 <DonutChart data={situacao} colors={SITUACAO_CORES} />
               </ChartCard>
-              <ChartCard title="Prazo por Projeto" footer={`Total: ${visiveis.length} projeto(s)`}>
+              <ChartCard title="Prazo por Projeto (CAPEX)" footer={`Total: ${visiveis.length} projeto(s)`}>
                 <DonutChart data={prazo} colors={PRAZO_CORES} />
               </ChartCard>
             </section>
+
+            {/* OPEX — orçado × realizado por país (moeda local, sem conversão) */}
+            <div className="flex items-center gap-2 mt-2">
+              <h2 className="text-sm font-semibold text-gray-700">OPEX — Orçado × Realizado</h2>
+              <span className="text-[11px] text-gray-500">cada país na sua moeda</span>
+              <button onClick={() => setView("opex")} className="ml-auto text-[11px] text-blue-600 hover:underline">abrir OPEX →</button>
+            </div>
+            {opexResumo ? (
+              <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {["BR", "AR", "UY"].map((p) => (
+                  <OpexResumoCard key={p} r={opexResumo[p] || { pais: p, moeda: OPEX_MOEDA[p], orcado: 0, realizado: 0, pct: null, residual: 0, alerta: "sem_orcado" }} />
+                ))}
+              </section>
+            ) : (
+              <div className="text-xs text-gray-500 bg-white border border-gray-200 rounded-lg px-4 py-2.5">Carregando OPEX…</div>
+            )}
+            {opexResumo && ["BR", "AR", "UY"].some((p) => (opexResumo[p] || {}).alerta === "acima") && (
+              <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2.5 text-xs">
+                <b>Atenção:</b> há país com OPEX realizado acima do orçado do ano:{" "}
+                {["BR", "AR", "UY"].filter((p) => (opexResumo[p] || {}).alerta === "acima").map((p) => OPEX_PAIS_NOME[p]).join(", ")}.
+              </div>
+            )}
           </>
         )}
 
-        {/* ── Portfólio ───────────────────────────────────────────── */}
+        {/* ── OPEX ────────────────────────────────────────────────── */}
+        {view === "opex" && (
+          <OpexView podeEditar={podeEditar} onResumo={setOpexResumo} />
+        )}
+
+        {/* ── Portfólio (CAPEX) ───────────────────────────────────── */}
         {view === "portfolio" && (
           <>
             {cabecalho("Portfólio de Projetos", "Cards, gráficos e a tabela; a trava impede alteração pelo Atualizar (EBS)")}

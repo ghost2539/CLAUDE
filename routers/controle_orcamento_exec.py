@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import json
 import logging
 import re
 from datetime import date
@@ -44,6 +45,7 @@ from db.orcamento_exec import (
     listar_acessos, registrar_acesso,
     NIVEIS_MODULO, nivel_do_login, listar_permissoes_modulo,
     definir_permissao_modulo, remover_permissao_modulo,
+    OpexOrcado, OpexItem,
 )
 from core.security import (
     check_rate_limit, client_ip, get_session,
@@ -706,6 +708,200 @@ def excluir_permissao(login: str, req: Request):
         raise HTTPException(404, "Liberação não encontrada.")
     registrar_acesso(sd.get("username", ""), client_ip(req), "revogar", login)
     return {"ok": True}
+
+
+# ── OPEX (incluído manualmente, sem EBS; cada país na sua moeda) ─────────
+OPEX_PAISES = ("BR", "AR", "UY")
+OPEX_MOEDA = {"BR": "BRL", "AR": "ARS", "UY": "UYU"}
+OPEX_REGIAO = {"BR": "BR", "AR": "LATAM", "UY": "LATAM"}
+
+
+def _opex_valida_pais(pais: str) -> str:
+    pais = (pais or "").strip().upper()
+    if pais not in OPEX_PAISES:
+        raise HTTPException(422, "País inválido (use BR, AR ou UY).")
+    return pais
+
+
+def _opex_meses(bruto) -> dict:
+    """Normaliza o mapa de meses {1..12: valor} para JSON, ignorando o resto."""
+    out = {}
+    if isinstance(bruto, dict):
+        for k, v in bruto.items():
+            try:
+                m = int(str(k).strip())
+                if 1 <= m <= 12:
+                    out[str(m)] = round(float(v or 0), 2)
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
+class OpexItemIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    regiao: Optional[str] = None
+    pais: str = "BR"
+    ano: Optional[int] = None
+    bu: str = ""
+    fornecedor: str = ""
+    conta_contabil: str = ""
+    conta_descricao: str = ""
+    tipo_despesa: str = ""
+    meses: Optional[dict] = None
+
+
+class OpexItemPatch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    pais: Optional[str] = None
+    ano: Optional[int] = None
+    bu: Optional[str] = None
+    fornecedor: Optional[str] = None
+    conta_contabil: Optional[str] = None
+    conta_descricao: Optional[str] = None
+    tipo_despesa: Optional[str] = None
+    meses: Optional[dict] = None
+
+
+class OpexOrcadoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    pais: str
+    ano: int
+    valor: float = 0
+
+
+def _opex_resumo(s, ano: int) -> dict:
+    """Orçado e realizado por país (moeda local, sem conversão) + alerta."""
+    from datetime import date as _date
+    orcados = {o.pais: float(o.valor or 0) for o in s.scalars(
+        select(OpexOrcado).where(OpexOrcado.ano == ano)).all()}
+    itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)).all()
+    realizado = {p: 0.0 for p in OPEX_PAISES}
+    for it in itens:
+        d = it.to_dict()
+        if it.pais in realizado:
+            realizado[it.pais] += d["total"]
+    hoje = _date.today()
+    decorridos = 12 if ano < hoje.year else (hoje.month if ano == hoje.year else 0)
+    resumo = {}
+    for p in OPEX_PAISES:
+        orc = round(orcados.get(p, 0.0), 2)
+        real = round(realizado[p], 2)
+        pct = (real / orc) if orc > 0 else None
+        # Ritmo esperado: fração do ano decorrido. Compara o realizado com ele.
+        esperado = orc * (decorridos / 12) if orc > 0 else 0.0
+        if orc <= 0:
+            alerta = "sem_orcado"
+        elif real > orc:
+            alerta = "acima"          # estourou o orçado do ano
+        elif esperado > 0 and real < esperado * 0.8:
+            alerta = "abaixo"         # gastando menos que o ritmo esperado
+        elif esperado > 0 and real > esperado * 1.1:
+            alerta = "atencao"        # acima do ritmo, mas dentro do ano
+        else:
+            alerta = "ok"
+        resumo[p] = {"pais": p, "moeda": OPEX_MOEDA[p], "regiao": OPEX_REGIAO[p],
+                     "orcado": orc, "realizado": real, "pct": pct,
+                     "residual": round(orc - real, 2), "alerta": alerta}
+    return resumo
+
+
+@router.get("/api/controle-orcamento-exec/opex")
+@_com_banco
+def opex_listar(req: Request, ano: Optional[int] = None):
+    _exigir(req, "view")
+    from datetime import date as _date
+    with SessionLocal() as s:
+        anos = sorted({a for (a,) in s.execute(
+            select(OpexItem.ano).where(OpexItem.ano > 0).distinct()).all()}
+            | {a for (a,) in s.execute(select(OpexOrcado.ano).distinct()).all()})
+        ano = ano or (anos[-1] if anos else _date.today().year)
+        itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)
+                          .order_by(OpexItem.sort_order, OpexItem.id)).all()
+        return {
+            "ano": ano,
+            "anos": anos or [ano],
+            "paises": list(OPEX_PAISES),
+            "moedas": OPEX_MOEDA,
+            "itens": [it.to_dict() for it in itens],
+            "resumo": _opex_resumo(s, ano),
+        }
+
+
+@router.post("/api/controle-orcamento-exec/opex", status_code=201)
+@_com_banco
+def opex_incluir(body: OpexItemIn, req: Request):
+    sd = _exigir(req, "create", "incluir", "linha OPEX")
+    check_rate_limit(req, "api")
+    from datetime import date as _date
+    pais = _opex_valida_pais(body.pais)
+    ano = int(body.ano or _date.today().year)
+    with SessionLocal.begin() as s:
+        ordem = (s.scalar(select(func.max(OpexItem.sort_order))) or 0) + 1
+        it = OpexItem(
+            regiao=OPEX_REGIAO[pais], pais=pais, ano=ano,
+            bu=body.bu[:120], fornecedor=body.fornecedor[:200],
+            conta_contabil=body.conta_contabil[:60], conta_descricao=body.conta_descricao[:200],
+            tipo_despesa=body.tipo_despesa[:80],
+            meses=json.dumps(_opex_meses(body.meses)),
+            sort_order=ordem, atualizado_por=sd.get("username", ""),
+        )
+        s.add(it)
+        s.flush()
+        return it.to_dict()
+
+
+@router.patch("/api/controle-orcamento-exec/opex/{item_id}")
+@_com_banco
+def opex_alterar(item_id: int, body: OpexItemPatch, req: Request):
+    sd = _exigir(req, "edit")
+    with SessionLocal.begin() as s:
+        it = s.get(OpexItem, item_id)
+        if not it:
+            raise HTTPException(404, "Linha não encontrada.")
+        dados = body.model_dump(exclude_unset=True)
+        if "pais" in dados and dados["pais"] is not None:
+            it.pais = _opex_valida_pais(dados["pais"])
+            it.regiao = OPEX_REGIAO[it.pais]
+        if "ano" in dados and dados["ano"]:
+            it.ano = int(dados["ano"])
+        for campo, limite in (("bu", 120), ("fornecedor", 200), ("conta_contabil", 60),
+                              ("conta_descricao", 200), ("tipo_despesa", 80)):
+            if campo in dados and dados[campo] is not None:
+                setattr(it, campo, str(dados[campo])[:limite])
+        if "meses" in dados and dados["meses"] is not None:
+            it.meses = json.dumps(_opex_meses(dados["meses"]))
+        it.atualizado_por = sd.get("username", "")
+        s.flush()
+        return it.to_dict()
+
+
+@router.delete("/api/controle-orcamento-exec/opex/{item_id}")
+@_com_banco
+def opex_excluir(item_id: int, req: Request):
+    _exigir(req, "edit", "excluir", f"linha OPEX {item_id}")
+    with SessionLocal.begin() as s:
+        it = s.get(OpexItem, item_id)
+        if not it:
+            raise HTTPException(404, "Linha não encontrada.")
+        s.delete(it)
+    return {"ok": True}
+
+
+@router.put("/api/controle-orcamento-exec/opex/orcado")
+@_com_banco
+def opex_orcado(body: OpexOrcadoIn, req: Request):
+    sd = _exigir(req, "edit")
+    pais = _opex_valida_pais(body.pais)
+    ano = int(body.ano)
+    with SessionLocal.begin() as s:
+        row = s.scalar(select(OpexOrcado).where(OpexOrcado.pais == pais, OpexOrcado.ano == ano))
+        if row is None:
+            row = OpexOrcado(pais=pais, ano=ano)
+            s.add(row)
+        row.valor = Decimal(str(round(float(body.valor or 0), 2)))
+        row.atualizado_por = sd.get("username", "")
+        s.flush()
+        return row.to_dict()
 
 
 @router.get("/api/controle-orcamento-exec/projetos")
