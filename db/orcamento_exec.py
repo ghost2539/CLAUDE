@@ -196,6 +196,89 @@ class Acesso(Base):
         }
 
 
+class BudgetPermissao(Base):
+    """Liberação de acesso PRÓPRIA do módulo (não é a permissão do portal).
+
+    Quem é ADMIN do módulo (marcado em Parâmetros) libera aqui, por login,
+    quem pode ver ou editar este módulo — sem depender da grade de permissões
+    do portal. O login continua sendo o do SSO (ServiceNow).
+    """
+    __tablename__ = "budget_permissoes"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    login: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    nome: Mapped[str] = mapped_column(String(160), default="")
+    nivel: Mapped[str] = mapped_column(String(10), default="view")   # view | edit | admin
+    criado_por: Mapped[str] = mapped_column(String(120), default="")
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "login": self.login, "nome": self.nome, "nivel": self.nivel,
+            "criado_por": self.criado_por,
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
+        }
+
+
+NIVEIS_MODULO = ("view", "edit", "admin")
+
+
+def _norm_login(login: str) -> str:
+    return (login or "").strip().lower()[:120]
+
+
+def nivel_do_login(login: str) -> str:
+    """Nível liberado para o login na lista do módulo, ou "" se não houver."""
+    login = _norm_login(login)
+    if not login:
+        return ""
+    try:
+        with SessionLocal() as s:
+            row = s.scalar(select(BudgetPermissao).where(BudgetPermissao.login == login))
+            return row.nivel if row else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def listar_permissoes_modulo() -> list[dict]:
+    try:
+        with SessionLocal() as s:
+            stmt = select(BudgetPermissao).order_by(BudgetPermissao.login)
+            return [r.to_dict() for r in s.scalars(stmt).all()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def definir_permissao_modulo(login: str, nivel: str, nome: str, criado_por: str) -> dict:
+    login = _norm_login(login)
+    if not login:
+        raise ValueError("Informe o login (usuário de rede).")
+    if nivel not in NIVEIS_MODULO:
+        raise ValueError("Nível inválido.")
+    with SessionLocal.begin() as s:
+        row = s.scalar(select(BudgetPermissao).where(BudgetPermissao.login == login))
+        if row is None:
+            row = BudgetPermissao(login=login, criado_por=(criado_por or "")[:120])
+            s.add(row)
+        row.nivel = nivel
+        if nome is not None:
+            row.nome = (nome or "")[:160]
+        s.flush()
+        return row.to_dict()
+
+
+def remover_permissao_modulo(login: str) -> bool:
+    login = _norm_login(login)
+    with SessionLocal.begin() as s:
+        row = s.scalar(select(BudgetPermissao).where(BudgetPermissao.login == login))
+        if row is None:
+            return False
+        s.delete(row)
+        return True
+
+
 def registrar_acesso(usuario: str, ip: str, acao: str, detalhe: str = "") -> None:
     """Grava uma linha na trilha. Nunca levanta: auditoria não bloqueia a tela."""
     try:
