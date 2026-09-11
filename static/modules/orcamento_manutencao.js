@@ -1180,7 +1180,7 @@
 
     /* ── Reparos ──────────────────────────────────────────────────── */
     async function renderReparos(c, p, preset) {
-        var FILTROS = ['ano', 'mes', 'familia', 'categoria', 'status', 'status_retorno',
+        var FILTROS = ['lote', 'mes', 'familia', 'categoria', 'status', 'status_retorno',
                        'empresa', 'tipo_manutencao', 'min_reparos', 'q'];
         var filtros = {};
         FILTROS.forEach(function (k) { filtros[k] = preset && preset[k] != null ? preset[k] : ''; });
@@ -1213,14 +1213,11 @@
         }
         renderFiltros();
 
-        function anosOpts() {
-            var list = opts(opcoes, 'anos');
-            if (!list.length) {
-                var y = new Date().getFullYear();
-                list = [y, y - 1, y - 2].map(function (a) { return { value: String(a), label: String(a) }; });
-            }
-            if (filtros.ano && !list.some(function (o) { return o.value === String(filtros.ano); })) {
-                list.unshift({ value: String(filtros.ano), label: String(filtros.ano) });
+        function lotesOpts() {
+            var list = opts(opcoes, 'lotes');
+            // Mantém o lote escolhido mesmo que não esteja entre os mais usados.
+            if (filtros.lote && !list.some(function (o) { return o.value === String(filtros.lote); })) {
+                list.unshift({ value: String(filtros.lote), label: String(filtros.lote) });
             }
             return list;
         }
@@ -1228,7 +1225,7 @@
         function renderFiltros() {
             var e = S.esc;
             document.getElementById('om-filtros').innerHTML =
-                selectHtml('om-fl-ano', 'Ano', anosOpts(), filtros.ano, 'Todos') +
+                selectHtml('om-fl-lote', 'Lote', lotesOpts(), filtros.lote, 'Todos') +
                 '<div class="form-group"><label>Mês</label><input id="om-fl-mes" type="month" class="form-control" value="' + e(filtros.mes) + '"></div>' +
                 selectHtml('om-fl-familia', 'Família', opts(opcoes, 'familias', FAMILIA_LABEL), filtros.familia, 'Todas') +
                 selectHtml('om-fl-categoria', 'Categoria', opts(opcoes, 'categorias'), filtros.categoria, 'Todas') +
@@ -1258,7 +1255,7 @@
                 min_reparos: filtros.min_reparos || 2,
                 familia:     filtros.familia,
                 categoria:   filtros.categoria,
-                ano:         filtros.ano,
+                lote:        filtros.lote,
                 q:           filtros.q
             };
         }

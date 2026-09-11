@@ -493,7 +493,7 @@ def _mes_entrada(v) -> Optional[str]:
 # ── Filtros e serialização ──────────────────────────────────────────────
 def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None,
              status_retorno=None, empresa=None, tipo_manutencao=None, q=None,
-             min_reparos=None):
+             min_reparos=None, lote=None):
     if min_reparos and int(min_reparos) > 1:
         # Reincidência (8.4): só as séries com N atendimentos ou mais. Uma
         # subconsulta agrupada, para valer igual na lista e na contagem.
@@ -514,6 +514,8 @@ def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None
         stmt = stmt.where(R.status_retorno == normalizar_status_retorno(status_retorno))
     if empresa:
         stmt = stmt.where(R.empresa == normalizar_empresa(empresa))
+    if lote and lote.strip():
+        stmt = stmt.where(R.lote_prime == lote.strip())
     if tipo_manutencao:
         stmt = stmt.where(R.tipo_manutencao == normalizar_tipo(tipo_manutencao)[0])
     if q and q.strip():
@@ -787,7 +789,7 @@ def listar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
            status: Optional[str] = None, status_retorno: Optional[str] = None,
            empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
            q: Optional[str] = None, min_reparos: Optional[int] = None,
-           limit: int = 100, offset: int = 0):
+           lote: Optional[str] = None, limit: int = 100, offset: int = 0):
     """`min_reparos=2` deixa só o que é reincidente (8.4). Cada item leva
     `serie_reparos` e `serie_custo` — o histórico da série na base inteira."""
     _exigir(req, "view")
@@ -795,7 +797,7 @@ def listar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
     offset = max(0, int(offset or 0))
     filtros = dict(ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
                    status_retorno=status_retorno, empresa=empresa,
-                   tipo_manutencao=tipo_manutencao, q=q, min_reparos=min_reparos)
+                   tipo_manutencao=tipo_manutencao, q=q, min_reparos=min_reparos, lote=lote)
     with db.SessionLocal() as s:
         total = s.scalar(_filtrar(select(func.count(R.id)), **filtros)) or 0
         itens = s.scalars(_ordenado(_filtrar(select(R), **filtros))
@@ -1384,14 +1386,15 @@ def exportar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
              familia: Optional[str] = None, categoria: Optional[str] = None,
              status: Optional[str] = None, status_retorno: Optional[str] = None,
              empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
-             q: Optional[str] = None, min_reparos: Optional[int] = None):
+             q: Optional[str] = None, min_reparos: Optional[int] = None,
+             lote: Optional[str] = None):
     _exigir(req, "export")
     with db.SessionLocal() as s:
         config = db.ler_config(s)
         itens = s.scalars(_ordenado(_filtrar(
             select(R), ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
             status_retorno=status_retorno, empresa=empresa, tipo_manutencao=tipo_manutencao,
-            q=q, min_reparos=min_reparos,
+            q=q, min_reparos=min_reparos, lote=lote,
         ))).all()
         # Sem paginação a exportação pode levar a base toda: um agregado só.
         agregado = _agregado_series(s)
