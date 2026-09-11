@@ -515,7 +515,9 @@ def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None
     if empresa:
         stmt = stmt.where(R.empresa == normalizar_empresa(empresa))
     if lote and lote.strip():
-        stmt = stmt.where(R.lote_prime == lote.strip())
+        # Casa por conteúdo e sem diferenciar maiúsculas (vale em SQLite e
+        # Postgres): digitar "lote" traz todos que contêm "lote".
+        stmt = stmt.where(func.lower(R.lote_prime).like(f"%{lote.strip().lower()}%"))
     if tipo_manutencao:
         stmt = stmt.where(R.tipo_manutencao == normalizar_tipo(tipo_manutencao)[0])
     if q and q.strip():
@@ -1505,9 +1507,11 @@ def opcoes(req: Request):
         empresas = {e for (e,) in s.execute(select(R.empresa).distinct()).all() if e}
         anos = sorted({int(a) for (a,) in s.execute(select(R.ano).distinct()).all() if a}
                       | {date.today().year}, reverse=True)
+        # Todos os lotes distintos (o filtro tem autocompletar por conteúdo,
+        # então precisa da lista inteira), do mais usado para o menos usado.
         lotes = [l for (l, _) in s.execute(
             select(R.lote_prime, func.count(R.id)).where(R.lote_prime != "")
-            .group_by(R.lote_prime).order_by(func.count(R.id).desc()).limit(20)).all()]
+            .group_by(R.lote_prime).order_by(func.count(R.id).desc())).all()]
     return {
         "categorias": sorted(categorias),
         "familias": list(db.FAMILIAS),
