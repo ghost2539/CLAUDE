@@ -45,7 +45,7 @@ from db.orcamento_exec import (
     listar_acessos, registrar_acesso,
     NIVEIS_MODULO, nivel_do_login, listar_permissoes_modulo,
     definir_permissao_modulo, remover_permissao_modulo,
-    OpexOrcado, OpexItem,
+    OpexItem,
 )
 from core.security import (
     check_rate_limit, client_ip, get_session,
@@ -747,7 +747,8 @@ class OpexItemIn(BaseModel):
     conta_contabil: str = ""
     conta_descricao: str = ""
     tipo_despesa: str = ""
-    meses: Optional[dict] = None
+    orcado_meses: Optional[dict] = None
+    realizado_meses: Optional[dict] = None
 
 
 class OpexItemPatch(BaseModel):
@@ -759,32 +760,27 @@ class OpexItemPatch(BaseModel):
     conta_contabil: Optional[str] = None
     conta_descricao: Optional[str] = None
     tipo_despesa: Optional[str] = None
-    meses: Optional[dict] = None
-
-
-class OpexOrcadoIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    pais: str
-    ano: int
-    valor: float = 0
+    orcado_meses: Optional[dict] = None
+    realizado_meses: Optional[dict] = None
 
 
 def _opex_resumo(s, ano: int) -> dict:
-    """Orçado e realizado por país (moeda local, sem conversão) + alerta."""
+    """Orçado e realizado por país (moeda local, sem conversão) + alerta.
+    Orçado e realizado saem das séries mensais das próprias linhas."""
     from datetime import date as _date
-    orcados = {o.pais: float(o.valor or 0) for o in s.scalars(
-        select(OpexOrcado).where(OpexOrcado.ano == ano)).all()}
     itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)).all()
+    orcados = {p: 0.0 for p in OPEX_PAISES}
     realizado = {p: 0.0 for p in OPEX_PAISES}
     for it in itens:
         d = it.to_dict()
         if it.pais in realizado:
-            realizado[it.pais] += d["total"]
+            orcados[it.pais] += d["total_orcado"]
+            realizado[it.pais] += d["total_realizado"]
     hoje = _date.today()
     decorridos = 12 if ano < hoje.year else (hoje.month if ano == hoje.year else 0)
     resumo = {}
     for p in OPEX_PAISES:
-        orc = round(orcados.get(p, 0.0), 2)
+        orc = round(orcados[p], 2)
         real = round(realizado[p], 2)
         pct = (real / orc) if orc > 0 else None
         # Ritmo esperado: fração do ano decorrido. Compara o realizado com ele.
@@ -812,8 +808,7 @@ def opex_listar(req: Request, ano: Optional[int] = None):
     from datetime import date as _date
     with SessionLocal() as s:
         anos = sorted({a for (a,) in s.execute(
-            select(OpexItem.ano).where(OpexItem.ano > 0).distinct()).all()}
-            | {a for (a,) in s.execute(select(OpexOrcado.ano).distinct()).all()})
+            select(OpexItem.ano).where(OpexItem.ano > 0).distinct()).all()})
         ano = ano or (anos[-1] if anos else _date.today().year)
         itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)
                           .order_by(OpexItem.sort_order, OpexItem.id)).all()
@@ -842,7 +837,8 @@ def opex_incluir(body: OpexItemIn, req: Request):
             bu=body.bu[:120], fornecedor=body.fornecedor[:200],
             conta_contabil=body.conta_contabil[:60], conta_descricao=body.conta_descricao[:200],
             tipo_despesa=body.tipo_despesa[:80],
-            meses=json.dumps(_opex_meses(body.meses)),
+            orcado_meses=json.dumps(_opex_meses(body.orcado_meses)),
+            realizado_meses=json.dumps(_opex_meses(body.realizado_meses)),
             sort_order=ordem, atualizado_por=sd.get("username", ""),
         )
         s.add(it)
@@ -868,8 +864,10 @@ def opex_alterar(item_id: int, body: OpexItemPatch, req: Request):
                               ("conta_descricao", 200), ("tipo_despesa", 80)):
             if campo in dados and dados[campo] is not None:
                 setattr(it, campo, str(dados[campo])[:limite])
-        if "meses" in dados and dados["meses"] is not None:
-            it.meses = json.dumps(_opex_meses(dados["meses"]))
+        if "orcado_meses" in dados and dados["orcado_meses"] is not None:
+            it.orcado_meses = json.dumps(_opex_meses(dados["orcado_meses"]))
+        if "realizado_meses" in dados and dados["realizado_meses"] is not None:
+            it.realizado_meses = json.dumps(_opex_meses(dados["realizado_meses"]))
         it.atualizado_por = sd.get("username", "")
         s.flush()
         return it.to_dict()
@@ -885,23 +883,6 @@ def opex_excluir(item_id: int, req: Request):
             raise HTTPException(404, "Linha não encontrada.")
         s.delete(it)
     return {"ok": True}
-
-
-@router.put("/api/controle-orcamento-exec/opex/orcado")
-@_com_banco
-def opex_orcado(body: OpexOrcadoIn, req: Request):
-    sd = _exigir(req, "edit")
-    pais = _opex_valida_pais(body.pais)
-    ano = int(body.ano)
-    with SessionLocal.begin() as s:
-        row = s.scalar(select(OpexOrcado).where(OpexOrcado.pais == pais, OpexOrcado.ano == ano))
-        if row is None:
-            row = OpexOrcado(pais=pais, ano=ano)
-            s.add(row)
-        row.valor = Decimal(str(round(float(body.valor or 0), 2)))
-        row.atualizado_por = sd.get("username", "")
-        s.flush()
-        return row.to_dict()
 
 
 @router.get("/api/controle-orcamento-exec/projetos")

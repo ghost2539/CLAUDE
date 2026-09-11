@@ -604,9 +604,11 @@ function OpexView({ podeEditar, onResumo }) {
   const [ano, setAno] = useState(null);
   const [dados, setDados] = useState({ itens: [], resumo: {}, anos: [] });
   const [aba, setAba] = useState("BR");
+  const [serie, setSerie] = useState("orcado");   // orcado | realizado (qual série mensal editar)
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const timers = useRef({});
+  const campoSerie = serie === "orcado" ? "orcado_meses" : "realizado_meses";
 
   const carregar = useCallback(async (a) => {
     setCarregando(true); setErro("");
@@ -619,11 +621,6 @@ function OpexView({ podeEditar, onResumo }) {
   }, [onResumo]);
   useEffect(() => { carregar(); }, [carregar]);
 
-  const orcado = (pais) => dados.resumo?.[pais]?.orcado || 0;
-  const salvarOrcado = async (pais, valor) => {
-    try { await api(API_BASE + "/opex/orcado", { method: "PUT", body: JSON.stringify({ pais, ano, valor }) }); carregar(ano); }
-    catch (e) { setErro("Falha ao salvar orçado: " + e.message); }
-  };
   const incluir = async (pais) => {
     try {
       await api(API_BASE + "/opex", { method: "POST", body: JSON.stringify({ pais, ano, bu: "", fornecedor: "" }) });
@@ -635,33 +632,40 @@ function OpexView({ podeEditar, onResumo }) {
     try { await api(API_BASE + "/opex/" + id, { method: "DELETE" }); carregar(ano); }
     catch (e) { setErro("Falha ao excluir: " + e.message); }
   };
+  const recalcTotal = (it) => ({
+    total_orcado: Object.values(it.orcado_meses || {}).reduce((a, b) => a + Number(b || 0), 0),
+    total_realizado: Object.values(it.realizado_meses || {}).reduce((a, b) => a + Number(b || 0), 0),
+  });
   const patch = (id, campos, recarregar) => {
-    setDados((prev) => ({ ...prev, itens: prev.itens.map((it) => it.id === id ? { ...it, ...campos, ...(campos.meses ? { total: Object.values(campos.meses).reduce((a, b) => a + Number(b || 0), 0) } : {}) } : it) }));
+    setDados((prev) => ({ ...prev, itens: prev.itens.map((it) => {
+      if (it.id !== id) return it;
+      const novo = { ...it, ...campos };
+      return { ...novo, ...recalcTotal(novo) };
+    }) }));
     clearTimeout(timers.current[id]);
     timers.current[id] = setTimeout(async () => {
       try { await api(API_BASE + "/opex/" + id, { method: "PATCH", body: JSON.stringify(campos) }); if (recarregar) carregar(ano); }
       catch (e) { setErro("Falha ao salvar: " + e.message); }
-    }, 500);
+    }, 600);
   };
   const setMes = (it, mes, valor) => {
-    const meses = { ...(it.meses || {}), [String(mes)]: valor };
-    patch(it.id, { meses }, true);
+    const meses = { ...(it[campoSerie] || {}), [String(mes)]: valor };
+    patch(it.id, { [campoSerie]: meses }, true);
   };
 
   const itensAba = dados.itens.filter((it) => (aba === "BR" ? it.pais === "BR" : it.pais !== "BR"));
-  const totalMes = (m) => itensAba.reduce((a, it) => a + Number((it.meses || {})[String(m)] || 0), 0);
-  const totalGeral = itensAba.reduce((a, it) => a + Number(it.total || 0), 0);
+  const totalMes = (m) => itensAba.reduce((a, it) => a + Number((it[campoSerie] || {})[String(m)] || 0), 0);
+  const totalGeral = itensAba.reduce((a, it) => a + Number(serie === "orcado" ? it.total_orcado : it.total_realizado || 0), 0);
   const moedaAba = aba === "BR" ? "BRL" : null;   // LATAM tem AR e UY juntos
 
   const inputCls = "cell-input min-w-[90px]";
-  const paises = aba === "BR" ? ["BR"] : ["AR", "UY"];
 
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="min-w-0">
           <h1 className="text-xl font-bold leading-tight text-gray-900">OPEX — Orçado e Realizado</h1>
-          <p className="text-xs text-gray-500">Brasil e Latam · cada país na sua moeda, sem conversão · inclusão manual</p>
+          <p className="text-xs text-gray-500">Brasil e Latam · cada país na sua moeda, sem conversão · orçado e realizado mês a mês</p>
         </div>
         <label className="ml-auto text-xs text-gray-600 flex items-center gap-2">
           Ano
@@ -677,32 +681,28 @@ function OpexView({ podeEditar, onResumo }) {
 
       {erro && <div className="mb-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2.5 text-xs">{erro}</div>}
 
-      {/* Orçado × Realizado por país (moeda local) */}
+      {/* Orçado × Realizado por país (moeda local, somados das linhas) */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        {["BR", "AR", "UY"].map((p) => {
-          const r = dados.resumo?.[p] || { pais: p, moeda: OPEX_MOEDA[p], orcado: 0, realizado: 0, pct: null, residual: 0, alerta: "sem_orcado" };
-          return (
-            <div key={p}>
-              <OpexResumoCard r={r} />
-              {podeEditar && (
-                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
-                  <span>Orçado {OPEX_MOEDA[p]}:</span>
-                  <input type="number" defaultValue={r.orcado || ""} placeholder="0"
-                         onBlur={(e) => { const v = Number(e.target.value || 0); if (v !== r.orcado) salvarOrcado(p, v); }}
-                         className="w-[130px] border border-gray-300 rounded px-2 py-1 text-right tabular-nums" />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {["BR", "AR", "UY"].map((p) => (
+          <OpexResumoCard key={p} r={dados.resumo?.[p] || { pais: p, moeda: OPEX_MOEDA[p], orcado: 0, realizado: 0, pct: null, residual: 0, alerta: "sem_orcado" }} />
+        ))}
       </section>
 
-      {/* Sub-abas BR / LATAM */}
-      <div className="flex items-center gap-1 mb-3">
-        {[["BR", "Brasil"], ["LATAM", "Latam (AR/UY)"]].map(([v, l]) => (
-          <button key={v} onClick={() => setAba(v)}
-                  className={"text-xs font-medium rounded-md px-3 py-1.5 border " + (aba === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50")}>{l}</button>
-        ))}
+      {/* Sub-abas BR / LATAM + alternador Orçado / Realizado */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex items-center gap-1">
+          {[["BR", "Brasil"], ["LATAM", "Latam (AR/UY)"]].map(([v, l]) => (
+            <button key={v} onClick={() => setAba(v)}
+                    className={"text-xs font-medium rounded-md px-3 py-1.5 border " + (aba === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50")}>{l}</button>
+          ))}
+        </div>
+        <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+          {[["orcado", "Orçado (mês a mês)"], ["realizado", "Realizado (mês a mês)"]].map(([v, l]) => (
+            <button key={v} onClick={() => setSerie(v)}
+                    className={"text-xs font-medium px-3 py-1.5 " + (serie === v ? (v === "orcado" ? "bg-slate-700 text-white" : "bg-emerald-600 text-white") : "bg-white text-gray-700 hover:bg-gray-50")}>{l}</button>
+          ))}
+        </div>
+        <span className="text-[11px] text-gray-500">Editando o <b>{serie === "orcado" ? "orçado" : "realizado"}</b> de cada mês.</span>
         {podeEditar && (
           <button onClick={() => incluir(aba === "BR" ? "BR" : "AR")}
                   className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5">
@@ -721,14 +721,15 @@ function OpexView({ podeEditar, onResumo }) {
               {aba !== "BR" && <th className="th">Conta Contábil</th>}
               <th className="th text-left">Conta Descrição</th>
               {aba === "BR" && <th className="th">Tipo</th>}
-              {MESES3.map((m) => <th key={m} className="th text-right">{m}</th>)}
-              <th className="th text-right">Total</th>
+              {MESES3.map((m) => <th key={m} className={"th text-right " + (serie === "realizado" ? "text-emerald-700" : "text-slate-600")}>{m}</th>)}
+              <th className="th text-right">Orçado</th>
+              <th className="th text-right">Realizado</th>
               <th className="th">Ações</th>
             </tr>
           </thead>
           <tbody>
             {!carregando && itensAba.length === 0 && (
-              <tr><td colSpan={aba === "BR" ? 17 : 18} className="px-4 py-8 text-center text-gray-500 text-xs">
+              <tr><td colSpan={aba === "BR" ? 18 : 19} className="px-4 py-8 text-center text-gray-500 text-xs">
                 Nenhuma linha para {aba === "BR" ? "o Brasil" : "a Latam"} em {ano}. {podeEditar ? "Use \"Nova linha\" para incluir." : ""}
               </td></tr>
             )}
@@ -752,9 +753,10 @@ function OpexView({ podeEditar, onResumo }) {
                   <td className="td"><input className={inputCls + " min-w-[150px]"} disabled={!podeEditar} value={it.conta_descricao} placeholder="Descrição" onChange={(e) => patch(it.id, { conta_descricao: e.target.value })} /></td>
                   {aba === "BR" && <td className="td"><input className="cell-input min-w-[110px]" disabled={!podeEditar} value={it.tipo_despesa} placeholder="Tipo" onChange={(e) => patch(it.id, { tipo_despesa: e.target.value })} /></td>}
                   {MESES3.map((_, i) => (
-                    <td key={i} className="td"><CelulaMes value={(it.meses || {})[String(i + 1)]} moeda={moeda} disabled={!podeEditar} onCommit={(v) => setMes(it, i + 1, v)} /></td>
+                    <td key={i} className="td"><CelulaMes value={(it[campoSerie] || {})[String(i + 1)]} moeda={moeda} disabled={!podeEditar} onCommit={(v) => setMes(it, i + 1, v)} /></td>
                   ))}
-                  <td className="td text-right tabular-nums font-semibold">{fmtMoeda(it.total, moeda)}</td>
+                  <td className="td text-right tabular-nums text-slate-700">{fmtMoeda(it.total_orcado, moeda)}</td>
+                  <td className={"td text-right tabular-nums font-semibold " + (Number(it.total_realizado) > Number(it.total_orcado) ? "text-red-600" : "text-emerald-700")}>{fmtMoeda(it.total_realizado, moeda)}</td>
                   <td className="td text-center">
                     {podeEditar && <button title="Excluir" onClick={() => excluir(it.id)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>}
                   </td>
@@ -765,9 +767,12 @@ function OpexView({ podeEditar, onResumo }) {
           {itensAba.length > 0 && (
             <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold text-gray-800">
               <tr>
-                <td colSpan={aba === "BR" ? 4 : 5} className="td text-right text-gray-600">Totais ({itensAba.length})</td>
+                <td colSpan={aba === "BR" ? 4 : 5} className="td text-right text-gray-600">
+                  Totais ({itensAba.length}) · {serie === "orcado" ? "orçado" : "realizado"}
+                </td>
                 {MESES3.map((_, i) => <td key={i} className="td text-right tabular-nums">{totalMes(i + 1).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>)}
-                <td className="td text-right tabular-nums">{moedaAba ? fmtMoeda(totalGeral, moedaAba) : totalGeral.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
+                <td className="td text-right tabular-nums">{itensAba.reduce((a, it) => a + Number(it.total_orcado || 0), 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
+                <td className="td text-right tabular-nums">{itensAba.reduce((a, it) => a + Number(it.total_realizado || 0), 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</td>
                 <td className="td" />
               </tr>
             </tfoot>
