@@ -1442,29 +1442,7 @@ export default function App() {
     </section>
   );
 
-  const analiseCharts = (
-    <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-      <ChartCard title="Distribuição por Categoria" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-        <DonutChart data={porCategoria} colors={coresCategoria} />
-      </ChartCard>
-      <ChartCard title="Estágio dos Projetos" subtitle="(Valor Aprovado)" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-        <DonutChart data={porEstagio} colors={ESTAGIO_CORES} />
-      </ChartCard>
-      <ChartCard title="Valor Aprovado por Prioridade" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-        <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={porPrioridade} layout="vertical" margin={{ top: 4, right: 64, bottom: 0, left: 0 }} barCategoryGap={10}>
-            <CartesianGrid horizontal={false} stroke="#e5e7eb" />
-            <XAxis type="number" tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false}
-                   domain={[0, maxPrioridade > 0 ? "auto" : 1]} />
-            <YAxis type="category" dataKey="name" width={44} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
-            <Tooltip content={<MoneyTooltip />} cursor={{ fill: "#f3f4f6" }} />
-            <Bar dataKey="value" name="Valor aprovado" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-              {porPrioridade.map((d) => <Cell key={d.name} fill={PRIORIDADE_CORES[d.name]} />)}
-              <LabelList dataKey="value" content={BarValueLabel} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+  const graficoEvolucao = (
       <ChartCard title="Evolução do Realizado (R$)">
         <div className="flex gap-2 h-full">
           <div className="flex-1 min-w-0">
@@ -1498,6 +1476,32 @@ export default function App() {
           </div>
         </div>
       </ChartCard>
+  );
+
+  const analiseCharts = (
+    <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <ChartCard title="Distribuição por Categoria" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <DonutChart data={porCategoria} colors={coresCategoria} />
+      </ChartCard>
+      <ChartCard title="Estágio dos Projetos" subtitle="(Valor Aprovado)" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <DonutChart data={porEstagio} colors={ESTAGIO_CORES} />
+      </ChartCard>
+      <ChartCard title="Valor Aprovado por Prioridade" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={porPrioridade} layout="vertical" margin={{ top: 4, right: 64, bottom: 0, left: 0 }} barCategoryGap={10}>
+            <CartesianGrid horizontal={false} stroke="#e5e7eb" />
+            <XAxis type="number" tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false}
+                   domain={[0, maxPrioridade > 0 ? "auto" : 1]} />
+            <YAxis type="category" dataKey="name" width={44} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+            <Tooltip content={<MoneyTooltip />} cursor={{ fill: "#f3f4f6" }} />
+            <Bar dataKey="value" name="Valor aprovado" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+              {porPrioridade.map((d) => <Cell key={d.name} fill={PRIORIDADE_CORES[d.name]} />)}
+              <LabelList dataKey="value" content={BarValueLabel} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+      {graficoEvolucao}
     </section>
   );
 
@@ -1525,13 +1529,14 @@ export default function App() {
           <>
             {cabecalho("Visão Geral do Portfólio", "Cards, situação do orçamento e prazo dos projetos")}
             {kpis}
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <section className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3">
               <ChartCard title="Situação do Orçamento CAPEX (R$)" footer={`Total Orçado: ${fmtBRL(totalOrcamento)}`}>
                 <DonutChart data={situacao} colors={SITUACAO_CORES} />
               </ChartCard>
               <ChartCard title="Prazo por Projeto (CAPEX)" footer={`Total: ${visiveis.length} projeto(s)`}>
                 <DonutChart data={prazo} colors={PRAZO_CORES} />
               </ChartCard>
+              <div className="xl:col-span-2">{graficoEvolucao}</div>
             </section>
 
             {/* OPEX — orçado × realizado por país (moeda local, sem conversão) */}
