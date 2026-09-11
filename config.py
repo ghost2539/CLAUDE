@@ -85,6 +85,12 @@ class Settings:
     STATIC: Path = ROOT / "static"
     UPLOAD: Path = ROOT / "data" / "uploads"
 
+    # Prefixo do portal quando servido atrás de proxy num subcaminho
+    # (ex.: /portal-spare). Vazio = servido na raiz do domínio (produção).
+    # O front-end lê isto e monta /static e /api já com o prefixo; sem ele,
+    # o navegador buscaria /static na raiz do domínio e receberia 404.
+    APP_BASE_PATH: str = _env("APP_BASE_PATH", "").rstrip("/")
+
     DATABASE_URL: str = _env_obrigatorio("DATABASE_URL")
     SESSION_SECRET: str = _env_obrigatorio("PORTAL_SESSION_SECRET")
     SESSION_TTL: int = int(_env("SESSION_TTL_MINUTES", "480")) * 60

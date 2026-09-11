@@ -23,6 +23,12 @@ PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
 # ── Servidor ────────────────────────────────────────────────────────────
 HOST=0.0.0.0
 PORT=8901
+# O proxy publica o portal em suporte.lojasrenner.com.br/portal-spare. Sem
+# este prefixo o front-end buscaria /static e /api na raiz do domínio e
+# receberia 404. Vazio quando servido na raiz. O proxy deve encaminhar
+# removendo o prefixo (proxy_pass com barra final no nginx), pois o app
+# atende em /static e /api.
+APP_BASE_PATH=/portal-spare
 # Espelho da tela dos times numa segunda porta: DESLIGADO. Um segundo
 # servidor uvicorn no mesmo processo trava a partida sob uvloop. Tudo
 # atende na 8901; o endereço antigo é resolvido no proxy.

@@ -59,7 +59,17 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
+        html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
+        base = _cfg.APP_BASE_PATH
+        if base:
+            # Servido num subcaminho do proxy: os arquivos e a API precisam
+            # levar o prefixo, senão o navegador os busca na raiz do domínio.
+            # O <meta> diz o prefixo ao app.js; os <link>/<script> do topo
+            # ganham o prefixo aqui. Vazio (produção) não muda nada.
+            html = html.replace('="/static/', f'="{base}/static/')
+            html = html.replace(
+                "<head>", f'<head>\n    <meta name="app-base" content="{base}">', 1)
+        return html
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

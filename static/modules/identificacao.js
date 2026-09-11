@@ -290,7 +290,7 @@ function _renderA4(c, S) {
 
     document.getElementById('a4-pdf').addEventListener('click', function () {
         var body = _a4Body();
-        fetch('/api/identificacao/a4.pdf', {
+        fetch((window.SPARE.base || '') + '/api/identificacao/a4.pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',

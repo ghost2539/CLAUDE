@@ -124,7 +124,9 @@ def _acesso_pagina(req: Request):
     if not sd:
         # Leva o destino junto: depois do login o portal volta para cá, em vez
         # de largar quem digitou o endereço na tela de Bem-vindo.
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
+        return RedirectResponse(
+            f"{_cfg.APP_BASE_PATH}/?next={quote(_cfg.APP_BASE_PATH + req.url.path, safe='/')}",
+            status_code=302)
     try:
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela

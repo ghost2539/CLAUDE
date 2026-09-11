@@ -27,7 +27,8 @@ from config import get_settings
 from core.security import check_rate_limit, get_session, require_permission
 
 _log = logging.getLogger("ebs_forms")
-_DIR = get_settings().STATIC / "ebs-forms"
+_cfg = get_settings()
+_DIR = _cfg.STATIC / "ebs-forms"
 
 router = APIRouter(prefix="/api/ebs-forms", tags=["EBS Forms"], include_in_schema=False)
 
@@ -238,7 +239,9 @@ def _acesso_pagina(req: Request):
     sd = get_session(req, required=False)
     if not sd:
         # o destino vai junto: depois do login o portal volta para esta tela
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
+        return RedirectResponse(
+            f"{_cfg.APP_BASE_PATH}/?next={quote(_cfg.APP_BASE_PATH + req.url.path, safe='/')}",
+            status_code=302)
     try:
         require_permission(req, MODULO, "view")
     except HTTPException:
