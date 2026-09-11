@@ -1213,19 +1213,23 @@
         }
         renderFiltros();
 
-        function lotesOpts() {
-            var list = opts(opcoes, 'lotes');
-            // Mantém o lote escolhido mesmo que não esteja entre os mais usados.
-            if (filtros.lote && !list.some(function (o) { return o.value === String(filtros.lote); })) {
-                list.unshift({ value: String(filtros.lote), label: String(filtros.lote) });
-            }
-            return list;
+        // Campo de texto com autocompletar: ao digitar, o navegador sugere os
+        // lotes que contêm o texto; o backend filtra por conteúdo (LIKE).
+        function loteFiltroHtml(valor) {
+            var e = S.esc;
+            var options = opts(opcoes, 'lotes').map(function (o) {
+                return '<option value="' + e(o.value) + '"></option>';
+            }).join('');
+            return '<div class="form-group"><label>Lote</label>' +
+                '<input id="om-fl-lote" class="form-control" list="om-fl-lote-lista" ' +
+                'autocomplete="off" placeholder="digite parte do lote" value="' + e(valor || '') + '">' +
+                '<datalist id="om-fl-lote-lista">' + options + '</datalist></div>';
         }
 
         function renderFiltros() {
             var e = S.esc;
             document.getElementById('om-filtros').innerHTML =
-                selectHtml('om-fl-lote', 'Lote', lotesOpts(), filtros.lote, 'Todos') +
+                loteFiltroHtml(filtros.lote) +
                 '<div class="form-group"><label>Mês</label><input id="om-fl-mes" type="month" class="form-control" value="' + e(filtros.mes) + '"></div>' +
                 selectHtml('om-fl-familia', 'Família', opts(opcoes, 'familias', FAMILIA_LABEL), filtros.familia, 'Todas') +
                 selectHtml('om-fl-categoria', 'Categoria', opts(opcoes, 'categorias'), filtros.categoria, 'Todas') +
@@ -1236,6 +1240,9 @@
                 selectHtml('om-fl-min_reparos', 'Reincidência', REINC_OPTS, filtros.min_reparos, 'Todos') +
                 '<div class="form-group"><label>Busca (RMA, série, lote)</label><input id="om-fl-q" class="form-control" placeholder="RMA, série ou lote" value="' + e(filtros.q) + '"></div>';
             document.getElementById('om-fl-q').onkeydown = function (ev) {
+                if (ev.key === 'Enter') aplicar();
+            };
+            document.getElementById('om-fl-lote').onkeydown = function (ev) {
                 if (ev.key === 'Enter') aplicar();
             };
         }
