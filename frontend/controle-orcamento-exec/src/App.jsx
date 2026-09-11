@@ -249,6 +249,36 @@ const Icon = {
       <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
     </svg>
   ),
+  home: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" />
+    </svg>
+  ),
+  grid: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  ),
+  list: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  ),
+  report: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M3 3v18h18" /><rect x="7" y="10" width="3" height="7" /><rect x="12" y="6" width="3" height="11" /><rect x="17" y="13" width="3" height="4" />
+    </svg>
+  ),
+  gear: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  ),
+  download: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+    </svg>
+  ),
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -476,6 +506,50 @@ function CategoriaLinha({ categoria, usos, onSalvar, onExcluir }) {
 
 const FILTROS_INICIAIS = { ano: "Todos", tipo: "Todos", area: "Todas", categoria: "Todas", prioridade: "Todas", estagio: "Todos", status: "Todos" };
 
+/* Itens do menu lateral. `view` casa com o estado que troca a tela. */
+const NAV = [
+  { view: "geral", label: "Visão Geral", icon: Icon.home },
+  { view: "portfolio", label: "Portfólio", icon: Icon.grid },
+  { view: "demandas", label: "Demandas", icon: Icon.list },
+  { view: "relatorios", label: "Relatórios", icon: Icon.report },
+  { view: "config", label: "Configurações", icon: Icon.gear },
+];
+
+function Sidebar({ view, onView, colapsado, onToggle }) {
+  return (
+    <aside className={"shrink-0 bg-[#0b1f3a] text-gray-300 flex flex-col transition-all " + (colapsado ? "w-16" : "w-56")}>
+      <div className="h-14 flex items-center gap-2 px-4 border-b border-white/10">
+        <span className="text-white shrink-0">{Icon.report}</span>
+        {!colapsado && <span className="text-sm font-semibold text-white truncate">Controle de Orçamento</span>}
+      </div>
+      <nav className="flex-1 py-3">
+        {NAV.map((n) => {
+          const ativo = view === n.view;
+          return (
+            <button key={n.view} onClick={() => onView(n.view)} title={n.label}
+              className={"w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors " +
+                (ativo ? "bg-white/10 text-white border-l-2 border-blue-400" : "text-gray-400 hover:bg-white/5 hover:text-white border-l-2 border-transparent")}>
+              <span className="shrink-0">{n.icon}</span>
+              {!colapsado && <span className="truncate">{n.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="p-3 border-t border-white/10 space-y-1">
+        <a href="/" title="Voltar ao Portal"
+           className="w-full flex items-center gap-3 px-1 py-2 text-xs text-gray-400 hover:text-white">
+          <span className="shrink-0">{Icon.back}</span>{!colapsado && <span>Portal</span>}
+        </a>
+        <button onClick={onToggle} title={colapsado ? "Expandir" : "Recolher"}
+          className="w-full flex items-center gap-3 px-1 py-2 text-xs text-gray-400 hover:text-white">
+          <span className="shrink-0 inline-block w-5 text-center">{colapsado ? "»" : "«"}</span>
+          {!colapsado && <span>Recolher</span>}
+        </button>
+      </div>
+    </aside>
+  );
+}
+
 export default function App() {
   const [projects, setProjects] = useState([]);
   const [filtros, setFiltros] = useState(FILTROS_INICIAIS);
@@ -486,6 +560,8 @@ export default function App() {
   const [erro, setErro] = useState("");
   const [pendentes, setPendentes] = useState(0);   // gravações em andamento
   const [ultimoSalvo, setUltimoSalvo] = useState(null);
+  const [view, setView] = useState("geral");        // seção do menu lateral
+  const [colapsado, setColapsado] = useState(false);
 
   /* Barra de inclusão de projetos (Número puxa do EBS) */
   const [inc, setInc] = useState({ numero: "", tipo: "CAPEX", projeto_demanda: "", categoria: "", area: "" });
@@ -767,85 +843,350 @@ export default function App() {
 
   const maxPrioridade = Math.max(0, ...porPrioridade.map((d) => d.value));
 
+  /* Situação do Orçamento: as três parcelas que compõem o orçado. */
+  const situacao = [
+    { name: "Realizado (Acum.)", value: totalRealizado },
+    { name: "Comprometido", value: totalComprometido },
+    { name: "Em Andamento", value: Math.max(0, totalARealizar) },
+  ];
+  const SITUACAO_CORES = {
+    "Realizado (Acum.)": "#22c55e", "Comprometido": "#f97316", "Em Andamento": "#eab308",
+  };
+
+  /* Prazo por projeto: fora do prazo = vencido e ainda não concluído. */
+  const hoje = todayISO();
+  const foraDoPrazo = (p) => p.vencimento && p.vencimento < hoje && p.estagio !== "Concluído";
+  const nFora = visiveis.filter(foraDoPrazo).length;
+  const nDentro = visiveis.length - nFora;
+  const prazo = [
+    { name: "Dentro do prazo", value: nDentro },
+    { name: "Fora do prazo", value: nFora },
+  ];
+  const PRAZO_CORES = { "Dentro do prazo": "#22c55e", "Fora do prazo": "#ef4444" };
+
+  /* Exporta o que está visível (respeita os filtros) em CSV para análise. */
+  const exportarCSV = () => {
+    const cols = [
+      ["ID", "codigo"], ["Projeto/Demanda", "nome"], ["Tipo", "tipo"], ["Categoria", "categoria"],
+      ["Área", "area"], ["Estágio", "estagio"], ["Prioridade", "prioridade"],
+      ["Orçamento Aprovado", "orcamento"], ["Comprometido", "comprometido"],
+      ["Realizado (Acum.)", "realizado"], ["A Realizar", "aRealizar"],
+      ["Vencimento", "vencimento"], ["Status", "status"], ["Bloqueado", "bloqueado"],
+    ];
+    const esc = (v) => {
+      const s = v === true ? "Sim" : v === false ? "Não" : String(v == null ? "" : v);
+      return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const linhas = [cols.map((c) => c[0]).join(";")];
+    visiveis.forEach((p) => linhas.push(cols.map((c) => esc(p[c[1]])).join(";")));
+    const blob = new Blob(["﻿" + linhas.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "controle-orcamento.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  /* ── Blocos reutilizados entre as telas ───────────────────────── */
+  const cabecalho = (titulo, subtitulo) => (
+    <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold leading-tight text-gray-900">{titulo}</h1>
+        {subtitulo && <p className="text-xs text-gray-500">{subtitulo}</p>}
+      </div>
+      <div className="ml-auto flex items-center gap-3">
+        <span className={"inline-flex items-center gap-1.5 text-[11px] " + (erro ? "text-red-600" : pendentes > 0 ? "text-amber-600" : "text-gray-500")} title="Gravação automática no banco do módulo">
+          {Icon.cloud}
+          {erro ? "Erro ao salvar" : pendentes > 0 ? "Salvando…" : ultimoSalvo ? `Salvo ${ultimoSalvo.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Gravação automática"}
+        </span>
+        {user && <span className="text-xs text-gray-600 hidden sm:inline">{user.display_name || user.username}</span>}
+        <button onClick={handleRecarregar} disabled={carregando} title="Recarregar os dados"
+                className="inline-flex items-center gap-1.5 text-xs text-gray-700 border border-gray-300 rounded-md px-2.5 py-1.5 bg-white hover:bg-gray-50 disabled:opacity-50">
+          {Icon.refresh} Atualizar tela
+        </button>
+        <button onClick={handleSincronizar} disabled={carregando || sincBusy} title="Puxa os valores de todos os projetos da API de CAPEX do EBS"
+                className="inline-flex items-center gap-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-md px-2.5 py-1.5 disabled:opacity-50">
+          {Icon.refresh} {sincBusy ? "Atualizando…" : "Atualizar (EBS)"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const barraInclusao = (
+    <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Número</span>
+          <input value={inc.numero} onChange={(e) => setInc({ ...inc, numero: e.target.value })}
+                 onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
+                 placeholder="ex.: 260021" title="Número do projeto (puxa os dados do EBS). Vários separados por vírgula."
+                 className="w-[130px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+        </label>
+        <label className="block">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Tipo</span>
+          <div className="select-wrap">
+            <select value={inc.tipo} onChange={(e) => setInc({ ...inc, tipo: e.target.value })}
+                    className="w-[92px] appearance-none bg-white border border-gray-300 rounded-md px-2.5 py-1.5 pr-7 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              {TIPOS.map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </div>
+        </label>
+        <label className="block flex-1 min-w-[180px]">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Projeto / Demanda</span>
+          <input value={inc.projeto_demanda} onChange={(e) => setInc({ ...inc, projeto_demanda: e.target.value })}
+                 onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
+                 placeholder="Descrição informada por você (não vem do EBS)" title="Nome/descrição do projeto — informado aqui, não é puxado do EBS"
+                 className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+        </label>
+        <label className="block">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Categoria</span>
+          <input list="cat-list" value={inc.categoria} onChange={(e) => setInc({ ...inc, categoria: e.target.value })}
+                 placeholder="Categoria" title="Escolha uma categoria existente ou digite uma nova"
+                 className="w-[150px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+          <datalist id="cat-list">{nomesCategoria.map((n) => <option key={n} value={n} />)}</datalist>
+        </label>
+        <label className="block">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Área Responsável</span>
+          <input value={inc.area} onChange={(e) => setInc({ ...inc, area: e.target.value })}
+                 onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
+                 placeholder="Área" className="w-[140px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+        </label>
+        <button onClick={handleIncluir} disabled={incBusy || !inc.numero.trim()}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+          {Icon.plus} {incBusy ? "Incluindo…" : "Incluir"}
+        </button>
+      </div>
+      {incMsg && <div className="mt-1.5 text-[11px] text-gray-600">{incMsg}</div>}
+    </section>
+  );
+
+  const kpis = (
+    <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <KpiCard icon={Icon.doc} color="#64748b" label="Demandas" value={totalDemandas} sub={`${emExecucao} em execução`} />
+      <KpiCard icon={Icon.dollar} color="#22c55e" label="Valor Total" value={fmtBRL(totalOrcamento)} sub="Orçamento aprovado" />
+      <KpiCard icon={Icon.pie} color="#2563eb" label="CAPEX Aprovado" value={fmtBRL(totalCapex)} sub={pct(totalCapex).replace("do orçamento total", "do valor total")} />
+      <KpiCard icon={Icon.trend} color="#8b5cf6" label="Realizado (Acum.)" value={fmtBRL(totalRealizado)} sub={pct(totalRealizado)} />
+      <KpiCard icon={Icon.clipboard} color="#f97316" label="Comprometido" value={fmtBRL(totalComprometido)} sub={pct(totalComprometido)} />
+      <KpiCard icon={Icon.target} color="#06b6d4" label="Em Andamento" value={fmtBRL(totalARealizar)} sub={pct(totalARealizar)} />
+    </section>
+  );
+
+  const filtrosBar = (
+    <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 items-end">
+        <FilterSelect label="Ano" value={filtros.ano} options={opcoesFiltro.ano} onChange={(v) => setFiltros({ ...filtros, ano: v })} />
+        <FilterSelect label="Tipo" value={filtros.tipo} options={opcoesFiltro.tipo} onChange={(v) => setFiltros({ ...filtros, tipo: v })} />
+        <FilterSelect label="Unidade / Área" value={filtros.area} options={opcoesFiltro.area} onChange={(v) => setFiltros({ ...filtros, area: v })} />
+        <FilterSelect label="Categoria" value={filtros.categoria} options={opcoesFiltro.categoria} onChange={(v) => setFiltros({ ...filtros, categoria: v })} />
+        <FilterSelect label="Prioridade" value={filtros.prioridade} options={opcoesFiltro.prioridade} onChange={(v) => setFiltros({ ...filtros, prioridade: v })} />
+        <FilterSelect label="Estágio" value={filtros.estagio} options={opcoesFiltro.estagio} onChange={(v) => setFiltros({ ...filtros, estagio: v })} />
+        <FilterSelect label="Status" value={filtros.status} options={opcoesFiltro.status} onChange={(v) => setFiltros({ ...filtros, status: v })} />
+        <button onClick={() => setFiltros(FILTROS_INICIAIS)} disabled={!filtrosAtivos}
+                className="inline-flex items-center justify-center gap-1.5 text-xs text-gray-700 border border-gray-300 rounded-md px-3 py-1.5 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+          {Icon.filter} Limpar Filtros
+        </button>
+      </div>
+    </section>
+  );
+
+  const tabela = (
+    <section className="bg-white rounded-lg border border-gray-200 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gray-200">
+        <h2 className="text-sm font-semibold text-gray-800">Portfólio de Projetos</h2>
+        <span className="text-[11px] text-gray-500">
+          {visiveis.length} de {projects.length} projeto(s){filtrosAtivos ? " · filtros ativos" : ""} · clique em uma célula para editar
+        </span>
+        <button onClick={exportarCSV} disabled={carregando || !visiveis.length}
+                className="ml-auto disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+          {Icon.download} Exportar
+        </button>
+        <button onClick={handleAddProject} disabled={carregando}
+                className="disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5">
+          {Icon.plus} Novo projeto
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1200px] w-full text-[12px] border-collapse">
+          <thead className="bg-gray-50 text-gray-600">
+            <tr className="text-[11px]">
+              <th rowSpan={2} className="th">ID</th>
+              <th rowSpan={2} className="th text-left">Projeto / Demanda</th>
+              <th rowSpan={2} className="th">Tipo</th>
+              <th rowSpan={2} className="th">Categoria</th>
+              <th rowSpan={2} className="th text-left">Área Responsável</th>
+              <th rowSpan={2} className="th">Estágio</th>
+              <th rowSpan={2} className="th">Prioridade</th>
+              <th colSpan={4} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
+              <th rowSpan={2} className="th text-right">% Realizado</th>
+              <th rowSpan={2} className="th">Vencimento Previsto</th>
+              <th rowSpan={2} className="th">Status</th>
+              <th rowSpan={2} className="th">Ações</th>
+            </tr>
+            <tr className="text-[11px]">
+              <th className="th text-right">Orçamento Aprovado</th>
+              <th className="th text-right">Comprometido</th>
+              <th className="th text-right">Realizado (Acum.)</th>
+              <th className="th text-right">A Realizar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!carregando && visiveis.length === 0 && (
+              <tr><td colSpan={15} className="px-4 py-8 text-center text-gray-500 text-xs">
+                {projects.length === 0 ? "Nenhum projeto cadastrado. Clique em \"Novo projeto\" para começar." : "Nenhum projeto corresponde aos filtros selecionados."}
+              </td></tr>
+            )}
+            {visiveis.map((p) => {
+              const st = STATUS_ESTILO[p.status];
+              return (
+                <tr key={p.id} className={"border-t border-gray-100 " + (p.bloqueado ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-blue-50/30")}>
+                  <td className="td">
+                    <input className="cell-input font-medium text-gray-600 w-[96px]" value={p.codigo} onChange={(e) => handleUpdateProject(p.id, "codigo", e.target.value)} />
+                  </td>
+                  <td className="td">
+                    <input className="cell-input min-w-[190px]" value={p.nome} onChange={(e) => handleUpdateProject(p.id, "nome", e.target.value)} />
+                  </td>
+                  <td className="td">
+                    <div className="select-wrap">
+                      <select className="cell-input min-w-[84px]" value={p.tipo} onChange={(e) => handleUpdateProject(p.id, "tipo", e.target.value)}>
+                        {TIPOS.map((o) => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  </td>
+                  <td className="td">
+                    <div className="select-wrap">
+                      <select className="cell-input min-w-[136px]" value={p.categoria} onChange={(e) => handleUpdateProject(p.id, "categoria", e.target.value)}>
+                        {nomesCategoria.map((o) => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  </td>
+                  <td className="td">
+                    <input className="cell-input min-w-[100px]" value={p.area} placeholder="Área" onChange={(e) => handleUpdateProject(p.id, "area", e.target.value)} />
+                  </td>
+                  <td className="td text-center">
+                    <BadgeSelect minWidth={118} value={p.estagio} options={ESTAGIOS} colors={ESTAGIO_CORES} onChange={(v) => handleUpdateProject(p.id, "estagio", v)} />
+                  </td>
+                  <td className="td text-center">
+                    <BadgeSelect minWidth={80} value={p.prioridade} options={PRIORIDADES} colors={PRIORIDADE_CORES} onChange={(v) => handleUpdateProject(p.id, "prioridade", v)} />
+                  </td>
+                  <td className="td"><MoneyInput title="Orçamento aprovado" value={p.orcamento} onChange={(v) => handleUpdateProject(p.id, "orcamento", v)} /></td>
+                  <td className="td"><MoneyInput title="Comprometido" value={p.comprometido} onChange={(v) => handleUpdateProject(p.id, "comprometido", v)} /></td>
+                  <td className="td"><MoneyInput title="Realizado acumulado" value={p.realizado} onChange={(v) => handleUpdateProject(p.id, "realizado", v)} /></td>
+                  <td className={"td text-right tabular-nums " + (p.aRealizar < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title={p.sincronizado_em ? "Saldo do dia (EBS)" : "Orçamento − (Comprometido + Realizado)"}>
+                    {fmtBRL(p.aRealizar)}
+                  </td>
+                  <td className="td text-right tabular-nums" title="Realizado ÷ Orçamento">
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="h-1.5 w-12 bg-gray-100 rounded overflow-hidden">
+                        <div className="h-full" style={{ width: `${Math.min(100, p.pctRealizado * 100)}%`, background: p.pctRealizado > 1 ? "#ef4444" : "#2563eb" }} />
+                      </div>
+                      <span className={p.pctRealizado > 1 ? "text-red-600 font-semibold" : "text-gray-700"}>{fmtPct(p.pctRealizado)}</span>
+                    </div>
+                  </td>
+                  <td className="td">
+                    <input type="date" className="cell-input w-[124px]" value={p.vencimento} onChange={(e) => handleUpdateProject(p.id, "vencimento", e.target.value)} />
+                  </td>
+                  <td className="td text-center">
+                    <span className="badge" style={{ background: st.bg, color: st.fg }}>{p.status}</span>
+                  </td>
+                  <td className="td">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        title={p.bloqueado ? "Bloqueado para o Atualizar (EBS) — clique para liberar" : "Bloquear: não alterar no Atualizar (EBS)"}
+                        onClick={() => handleUpdateProject(p.id, "bloqueado", !p.bloqueado)}
+                        className={"p-1 rounded " + (p.bloqueado ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-400 hover:text-amber-600 hover:bg-amber-50")}>
+                        {p.bloqueado ? Icon.lock : Icon.lockOpen}
+                      </button>
+                      <button title="Duplicar" onClick={() => handleDuplicateProject(p.id)} className="p-1 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50">{Icon.copy}</button>
+                      <button title="Excluir" onClick={() => handleDeleteProject(p.id)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {visiveis.length > 0 && (
+            <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold text-gray-800">
+              <tr>
+                <td colSpan={7} className="td text-right text-gray-600">Totais ({visiveis.length})</td>
+                <td className="td text-right tabular-nums">{fmtBRL(totalOrcamento)}</td>
+                <td className="td text-right tabular-nums">{fmtBRL(totalComprometido)}</td>
+                <td className="td text-right tabular-nums">{fmtBRL(totalRealizado)}</td>
+                <td className={"td text-right tabular-nums " + (totalARealizar < 0 ? "text-red-600" : "")}>{fmtBRL(totalARealizar)}</td>
+                <td className="td text-right tabular-nums">{totalOrcamento > 0 ? fmtPct(totalRealizado / totalOrcamento) : "0,0%"}</td>
+                <td colSpan={3} className="td" />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
+  );
+
+  const analiseCharts = (
+    <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <ChartCard title="Distribuição por Categoria" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <DonutChart data={porCategoria} colors={coresCategoria} />
+      </ChartCard>
+      <ChartCard title="Estágio dos Projetos" subtitle="(Valor Aprovado)" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <DonutChart data={porEstagio} colors={ESTAGIO_CORES} />
+      </ChartCard>
+      <ChartCard title="Valor Aprovado por Prioridade" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={porPrioridade} layout="vertical" margin={{ top: 4, right: 64, bottom: 0, left: 0 }} barCategoryGap={10}>
+            <CartesianGrid horizontal={false} stroke="#e5e7eb" />
+            <XAxis type="number" tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false}
+                   domain={[0, maxPrioridade > 0 ? "auto" : 1]} />
+            <YAxis type="category" dataKey="name" width={44} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+            <Tooltip content={<MoneyTooltip />} cursor={{ fill: "#f3f4f6" }} />
+            <Bar dataKey="value" name="Valor aprovado" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+              {porPrioridade.map((d) => <Cell key={d.name} fill={PRIORIDADE_CORES[d.name]} />)}
+              <LabelList dataKey="value" content={BarValueLabel} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+      <ChartCard title="Evolução do Realizado (R$)">
+        <div className="flex gap-2 h-full">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-600 mb-1">
+              <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-blue-600" />Realizado Acumulado</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-dashed border-gray-400" />Planejado Acumulado</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-dashed border-green-500" />Forecast</span>
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={evolucao} margin={{ top: 4, right: 8, bottom: 0, left: -6 }}>
+                <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                <XAxis dataKey="mes" interval={0} tick={{ fontSize: 8, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip content={<MoneyTooltip />} />
+                <Line type="monotone" dataKey="realizado" name="Realizado Acumulado" stroke="#2563eb" strokeWidth={2} dot={{ r: 2.5, fill: "#2563eb" }} connectNulls={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="planejado" name="Planejado Acumulado" stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2, fill: "#9ca3af" }} isAnimationActive={false} />
+                <Line type="monotone" dataKey="forecast" name="Forecast" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2, fill: "#22c55e" }} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="w-[92px] shrink-0 border border-gray-200 rounded-md bg-gray-50 p-2 text-[10px] text-gray-500 space-y-1.5">
+            <div><div>Previsto (EAC)</div><div className="text-[12px] font-bold text-gray-900 tabular-nums">{fmtCompact(eac)}</div></div>
+            <div><div>Orçamento</div><div className="text-[12px] font-bold text-gray-900 tabular-nums">{fmtCompact(totalOrcamento)}</div></div>
+            <div>
+              <div>Variação</div>
+              <div className="text-[12px] font-bold tabular-nums" style={{ color: variacao > 0 ? "#dc2626" : "#16a34a" }}>
+                {variacao >= 0 ? "+" : "-"}{fmtCompact(Math.abs(variacao)).replace("R$ ", "")}
+              </div>
+              <div className="tabular-nums">({totalOrcamento > 0 ? (variacao >= 0 ? "+" : "-") + fmtPct(Math.abs(variacao) / totalOrcamento) : "0,0%"})</div>
+            </div>
+          </div>
+        </div>
+      </ChartCard>
+    </section>
+  );
+
   /* ── Render ───────────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900 font-sans">
-      {/* Cabeçalho */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
-          <a href="/" className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md px-2.5 py-1.5 bg-white">
-            {Icon.back} Portal
-          </a>
-          <div className="min-w-0">
-            <h1 className="text-base font-bold leading-tight">Execução de CAPEX</h1>
-            <p className="text-[11px] text-gray-500">Acompanhamento da execução · CAPEX / OPEX · dados do EBS</p>
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <span className={"inline-flex items-center gap-1.5 text-[11px] " + (erro ? "text-red-600" : pendentes > 0 ? "text-amber-600" : "text-gray-500")} title="Gravação automática no banco do módulo">
-              {Icon.cloud}
-              {erro ? "Erro ao salvar" : pendentes > 0 ? "Salvando…" : ultimoSalvo ? `Salvo ${ultimoSalvo.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Gravação automática"}
-            </span>
-            {user && <span className="text-xs text-gray-600 hidden sm:inline">{user.display_name || user.username}</span>}
-            <button onClick={handleSincronizar} disabled={carregando || sincBusy} title="Puxa os valores de todos os projetos da API de CAPEX do EBS"
-                    className="inline-flex items-center gap-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-md px-2.5 py-1.5 disabled:opacity-50">
-              {Icon.refresh} {sincBusy ? "Atualizando…" : "Atualizar (EBS)"}
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen flex bg-gray-100 text-gray-900 font-sans">
+      <Sidebar view={view} onView={setView} colapsado={colapsado} onToggle={() => setColapsado((c) => !c)} />
 
-        {/* Barra de inclusão de projetos */}
-        <div className="border-t border-gray-100 bg-gray-50">
-          <div className="max-w-[1600px] mx-auto px-4 py-2.5">
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Número</span>
-                <input value={inc.numero} onChange={(e) => setInc({ ...inc, numero: e.target.value })}
-                       onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
-                       placeholder="ex.: 260021" title="Número do projeto (puxa os dados do EBS). Vários separados por vírgula."
-                       className="w-[130px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-              </label>
-              <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Tipo</span>
-                <div className="select-wrap">
-                  <select value={inc.tipo} onChange={(e) => setInc({ ...inc, tipo: e.target.value })}
-                          className="w-[92px] appearance-none bg-white border border-gray-300 rounded-md px-2.5 py-1.5 pr-7 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                    {TIPOS.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              </label>
-              <label className="block flex-1 min-w-[180px]">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Projeto / Demanda</span>
-                <input value={inc.projeto_demanda} onChange={(e) => setInc({ ...inc, projeto_demanda: e.target.value })}
-                       onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
-                       placeholder="Descrição informada por você (não vem do EBS)" title="Nome/descrição do projeto — informado aqui, não é puxado do EBS"
-                       className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-              </label>
-              <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Categoria</span>
-                <input list="cat-list" value={inc.categoria} onChange={(e) => setInc({ ...inc, categoria: e.target.value })}
-                       placeholder="Categoria" title="Escolha uma categoria existente ou digite uma nova"
-                       className="w-[150px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                <datalist id="cat-list">{nomesCategoria.map((n) => <option key={n} value={n} />)}</datalist>
-              </label>
-              <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Área Responsável</span>
-                <input value={inc.area} onChange={(e) => setInc({ ...inc, area: e.target.value })}
-                       onKeyDown={(e) => e.key === "Enter" && !incBusy && handleIncluir()}
-                       placeholder="Área" className="w-[140px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-              </label>
-              <button onClick={handleIncluir} disabled={incBusy || !inc.numero.trim()}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5 disabled:opacity-50">
-                {Icon.plus} {incBusy ? "Incluindo…" : "Incluir"}
-              </button>
-            </div>
-            {incMsg && (
-              <div className="mt-1.5 text-[11px] text-gray-600">{incMsg}</div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-[1600px] mx-auto px-4 py-4 space-y-4">
+      <main className="flex-1 min-w-0 px-4 py-4 space-y-4 overflow-x-hidden">
         {erro && (
           <div className="flex flex-wrap items-center gap-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2.5 text-xs">
             <span className="font-semibold">{erro}</span>
@@ -859,236 +1200,100 @@ export default function App() {
           <div className="text-xs text-gray-500 bg-white border border-gray-200 rounded-lg px-4 py-2.5">Carregando projetos…</div>
         )}
 
-        {/* KPIs */}
-        <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <KpiCard icon={Icon.doc} color="#64748b" label="Demandas" value={totalDemandas} sub={`${emExecucao} em execução`} />
-          <KpiCard icon={Icon.dollar} color="#22c55e" label="Valor Total" value={fmtBRL(totalOrcamento)} sub="Orçamento aprovado" />
-          <KpiCard icon={Icon.pie} color="#2563eb" label="CAPEX Aprovado" value={fmtBRL(totalCapex)} sub={pct(totalCapex).replace("do orçamento total", "do valor total")} />
-          <KpiCard icon={Icon.trend} color="#8b5cf6" label="Realizado (Acum.)" value={fmtBRL(totalRealizado)} sub={pct(totalRealizado)} />
-          <KpiCard icon={Icon.clipboard} color="#f97316" label="Comprometido" value={fmtBRL(totalComprometido)} sub={pct(totalComprometido)} />
-          <KpiCard icon={Icon.target} color="#06b6d4" label="A Realizar" value={fmtBRL(totalARealizar)} sub={pct(totalARealizar)} />
-        </section>
+        {/* ── Visão Geral ─────────────────────────────────────────── */}
+        {view === "geral" && (
+          <>
+            {cabecalho("Visão Geral do Portfólio", "Cards, situação do orçamento e prazo dos projetos")}
+            {kpis}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <ChartCard title="Situação do Orçamento (R$)" footer={`Total Orçado: ${fmtBRL(totalOrcamento)}`}>
+                <DonutChart data={situacao} colors={SITUACAO_CORES} />
+              </ChartCard>
+              <ChartCard title="Prazo por Projeto" footer={`Total: ${visiveis.length} projeto(s)`}>
+                <DonutChart data={prazo} colors={PRAZO_CORES} />
+              </ChartCard>
+            </section>
+          </>
+        )}
 
-        {/* Gráficos */}
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-          <ChartCard title="Distribuição por Categoria" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-            <DonutChart data={porCategoria} colors={coresCategoria} />
-          </ChartCard>
+        {/* ── Portfólio ───────────────────────────────────────────── */}
+        {view === "portfolio" && (
+          <>
+            {cabecalho("Portfólio de Projetos", "Filtre e edite os projetos; a trava impede alteração pelo Atualizar (EBS)")}
+            {filtrosBar}
+            {tabela}
+          </>
+        )}
 
-          <ChartCard title="Estágio dos Projetos" subtitle="(Valor Aprovado)" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-            <DonutChart data={porEstagio} colors={ESTAGIO_CORES} />
-          </ChartCard>
+        {/* ── Demandas ────────────────────────────────────────────── */}
+        {view === "demandas" && (
+          <>
+            {cabecalho("Demandas", "Inclua novos projetos pelo número (puxa do EBS) e acompanhe os filtrados")}
+            {barraInclusao}
+            {filtrosBar}
+            {tabela}
+          </>
+        )}
 
-          <ChartCard title="Valor Aprovado por Prioridade" footer={`Total: ${fmtBRL(totalOrcamento)}`}>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={porPrioridade} layout="vertical" margin={{ top: 4, right: 64, bottom: 0, left: 0 }} barCategoryGap={10}>
-                <CartesianGrid horizontal={false} stroke="#e5e7eb" />
-                <XAxis type="number" tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false}
-                       domain={[0, maxPrioridade > 0 ? "auto" : 1]} />
-                <YAxis type="category" dataKey="name" width={44} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
-                <Tooltip content={<MoneyTooltip />} cursor={{ fill: "#f3f4f6" }} />
-                <Bar dataKey="value" name="Valor aprovado" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                  {porPrioridade.map((d) => <Cell key={d.name} fill={PRIORIDADE_CORES[d.name]} />)}
-                  <LabelList dataKey="value" content={BarValueLabel} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard title="Evolução do Realizado (R$)">
-            <div className="flex gap-2 h-full">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-600 mb-1">
-                  <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-blue-600" />Realizado Acumulado</span>
-                  <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-dashed border-gray-400" />Planejado Acumulado</span>
-                  <span className="inline-flex items-center gap-1"><span className="inline-block w-3.5 border-t-2 border-dashed border-green-500" />Forecast</span>
-                </div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <LineChart data={evolucao} margin={{ top: 4, right: 8, bottom: 0, left: -6 }}>
-                    <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="mes" interval={0} tick={{ fontSize: 8, fill: "#6b7280" }} axisLine={false} tickLine={false} />
-                    <YAxis tickFormatter={fmtAxis} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} width={36} />
-                    <Tooltip content={<MoneyTooltip />} />
-                    <Line type="monotone" dataKey="realizado" name="Realizado Acumulado" stroke="#2563eb" strokeWidth={2} dot={{ r: 2.5, fill: "#2563eb" }} connectNulls={false} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="planejado" name="Planejado Acumulado" stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2, fill: "#9ca3af" }} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="forecast" name="Forecast" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2, fill: "#22c55e" }} isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+        {/* ── Relatórios ──────────────────────────────────────────── */}
+        {view === "relatorios" && (
+          <>
+            {cabecalho("Relatórios", "Exporte os dados e veja a composição do portfólio")}
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex flex-wrap items-center gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-800">Exportar dados</div>
+                <div className="text-[11px] text-gray-500">{visiveis.length} projeto(s) conforme os filtros atuais.</div>
               </div>
-              <div className="w-[92px] shrink-0 border border-gray-200 rounded-md bg-gray-50 p-2 text-[10px] text-gray-500 space-y-1.5">
-                <div><div>Previsto (EAC)</div><div className="text-[12px] font-bold text-gray-900 tabular-nums">{fmtCompact(eac)}</div></div>
-                <div><div>Orçamento</div><div className="text-[12px] font-bold text-gray-900 tabular-nums">{fmtCompact(totalOrcamento)}</div></div>
-                <div>
-                  <div>Variação</div>
-                  <div className="text-[12px] font-bold tabular-nums" style={{ color: variacao > 0 ? "#dc2626" : "#16a34a" }}>
-                    {variacao >= 0 ? "+" : "-"}{fmtCompact(Math.abs(variacao)).replace("R$ ", "")}
-                  </div>
-                  <div className="tabular-nums">({totalOrcamento > 0 ? (variacao >= 0 ? "+" : "-") + fmtPct(Math.abs(variacao) / totalOrcamento) : "0,0%"})</div>
-                </div>
+              <button onClick={exportarCSV} disabled={!visiveis.length}
+                      className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+                {Icon.download} Exportar CSV
+              </button>
+              <button onClick={() => window.print()}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+                {Icon.report} Imprimir / PDF
+              </button>
+            </section>
+            {filtrosBar}
+            {analiseCharts}
+          </>
+        )}
+
+        {/* ── Configurações ───────────────────────────────────────── */}
+        {view === "config" && (
+          <>
+            {cabecalho("Configurações do módulo", "Categorias de projeto e informações do módulo")}
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-sm font-semibold text-gray-800">Categorias</h2>
+                <span className="text-[11px] text-gray-500">Usadas na classificação e nos gráficos.</span>
+                <button onClick={() => setModalCategorias(true)}
+                        className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+                  {Icon.tag} Gerenciar categorias
+                </button>
               </div>
-            </div>
-          </ChartCard>
-        </section>
-
-        {/* Filtros */}
-        <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 items-end">
-            <FilterSelect label="Ano" value={filtros.ano} options={opcoesFiltro.ano} onChange={(v) => setFiltros({ ...filtros, ano: v })} />
-            <FilterSelect label="Tipo" value={filtros.tipo} options={opcoesFiltro.tipo} onChange={(v) => setFiltros({ ...filtros, tipo: v })} />
-            <FilterSelect label="Unidade / Área" value={filtros.area} options={opcoesFiltro.area} onChange={(v) => setFiltros({ ...filtros, area: v })} />
-            <FilterSelect label="Categoria" value={filtros.categoria} options={opcoesFiltro.categoria} onChange={(v) => setFiltros({ ...filtros, categoria: v })} />
-            <FilterSelect label="Prioridade" value={filtros.prioridade} options={opcoesFiltro.prioridade} onChange={(v) => setFiltros({ ...filtros, prioridade: v })} />
-            <FilterSelect label="Estágio" value={filtros.estagio} options={opcoesFiltro.estagio} onChange={(v) => setFiltros({ ...filtros, estagio: v })} />
-            <FilterSelect label="Status" value={filtros.status} options={opcoesFiltro.status} onChange={(v) => setFiltros({ ...filtros, status: v })} />
-            <button onClick={() => setFiltros(FILTROS_INICIAIS)} disabled={!filtrosAtivos}
-                    className="inline-flex items-center justify-center gap-1.5 text-xs text-gray-700 border border-gray-300 rounded-md px-3 py-1.5 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
-              {Icon.filter} Limpar Filtros
-            </button>
-          </div>
-        </section>
-
-        {/* Tabela editável */}
-        <section className="bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-800">Portfólio de Projetos</h2>
-            <span className="text-[11px] text-gray-500">
-              {visiveis.length} de {projects.length} projeto(s){filtrosAtivos ? " · filtros ativos" : ""} · clique em uma célula para editar
-            </span>
-            <button onClick={() => setModalCategorias(true)} disabled={carregando}
-                    className="ml-auto disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
-              {Icon.tag} Categorias
-            </button>
-            <button onClick={handleAddProject} disabled={carregando}
-                    className="disabled:opacity-50 inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5">
-              {Icon.plus} Novo projeto
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-[1200px] w-full text-[12px] border-collapse">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr className="text-[11px]">
-                  <th rowSpan={2} className="th">ID</th>
-                  <th rowSpan={2} className="th text-left">Projeto / Demanda</th>
-                  <th rowSpan={2} className="th">Tipo</th>
-                  <th rowSpan={2} className="th">Categoria</th>
-                  <th rowSpan={2} className="th text-left">Área Responsável</th>
-                  <th rowSpan={2} className="th">Estágio</th>
-                  <th rowSpan={2} className="th">Prioridade</th>
-                  <th colSpan={4} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
-                  <th rowSpan={2} className="th text-right">% Realizado</th>
-                  <th rowSpan={2} className="th">Vencimento Previsto</th>
-                  <th rowSpan={2} className="th">Status</th>
-                  <th rowSpan={2} className="th">Ações</th>
-                </tr>
-                <tr className="text-[11px]">
-                  <th className="th text-right">Orçamento Aprovado</th>
-                  <th className="th text-right">Comprometido</th>
-                  <th className="th text-right">Realizado (Acum.)</th>
-                  <th className="th text-right">A Realizar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!carregando && visiveis.length === 0 && (
-                  <tr><td colSpan={15} className="px-4 py-8 text-center text-gray-500 text-xs">
-                    {projects.length === 0 ? "Nenhum projeto cadastrado. Clique em \"Novo projeto\" para começar." : "Nenhum projeto corresponde aos filtros selecionados."}
-                  </td></tr>
-                )}
-                {visiveis.map((p) => {
-                  const st = STATUS_ESTILO[p.status];
-                  return (
-                    <tr key={p.id} className={"border-t border-gray-100 " + (p.bloqueado ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-blue-50/30")}>
-                      <td className="td">
-                        <input className="cell-input font-medium text-gray-600 w-[96px]" value={p.codigo} onChange={(e) => handleUpdateProject(p.id, "codigo", e.target.value)} />
-                      </td>
-                      <td className="td">
-                        <input className="cell-input min-w-[190px]" value={p.nome} onChange={(e) => handleUpdateProject(p.id, "nome", e.target.value)} />
-                      </td>
-                      <td className="td">
-                        <div className="select-wrap">
-                          <select className="cell-input min-w-[84px]" value={p.tipo} onChange={(e) => handleUpdateProject(p.id, "tipo", e.target.value)}>
-                            {TIPOS.map((o) => <option key={o}>{o}</option>)}
-                          </select>
-                        </div>
-                      </td>
-                      <td className="td">
-                        <div className="select-wrap">
-                          <select className="cell-input min-w-[136px]" value={p.categoria} onChange={(e) => handleUpdateProject(p.id, "categoria", e.target.value)}>
-                            {nomesCategoria.map((o) => <option key={o}>{o}</option>)}
-                          </select>
-                        </div>
-                      </td>
-                      <td className="td">
-                        <input className="cell-input min-w-[100px]" value={p.area} placeholder="Área" onChange={(e) => handleUpdateProject(p.id, "area", e.target.value)} />
-                      </td>
-                      <td className="td text-center">
-                        <BadgeSelect minWidth={118} value={p.estagio} options={ESTAGIOS} colors={ESTAGIO_CORES} onChange={(v) => handleUpdateProject(p.id, "estagio", v)} />
-                      </td>
-                      <td className="td text-center">
-                        <BadgeSelect minWidth={80} value={p.prioridade} options={PRIORIDADES} colors={PRIORIDADE_CORES} onChange={(v) => handleUpdateProject(p.id, "prioridade", v)} />
-                      </td>
-                      <td className="td"><MoneyInput title="Orçamento aprovado" value={p.orcamento} onChange={(v) => handleUpdateProject(p.id, "orcamento", v)} /></td>
-                      <td className="td"><MoneyInput title="Comprometido" value={p.comprometido} onChange={(v) => handleUpdateProject(p.id, "comprometido", v)} /></td>
-                      <td className="td"><MoneyInput title="Realizado acumulado" value={p.realizado} onChange={(v) => handleUpdateProject(p.id, "realizado", v)} /></td>
-                      <td className={"td text-right tabular-nums " + (p.aRealizar < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title={p.sincronizado_em ? "Saldo do dia (EBS)" : "Orçamento − (Comprometido + Realizado)"}>
-                        {fmtBRL(p.aRealizar)}
-                      </td>
-                      <td className="td text-right tabular-nums" title="Realizado ÷ Orçamento">
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="h-1.5 w-12 bg-gray-100 rounded overflow-hidden">
-                            <div className="h-full" style={{ width: `${Math.min(100, p.pctRealizado * 100)}%`, background: p.pctRealizado > 1 ? "#ef4444" : "#2563eb" }} />
-                          </div>
-                          <span className={p.pctRealizado > 1 ? "text-red-600 font-semibold" : "text-gray-700"}>{fmtPct(p.pctRealizado)}</span>
-                        </div>
-                      </td>
-                      <td className="td">
-                        <input type="date" className="cell-input w-[124px]" value={p.vencimento} onChange={(e) => handleUpdateProject(p.id, "vencimento", e.target.value)} />
-                      </td>
-                      <td className="td text-center">
-                        <span className="badge" style={{ background: st.bg, color: st.fg }}>{p.status}</span>
-                      </td>
-                      <td className="td">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            title={p.bloqueado ? "Bloqueado para o Atualizar (EBS) — clique para liberar" : "Bloquear: não alterar no Atualizar (EBS)"}
-                            onClick={() => handleUpdateProject(p.id, "bloqueado", !p.bloqueado)}
-                            className={"p-1 rounded " + (p.bloqueado ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-400 hover:text-amber-600 hover:bg-amber-50")}>
-                            {p.bloqueado ? Icon.lock : Icon.lockOpen}
-                          </button>
-                          <button title="Duplicar" onClick={() => handleDuplicateProject(p.id)} className="p-1 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50">{Icon.copy}</button>
-                          <button title="Excluir" onClick={() => handleDeleteProject(p.id)} className="p-1 rounded text-gray-500 hover:text-red-600 hover:bg-red-50">{Icon.trash}</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              {visiveis.length > 0 && (
-                <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold text-gray-800">
-                  <tr>
-                    <td colSpan={7} className="td text-right text-gray-600">Totais ({visiveis.length})</td>
-                    <td className="td text-right tabular-nums">{fmtBRL(totalOrcamento)}</td>
-                    <td className="td text-right tabular-nums">{fmtBRL(totalComprometido)}</td>
-                    <td className="td text-right tabular-nums">{fmtBRL(totalRealizado)}</td>
-                    <td className={"td text-right tabular-nums " + (totalARealizar < 0 ? "text-red-600" : "")}>{fmtBRL(totalARealizar)}</td>
-                    <td className="td text-right tabular-nums">{totalOrcamento > 0 ? fmtPct(totalRealizado / totalOrcamento) : "0,0%"}</td>
-                    <td colSpan={3} className="td" />
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </section>
+              <div className="flex flex-wrap gap-2">
+                {nomesCategoria.length === 0 && <span className="text-xs text-gray-500">Nenhuma categoria cadastrada.</span>}
+                {nomesCategoria.map((n) => (
+                  <span key={n} className="inline-flex items-center gap-1.5 text-xs border border-gray-200 rounded-full px-2.5 py-1 bg-gray-50">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: coresCategoria[n] }} />
+                    {n}<span className="text-gray-400">· {usosCategoria[n] || 0}</span>
+                  </span>
+                ))}
+              </div>
+            </section>
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 text-[11px] text-gray-500 leading-relaxed">
+              Os valores dos projetos são puxados da API de CAPEX do EBS pelo número. Projetos fora do EBS
+              podem ser incluídos e editados manualmente. Projetos travados não são alterados pelo Atualizar (EBS).
+              As edições são gravadas no banco exclusivo deste módulo.
+            </section>
+          </>
+        )}
 
         {modalCategorias && (
           <CategoriasModal categorias={categorias} emUso={usosCategoria}
                            onCriar={handleCriarCategoria} onAtualizar={handleAtualizarCategoria}
                            onExcluir={handleExcluirCategoria} onFechar={() => setModalCategorias(false)} />
         )}
-
-        <footer className="text-[11px] text-gray-400 text-center pb-2">
-          Valores dos projetos são puxados da API de CAPEX do EBS pelo número; projetos fora do EBS podem ser incluídos e editados manualmente. As edições são gravadas no banco exclusivo deste módulo (separado do /tv2).
-        </footer>
       </main>
     </div>
   );
