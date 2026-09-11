@@ -311,12 +311,24 @@ def calcular(r, limiar: float) -> bool:
             r.status = "APROVADO"
             r.status_original = "Aprovado — garantia"
         return antes != (r.percentual, r.avaliacao, r.status, r.status_original)
-    if r.avaliacao == "FORA" and r.status in db.STATUS_PENDENTES:
+    # RFR901, HF550 e S70 podem ser aprovados mesmo acima dos 60 %: ficam de
+    # fora da reprovação automática e seguem pendentes para decisão manual.
+    if r.avaliacao == "FORA" and r.status in db.STATUS_PENDENTES and not _isento_60(r.categoria):
         r.status = "REPROVADO"
         pct = f"{perc * 100:.1f}".replace(".", ",")
         lim = f"{limiar * 100:g}".replace(".", ",")
         r.status_original = f"Reprovado automaticamente ({pct} % > {lim} %)"[:60]
     return antes != (r.percentual, r.avaliacao, r.status, r.status_original)
+
+
+# Modelos que podem ser aprovados acima dos 60 %: a regra automática não os
+# reprova; a aprovação é decidida manualmente.
+_ISENTOS_60 = ("RFR901", "HF550", "S70")
+
+
+def _isento_60(categoria) -> bool:
+    chave = _sem_acento(categoria).replace(" ", "")
+    return any(m.lower() in chave for m in _ISENTOS_60)
 
 
 def _padrao_categoria(config: dict, categoria: str) -> Optional[float]:
