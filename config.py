@@ -220,6 +220,13 @@ class Settings:
         _sqlite("orcamento_spare"),
     )
 
+    # ── Orçamento de Manutenção (reparo de coletores e SLEDs) — módulo isolado
+    # Banco PRÓPRIO; contrato em docs/ORCAMENTO_MANUTENCAO.md.
+    ORCAMENTO_MANUTENCAO_DATABASE_URL: str = os.getenv(
+        "ORCAMENTO_MANUTENCAO_DATABASE_URL",
+        _sqlite("orcamento_manutencao"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = _env(
@@ -302,7 +309,7 @@ class Settings:
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms", "automacoes"
+        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
