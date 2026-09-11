@@ -1067,8 +1067,15 @@ CAMPOS_OPCIONAIS = ("loja", "lote_prime", "qtde", "status_retorno", "ano_devoluc
 def _mapear_colunas(colunas) -> dict:
     """{destino: nome da coluna no arquivo}; None para o que não veio."""
     cmap = {_sem_acento(c): c for c in colunas}
-    return {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
+    mapa = {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
             for k, al in ALIASES.items()}
+    # Lote: se o nome exato não bateu, aceita qualquer coluna que contenha
+    # "lote" (ex.: "Lote de Reparo"), para não vir vazio.
+    if not mapa.get("lote_prime"):
+        achou = next((orig for norm, orig in cmap.items() if "lote" in norm), None)
+        if achou:
+            mapa["lote_prime"] = achou
+    return mapa
 
 
 def _layout_da_aba(colunas) -> str:
@@ -1165,7 +1172,8 @@ def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str,
 
 @router.post("/importar")
 def importar(req: Request, file: UploadFile = File(...),
-             substituir: bool = Form(False), aba: str = Form("")):
+             substituir: bool = Form(False), aba: str = Form(""),
+             dry_run: bool = Form(False)):
     """`substituir=true`: a planilha vira a base. Linhas importadas antes que
     não estão no arquivo são removidas; o que foi digitado no portal fica.
     `aba`: qual aba do xlsx ler; sem ela, a primeira que servir (8.2)."""
@@ -1327,35 +1335,53 @@ def importar(req: Request, file: UploadFile = File(...),
                 novos.append({**cols, "observacao": "", "ebs_erro": "", "ebs_consultado_em": None,
                               "criado_em": agora, "criado_por": usuario, "origem": "PLANILHA"})
 
-        for i in range(0, len(novos), 500):
-            s.execute(insert(R), novos[i:i + 500])
-        for i in range(0, len(alterados), 500):
-            s.execute(update(R), alterados[i:i + 500])
+        # Amostra para a tela conferir antes de gravar (o que entraria).
+        def _amostra(reg, acao):
+            return {
+                "acao": acao, "rma": reg.get("rma", ""), "serie": reg.get("serie", ""),
+                "categoria": reg.get("categoria", ""), "familia": reg.get("familia", ""),
+                "lote_prime": reg.get("lote_prime", ""), "status": reg.get("status", ""),
+                "tipo_manutencao": reg.get("tipo_manutencao", ""),
+                "mes_referencia": reg.get("mes_referencia") or "",
+                "empresa": reg.get("empresa", ""),
+                "orcamento": reg.get("orcamento", 0), "loja": reg.get("loja"),
+            }
+        previa = ([_amostra(r_, "incluir") for r_ in novos[:400]]
+                  + [_amostra(r_, "atualizar") for r_ in alterados[:400]])[:500]
 
         removidas = 0
-        if substituir:
-            # Só sai o que veio de planilha: o que foi digitado no portal fica.
-            sobrando = [
-                rid for rid, rma in s.execute(
-                    select(R.id, R.rma).where(R.origem == "PLANILHA")).all()
-                if rma not in no_arquivo
-            ]
-            for i in range(0, len(sobrando), 500):
-                s.execute(delete(R).where(R.id.in_(sobrando[i:i + 500])))
-            removidas = len(sobrando)
+        if not dry_run:
+            for i in range(0, len(novos), 500):
+                s.execute(insert(R), novos[i:i + 500])
+            for i in range(0, len(alterados), 500):
+                s.execute(update(R), alterados[i:i + 500])
 
-        rejeitadas = lidas - len(novos) - len(alterados)
-        s.add(db.Importacao(
-            arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
-            atualizadas=len(alterados), rejeitadas=rejeitadas,
-            detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
-                                 "aba": aba_usada, "rejeicoes": detalhes}, ensure_ascii=False),
-        ))
+            if substituir:
+                # Só sai o que veio de planilha: o que foi digitado no portal fica.
+                sobrando = [
+                    rid for rid, rma in s.execute(
+                        select(R.id, R.rma).where(R.origem == "PLANILHA")).all()
+                    if rma not in no_arquivo
+                ]
+                for i in range(0, len(sobrando), 500):
+                    s.execute(delete(R).where(R.id.in_(sobrando[i:i + 500])))
+                removidas = len(sobrando)
 
+            rejeitadas_log = lidas - len(novos) - len(alterados)
+            s.add(db.Importacao(
+                arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
+                atualizadas=len(alterados), rejeitadas=rejeitadas_log,
+                detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
+                                     "aba": aba_usada, "rejeicoes": detalhes}, ensure_ascii=False),
+            ))
+        # dry_run: nada é gravado — o bloco só leu, então fecha sem alterações.
+
+    rejeitadas = lidas - len(novos) - len(alterados)
     return {
+        "dry_run": bool(dry_run),
         "lidas": lidas, "incluidas": len(novos), "atualizadas": len(alterados),
         "rejeitadas": rejeitadas, "removidas": removidas,
-        "substituiu": bool(substituir), "detalhes": detalhes,
+        "substituiu": bool(substituir), "detalhes": detalhes, "previa": previa,
         "aba": aba_usada, "abas_disponiveis": abas_disponiveis, "layout": layout,
         "avisos": dict(avisos), "avisos_detalhes": avisos_detalhes,
     }

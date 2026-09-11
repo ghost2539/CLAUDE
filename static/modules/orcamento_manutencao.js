@@ -2027,8 +2027,10 @@
                             '<input id="om-imp-file" type="file" accept=".xlsx,.csv" class="form-control"></div>' +
                         '<div class="form-group"><label for="om-imp-aba">Aba da planilha</label>' +
                             '<input id="om-imp-aba" class="form-control" placeholder="deixe vazio para detectar automaticamente"></div>' +
-                        '<button id="om-imp-btn" class="btn btn-primary">Importar</button>' +
+                        '<label class="om-check" style="align-self:end"><input id="om-imp-subst" type="checkbox"> substituir a base</label>' +
+                        '<button id="om-imp-btn" class="btn btn-primary">Validar planilha</button>' +
                     '</div>' +
+                    '<p class="om-hint">A planilha é conferida primeiro numa prévia; nada é gravado até você confirmar.</p>' +
                     '<div id="om-imp-result" class="mt-3"></div>' +
                 '</div>' +
             '</div>' +
@@ -2042,27 +2044,50 @@
                 '</div>' +
             '</div>';
 
-        document.getElementById('om-imp-btn').onclick = async function () {
-            var inp = document.getElementById('om-imp-file');
-            var file = inp.files && inp.files[0];
-            if (!file) { S.toast('Selecione uma planilha (.xlsx ou .csv).', 'warning'); return; }
+        // Monta o FormData da vez, opcionalmente como prévia (dry_run).
+        function montarFd(dry) {
+            var file = (document.getElementById('om-imp-file') || {}).files;
+            file = file && file[0];
+            if (!file) { S.toast('Selecione uma planilha (.xlsx ou .csv).', 'warning'); return null; }
             var aba = String(((document.getElementById('om-imp-aba') || {}).value) || '').trim();
+            var subst = !!(document.getElementById('om-imp-subst') || {}).checked;
             var fd = new FormData();
             fd.append('file', file);
             if (aba) fd.append('aba', aba);
+            fd.append('substituir', subst ? 'true' : 'false');
+            if (dry) fd.append('dry_run', 'true');
+            return { fd: fd, nome: file.name, subst: subst };
+        }
+
+        // Grava de fato, depois que o usuário confirma a prévia.
+        async function enviarBase() {
+            var m = montarFd(false); if (!m) return;
             var out = document.getElementById('om-imp-result');
             out.innerHTML = SPIN;
             try {
-                var r = await busy(function () {
-                    return S.api(BASE + '/importar', { method: 'POST', body: fd });
-                });
+                var r = await busy(function () { return S.api(BASE + '/importar', { method: 'POST', body: m.fd }); });
                 out.innerHTML = importResultHtml(r || {});
                 S.toast('Importação concluída: ' + fmtInt(r.incluidas) + ' incluída(s), ' +
                     fmtInt(r.atualizadas) + ' atualizada(s), ' + fmtInt(r.rejeitadas) + ' rejeitada(s)' +
                     (Number(r.removidas) ? ', ' + fmtInt(r.removidas) + ' removida(s)' : '') + '.', 'success');
             } catch (e) {
-                out.innerHTML = alertHtml(e.message);
-                S.toast(e.message, 'error');
+                out.innerHTML = alertHtml(e.message); S.toast(e.message, 'error');
+            }
+        }
+
+        document.getElementById('om-imp-btn').onclick = async function () {
+            var m = montarFd(true); if (!m) return;
+            var out = document.getElementById('om-imp-result');
+            out.innerHTML = SPIN;
+            try {
+                var r = await busy(function () { return S.api(BASE + '/importar', { method: 'POST', body: m.fd }); });
+                out.innerHTML = previaHtml(r || {}, m.subst);
+                var okBtn = document.getElementById('om-imp-confirm');
+                if (okBtn) okBtn.onclick = enviarBase;
+                var cancel = document.getElementById('om-imp-cancel');
+                if (cancel) cancel.onclick = function () { out.innerHTML = ''; };
+            } catch (e) {
+                out.innerHTML = alertHtml(e.message); S.toast(e.message, 'error');
             }
         };
 
@@ -2086,6 +2111,65 @@
         return '<div class="stat-card' + (accent ? ' accent-' + accent : '') + (extraCls ? ' ' + extraCls : '') + '">' +
             '<div class="stat-value">' + valor + '</div>' +
             '<div class="stat-label">' + S.esc(rotulo) + '</div></div>';
+    }
+
+    // Prévia da importação: mostra o que entraria e os botões Cancelar/Enviar.
+    function previaHtml(r, subst) {
+        var e = S.esc;
+        var linhas = r.previa || [];
+        var h = '<div class="card"><div class="card-header">Prévia da importação — confira antes de gravar</div>' +
+            '<div class="card-body">' +
+            '<div class="stats-grid mb-3">' +
+                statCard(fmtInt(r.lidas), 'Linhas lidas', 'teal') +
+                statCard(fmtInt(r.incluidas), 'A incluir', 'green') +
+                statCard(fmtInt(r.atualizadas), 'A atualizar', 'gold') +
+                statCard(fmtInt(r.rejeitadas), 'Rejeitadas', 'orange') +
+            '</div>';
+        if (subst) {
+            h += '<div class="alert alert-warning mb-3">Substituir a base: reparos importados antes que não ' +
+                 'estiverem nesta planilha serão removidos ao confirmar (o que foi digitado no portal fica).</div>';
+        }
+        var av = r.avisos || {};
+        var avK = Object.keys(av).filter(function (k) { return Number(av[k]) > 0; });
+        if (avK.length) {
+            h += '<div class="alert alert-warning mb-3"><b>Avisos:</b> ' + avK.map(function (k) {
+                return e(AVISO_LABEL[k] || k.replace(/_/g, ' ')) + ': ' + fmtInt(av[k]);
+            }).join(' · ') + '</div>';
+        }
+        if (r.aba) h += '<p class="text-muted" style="margin:0 0 8px">Aba lida: <b>' + e(r.aba) + '</b>' +
+            (r.abas_disponiveis && r.abas_disponiveis.length ? ' · Abas: ' + e(r.abas_disponiveis.join(', ')) : '') + '</p>';
+        if (linhas.length) {
+            h += '<div class="om-scroll"><table class="om-mtable"><thead><tr>' +
+                '<th>Ação</th><th>RMA</th><th>Série</th><th>Categoria</th><th>Lote</th>' +
+                '<th>Status</th><th>Tipo</th><th>Mês</th><th class="om-num">Orçamento</th></tr></thead><tbody>' +
+                linhas.map(function (x) {
+                    return '<tr><td>' + (x.acao === 'incluir'
+                        ? '<span class="badge badge-success">incluir</span>'
+                        : '<span class="badge badge-info">atualizar</span>') + '</td>' +
+                        '<td class="om-mono">' + e(x.rma) + '</td>' +
+                        '<td>' + e(x.serie) + '</td>' +
+                        '<td>' + e(x.categoria) + '</td>' +
+                        '<td>' + (x.lote_prime ? e(x.lote_prime) : '<span class="text-muted">—</span>') + '</td>' +
+                        '<td>' + e(STATUS_LABEL[x.status] || x.status || '') + '</td>' +
+                        '<td>' + e(TIPO_LABEL[x.tipo_manutencao] || x.tipo_manutencao || '') + '</td>' +
+                        '<td>' + (x.mes_referencia ? e(x.mes_referencia) : '<span class="text-muted">—</span>') + '</td>' +
+                        '<td class="om-num">' + money(x.orcamento) + '</td></tr>';
+                }).join('') +
+                '</tbody></table></div>' +
+                (r.lidas > linhas.length ? '<p class="text-muted" style="margin:6px 0 0">Mostrando as primeiras ' + fmtInt(linhas.length) + ' de ' + fmtInt(r.lidas) + ' linhas.</p>' : '');
+        }
+        var det = r.detalhes || [];
+        if (det.length) {
+            h += '<div style="font-weight:600;margin:10px 0 6px">Linhas rejeitadas</div>' +
+                '<div class="om-scroll"><table class="data-table"><thead><tr><th class="om-num">Linha</th><th>Motivo</th></tr></thead><tbody>' +
+                det.map(function (x) { return '<tr><td class="om-num">' + e(x.linha) + '</td><td>' + e(x.motivo) + '</td></tr>'; }).join('') +
+                '</tbody></table></div>';
+        }
+        h += '<div class="btn-row mt-3">' +
+            '<button id="om-imp-confirm" class="btn btn-primary">Enviar para a base</button>' +
+            '<button id="om-imp-cancel" class="btn btn-outline">Cancelar</button>' +
+            '</div></div></div>';
+        return h;
     }
 
     function importResultHtml(r) {
