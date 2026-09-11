@@ -15,6 +15,7 @@
         servicenow:     'ServiceNow',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
+        orcamento_manutencao: 'Orçamento',
         status:         'Status',
         parametros:     'Parâmetros'
     };
