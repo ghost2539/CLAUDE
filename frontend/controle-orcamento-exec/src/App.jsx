@@ -1608,14 +1608,10 @@ export default function App() {
             {/* Controle de acesso PRÓPRIO do módulo — só o admin do módulo vê */}
             {adminModulo ? (
               <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-3">
                   <h2 className="text-sm font-semibold text-gray-800">Acesso ao módulo</h2>
-                  <span className="text-[11px] text-gray-500">Liberação por login (SSO/ServiceNow), exclusiva deste módulo.</span>
+                  <span className="text-[11px] text-gray-500">Informe o usuário de rede no formato 001+LOGIN.</span>
                 </div>
-                <p className="text-[11px] text-gray-500 mb-3">
-                  O login continua sendo o da rede (ServiceNow). Estas liberações valem só para o Controle
-                  de Orçamento e não dependem da grade de permissões do portal.
-                </p>
                 <div className="flex flex-wrap items-end gap-2 mb-3">
                   <label className="block">
                     <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Login (rede)</span>
