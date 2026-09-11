@@ -5,7 +5,13 @@
 (function () {
     'use strict';
 
-    var API = '/api';
+    // Prefixo quando o portal é servido num subcaminho do proxy (o main.py
+    // injeta <meta name=app-base>). Vazio na raiz do domínio (produção).
+    var APP_BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+    var API = APP_BASE + '/api';
 
     var ROUTES = {
         bemvindo:       'Bem-vindo',
@@ -230,7 +236,7 @@
     function startSnKeepAlive() {
         if (_snKeepAlive) return;
         var ping = function () {
-            fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
+            fetch(API + '/servicenow/session-status', { credentials: 'same-origin' })
                 .catch(function () {});
         };
         ping();
@@ -379,7 +385,7 @@
 
         _loadingModules[name] = new Promise(function (resolve, reject) {
             var script = document.createElement('script');
-            script.src = '/static/modules/' + name + '.js?v=' + Date.now();
+            script.src = APP_BASE + '/static/modules/' + name + '.js?v=' + Date.now();
             script.onload = function () {
                 delete _loadingModules[name];
                 resolve();
@@ -494,6 +500,7 @@
 
     window.SPARE = {
         api: api,
+        base: APP_BASE,
         el: el,
         esc: esc,
         toast: toast,

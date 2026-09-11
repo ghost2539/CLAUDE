@@ -576,7 +576,7 @@ async function renderBase(c, S) {
 
     document.getElementById('bf-run').onclick = load;
     document.getElementById('bf-snow').onclick = function () {
-        window.location = '/api/recebimentos/export-servicenow';
+        window.location = (window.SPARE.base || '') + '/api/recebimentos/export-servicenow';
     };
     load();
 }
