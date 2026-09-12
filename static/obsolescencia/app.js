@@ -16,6 +16,21 @@
         });
     }
 
+    /* Nem todo erro volta em JSON: um 500 sai como texto puro do servidor,
+       e o r.json() estoura com "unexpected token" — mensagem que não diz
+       nada a quem está tentando usar a tela. Aqui lemos como texto e só
+       então tentamos interpretar, para o motivo real chegar na tela. */
+    function resposta(r) {
+        return r.text().then(function (t) {
+            var j = null;
+            try { j = t ? JSON.parse(t) : null; } catch (_) { j = null; }
+            if (r.ok) return j || {};
+            var motivo = (j && (j.detail || j.erro)) || (t || '').trim().slice(0, 220) ||
+                         'sem detalhe do servidor';
+            throw new Error('HTTP ' + r.status + ' — ' + motivo);
+        });
+    }
+
     function num(n) {
         return (n == null ? 0 : n).toLocaleString('pt-BR');
     }
@@ -161,7 +176,7 @@
 
     function abrirCredencial() {
         fetch('/api/obsolescencia/credencial', { credentials: 'include' })
-            .then(function (r) { return r.ok ? r.json() : {}; })
+            .then(resposta)
             .catch(function () { return {}; })
             .then(function (estado) {
                 var caixa = document.getElementById('obs-cred-box');
@@ -191,10 +206,9 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: u, senha: p })
         })
-            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-            .then(function (x) {
+            .then(resposta)
+            .then(function () {
                 b.disabled = false;
-                if (!x.ok) throw new Error(x.j.detail || 'Não foi possível guardar.');
                 document.getElementById('obs-cred-senha').value = '';
                 m.textContent = 'Guardada. Já pode usar “Atualizar do MDM”.';
                 setTimeout(function () { caixa.remove(); }, 2200);
@@ -255,11 +269,10 @@
             b.disabled = true;
             if (m) m.textContent = 'Lendo o parque no MDM… isso leva alguns minutos.';
             fetch('/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
-                .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-                .then(function (x) {
-                    if (!x.ok) throw new Error(x.j.detail || 'Falha na coleta.');
-                    if (m) m.textContent = 'Coleta concluída: ' + num(x.j.lidos) + ' lidos, ' +
-                        num(x.j.novos) + ' novos, ' + num(x.j.sumiram) + ' sumiram.';
+                .then(resposta)
+                .then(function (j) {
+                    if (m) m.textContent = 'Coleta concluída: ' + num(j.lidos) + ' lidos, ' +
+                        num(j.novos) + ' novos, ' + num(j.sumiram) + ' sumiram.';
                     carregar();
                 })
                 .catch(function (e) {
@@ -275,8 +288,7 @@
         fetch('/api/obsolescencia/resumo', { credentials: 'include' })
             .then(function (r) {
                 if (r.status === 401) { location.href = '/?next=/obsolescencia'; return null; }
-                if (!r.ok) throw new Error('Não foi possível carregar o painel (HTTP ' + r.status + ').');
-                return r.json();
+                return resposta(r);
             })
             .then(function (d) {
                 if (!d) return;

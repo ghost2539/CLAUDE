@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -392,10 +393,18 @@ def sessao_mdm(forcar: bool = False):
 def credencial_status(req: Request):
     """Se a credencial está no cofre — nunca devolve a senha."""
     _exigir_admin(req)
+    from core import cofre
     usuario, senha = credencial_mdm()
+    # Avisa ANTES de o usuário digitar a senha, não depois de tentar gravar.
+    try:
+        gravavel = os.access(str(cofre.DIR), os.W_OK) if cofre.DIR.exists() \
+            else os.access(str(cofre.DIR.parent), os.W_OK)
+    except Exception:  # noqa: BLE001
+        gravavel = False
     return {"configurada": bool(usuario and senha),
             "usuario": usuario, "chave_usuario": CHAVE_USUARIO,
-            "chave_senha": CHAVE_SENHA}
+            "chave_senha": CHAVE_SENHA,
+            "cofre_pasta": str(cofre.DIR), "cofre_gravavel": bool(gravavel)}
 
 
 class CredencialMDM(BaseModel):
@@ -413,8 +422,17 @@ def credencial_gravar(req: Request, corpo: CredencialMDM):
         raise HTTPException(400, "Informe usuário e senha.")
     if "\\" not in usuario and "/" not in usuario:
         raise HTTPException(400, "O usuário do MDM precisa do domínio: renner\\<login>.")
-    cofre.definir(CHAVE_USUARIO, usuario)
-    cofre.definir(CHAVE_SENHA, corpo.senha)
+    try:
+        cofre.definir(CHAVE_USUARIO, usuario)
+        cofre.definir(CHAVE_SENHA, corpo.senha)
+    except Exception as exc:  # noqa: BLE001
+        # Sem isto vira 500 em texto puro, e a tela mostra só "unexpected
+        # token" — que não ajuda ninguém a descobrir que é permissão.
+        _log.error("Falha ao gravar credencial no cofre: %s", exc, exc_info=True)
+        raise HTTPException(
+            500, f"Não foi possível gravar no cofre em {cofre.DIR}. "
+                 f"Confira se o usuário que roda o portal tem permissão de "
+                 f"escrita nessa pasta. Detalhe: {exc}") from exc
     global _sessao_mdm
     _sessao_mdm = None                      # credencial nova, sessão velha não serve
     _log.info("Credencial do MDM atualizada por %s", sd.get("username", ""))
