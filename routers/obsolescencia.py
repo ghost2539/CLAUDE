@@ -436,6 +436,55 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
     return resultado
 
 
+# ── PDVs, via ServiceNow ──────────────────────────────────────────
+# Vêm da CMDB (cmdb_ci_computer), filtrados por origem da descoberta
+# ACC_VISIBILITY e status Instalado. A integração com o ServiceNow já
+# existe no portal, então aqui só traduzimos o registro para o mesmo
+# formato dos coletores — o painel não precisa saber a origem.
+CAMPOS_PDV = ("sys_id,name,serial_number,model_id,manufacturer,location,"
+              "install_status,os,os_version,last_discovered,sys_updated_on")
+
+
+def _texto_sn(valor) -> str:
+    """O JSONv2 devolve referência ora como texto, ora como {value,display}."""
+    if isinstance(valor, dict):
+        return str(valor.get("display_value") or valor.get("value") or "").strip()
+    return str(valor or "").strip()
+
+
+def traduzir_pdv(reg: dict) -> dict:
+    """Registro da CMDB no mesmo formato que o parser do MDM devolve."""
+    return {
+        "id": _texto_sn(reg.get("sys_id")),
+        "tipo": "pdv",
+        "nome": _texto_sn(reg.get("name")),
+        "serie": _texto_sn(reg.get("serial_number")),
+        "modelo": _texto_sn(reg.get("model_id")),
+        "fabricante": _texto_sn(reg.get("manufacturer")),
+        "local": _texto_sn(reg.get("location")),
+        "plataforma": _texto_sn(reg.get("os")) or "PDV",
+        "versao_os": _texto_sn(reg.get("os_version")),
+        "conformidade": _texto_sn(reg.get("install_status")),
+        "visto_em": _texto_sn(reg.get("last_discovered")) or _texto_sn(reg.get("sys_updated_on")),
+        # A loja do PDV vem do Local, não de um usuário <sigla><n>_coletor.
+        "usuario": "",
+        "tags": [],
+    }
+
+
+def coletar_pdvs(sessao_sn) -> list[dict]:
+    """Todos os PDVs instalados, por local. Somente leitura."""
+    from routers.servicenow import _sn_query_all
+    import db.obsolescencia as _db
+
+    cfg = _db.ler_config()
+    registros = _sn_query_all(
+        sessao_sn, cfg.get("pdv_tabela", "cmdb_ci_computer"),
+        query=cfg.get("pdv_query", ""), fields=CAMPOS_PDV,
+        page_size=500, max_records=100000)
+    return [traduzir_pdv(r) for r in registros]
+
+
 # ── Agregações do painel ──────────────────────────────────────────
 def resumo_parque() -> dict:
     """Os recortes que a área pediu, calculados sobre a última coleta."""
