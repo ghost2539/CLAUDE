@@ -150,3 +150,128 @@ def paginas(total: int, por_pagina: int) -> range:
     if total <= 0 or por_pagina <= 0:
         return range(0)
     return range((total + por_pagina - 1) // por_pagina)
+
+
+# ── Sessão ────────────────────────────────────────────────────────
+# O login é por formulário, e os nomes dos campos não são estáveis entre
+# versões do console. Em vez de fixá-los, lemos o formulário e devolvemos
+# tudo preenchido — mesma técnica já usada no login do ServiceNow.
+_CAMPOS_USUARIO = ("username", "UserName", "userid", "user", "login", "j_username")
+_CAMPOS_SENHA = ("password", "Password", "passwd", "pass", "j_password")
+
+LOGIN = "/AirWatch/Login/Login/Login-User"
+
+
+def _campos_do_form(html: str, acao_padrao: str) -> tuple[str, dict]:
+    m = re.search(r"<form\b[^>]*id=[\"']loginform[\"'][^>]*>(.*?)</form>", html, re.I | re.S)
+    if not m:
+        m = re.search(r"<form\b[^>]*>(.*?)</form>", html, re.I | re.S)
+    if not m:
+        return acao_padrao, {}
+    bloco = m.group(0)
+    macao = re.search(r"action=[\"']([^\"']+)[\"']", bloco, re.I)
+    campos = {}
+    for mi in re.finditer(r"<input\b[^>]*>", bloco, re.I):
+        tag = mi.group(0)
+        nome = re.search(r"\bname=[\"']([^\"']+)[\"']", tag, re.I)
+        if not nome:
+            continue
+        valor = re.search(r"\bvalue=[\"']([^\"']*)[\"']", tag, re.I)
+        campos[nome.group(1)] = valor.group(1) if valor else ""
+    return (macao.group(1) if macao else acao_padrao), campos
+
+
+def login(sessao, usuario: str, senha: str, base: str = "") -> bool:
+    """Autentica no console. O usuário vai no formato `renner\\<login>`.
+
+    Devolve True quando a sessão passa a valer. A senha nunca é registrada
+    em log — nem em caso de falha.
+    """
+    alvo = (base or "") + LOGIN
+    r = sessao.get((base or "") + "/AirWatch/", timeout=30)
+    acao, campos = _campos_do_form(getattr(r, "text", ""), alvo)
+    if acao.startswith("/"):
+        acao = (base or "") + acao
+
+    for c in _CAMPOS_USUARIO:
+        if c in campos:
+            campos[c] = usuario
+            break
+    else:
+        campos["username"] = usuario
+    for c in _CAMPOS_SENHA:
+        if c in campos:
+            campos[c] = senha
+            break
+    else:
+        campos["password"] = senha
+
+    sessao.post(acao, data=campos, timeout=30)
+    return sessao_valida(sessao, base)
+
+
+def sessao_valida(sessao, base: str = "") -> bool:
+    """Sessão viva = a grade responde com o fragmento, não com a tela de login."""
+    try:
+        r = sessao.get((base or "") + GRADE, headers=CABECALHOS, timeout=30)
+    except Exception:  # noqa: BLE001 — rede fora é sessão inválida para o chamador
+        return False
+    txt = getattr(r, "text", "") or ""
+    return getattr(r, "status_code", 0) == 200 and "DeviceGrid" in txt and "<html" not in txt
+
+
+# ── Varredura ─────────────────────────────────────────────────────
+class SessaoExpirada(RuntimeError):
+    """A grade parou de responder o fragmento no meio da varredura."""
+
+
+def buscar_pagina(sessao, pagina: int, base: str = "", ordenar: bool = True) -> str:
+    partes = [f"Page={int(pagina)}"]
+    if ordenar:
+        partes += [f"{k}={v}" for k, v in ORDENACAO.items()]
+    url = (base or "") + GRADE + "?" + "&".join(partes)
+    r = sessao.get(url, headers=CABECALHOS, timeout=60)
+    txt = getattr(r, "text", "") or ""
+    if "DeviceGrid" not in txt or "<html" in txt:
+        raise SessaoExpirada(f"A grade não respondeu o fragmento na página {pagina}.")
+    return txt
+
+
+def varrer(sessao, base: str = "", max_paginas: int = 400, progresso=None) -> dict:
+    """Percorre o parque inteiro, página a página, e devolve os coletores.
+
+    O fim vem do rodapé (`ate >= total`), não de uma contagem de linhas: a
+    lista se move enquanto a varredura roda. Por isso também ordenamos por
+    nome — na ordem padrão (Last Seen) as páginas se sobrepõem e a coleta
+    repetiria uns coletores e pularia outros.
+
+    `max_paginas` é trava de segurança: rodapé estranho não vira laço infinito.
+    """
+    achados: dict[str, dict] = {}
+    total = 0
+    pagina = 0
+    ultima_faixa = None
+
+    while pagina < max_paginas:
+        html = buscar_pagina(sessao, pagina, base)
+        dados = parse_grade(html)
+        faixa = dados["rodape"]
+        for c in dados["coletores"]:
+            achados[c["id"]] = c          # o id do MDM deduplica sobreposição
+
+        if progresso:
+            progresso(pagina, faixa, len(achados))
+
+        if not faixa:
+            break                          # sem rodapé não dá para saber o fim
+        total = faixa["total"]
+        # Rodapé que não avança significa que o servidor parou de paginar.
+        if ultima_faixa and faixa["de"] <= ultima_faixa["de"]:
+            break
+        ultima_faixa = faixa
+        if faixa["ate"] >= total:
+            break
+        pagina += 1
+
+    return {"total": total, "paginas": pagina + 1,
+            "coletores": list(achados.values())}
