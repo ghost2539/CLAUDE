@@ -1,5 +1,5 @@
 /* ============================================================
-   MDM de Coletores (Workspace ONE UEM / AirWatch)
+   MDM de Coletores (Workspace ONE / AirWatch)
    Captura e análise dos dados que a tela carrega.
 
    PARA QUE SERVE
@@ -8,57 +8,83 @@
    que voltam. Com isso o portal passa a buscar essas informações em
    segundo plano e montar a tela de Obsolescência do parque.
 
+   AGUENTA RECARREGAMENTO
+   ----------------------
+   A tela do MDM recarrega ao entrar em "Devices", ao pesquisar e ao
+   abrir um coletor — e um script de console morre junto com a página.
+   Por isso o que já foi capturado fica guardado no próprio navegador
+   (localStorage) e NÃO se perde. Depois de cada recarregamento, basta
+   colar este arquivo de novo: ele continua de onde parou, somando.
+
+   Mais prático ainda: em vez de recolar, salve como Snippet
+   (F12 > Sources > Snippets > New snippet > colar > Ctrl+Enter).
+   Aí é só apertar Ctrl+Enter depois de cada recarregamento.
+
    COMO USAR
    ---------
-   1. Abra a tela no navegador, já logado no MDM:
-      https://cn258.awmdm.com/AirWatch/aa/#/devices/updates/platform/list/windows
-   2. Tecle F12 e vá na aba "Console".
-   3. Cole este arquivo INTEIRO e tecle Enter (aparece "captura ligada").
-   4. Use a tela normalmente, para que ela carregue dados:
-      - recarregue a página (F5) e espere a lista aparecer;
-      - troque o filtro de plataforma / status;
-      - passe para a página 2 da lista;
-      - clique em um coletor para abrir o detalhe.
-   5. Rode os comandos abaixo no mesmo Console:
-      __mdmResumo()   -> lista os endpoints chamados e quantos registros vieram
-      __mdmSchema()   -> mostra os campos (nome e tipo) de cada resposta
-      __mdmSalvar()   -> baixa um .json com a análise, para me enviar
-      __mdmParar()    -> desliga a captura
+   1. Abra a tela do MDM, já logado.
+   2. F12 > aba "Console" > cole este arquivo > Enter.
+   3. Faça o caminho todo, recolando após cada recarregamento:
+      entrar > Devices > pesquisar > abrir um coletor > paginar.
+   4. Ao final, rode:
+      __mdmResumo()   -> endpoints chamados e quantos registros vieram
+      __mdmSchema()   -> os campos de cada resposta
+      __mdmSalvar()   -> baixa o .json com a análise, para me enviar
+      __mdmLimpar()   -> zera tudo e recomeça
+      __mdmParar()    -> desliga a captura desta página
 
    PRIVACIDADE — leia antes de rodar
    ---------------------------------
-   Nada sai do seu navegador. O script só guarda em memória; o arquivo
-   é salvo por você, manualmente, no seu computador. Antes de gravar:
-   - cabeçalhos e campos de autenticação (cookie, token, senha, apikey)
-     são descartados;
-   - por padrão só 2 registros de exemplo por endpoint vão para o
-     arquivo — o resto vira contagem. Assim a análise mostra o FORMATO
-     dos dados sem exportar o parque inteiro.
+   Nada sai do seu navegador: o script só guarda localmente e o arquivo
+   é salvo por você. Cookies, tokens e senhas são descartados antes de
+   gravar, e só 2 registros de exemplo por endpoint entram no arquivo —
+   o bastante para ver o FORMATO, sem exportar o parque inteiro.
    ============================================================ */
 
 (function () {
     'use strict';
 
-    if (window.__MDM_CAPT) {
-        console.log('%c[MDM] A captura já estava ligada. Use __mdmResumo().', 'color:#c47f00');
-        return;
+    var CHAVE = '__mdm_capturas';
+    var MAX_AMOSTRAS = 2;
+    var MAX_TEXTO = 300;
+    var MAX_PROF = 6;
+
+    var SENSIVEL = /(authoriz|cookie|token|senha|password|passwd|secret|api[-_]?key|sessionid|jsessionid|aw[-_]?tenant|bearer|credential)/i;
+    var ESTATICO = /\.(js|css|png|jpe?g|gif|svg|woff2?|ttf|eot|ico|map)(\?|$)/i;
+
+    // ── memória que atravessa o recarregamento ─────────────────
+    function carregar() {
+        try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; }
+        catch (_) { return {}; }
     }
 
-    // Quantos registros de exemplo guardar por endpoint. O objetivo é
-    // descobrir o formato, não exportar a base — por isso o número é baixo.
-    var MAX_AMOSTRAS = 2;
-    var MAX_TEXTO = 300;      // corte de strings longas na amostra
-    var MAX_PROF = 6;         // profundidade máxima ao mapear o schema
+    var mapa = carregar();
+    var gravacaoPendente = null;
 
-    // Chaves que nunca entram na captura: são credenciais ou identificadores
-    // de sessão, e não têm nenhum valor para a análise do formato.
-    var SENSIVEL = /(authoriz|cookie|token|senha|password|passwd|secret|api[-_]?key|sessionid|jsessionid|aw[-_]?tenant|bearer|credential)/i;
+    function gravar() {
+        if (gravacaoPendente) return;
+        gravacaoPendente = setTimeout(function () {
+            gravacaoPendente = null;
+            try {
+                localStorage.setItem(CHAVE, JSON.stringify(mapa));
+            } catch (_) {
+                // Estourou o espaço: solta as amostras e fica só com o formato,
+                // que é o que realmente interessa para a análise.
+                Object.keys(mapa).forEach(function (k) { delete mapa[k].amostra; });
+                try { localStorage.setItem(CHAVE, JSON.stringify(mapa)); } catch (__) {}
+            }
+        }, 400);
+    }
 
-    var reg = [];
-    window.__MDM_CAPT = reg;
+    if (window.__MDM_LIGADO) {
+        console.log('%c[MDM] A captura desta página já estava ligada (' +
+            Object.keys(mapa).length + ' endpoint[s] acumulado[s]).', 'color:#c47f00');
+        return;
+    }
+    window.__MDM_LIGADO = true;
+    window.__MDM_CAPT = mapa;
 
     // ── utilitários ────────────────────────────────────────────
-
     function cortar(s) {
         s = String(s);
         return s.length > MAX_TEXTO ? s.slice(0, MAX_TEXTO) + '…(+' + (s.length - MAX_TEXTO) + ')' : s;
@@ -70,7 +96,6 @@
         try { return JSON.parse(txt); } catch (_) { return null; }
     }
 
-    // Remove chaves sensíveis e encurta a estrutura, preservando o formato.
     function podar(v, prof) {
         prof = prof || 0;
         if (v === null || v === undefined) return null;
@@ -79,8 +104,7 @@
         if (typeof v === 'object') {
             var o = {};
             Object.keys(v).forEach(function (k) {
-                if (SENSIVEL.test(k)) { o[k] = '«removido»'; return; }
-                o[k] = podar(v[k], prof + 1);
+                o[k] = SENSIVEL.test(k) ? '«removido»' : podar(v[k], prof + 1);
             });
             return o;
         }
@@ -88,7 +112,6 @@
         return v;
     }
 
-    // Descreve o formato: para cada campo, o tipo e um exemplo curto.
     function inferir(v, prof) {
         prof = prof || 0;
         if (prof > MAX_PROF) return '…';
@@ -115,64 +138,70 @@
         return typeof v;
     }
 
-    // Acha a lista principal da resposta (Devices, data, results, rows...).
     function acharLista(corpo) {
         if (!corpo || typeof corpo !== 'object') return null;
         if (Array.isArray(corpo)) return { campo: '(raiz)', qtd: corpo.length };
         var achado = null;
         Object.keys(corpo).forEach(function (k) {
-            if (achado) return;
-            if (Array.isArray(corpo[k]) && corpo[k].length) achado = { campo: k, qtd: corpo[k].length };
+            if (!achado && Array.isArray(corpo[k]) && corpo[k].length) achado = { campo: k, qtd: corpo[k].length };
         });
         if (achado) return achado;
-        // às vezes vem aninhado um nível (ex.: { Page: { Devices: [...] } })
         Object.keys(corpo).forEach(function (k) {
-            if (achado || !corpo[k] || typeof corpo[k] !== 'object') return;
+            if (achado || !corpo[k] || typeof corpo[k] !== 'object' || Array.isArray(corpo[k])) return;
             var dentro = acharLista(corpo[k]);
             if (dentro) achado = { campo: k + '.' + dentro.campo, qtd: dentro.qtd };
         });
         return achado;
     }
 
-    function urlCurta(u) {
+    function partes(u) {
         try {
             var a = new URL(u, location.origin);
-            return a.pathname + (a.search ? a.search.slice(0, 160) : '');
-        } catch (_) { return String(u).slice(0, 200); }
+            return { caminho: a.pathname, consulta: a.search.slice(1, 300) };
+        } catch (_) { return { caminho: String(u).slice(0, 200), consulta: '' }; }
     }
 
-    // ── registro das chamadas ──────────────────────────────────
-
+    // ── registro ───────────────────────────────────────────────
     function registrar(metodo, url, status, corpoReq, corpoResp) {
-        // Só interessa o que devolve dados; recursos estáticos poluem a análise.
-        if (/\.(js|css|png|jpe?g|gif|svg|woff2?|ttf|ico|map)(\?|$)/i.test(url)) return;
+        if (ESTATICO.test(url)) return;
         var resp = jsonSeguro(corpoResp);
-        if (resp === null && !/json|api|odata|list|device|update/i.test(url)) return;
+        if (resp === null) return;
 
+        var p = partes(url);
+        metodo = String(metodo || 'GET').toUpperCase();
+        var chave = metodo + ' ' + p.caminho;
         var lista = acharLista(resp);
-        var item = {
-            quando: new Date().toISOString(),
-            metodo: String(metodo || 'GET').toUpperCase(),
-            url: urlCurta(url),
-            url_completa: String(url),
-            status: status,
-            registros: lista ? lista.qtd : (resp ? 1 : 0),
-            campo_lista: lista ? lista.campo : null,
-            requisicao: podar(jsonSeguro(corpoReq)),
-            amostra: podar(resp),
-            schema: inferir(resp)
-        };
-        reg.push(item);
-        if (item.registros > 0) {
-            console.log('%c[MDM] ' + item.metodo + ' ' + item.url +
-                ' → ' + item.registros + ' registro(s)' +
-                (item.campo_lista ? ' em "' + item.campo_lista + '"' : ''),
-                'color:#0a7');
+        var registros = lista ? lista.qtd : 1;
+
+        var atual = mapa[chave];
+        if (!atual) {
+            mapa[chave] = {
+                metodo: metodo, caminho: p.caminho, consulta_exemplo: p.consulta,
+                status: status, chamadas: 1, registros: registros,
+                campo_lista: lista ? lista.campo : null,
+                requisicao: podar(jsonSeguro(corpoReq)),
+                amostra: podar(resp), schema: inferir(resp),
+                visto_em: new Date().toISOString()
+            };
+        } else {
+            atual.chamadas++;
+            // Fica com a chamada mais rica: é a que melhor mostra o formato.
+            if (registros > (atual.registros || 0)) {
+                atual.registros = registros;
+                atual.campo_lista = lista ? lista.campo : null;
+                atual.consulta_exemplo = p.consulta;
+                atual.amostra = podar(resp);
+                atual.schema = inferir(resp);
+            }
+        }
+        gravar();
+        if (registros > 0 && !atual) {
+            console.log('%c[MDM] ' + metodo + ' ' + p.caminho + ' → ' + registros +
+                ' registro(s)' + (lista ? ' em "' + lista.campo + '"' : ''), 'color:#0a7');
         }
     }
 
-    // ── ganchos (XHR e fetch) ──────────────────────────────────
-
+    // ── ganchos ────────────────────────────────────────────────
     var xhrOpen = XMLHttpRequest.prototype.open;
     var xhrSend = XMLHttpRequest.prototype.send;
 
@@ -212,82 +241,80 @@
             });
         };
     }
-    window.__mdmFetchOrig = fetchOrig;
-    window.__mdmXhrOpen = xhrOpen;
-    window.__mdmXhrSend = xhrSend;
 
-    // ── comandos para o usuário ────────────────────────────────
+    // ── comandos ───────────────────────────────────────────────
+    function lista() {
+        return Object.keys(mapa).map(function (k) { return mapa[k]; })
+            .sort(function (a, b) { return (b.registros || 0) - (a.registros || 0); });
+    }
 
-    // Lista o que foi capturado, do que traz mais dados para o que traz menos.
     window.__mdmResumo = function () {
-        if (!reg.length) {
-            console.log('%c[MDM] Nada capturado ainda. Recarregue a tela (F5) e espere a lista carregar.', 'color:#c47f00');
+        var L = lista();
+        if (!L.length) {
+            console.log('%c[MDM] Nada capturado ainda. Navegue pela tela — e recole este script após cada recarregamento.', 'color:#c47f00');
             return;
         }
-        var porUrl = {};
-        reg.forEach(function (x) {
-            var c = porUrl[x.url] || (porUrl[x.url] = { chamadas: 0, registros: 0, metodo: x.metodo, campo: x.campo_lista, status: x.status });
-            c.chamadas++;
-            c.registros = Math.max(c.registros, x.registros);
-        });
-        var linhas = Object.keys(porUrl).map(function (u) {
+        console.table(L.map(function (x) {
             return {
-                metodo: porUrl[u].metodo, endpoint: u, chamadas: porUrl[u].chamadas,
-                registros: porUrl[u].registros, campo_lista: porUrl[u].campo, status: porUrl[u].status
+                metodo: x.metodo, caminho: x.caminho, chamadas: x.chamadas,
+                registros: x.registros, campo_lista: x.campo_lista, status: x.status
             };
-        }).sort(function (a, b) { return b.registros - a.registros; });
-        console.table(linhas);
-        console.log('%c[MDM] ' + reg.length + ' chamada(s) capturada(s). Use __mdmSchema() para ver os campos e __mdmSalvar() para baixar.', 'color:#0a7');
-        return linhas;
+        }));
+        console.log('%c[MDM] ' + L.length + ' endpoint(s) acumulado(s), somando recarregamentos. ' +
+            'Use __mdmSalvar() para baixar.', 'color:#0a7');
+        return L.length;
     };
 
-    // Mostra os campos das respostas que trouxeram dados.
     window.__mdmSchema = function (filtro) {
-        var alvos = reg.filter(function (x) { return x.registros > 0; });
-        if (filtro) alvos = alvos.filter(function (x) { return x.url.indexOf(filtro) !== -1; });
-        if (!alvos.length) { console.log('%c[MDM] Nenhuma resposta com dados' + (filtro ? ' para "' + filtro + '"' : '') + '.', 'color:#c47f00'); return; }
-        var vistos = {};
-        alvos.forEach(function (x) {
-            if (vistos[x.url]) return;
-            vistos[x.url] = true;
-            console.groupCollapsed('%c' + x.metodo + ' ' + x.url + '  (' + x.registros + ' registro[s])', 'color:#06c');
+        var L = lista().filter(function (x) {
+            return x.registros > 0 && (!filtro || x.caminho.indexOf(filtro) !== -1);
+        });
+        if (!L.length) { console.log('%c[MDM] Nenhuma resposta com dados.', 'color:#c47f00'); return; }
+        L.forEach(function (x) {
+            console.groupCollapsed('%c' + x.metodo + ' ' + x.caminho + '  (' + x.registros + ' registro[s])', 'color:#06c');
             console.log(x.schema);
             console.groupEnd();
         });
-        return Object.keys(vistos);
+        return L.length;
     };
 
-    // Baixa a análise em .json — é este arquivo que deve ser enviado.
     window.__mdmSalvar = function (nome) {
         var pacote = {
             gerado_em: new Date().toISOString(),
             origem: location.origin,
-            tela: location.href,
-            observacao: 'Amostra limitada a ' + MAX_AMOSTRAS + ' registro(s) por endpoint; campos de credencial removidos.',
-            total_chamadas: reg.length,
-            chamadas: reg
+            observacao: 'Amostra limitada a ' + MAX_AMOSTRAS + ' registro(s) por endpoint; credenciais removidas.',
+            total_endpoints: Object.keys(mapa).length,
+            endpoints: lista()
         };
         var txt = JSON.stringify(pacote, null, 2);
         var a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' }));
-        a.download = nome || ('mdm-analise-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '') + '.json');
+        a.download = nome || ('mdm-analise-' + new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '') + '.json');
         document.body.appendChild(a);
         a.click();
         setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-        console.log('%c[MDM] Arquivo gerado (' + Math.round(txt.length / 1024) + ' KB). Confira o conteúdo antes de enviar.', 'color:#0a7');
+        console.log('%c[MDM] Arquivo gerado (' + Math.round(txt.length / 1024) + ' KB). Confira antes de enviar.', 'color:#0a7');
         return a.download;
     };
 
-    window.__mdmLimpar = function () { reg.length = 0; console.log('[MDM] Captura zerada.'); };
-
-    window.__mdmParar = function () {
-        XMLHttpRequest.prototype.open = window.__mdmXhrOpen;
-        XMLHttpRequest.prototype.send = window.__mdmXhrSend;
-        if (window.__mdmFetchOrig) window.fetch = window.__mdmFetchOrig;
-        console.log('%c[MDM] Captura desligada. Os dados já capturados continuam em __MDM_CAPT.', 'color:#c47f00');
+    window.__mdmLimpar = function () {
+        Object.keys(mapa).forEach(function (k) { delete mapa[k]; });
+        try { localStorage.removeItem(CHAVE); } catch (_) {}
+        console.log('[MDM] Captura zerada.');
     };
 
-    console.log('%c[MDM] Captura ligada.', 'color:#0a7;font-weight:bold');
-    console.log('%cAgora recarregue a tela (F5), espere a lista carregar, pagine e abra um coletor.\n' +
-        'Depois rode: __mdmResumo()  →  __mdmSchema()  →  __mdmSalvar()', 'color:#666');
+    window.__mdmParar = function () {
+        XMLHttpRequest.prototype.open = xhrOpen;
+        XMLHttpRequest.prototype.send = xhrSend;
+        if (fetchOrig) window.fetch = fetchOrig;
+        window.__MDM_LIGADO = false;
+        console.log('%c[MDM] Captura desligada nesta página. O acumulado continua salvo.', 'color:#c47f00');
+    };
+
+    var jaTem = Object.keys(mapa).length;
+    console.log('%c[MDM] Captura ligada.' + (jaTem ? ' Continuando de ' + jaTem + ' endpoint(s) já capturado(s).' : ''),
+        'color:#0a7;font-weight:bold');
+    console.log('%cNavegue: Devices > pesquisar > abrir um coletor > paginar.\n' +
+        'Recole este script depois de CADA recarregamento (o acumulado não se perde).\n' +
+        'No final: __mdmResumo()  →  __mdmSchema()  →  __mdmSalvar()', 'color:#666');
 })();
