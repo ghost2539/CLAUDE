@@ -286,3 +286,171 @@ def resumo(req: Request):
         "total": 0,
         "usuario": sd.get("display_name") or sd.get("username", ""),
     }
+
+
+# ── Persistência da coleta ────────────────────────────────────────
+def _limpar(v) -> str:
+    return str(v or "").strip()
+
+
+def aplicar_coleta(coletores: list[dict], usuario: str = "",
+                   total_mdm: int = 0, paginas: int = 0) -> dict:
+    """Grava o resultado de uma varredura e apura o que mudou.
+
+    Coletor que não veio nesta rodada NÃO é apagado: muda para `sumiu` e
+    entra na fila de tratativa. Apagar em silêncio esconderia justamente o
+    caso que precisa de decisão humana.
+    """
+    import json as _json
+    from sqlalchemy import select as _select
+    import db.obsolescencia as _db
+
+    cfg = _db.ler_config()
+    modo = cfg.get("modo_regra", MODO_PADRAO)
+    eol = [m.strip() for m in (cfg.get("modelos_eol") or "").split(",") if m.strip()]
+    agora = datetime.now(timezone.utc)
+
+    novos = atualizados = 0
+    with _db.SessionLocal.begin() as s:
+        coleta = _db.Coleta(usuario=usuario, total_mdm=total_mdm, paginas=paginas,
+                            lidos=len(coletores), situacao="aberta")
+        s.add(coleta)
+        s.flush()
+
+        existentes = {c.mdm_id: c for c in s.execute(_select(_db.Coletor)).scalars()}
+
+        for bruto in coletores:
+            mdm_id = _limpar(bruto.get("id"))
+            if not mdm_id:
+                continue
+            loja = identificar_loja(bruto.get("usuario"))
+            tags = tags_relevantes(bruto.get("tags"))
+            aval = avaliar_obsolescencia(
+                {"modelo": bruto.get("modelo"),
+                 "data_aquisicao": bruto.get("data_aquisicao"),
+                 "android_travado": bruto.get("android_travado")},
+                eol, agora, modo)
+
+            linha = existentes.get(mdm_id)
+            if linha is None:
+                linha = _db.Coletor(mdm_id=mdm_id)
+                s.add(linha)
+                novos += 1
+            else:
+                atualizados += 1
+
+            linha.nome = _limpar(bruto.get("nome"))
+            linha.usuario = loja["usuario"]
+            linha.caminho_og = _limpar(bruto.get("caminho_og"))
+            linha.bu = loja["bu"]
+            linha.bu_nome = loja["bu_nome"]
+            linha.pais = loja["pais"]
+            linha.loja = loja["loja"]
+            linha.e_loja = loja["e_loja"]
+            linha.plataforma = _limpar(bruto.get("plataforma"))
+            linha.modelo = _limpar(bruto.get("modelo"))
+            linha.versao_os = _limpar(bruto.get("versao_os"))
+            linha.propriedade = _limpar(bruto.get("propriedade"))
+            linha.gerenciamento = _limpar(bruto.get("gerenciamento"))
+            linha.conformidade = _limpar(bruto.get("conformidade"))
+            linha.visto_relativo = _limpar(bruto.get("visto_relativo"))
+            linha.dias_sem_ver = dias_sem_ver(bruto.get("visto_em"), agora)
+            linha.tags = "|".join(tags)
+            linha.idade_anos = aval["idade_anos"]
+            linha.idade_desconhecida = aval["idade_desconhecida"]
+            linha.obsoleto = aval["obsoleto"]
+            linha.criterios = _json.dumps(aval["criterios"], ensure_ascii=False)
+            linha.situacao = _db.ATIVO
+            linha.visto_na_coleta = coleta.id
+            linha.atualizado_em = _db.localnow()
+
+        # O que não apareceu nesta rodada vira tratativa.
+        sumiram = 0
+        for mdm_id, linha in existentes.items():
+            if linha.visto_na_coleta != coleta.id and linha.situacao == _db.ATIVO:
+                linha.situacao = _db.SUMIU
+                linha.atualizado_em = _db.localnow()
+                sumiram += 1
+
+        coleta.novos = novos
+        coleta.atualizados = atualizados
+        coleta.sumiram = sumiram
+        coleta.fim = _db.localnow()
+        coleta.situacao = "concluida"
+        resultado = {"coleta_id": coleta.id, "lidos": len(coletores),
+                     "novos": novos, "atualizados": atualizados,
+                     "sumiram": sumiram, "total_mdm": total_mdm}
+    return resultado
+
+
+# ── Agregações do painel ──────────────────────────────────────────
+def resumo_parque() -> dict:
+    """Os recortes que a área pediu, calculados sobre a última coleta."""
+    from sqlalchemy import select as _select
+    import db.obsolescencia as _db
+
+    cfg = _db.ler_config()
+    limite_sem_ver = int(cfg.get("limite_sem_ver") or LIMITE_SEM_VER)
+
+    with _db.SessionLocal() as s:
+        todos = list(s.execute(_select(_db.Coletor)).scalars())
+        ultima = s.execute(
+            _select(_db.Coleta).order_by(_db.Coleta.id.desc()).limit(1)).scalar_one_or_none()
+
+    ativos = [c for c in todos if c.situacao == _db.ATIVO]
+    # O CD não é loja: fica fora das contagens por loja/BU, mas continua no
+    # parque total — o aparelho existe.
+    de_loja = [c for c in ativos if c.e_loja]
+
+    por_bu: dict[str, dict] = {}
+    for c in de_loja:
+        b = por_bu.setdefault(c.bu or "?", {"bu": c.bu, "bu_nome": c.bu_nome,
+                                            "pais": c.pais, "coletores": 0,
+                                            "obsoletos": 0, "lojas": set()})
+        b["coletores"] += 1
+        b["obsoletos"] += 1 if c.obsoleto else 0
+        if c.loja:
+            b["lojas"].add(c.loja)
+
+    por_loja: dict[tuple, dict] = {}
+    for c in de_loja:
+        k = (c.bu, c.loja)
+        l = por_loja.setdefault(k, {"bu": c.bu, "bu_nome": c.bu_nome, "loja": c.loja,
+                                    "coletores": 0, "obsoletos": 0, "sem_ver": 0})
+        l["coletores"] += 1
+        l["obsoletos"] += 1 if c.obsoleto else 0
+        if (c.dias_sem_ver or 0) > limite_sem_ver:
+            l["sem_ver"] += 1
+
+    sem_ver = [c for c in ativos
+               if c.dias_sem_ver is not None and c.dias_sem_ver > limite_sem_ver]
+
+    # Os mais antigos: só entram os que têm idade conhecida. Ordenar com
+    # idade nula no meio daria uma lista sem sentido.
+    com_idade = [c for c in ativos if c.idade_anos is not None]
+    mais_antigos = sorted(com_idade, key=lambda c: -(c.idade_anos or 0))[:50]
+
+    tags = contar_tags([{"tags": c.tags.split("|") if c.tags else []} for c in ativos])
+
+    return {
+        "coletado_em": ultima.fim.isoformat() if ultima and ultima.fim else None,
+        "total": len(ativos),
+        "em_lojas": len(de_loja),
+        "fora_de_loja": len(ativos) - len(de_loja),
+        "nao_identificados": sum(1 for c in ativos if not c.bu),
+        "obsoletos": sum(1 for c in de_loja if c.obsoleto),
+        "idade_desconhecida": sum(1 for c in ativos if c.idade_desconhecida),
+        "sem_ver": {"limite_dias": limite_sem_ver, "quantidade": len(sem_ver)},
+        "em_tratativa": sum(1 for c in todos if c.situacao == _db.SUMIU),
+        "por_bu": sorted(
+            ({**b, "lojas": len(b["lojas"])} for b in por_bu.values()),
+            key=lambda x: -x["coletores"]),
+        "por_loja": sorted(por_loja.values(), key=lambda x: -x["coletores"]),
+        "tags": tags,
+        "mais_antigos": [
+            {"mdm_id": c.mdm_id, "nome": c.nome, "bu": c.bu_nome, "loja": c.loja,
+             "modelo": c.modelo, "versao_os": c.versao_os,
+             "idade_anos": c.idade_anos, "dias_sem_ver": c.dias_sem_ver}
+            for c in mais_antigos],
+        "modo_regra": cfg.get("modo_regra"),
+    }
