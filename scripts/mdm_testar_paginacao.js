@@ -36,10 +36,20 @@
         return Object.keys(s);
     }
 
+    // O console é ASP.NET MVC: sem o cabeçalho de AJAX ele devolve a PÁGINA
+    // INTEIRA em vez do fragmento da grade — e aí ignora todo parâmetro.
+    // Foi o que aconteceu na primeira tentativa (3,2 MB, o console todo).
     async function pegar(qs) {
-        var r = await fetch(BASE + (qs ? '?' + qs : ''), { credentials: 'include' });
+        var r = await fetch(BASE + (qs ? '?' + qs : ''), {
+            credentials: 'include',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
         var t = await r.text();
-        return { qs: qs || '(sem parâmetro)', status: r.status, itens: conjunto(t), bytes: t.length };
+        return {
+            qs: qs || '(sem parâmetro)', status: r.status,
+            itens: conjunto(t), bytes: t.length,
+            fragmento: t.indexOf('DeviceGrid') !== -1 && t.indexOf('<html') === -1
+        };
     }
 
     function iguais(a, b) {
@@ -66,11 +76,18 @@
         var base = await pegar('');
         resultado.base = base;
         console.log('%cBase: ' + base.itens.length + ' coletor(es), ' +
-            Math.round(base.bytes / 1024) + ' KB', 'color:#06c;font-weight:bold');
+            Math.round(base.bytes / 1024) + ' KB, fragmento da grade: ' + base.fragmento,
+            'color:#06c;font-weight:bold');
         if (!base.itens.length) {
             console.log('%c[MDM] A base não trouxe coletor nenhum — abra a lista de ' +
                 'Devices uma vez e rode de novo.', 'color:#c00');
             return;
+        }
+        if (!base.fragmento) {
+            console.log('%c[MDM] ATENÇÃO: veio a página inteira, não o fragmento da ' +
+                'grade. Os parâmetros vão ser ignorados e o teste não vale. ' +
+                'Abra Devices > List View e rode de novo a partir dela.',
+                'color:#fff;background:#c00;font-weight:bold;padding:2px 6px');
         }
 
         console.log('%c── Qual parâmetro vira a página? ──', 'color:#666');
