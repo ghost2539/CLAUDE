@@ -12,7 +12,7 @@
         consulta:       'Consulta',
         recebimento:    'Recebimento',
         identificacao:  'Identificação',
-        servicenow:     'ServiceNow',
+        gestao_ativos:  'Gestão de Ativos',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
@@ -361,7 +361,11 @@
     function buildMenu() {
         $$('.sidebar-item').forEach(function (item) {
             var route = item.dataset.route;
-            var visible = state.user.is_admin || state.permissions.indexOf(route) !== -1;
+            // Um item pode ter chave de permissão diferente da rota: Gestão de
+            // Ativos herda a permissão "servicenow", para que ninguém perca
+            // acesso quando a tela muda de lugar no menu.
+            var perm = item.dataset.perm || route;
+            var visible = state.user.is_admin || state.permissions.indexOf(perm) !== -1;
             item.style.display = visible ? '' : 'none';
             item.onclick = function (e) {
                 e.preventDefault();

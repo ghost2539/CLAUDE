@@ -205,6 +205,15 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    try:
+        from routers.obsolescencia import router as obsolescencia_router
+        app.include_router(obsolescencia_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("obsolescencia").error(
+            "Painel de Obsolescência NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     return app
 
 
