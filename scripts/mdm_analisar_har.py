@@ -184,8 +184,11 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
             if len(html) < 200 or "<" not in html:
                 continue
             chave_h = f"{metodo} {p.path} [html]"
-            corpo_tab = re.search(r"<tbody\b[^>]*>(.*?)</tbody>", html, re.I | re.S)
-            alvo_linhas = corpo_tab.group(1) if corpo_tab else html
+            # Somar TODOS os <tbody>: o primeiro da página costuma ser um
+            # template vazio, e contar só ele dava 0 numa grade cheia.
+            corpos = re.findall(r"<tbody\b[^>]*>(.*?)</tbody>", html, re.I | re.S)
+            alvo_linhas = "".join(corpos) if corpos else re.sub(
+                r"<thead\b[^>]*>.*?</thead>", "", html, flags=re.I | re.S)
             linhas = len(re.findall(r"<tr[\s>]", alvo_linhas, re.I))
             colunas = texto_de_tags(html, "th")
             atual_h = achados.get(chave_h)

@@ -32,6 +32,14 @@ de raspar a grade quebra quando o MDM é atualizado — é dívida conhecida.
 versões antigas que o widget não plota. Ou seja: o dashboard NÃO serve para
 medir obsolescência, justamente porque omite a parte obsoleta.
 
+### `GET /AirWatch/Device/List` — a casca (506 bytes)
+Só dispara a grade por AJAX, sem token nem cabeçalho especial:
+
+    var url = '/AirWatch/Device/List/Search';
+    $.ajax({ url: url, method: 'get' }).then(view => $('#device-list').html(view));
+
+Ou seja: basta a sessão para chamar `/Device/List/Search` direto.
+
 ### `GET /AirWatch/Device/List/Search` — HTML, a grade
 Colunas: Last Seen, General Info, Platform, User, Tags, Enrollment,
 Compliance Status. Filtros confirmados pelas URLs de drill-down:
@@ -43,8 +51,19 @@ Compliance Status. Filtros confirmados pelas URLs de drill-down:
     ?LastSeenMin=0&LastSeenMax=3
     ?Passcode=N  ?Encryption=N  ?Compromised=...
 
-Na captura o `<tbody>` veio vazio (684 KB eram a casca da página): as linhas
-chegam em outra requisição, ainda não capturada.
+As linhas **estão** nesta resposta (684 KB): 74 coletores por página. A
+primeira leitura deu "0 linhas" porque o contador olhava só o primeiro
+`<tbody>` da página, que é um template vazio — corrigido.
+
+Cada linha traz um `aria-label` com usuário, modelo e versão juntos, e o id do
+aparelho no link de detalhe:
+
+    aria-label="ljr417_coletor_2 Bluebird EF501R Android 9.0 I985"
+    href="#/AirWatch/Device/Details/Summary/751057"
+    <td class="time_stamp" data-property="LastPingDate">
+
+Os `data-property` das células são a chave para extrair campo a campo, em vez
+de depender da posição da coluna.
 
 ## Regra de obsolescência (definida pela área)
 
@@ -82,6 +101,7 @@ O usuário do coletor carrega a loja: `<sigla><numero>_coletor`.
 | CM | Camicado | BR | — |
 | LAS | Ashua | BR | — |
 | YC | Youcom | BR | — |
+| CD | Centro de Distribuição | BR | — |
 | LJRAR | Renner Argentina | AR | 13 |
 | LJRUY | Renner Uruguai | UY | 11 |
 
@@ -90,6 +110,14 @@ número da loja: `ljrar13001_coletor` é a loja 001, não a 13001.
 
 A separação letras/dígitos é feita por regex, então `ljrar13001` nunca é lido
 como a BU `LJR` seguida de `ar13001` — essa era a armadilha do parsing.
+
+Dois achados que só os dados reais revelaram:
+
+- **`CD`** (Centro de Distribuição) existe no parque (`cd504_coletor`) e não
+  estava na lista original de identificadores. **Confirmar com a área** se o
+  CD entra nos números do painel ou fica de fora.
+- **Sufixo de sequência**: `ljr417_coletor_2` é o segundo coletor da mesma
+  loja. O sufixo é guardado à parte; a loja continua sendo a 417.
 O que não bate no padrão vira "Não identificado" em vez de ser descartado:
 sumir com o registro esconderia coletor do painel.
 
