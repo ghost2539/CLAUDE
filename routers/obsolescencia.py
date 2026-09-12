@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -23,14 +24,26 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
 
+import config as _config_mod
 from core.security import get_session
+
+_cfg = _config_mod.get_settings()
 
 _log = logging.getLogger("obsolescencia")
 
 router = APIRouter()
+
+
+def _exigir_admin(req: Request) -> dict:
+    """Coletar e mexer em credencial é de admin do portal. Ver o painel não é."""
+    sd = get_session(req)
+    if not sd.get("is_admin"):
+        raise HTTPException(403, "Ação restrita a administradores do portal.")
+    return sd
 
 # ── Identidade da loja e da BU ────────────────────────────────────
 # O usuário do coletor carrega a loja: <sigla><numero>_coletor
@@ -324,21 +337,117 @@ def config_ler(req: Request):
     return _db.ler_config()
 
 
+# ── Sessão no MDM ─────────────────────────────────────────────────
+# A credencial é de SERVIÇO e vive no cofre: o portal não guarda a senha do
+# usuário logado (só os cookies do ServiceNow), então não há como reaproveitá-la.
+# O usuário do MDM vai no formato `renner\<login>`.
+CHAVE_USUARIO = "MDM_USUARIO"
+CHAVE_SENHA = "MDM_SENHA"
+
+_sessao_mdm = None
+_trava_sessao = threading.Lock()
+
+
+def credencial_mdm() -> tuple[str, str]:
+    from core import cofre
+    return cofre.obter(CHAVE_USUARIO), cofre.obter(CHAVE_SENHA)
+
+
+def _nova_sessao():
+    import requests
+    from routers.servicenow import SN_PROXY
+    s = requests.Session()
+    if SN_PROXY:
+        s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    return s
+
+
+def sessao_mdm(forcar: bool = False):
+    """Sessão autenticada no console, reaproveitada entre chamadas.
+
+    É o keep-alive: em vez de logar a cada uso, guardamos a sessão e só
+    refazemos o login quando o console deixa de responder o fragmento.
+    """
+    global _sessao_mdm
+    from integracoes import mdm_airwatch as mdm
+
+    base = getattr(_cfg, "MDM_BASE_URL", "")
+    with _trava_sessao:
+        if not forcar and _sessao_mdm is not None and mdm.sessao_valida(_sessao_mdm, base):
+            return _sessao_mdm
+        usuario, senha = credencial_mdm()
+        if not usuario or not senha:
+            raise HTTPException(
+                503, "Credencial de serviço do MDM não configurada no cofre "
+                     f"({CHAVE_USUARIO} / {CHAVE_SENHA}).")
+        nova = _nova_sessao()
+        if not mdm.login(nova, usuario, senha, base):
+            raise HTTPException(502, "Login no MDM recusado. Confira a credencial "
+                                     "de serviço no cofre.")
+        _sessao_mdm = nova
+        return _sessao_mdm
+
+
+@router.get("/api/obsolescencia/credencial")
+def credencial_status(req: Request):
+    """Se a credencial está no cofre — nunca devolve a senha."""
+    _exigir_admin(req)
+    usuario, senha = credencial_mdm()
+    return {"configurada": bool(usuario and senha),
+            "usuario": usuario, "chave_usuario": CHAVE_USUARIO,
+            "chave_senha": CHAVE_SENHA}
+
+
+class CredencialMDM(BaseModel):
+    usuario: str
+    senha: str
+
+
+@router.post("/api/obsolescencia/credencial")
+def credencial_gravar(req: Request, corpo: CredencialMDM):
+    """Guarda a credencial de serviço no cofre. Só admin do portal."""
+    sd = _exigir_admin(req)
+    from core import cofre
+    usuario = (corpo.usuario or "").strip()
+    if not usuario or not corpo.senha:
+        raise HTTPException(400, "Informe usuário e senha.")
+    if "\\" not in usuario and "/" not in usuario:
+        raise HTTPException(400, "O usuário do MDM precisa do domínio: renner\\<login>.")
+    cofre.definir(CHAVE_USUARIO, usuario)
+    cofre.definir(CHAVE_SENHA, corpo.senha)
+    global _sessao_mdm
+    _sessao_mdm = None                      # credencial nova, sessão velha não serve
+    _log.info("Credencial do MDM atualizada por %s", sd.get("username", ""))
+    return {"ok": True, "configurada": True, "usuario": usuario}
+
+
 @router.post("/api/obsolescencia/coletar")
 def coletar(req: Request):
-    """Dispara a varredura do parque, sob demanda.
+    """Varre o parque de coletores e grava. Sob demanda, por botão.
 
-    Sem agendamento por ora, por decisão da área: roda por botão, com alguém
-    acompanhando. A credencial é a conta de serviço do cofre — não a senha
-    do usuário, que o portal não guarda.
+    Sem agendamento por ora, por decisão da área. Somente leitura no MDM:
+    esta rota nunca chama escrita.
     """
-    sd = get_session(req)
-    return {
-        "ok": False,
-        "detalhe": ("Credencial de serviço do MDM ainda não configurada. "
-                    "Cadastre-a no cofre para a coleta poder rodar."),
-        "usuario": sd.get("username", ""),
-    }
+    sd = _exigir_admin(req)
+    from integracoes import mdm_airwatch as mdm
+    import db.obsolescencia as _db
+    _db.init_db()
+
+    base = getattr(_cfg, "MDM_BASE_URL", "")
+    sessao = sessao_mdm()
+    try:
+        varredura = mdm.varrer(sessao, base)
+    except mdm.SessaoExpirada:
+        # Uma segunda tentativa com login novo; se cair de novo, é problema real.
+        varredura = mdm.varrer(sessao_mdm(forcar=True), base)
+
+    for c in varredura["coletores"]:
+        c["tipo"] = _db.COLETOR
+    resultado = aplicar_coleta(
+        varredura["coletores"], usuario=sd.get("username", ""),
+        total_mdm=varredura["total"], paginas=varredura["paginas"])
+    _log.info("Coleta do MDM por %s: %s", sd.get("username", ""), resultado)
+    return {"ok": True, **resultado}
 
 
 # ── Persistência da coleta ────────────────────────────────────────
