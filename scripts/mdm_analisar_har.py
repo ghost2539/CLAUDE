@@ -63,6 +63,31 @@ def corpo_json(conteudo: dict):
         return None
 
 
+def texto_bruto(conteudo: dict) -> str:
+    """Texto da resposta, decodificando base64 quando for o caso."""
+    texto = conteudo.get("text") or ""
+    if conteudo.get("encoding") == "base64":
+        try:
+            texto = base64.b64decode(texto).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return ""
+    return texto
+
+
+def texto_de_tags(html: str, tag: str) -> list[str]:
+    """Títulos das colunas da grade: é o que identifica a lista de coletores."""
+    fora = []
+    for m in re.finditer(rf"<{tag}\b[^>]*>(.*?)</{tag}>", html, re.I | re.S):
+        t = re.sub(r"<[^>]*>", " ", m.group(1))
+        t = re.sub(r"&nbsp;?", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        if t:
+            fora.append(t[:60])
+        if len(fora) >= 40:
+            break
+    return fora
+
+
 def achar_lista(corpo):
     """Acha a lista principal da resposta (Devices, data, results, rows...)."""
     if not isinstance(corpo, (dict, list)):
@@ -130,19 +155,45 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
         url = req.get("url") or ""
         if not url or ESTATICO.search(url):
             continue
-        corpo = corpo_json(resp.get("content") or {})
+        conteudo = resp.get("content") or {}
+        corpo = corpo_json(conteudo)
+        p = urlparse(url)
+        metodo = req.get("method", "GET")
+
         if corpo is None:
+            # A grade de coletores do AirWatch volta em HTML, não em JSON.
+            # Guardamos a forma dela: colunas e nº de linhas.
+            html = texto_bruto(conteudo)
+            if len(html) < 200 or "<" not in html:
+                continue
+            chave_h = f"{metodo} {p.path} [html]"
+            corpo_tab = re.search(r"<tbody\b[^>]*>(.*?)</tbody>", html, re.I | re.S)
+            alvo_linhas = corpo_tab.group(1) if corpo_tab else html
+            linhas = len(re.findall(r"<tr[\s>]", alvo_linhas, re.I))
+            colunas = texto_de_tags(html, "th")
+            atual_h = achados.get(chave_h)
+            if atual_h is None or linhas > atual_h["registros"]:
+                achados[chave_h] = {
+                    "tipo": "html", "metodo": metodo, "caminho": p.path,
+                    "consulta_exemplo": p.query[:300], "status": resp.get("status"),
+                    "chamadas": (atual_h["chamadas"] + 1) if atual_h else 1,
+                    "registros": linhas, "campo_lista": None,
+                    "linhas_tabela": linhas, "colunas": colunas,
+                    "bytes": len(html), "trecho": html[:1200],
+                }
+            elif atual_h:
+                atual_h["chamadas"] += 1
             continue
 
-        p = urlparse(url)
-        chave = f"{req.get('method', 'GET')} {p.path}"
+        chave = f"{metodo} {p.path}"
         lista = achar_lista(corpo)
         registros = lista[1] if lista else (1 if corpo else 0)
 
         atual = achados.get(chave)
         if atual is None:
             achados[chave] = {
-                "metodo": req.get("method", "GET"),
+                "tipo": "json",
+                "metodo": metodo,
                 "caminho": p.path,
                 "consulta_exemplo": p.query[:300],
                 "status": resp.get("status"),
@@ -195,11 +246,12 @@ def main() -> int:
         return 1
 
     print(f"\n{len(achados)} endpoint(s) com dados — do que mais traz para o que menos traz:\n")
-    print(f"{'REGISTROS':>9}  {'CHAM':>4}  {'MÉTODO':<6}  {'CAMPO DA LISTA':<22}  CAMINHO")
-    print("-" * 108)
+    print(f"{'REGISTROS':>9}  {'CHAM':>4}  {'TIPO':<5}  {'MÉTODO':<6}  {'LISTA / COLUNAS':<22}  CAMINHO")
+    print("-" * 112)
     for a in achados:
-        print(f"{a['registros']:>9}  {a['chamadas']:>4}  {a['metodo']:<6}  "
-              f"{str(a['campo_lista'] or '-'):<22}  {a['caminho'][:52]}")
+        desc = a.get("campo_lista") or (f"{len(a['colunas'])} coluna(s)" if a.get("colunas") else "-")
+        print(f"{a['registros']:>9}  {a['chamadas']:>4}  {a.get('tipo','json'):<5}  {a['metodo']:<6}  "
+              f"{desc:<22}  {a['caminho'][:52]}")
 
     alvos = [a for a in achados if not args.schema or args.schema.lower() in a["caminho"].lower()]
     for a in alvos[:3 if not args.schema else len(alvos)]:
@@ -207,7 +259,12 @@ def main() -> int:
         if a["consulta_exemplo"]:
             print(f"consulta: ?{a['consulta_exemplo']}")
         print(f"{'-' * 108}")
-        print(json.dumps(a["schema"], indent=2, ensure_ascii=False)[:6000])
+        if a.get("tipo") == "html":
+            print(f"grade HTML — {a['linhas_tabela']} linha(s), {len(a['colunas'])} coluna(s):")
+            for c in a["colunas"]:
+                print(f"  · {c}")
+        else:
+            print(json.dumps(a["schema"], indent=2, ensure_ascii=False)[:6000])
 
     if args.saida:
         Path(args.saida).write_text(
