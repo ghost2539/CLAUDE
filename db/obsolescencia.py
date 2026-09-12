@@ -80,7 +80,11 @@ class Base(DeclarativeBase):
     pass
 
 
-# Situação do coletor na base, entre uma coleta e outra.
+# O painel cobre dois parques, de origens diferentes:
+COLETOR = "coletor"   # MDM (Workspace ONE), raspado da grade
+PDV = "pdv"           # ServiceNow, tabela cmdb_ci_computer
+
+# Situação do ativo na base, entre uma coleta e outra.
 ATIVO = "ativo"              # veio na última varredura
 SUMIU = "sumiu"              # estava na base e não veio mais — vai para tratativa
 TRATADO = "tratado"          # alguém resolveu o sumiço
@@ -91,8 +95,11 @@ class Coletor(Base):
     __tablename__ = "obs_coletor"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # id do aparelho no MDM: é a chave estável entre as coletas.
-    mdm_id: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    # Chave estável entre coletas: id do MDM para coletor, sys_id para PDV.
+    mdm_id: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    tipo: Mapped[str] = mapped_column(String(10), default=COLETOR, index=True)
+    serie: Mapped[str] = mapped_column(String(80), default="", index=True)
+    local: Mapped[str] = mapped_column(String(160), default="")
 
     nome: Mapped[str] = mapped_column(String(200), default="")
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
@@ -183,6 +190,10 @@ PADROES = {
     "limite_anos": "5",
     "limite_sem_ver": "30",
     "modelos_eol": "EF500,EF500R",
+    # PDVs no ServiceNow. Deixado configurável porque o rótulo da tela
+    # ("Origem da descoberta") pode não bater com o nome interno do campo.
+    "pdv_tabela": "cmdb_ci_computer",
+    "pdv_query": "discovery_source=ACC_VISIBILITY^install_status=1",
 }
 
 

@@ -281,9 +281,36 @@ Tag sem nenhum coletor não aparece: o painel mostra o parque, não o catálogo
 de tags do MDM. Um coletor com duas tags conta nas duas, porque as situações
 são simultâneas.
 
+## PDVs — o segundo parque, vindo do ServiceNow
+
+O painel cobre dois parques de origens diferentes, na mesma base e na mesma
+tela (coluna `tipo`: `coletor` | `pdv`):
+
+| Parque | Origem | Como |
+|---|---|---|
+| Coletores | MDM (Workspace ONE) | grade HTML, paginada |
+| PDVs | ServiceNow, `cmdb_ci_computer` | JSONv2, já integrado ao portal |
+
+    discovery_source=ACC_VISIBILITY^install_status=1
+
+Filtro definido pela área: origem da descoberta **ACC_VISIBILITY** e status
+**Instalado**, agrupado por local. Tabela e query ficam na configuração do
+módulo, porque o rótulo da tela ("Origem da descoberta") pode não bater com
+o nome interno do campo — vale conferir na primeira execução.
+
+Diferenças de tratamento:
+
+- A loja do PDV vem do **Local** da CMDB, não do padrão
+  `<sigla><numero>_coletor`, que só existe no MDM.
+- Referências do JSONv2 chegam ora como texto, ora como
+  `{value, display_value}` — a tradução resolve os dois casos.
+
+Os PDVs são mais fáceis que os coletores: a integração com o ServiceNow já
+existe no portal e pagina sozinha (`_sn_query_all`).
+
 ## Próximo passo
 
-Construir a coleta sob demanda usando o contrato acima.
+O painel, cobrindo os dois parques.
 
 ## Identidade da loja e da BU
 
