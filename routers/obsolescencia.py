@@ -14,6 +14,7 @@ tratamento entra aqui depois, sobre o formato real.
 from __future__ import annotations
 
 import hashlib
+import logging
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -26,6 +27,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from core.security import get_session
+
+_log = logging.getLogger("obsolescencia")
 
 router = APIRouter()
 
@@ -276,15 +279,65 @@ def pagina_barra(req: Request):
 # ── API ───────────────────────────────────────────────────────────
 @router.get("/api/obsolescencia/resumo")
 def resumo(req: Request):
-    """Situação do parque. Enquanto o coletor do MDM não roda pela
-    primeira vez, devolve `pendente` para a tela explicar o que falta."""
-    sd = get_session(req)  # exige sessão do portal
-    return {
-        "pendente": True,
-        "coletado_em": None,
+    """Situação do parque, sobre a última coleta gravada."""
+    sd = get_session(req)          # exige sessão do portal
+    base = {
         "fonte": "MDM de Coletores (Workspace ONE / AirWatch)",
-        "total": 0,
         "usuario": sd.get("display_name") or sd.get("username", ""),
+    }
+    try:
+        import db.obsolescencia as _db
+        _db.init_db()
+        dados = resumo_parque()
+    except Exception as exc:  # noqa: BLE001 — banco fora não derruba a tela
+        _log.error("Resumo indisponível: %s", exc, exc_info=True)
+        return {**base, "pendente": True, "erro": "Base do módulo indisponível."}
+
+    if not dados.get("coletado_em"):
+        return {**base, "pendente": True, "total": 0}
+    return {**base, "pendente": False, **dados}
+
+
+@router.get("/api/obsolescencia/tratativa")
+def tratativa(req: Request):
+    """Coletores que sumiram do MDM e ainda não foram tratados."""
+    from sqlalchemy import select as _select
+    get_session(req)
+    import db.obsolescencia as _db
+    _db.init_db()
+    with _db.SessionLocal() as s:
+        linhas = list(s.execute(
+            _select(_db.Coletor).where(_db.Coletor.situacao == _db.SUMIU)
+            .order_by(_db.Coletor.atualizado_em.desc())).scalars())
+    return {"total": len(linhas), "coletores": [
+        {"mdm_id": c.mdm_id, "nome": c.nome, "bu": c.bu_nome, "loja": c.loja,
+         "modelo": c.modelo, "usuario": c.usuario,
+         "desde": c.atualizado_em.isoformat() if c.atualizado_em else None}
+        for c in linhas]}
+
+
+@router.get("/api/obsolescencia/config")
+def config_ler(req: Request):
+    get_session(req)
+    import db.obsolescencia as _db
+    _db.init_db()
+    return _db.ler_config()
+
+
+@router.post("/api/obsolescencia/coletar")
+def coletar(req: Request):
+    """Dispara a varredura do parque, sob demanda.
+
+    Sem agendamento por ora, por decisão da área: roda por botão, com alguém
+    acompanhando. A credencial é a conta de serviço do cofre — não a senha
+    do usuário, que o portal não guarda.
+    """
+    sd = get_session(req)
+    return {
+        "ok": False,
+        "detalhe": ("Credencial de serviço do MDM ainda não configurada. "
+                    "Cadastre-a no cofre para a coleta poder rodar."),
+        "usuario": sd.get("username", ""),
     }
 
 
