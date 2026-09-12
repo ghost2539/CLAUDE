@@ -198,16 +198,16 @@ button, input, select, textarea { font: inherit; }
     border-radius: var(--radius);
 }
 
-.notif-dot, .dot {
+.dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
 }
-.notif-dot--blue, .dot-blue   { background: var(--color-info); }
-.notif-dot--green, .dot-green { background: var(--color-success); }
-.notif-dot--yellow, .dot-yellow { background: var(--color-gold); }
-.notif-dot--red, .dot-red     { background: var(--color-danger); }
+.dot-blue   { background: var(--color-info); }
+.dot-green  { background: var(--color-success); }
+.dot-yellow { background: var(--color-gold); }
+.dot-red    { background: var(--color-danger); }
 .dot-muted                     { background: #444; }
 
 .topbar-user-avatar {
