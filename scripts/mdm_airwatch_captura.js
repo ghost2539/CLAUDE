@@ -199,7 +199,25 @@
         };
     }
 
-    function registrarHtml(metodo, url, status, corpoResp) {
+    // O que revela a paginação são os PARÂMETROS, e eles variam a cada
+    // chamada. Guardar só "um exemplo" perdia justamente a 2ª página —
+    // por isso aqui acumulamos toda variação distinta.
+    function anotarChamada(reg, consulta, corpoReq) {
+        if (consulta) {
+            reg.consultas = reg.consultas || [];
+            if (reg.consultas.indexOf(consulta) === -1 && reg.consultas.length < 25) {
+                reg.consultas.push(consulta);
+            }
+        }
+        if (corpoReq && typeof corpoReq === 'string' && corpoReq.length < 2000) {
+            reg.corpos = reg.corpos || [];
+            if (reg.corpos.indexOf(corpoReq) === -1 && reg.corpos.length < 15) {
+                reg.corpos.push(corpoReq);
+            }
+        }
+    }
+
+    function registrarHtml(metodo, url, status, corpoResp, corpoReq) {
         if (typeof corpoResp !== 'string' || corpoResp.length < 200) return;
         if (corpoResp.indexOf('<') === -1) return;
 
@@ -223,8 +241,10 @@
                 bytes: corpoResp.length, linhas_tabela: linhas, colunas: colunas,
                 coletores: acharColetores(corpoResp),
                 trecho: corpoResp.slice(0, 1200),
+                consultas: [], corpos: [],
                 visto_em: new Date().toISOString()
             };
+            anotarChamada(mapa[chave], p.consulta, corpoReq);
             var col = mapa[chave].coletores;
             if (col) {
                 console.log('%c[MDM] ★ ACHOU ' + col.unicos + ' coletor(es) em ' + metodo + ' ' +
@@ -235,7 +255,8 @@
             }
         } else {
             atual.chamadas++;
-            if (linhas > (atual.linhas_tabela || 0)) {
+            anotarChamada(atual, p.consulta, corpoReq);   // sempre, não só quando cresce
+            if (linhas > (atual.linhas_tabela || 0) || !atual.coletores) {
                 atual.linhas_tabela = linhas;
                 atual.registros = linhas;
                 atual.colunas = colunas;
@@ -251,7 +272,7 @@
     function registrar(metodo, url, status, corpoReq, corpoResp) {
         if (ESTATICO.test(url)) return;
         var resp = jsonSeguro(corpoResp);
-        if (resp === null) { registrarHtml(metodo, url, status, corpoResp); return; }
+        if (resp === null) { registrarHtml(metodo, url, status, corpoResp, corpoReq); return; }
 
         var p = partes(url);
         metodo = String(metodo || 'GET').toUpperCase();
@@ -268,10 +289,15 @@
                 requisicao: podar(jsonSeguro(corpoReq)),
                 coletores: acharColetores(typeof corpoResp === 'string' ? corpoResp : JSON.stringify(corpoResp)),
                 amostra: podar(resp), schema: inferir(resp),
+                consultas: [], corpos: [],
                 visto_em: new Date().toISOString()
             };
+            anotarChamada(mapa[chave], p.consulta,
+                          typeof corpoReq === 'string' ? corpoReq : null);
         } else {
             atual.chamadas++;
+            anotarChamada(atual, p.consulta,
+                          typeof corpoReq === 'string' ? corpoReq : null);
             // Fica com a chamada mais rica: é a que melhor mostra o formato.
             if (registros > (atual.registros || 0)) {
                 atual.registros = registros;
@@ -347,6 +373,7 @@
                 chamadas: x.chamadas, registros: x.registros,
                 campo_lista: x.campo_lista || (x.colunas ? x.colunas.length + ' coluna(s)' : null),
                 COLETORES: x.coletores ? x.coletores.unicos : 0,
+                variacoes: (x.consultas || []).length,
                 status: x.status
             };
         }));
