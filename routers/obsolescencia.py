@@ -95,8 +95,12 @@ def identificar_loja(usuario: str) -> dict:
 
 
 # ── Tags ──────────────────────────────────────────────────────────
-# Só estas três interessam ao painel; qualquer outra é ignorada.
-TAGS_INTERESSE = ("Inatividade", "Manutenção", "Movimentação")
+# Interessam as tags que carregam um destes nomes. Existem nove no MDM
+# (Manutenção, Em manutenção, Backlog de manutenção, Bloqueio - Inatividade
+# N1, …) e o painel conta CADA UMA pelo nome real, sem amassar as nove em
+# três baldes: "Backlog de manutenção" e "Manutenção" são situações
+# diferentes e somá-las esconderia a informação.
+GRUPOS_TAG = ("Inatividade", "Manutenção", "Movimentação")
 
 
 def _sem_acento(v: str) -> str:
@@ -104,21 +108,50 @@ def _sem_acento(v: str) -> str:
     return "".join(c for c in txt if not unicodedata.combining(c)).lower()
 
 
-_TAGS_NORM = {_sem_acento(t): t for t in TAGS_INTERESSE}
+_GRUPOS_NORM = {_sem_acento(g): g for g in GRUPOS_TAG}
 
 
-def classificar_tags(tags) -> list[str]:
-    """Quais das três tags de interesse o coletor tem. Compara sem acento
-    e sem caixa, e por conteúdo — "Em Manutenção" conta como Manutenção."""
+def grupo_da_tag(nome: str) -> str:
+    """A qual dos três nomes esta tag pertence; vazio se não for de interesse."""
+    alvo = _sem_acento(nome)
+    for norm, grupo in _GRUPOS_NORM.items():
+        if norm in alvo:
+            return grupo
+    return ""
+
+
+def tags_relevantes(tags) -> list[str]:
+    """Nomes REAIS das tags de interesse do coletor, como estão no MDM.
+
+    Preserva "Backlog de manutenção" em vez de devolver "Manutenção": o
+    painel conta por tag, e a agregação por grupo é feita depois, por quem
+    quiser vê-la.
+    """
     if isinstance(tags, str):
-        tags = [p for p in re.split(r"[;,|]", tags)]
-    achadas = []
+        tags = re.split(r"[;,|]", tags)
+    fora = []
     for t in tags or []:
-        alvo = _sem_acento(t)
-        for norm, nome in _TAGS_NORM.items():
-            if norm in alvo and nome not in achadas:
-                achadas.append(nome)
-    return achadas
+        nome = str(t or "").strip()
+        if nome and grupo_da_tag(nome) and nome not in fora:
+            fora.append(nome)
+    return fora
+
+
+def contar_tags(coletores) -> list[dict]:
+    """Quantos coletores por tag — só as que têm alguém atribuído.
+
+    Tag sem coletor não entra: o painel mostra o que existe no parque, não o
+    catálogo de tags do MDM.
+    """
+    contagem: dict[str, int] = {}
+    for c in coletores or []:
+        for nome in tags_relevantes(c.get("tags")):
+            contagem[nome] = contagem.get(nome, 0) + 1
+    return sorted(
+        ({"tag": n, "grupo": grupo_da_tag(n), "quantidade": q}
+         for n, q in contagem.items() if q > 0),
+        key=lambda x: (x["grupo"], -x["quantidade"], x["tag"]),
+    )
 
 
 # ── Obsolescência ─────────────────────────────────────────────────

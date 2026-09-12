@@ -272,9 +272,14 @@ A comparação por conteúdo pega mais do que três. Existem no MDM:
 | Bloqueio - Movimentação N2 | 11635 |
 | HML BLOQUEIO MOVIMENTAÇÃO | 11768 |
 
-Contar por conteúdo joga as nove em três baldes e infla os números. Falta a
-área dizer se o painel conta **só as tags exatas** ou **todas que contenham
-o nome**.
+Decidido pela área: **conta as nove, mas o painel só mostra as que têm
+coletor atribuído**. Cada tag é contada pelo **nome real** — "Backlog de
+manutenção" não vira "Manutenção" — e o grupo (Inatividade / Manutenção /
+Movimentação) fica ao lado, para quem quiser somar.
+
+Tag sem nenhum coletor não aparece: o painel mostra o parque, não o catálogo
+de tags do MDM. Um coletor com duas tags conta nas duas, porque as situações
+são simultâneas.
 
 ## Próximo passo
 
@@ -315,9 +320,12 @@ sumir com o registro esconderia coletor do painel.
 
 ## Tags acompanhadas
 
-Só três, contadas separadamente: **Inatividade**, **Manutenção**,
-**Movimentação**. A comparação é por conteúdo, sem acento e sem caixa, então
-"Em Manutenção - CD" conta como Manutenção. Qualquer outra tag é ignorada.
+Interessam as que carregam um destes nomes: **Inatividade**, **Manutenção**,
+**Movimentação** — comparados sem acento e sem caixa. Qualquer outra tag do
+MDM é ignorada.
+
+Cada tag é contada **pelo nome real**, não amassada no grupo, e só entra no
+painel se tiver coletor atribuído.
 
 ## Recortes que o painel deve entregar
 
