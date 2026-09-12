@@ -125,6 +125,13 @@ def classificar_tags(tags) -> list[str]:
 LIMITE_ANOS = 5          # 5 anos de uso
 LIMITE_SEM_VER = 30      # dias sem comunicar
 
+# Como combinar os critérios. Começa em "todos" (E), como a área definiu,
+# mas fica configurável: com "qualquer" (OU) o número dispara, e a diferença
+# entre os dois é o tamanho do investimento que o painel vai sustentar.
+MODO_TODOS = "todos"
+MODO_QUALQUER = "qualquer"
+MODO_PADRAO = MODO_TODOS
+
 
 def dias_sem_ver(last_seen, agora=None) -> int | None:
     """Dias desde a última comunicação. None quando a data não veio."""
@@ -155,11 +162,13 @@ def idade_anos(data_aquisicao, agora=None) -> float | None:
     return (agora - data_aquisicao).days / 365.25
 
 
-def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None) -> dict:
-    """Aplica a regra da área: 5 anos de uso, Android travado sem update
-    possível e EOL do modelo atingido.
+def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None,
+                          modo: str = MODO_PADRAO) -> dict:
+    """Aplica a regra: 5 anos de uso, Android travado sem update possível e
+    EOL do modelo atingido.
 
-    Os três critérios são devolvidos separados, e não só o veredito: numa
+    `modo` decide a combinação — "todos" (E, o padrão da área) ou "qualquer"
+    (OU). Os três critérios voltam separados, e não só o veredito: numa
     apresentação é o motivo que sustenta a troca, não o rótulo.
     """
     idade = idade_anos(coletor.get("data_aquisicao"), agora)
@@ -172,8 +181,13 @@ def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None) -> dict:
         "modelo_eol": eol,
     }
     atendidos = [k for k, v in criterios.items() if v]
+    if modo == MODO_QUALQUER:
+        obsoleto = bool(atendidos)
+    else:
+        obsoleto = len(atendidos) == len(criterios)
     return {
-        "obsoleto": len(atendidos) == len(criterios),   # regra: os três juntos
+        "obsoleto": obsoleto,
+        "modo": modo,
         "criterios": criterios,
         "atendidos": atendidos,
         "idade_anos": round(idade, 1) if idade is not None else None,

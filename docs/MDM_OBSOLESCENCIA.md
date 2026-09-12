@@ -83,13 +83,84 @@ sessão mantida por keep-alive. O portal **não guarda a senha do usuário** (s�
 `sn_cookies`), então a coleta em segundo plano usa credencial de serviço no
 **cofre**, como já faz `routers/automacoes.py` (`_creds_para_login()`).
 
-O coletor é **somente leitura**. Nunca chamar `Devices/DeleteDevice`,
-`Devices/ManageTagsBulkDevices` nem qualquer rota de escrita.
+### Leitura e escrita têm credenciais diferentes
+
+Espelha a norma que já vale para o ServiceNow:
+
+| | Credencial | Quem dispara |
+|---|---|---|
+| **Leitura** (coleta noturna) | conta de serviço, no cofre | rotina automática |
+| **Escrita** (tag, deleção) | **sessão do usuário logado** | sempre uma pessoa |
+
+Escrever como o usuário logado deixa o rastro certo no próprio MDM: quem
+deletou um coletor aparece lá, não uma conta genérica.
+
+### A rotina noturna NUNCA escreve
+
+Separação dura: o processo que roda de madrugada só lê. Nenhum caminho de
+código da coleta chama rota de escrita. Isso é o que impede um erro de
+parsing virar deleção em massa às 3h da manhã, sem ninguém olhando.
+
+## Arquitetura definida
+
+### Coleta noturna
+Roda de madrugada, lê o parque inteiro e grava no banco próprio do módulo.
+A cada rodada, compara com o que já existe:
+
+- **coletor novo** → entra na base;
+- **coletor que sumiu** do MDM → não é apagado: vai para uma fila de
+  **tratativa**, em menu separado, para alguém decidir. Sumir da base em
+  silêncio esconderia justamente o caso que precisa de ação.
+
+### Data de aquisição — vem do EBS
+O MDM só tem a data de inscrição, que "rejuvenesce" quando o coletor é
+reinscrito após reparo. A idade real vem do **EBS**, cruzada pela série.
+Quando o EBS não tiver o ativo, a idade fica marcada como desconhecida em
+vez de ser estimada pela inscrição: número inventado em tela de diretoria é
+pior que número ausente.
+
+### Regra de obsolescência configurável
+Padrão **E** (os três critérios juntos), como a área definiu, com opção de
+trocar para **OU** na configuração do módulo.
+
+### Escritas no MDM (sob demanda, nunca automáticas)
+Sempre por ação de uma pessoa, sempre num coletor só, resolvido pela série.
+
+| Ação | Endpoint | Origem |
+|---|---|---|
+| Inserir/remover tag | `POST /AirWatch/Devices/ManageTagsBulkDevices` | tela ou abertura de chamado |
+| Ler tags do aparelho | `POST /AirWatch/Device/Details/ReloadTags?deviceId=` | conferência |
+| Deletar coletor | `POST /AirWatch/Devices/DeleteDevice/{id}` | Recebimento |
+| Lista de tags (id) | `GET /AirWatch/Device/List/TagsListSearch` | 57 tags, label + value |
+
+**Busca sempre pela série** — é o padrão da área.
+
+### Processos que disparam escrita
+- **Recebimento**: coletor recebido no CD é **deletado** do MDM, para
+  desvincular da loja. Processo padrão da área.
+- **Chamado**: ao iniciar o atendimento, o coletor recebe a tag
+  **Manutenção**.
+
+### Salvaguardas da deleção
+Deleção não tem volta, e vai passar a ser disparada por um fluxo de rotina.
+Por isso:
+
+1. **Um por vez.** Nunca em lote, mesmo que o endpoint aceite.
+2. **Série tem que resolver para exatamente um aparelho.** Zero ou mais de
+   um → recusa e mostra o que achou, em vez de escolher sozinho.
+3. **Registro local de toda escrita**: quem, quando, série, ação, resposta
+   do MDM. Independente do log do próprio MDM.
+4. **Confirmação explícita** na tela antes de deletar.
+5. A rotina noturna não tem acesso a esse caminho.
 
 ## Próximo passo
 
-Capturar a ação de **Export** da lista: é o caminho de 1 requisição para as
-15.8 mil linhas, em vez de paginar ~316 telas de HTML.
+Falta capturar, e a captura agora guarda corpo de requisição:
+
+1. **Paginação** de `/Device/List/Search` (parâmetro de página / page size).
+2. **Busca por série** — qual endpoint e qual parâmetro.
+3. **Corpo do `ManageTagsBulkDevices`** ao inserir e ao remover uma tag,
+   para saber como identificar aparelho e tag na chamada.
 
 ## Identidade da loja e da BU
 
