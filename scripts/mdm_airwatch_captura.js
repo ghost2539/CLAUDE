@@ -162,10 +162,65 @@
     }
 
     // ── registro ───────────────────────────────────────────────
+    // ── respostas em HTML ──────────────────────────────────────
+    // A grade de coletores do AirWatch não volta em JSON: é HTML montado
+    // no servidor. Aqui guardamos só a FORMA dela — os títulos das colunas
+    // e quantas linhas vieram —, que é o que identifica o endpoint da lista.
+    function textoDeTags(html, tag) {
+        var re = new RegExp('<' + tag + '\\b[^>]*>([\\s\\S]*?)</' + tag + '>', 'gi');
+        var fora = [], m;
+        while ((m = re.exec(html)) !== null && fora.length < 40) {
+            var t = m[1].replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ')
+                        .replace(/\s+/g, ' ').trim();
+            if (t) fora.push(t.slice(0, 60));
+        }
+        return fora;
+    }
+
+    function registrarHtml(metodo, url, status, corpoResp) {
+        if (typeof corpoResp !== 'string' || corpoResp.length < 200) return;
+        if (corpoResp.indexOf('<') === -1) return;
+
+        var p = partes(url);
+        metodo = String(metodo || 'GET').toUpperCase();
+        var chave = metodo + ' ' + p.caminho + ' [html]';
+        var corpoTab = corpoResp.match(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/i);
+        var alvoLinhas = corpoTab ? corpoTab[1] : corpoResp;
+        var linhas = (alvoLinhas.match(/<tr[\s>]/gi) || []).length;
+        var colunas = textoDeTags(corpoResp, 'th');
+
+        var atual = mapa[chave];
+        if (!atual) {
+            mapa[chave] = {
+                tipo: 'html', metodo: metodo, caminho: p.caminho,
+                consulta_exemplo: p.consulta, status: status, chamadas: 1,
+                registros: linhas, campo_lista: null,
+                bytes: corpoResp.length, linhas_tabela: linhas, colunas: colunas,
+                trecho: corpoResp.slice(0, 1200),
+                visto_em: new Date().toISOString()
+            };
+            if (linhas > 1 || colunas.length) {
+                console.log('%c[MDM/html] ' + metodo + ' ' + p.caminho + ' → ' + linhas +
+                    ' linha(s), ' + colunas.length + ' coluna(s)', 'color:#a0f');
+            }
+        } else {
+            atual.chamadas++;
+            if (linhas > (atual.linhas_tabela || 0)) {
+                atual.linhas_tabela = linhas;
+                atual.registros = linhas;
+                atual.colunas = colunas;
+                atual.bytes = corpoResp.length;
+                atual.consulta_exemplo = p.consulta;
+                atual.trecho = corpoResp.slice(0, 1200);
+            }
+        }
+        gravar();
+    }
+
     function registrar(metodo, url, status, corpoReq, corpoResp) {
         if (ESTATICO.test(url)) return;
         var resp = jsonSeguro(corpoResp);
-        if (resp === null) return;
+        if (resp === null) { registrarHtml(metodo, url, status, corpoResp); return; }
 
         var p = partes(url);
         metodo = String(metodo || 'GET').toUpperCase();
@@ -256,8 +311,10 @@
         }
         console.table(L.map(function (x) {
             return {
-                metodo: x.metodo, caminho: x.caminho, chamadas: x.chamadas,
-                registros: x.registros, campo_lista: x.campo_lista, status: x.status
+                tipo: x.tipo || 'json', metodo: x.metodo, caminho: x.caminho,
+                chamadas: x.chamadas, registros: x.registros,
+                campo_lista: x.campo_lista || (x.colunas ? x.colunas.length + ' coluna(s)' : null),
+                status: x.status
             };
         }));
         console.log('%c[MDM] ' + L.length + ' endpoint(s) acumulado(s), somando recarregamentos. ' +
