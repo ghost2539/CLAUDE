@@ -1092,7 +1092,9 @@ async function renderPermissions(c, S) {
         'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
-        identificacao: 'Identificação', servicenow: 'ServiceNow', rastreio: 'Correios',
+        // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
+        // permissão já existe nos usuários); só o nome no menu mudou.
+        identificacao: 'Identificação', servicenow: 'Gestão de Ativos', rastreio: 'Correios',
         reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
