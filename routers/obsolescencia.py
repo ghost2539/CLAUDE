@@ -389,22 +389,54 @@ def sessao_mdm(forcar: bool = False):
         return _sessao_mdm
 
 
+def diagnostico_cofre() -> dict:
+    """Onde o cofre grava, se dá para gravar ali, e o que fazer se não der.
+
+    O diretório da aplicação costuma ser somente leitura — e deve ser mesmo.
+    A norma do projeto reserva `data/` para escrita, então é de lá que sai a
+    sugestão, já montada, em vez de deixar quem administra adivinhando.
+    """
+    from core import cofre
+    pasta = Path(str(cofre.DIR))
+    try:
+        alvo = pasta if pasta.exists() else pasta.parent
+        gravavel = os.access(str(alvo), os.W_OK)
+    except Exception:  # noqa: BLE001
+        gravavel = False
+
+    sugerida = Path(str(getattr(_cfg, "DATA", "data"))) / "cofre"
+    try:
+        base = sugerida if sugerida.exists() else sugerida.parent
+        sugerida_ok = os.access(str(base), os.W_OK)
+    except Exception:  # noqa: BLE001
+        sugerida_ok = False
+
+    return {
+        "cofre_pasta": str(pasta),
+        "cofre_gravavel": bool(gravavel),
+        "cofre_sugestao": str(sugerida),
+        "cofre_sugestao_ok": bool(sugerida_ok),
+        "cofre_corporativo": _cofre_corporativo_ok(),
+    }
+
+
+def _cofre_corporativo_ok() -> bool:
+    try:
+        from core import cofre
+        return bool(cofre.corporativo_disponivel())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @router.get("/api/obsolescencia/credencial")
 def credencial_status(req: Request):
     """Se a credencial está no cofre — nunca devolve a senha."""
     _exigir_admin(req)
-    from core import cofre
     usuario, senha = credencial_mdm()
-    # Avisa ANTES de o usuário digitar a senha, não depois de tentar gravar.
-    try:
-        gravavel = os.access(str(cofre.DIR), os.W_OK) if cofre.DIR.exists() \
-            else os.access(str(cofre.DIR.parent), os.W_OK)
-    except Exception:  # noqa: BLE001
-        gravavel = False
+    diag = diagnostico_cofre()
     return {"configurada": bool(usuario and senha),
             "usuario": usuario, "chave_usuario": CHAVE_USUARIO,
-            "chave_senha": CHAVE_SENHA,
-            "cofre_pasta": str(cofre.DIR), "cofre_gravavel": bool(gravavel)}
+            "chave_senha": CHAVE_SENHA, **diag}
 
 
 class CredencialMDM(BaseModel):
@@ -429,10 +461,16 @@ def credencial_gravar(req: Request, corpo: CredencialMDM):
         # Sem isto vira 500 em texto puro, e a tela mostra só "unexpected
         # token" — que não ajuda ninguém a descobrir que é permissão.
         _log.error("Falha ao gravar credencial no cofre: %s", exc, exc_info=True)
+        diag = diagnostico_cofre()
+        dica = ""
+        if diag.get("cofre_sugestao_ok"):
+            dica = (f" A pasta da aplicação costuma ser somente leitura, e deve ser. "
+                    f"Aponte o cofre para a área gravável do projeto: acrescente "
+                    f"PORTAL_COFRE_DIR={diag['cofre_sugestao']} ao data/environment "
+                    f"e reinicie o serviço.")
         raise HTTPException(
-            500, f"Não foi possível gravar no cofre em {cofre.DIR}. "
-                 f"Confira se o usuário que roda o portal tem permissão de "
-                 f"escrita nessa pasta. Detalhe: {exc}") from exc
+            500, f"Não foi possível gravar no cofre em {diag['cofre_pasta']}.{dica} "
+                 f"Detalhe: {exc}") from exc
     global _sessao_mdm
     _sessao_mdm = None                      # credencial nova, sessão velha não serve
     _log.info("Credencial do MDM atualizada por %s", sd.get("username", ""))

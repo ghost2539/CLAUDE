@@ -152,12 +152,29 @@
        volta: o formulário só informa se está configurada e qual o usuário. */
     function formCredencial(estado) {
         var cfg = estado && estado.configurada;
+        // Cofre sem permissão de escrita trava tudo: avisa aqui, com a linha
+        // pronta, em vez de deixar a pessoa descobrir depois de digitar a senha.
+        var travado = estado && estado.cofre_gravavel === false && !estado.cofre_corporativo;
+        var aviso = '';
+        if (travado) {
+            aviso = '<div class="obs-erro" style="margin:0 0 16px">' +
+                '<b>O cofre não é gravável.</b><br>Pasta atual: <code>' +
+                esc(estado.cofre_pasta) + '</code>' +
+                (estado.cofre_sugestao_ok
+                    ? '<br><br>A pasta da aplicação é somente leitura, e deve ser. ' +
+                      'Aponte o cofre para a área gravável do projeto — no ' +
+                      '<code>data/environment</code>:<br><br><code>PORTAL_COFRE_DIR=' +
+                      esc(estado.cofre_sugestao) + '</code><br><br>Depois reinicie o serviço.'
+                    : '<br><br>Nenhuma pasta gravável encontrada. Ajuste a permissão ' +
+                      'da pasta acima para o usuário que roda o portal.') +
+                '</div>';
+        }
         return '<div class="obs-card obs-cred-card">' +
             '<h2>Credencial de serviço do MDM</h2>' +
             '<p class="obs-sub-card">' +
                 (cfg ? 'Configurada para <b>' + esc(estado.usuario) + '</b>. Salvar de novo substitui.'
                      : 'Ainda não configurada — sem ela a coleta não roda.') +
-            '</p>' +
+            '</p>' + aviso +
             '<div class="obs-campos">' +
                 '<label>Usuário<input id="obs-cred-user" type="text" autocomplete="off" ' +
                     'placeholder="renner\\seulogin" value="' + esc((estado && estado.usuario) || '') + '"></label>' +
