@@ -522,7 +522,10 @@
             e.preventDefault();
             var username = $('#login-username').value.trim();
             var password = $('#login-password').value;
-            var authType = $('.login-type-btn.active').dataset.authType;
+            // Entrada única pelo Logon AD desde que o login local saiu. O
+            // seletor de um item só foi removido: controle sem escolha ocupa
+            // espaço, e estilizado como botão competia com o "Entrar".
+            var authType = 'SSO';
             try {
                 loading(true);
                 state.user = await api('/auth/login', {
@@ -542,12 +545,6 @@
         };
 
         // Login type selector
-        $$('.login-type-btn').forEach(function (b) {
-            b.onclick = function () {
-                $$('.login-type-btn').forEach(function (x) { x.classList.remove('active'); });
-                b.classList.add('active');
-            };
-        });
 
         // Logout
         $('#logout-btn').onclick = async function () {

@@ -12,31 +12,33 @@
 
 <!-- ── Login screen ─────────────────────────────────────────── -->
 <div id="login-screen" class="login-screen">
-    <div class="login-card">
-        <div class="login-logo-area">
-            <div class="login-logo-icon">SP</div>
-            <h1 class="login-title">Portal de Operações - SPARE</h1>
-            <p class="login-subtitle">Operações de ativos</p>
-        </div>
-        <div class="login-type-selector">
-            <button class="login-type-btn active" data-auth-type="SSO">Logon AD</button>
-        </div>
-        <form id="login-form">
-            <div class="form-group">
-                <label>Usuário</label>
-                <input id="login-username" class="form-control" autocomplete="username">
+    <main class="login-card">
+        <div class="login-marca" aria-hidden="true">SP</div>
+        <h1 class="login-title">Portal de Operações</h1>
+        <p class="login-subtitle">Ativos, reparos e orçamento da operação SPARE</p>
+
+        <form id="login-form" class="login-form">
+            <div class="campo">
+                <label for="login-username">Usuário da rede</label>
+                <input id="login-username" name="username" class="form-control"
+                       autocomplete="username" autocapitalize="none" spellcheck="false"
+                       autofocus required>
             </div>
-            <div class="form-group mt-2">
-                <label>Senha</label>
-                <input id="login-password" type="password" class="form-control" autocomplete="current-password">
+            <div class="campo">
+                <label for="login-password">Senha</label>
+                <input id="login-password" name="password" type="password" class="form-control"
+                       autocomplete="current-password" required>
             </div>
-            <button class="login-submit-btn" type="submit">Entrar</button>
+            <button id="login-submit" class="login-submit-btn" type="submit">Entrar</button>
         </form>
-        <div id="login-error" class="login-error" hidden>
-            <span>!</span> <span id="login-error-text"></span>
+
+        <div id="login-error" class="login-error" role="alert" aria-live="polite" hidden>
+            <span id="login-error-text"></span>
         </div>
-        <div class="login-footer">SPARE - Portal de Operações</div>
-    </div>
+
+        <p class="login-nota">Sua conta é a mesma da rede Renner. Acesso liberado
+            previamente por um administrador do portal.</p>
+    </main>
 </div>
 
 <!-- ── App wrapper ──────────────────────────────────────────── -->
