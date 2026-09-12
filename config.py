@@ -171,6 +171,15 @@ class Settings:
         _sqlite("orcamento_manutencao"),
     )
 
+    # ── Obsolescência do parque de coletores (/obsolescencia) ───────────
+    # Banco PRÓPRIO; contrato em docs/MDM_OBSOLESCENCIA.md.
+    OBSOLESCENCIA_DATABASE_URL: str = os.getenv(
+        "OBSOLESCENCIA_DATABASE_URL",
+        _sqlite("obsolescencia"),
+    )
+    # Console do MDM de Coletores (Workspace ONE / AirWatch).
+    MDM_BASE_URL: str = os.getenv("MDM_BASE_URL", "https://cn258.awmdm.com")
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
