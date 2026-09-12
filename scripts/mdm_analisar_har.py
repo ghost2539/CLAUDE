@@ -192,6 +192,12 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
             linhas = len(re.findall(r"<tr[\s>]", alvo_linhas, re.I))
             colunas = texto_de_tags(html, "th")
             atual_h = achados.get(chave_h)
+            if atual_h is not None:
+                # Os PARÂMETROS é que revelam a paginação, e variam a cada
+                # chamada: acumula toda variação em vez de guardar só uma.
+                cs = atual_h.setdefault("consultas", [])
+                if p.query and p.query not in cs and len(cs) < 25:
+                    cs.append(p.query)
             if atual_h is None or linhas > atual_h["registros"]:
                 achados[chave_h] = {
                     "tipo": "html", "metodo": metodo, "caminho": p.path,
@@ -201,6 +207,8 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
                     "linhas_tabela": linhas, "colunas": colunas,
                     "bytes": len(html), "coletores": achar_coletores(html),
                     "trecho": html[:1200],
+                    "consultas": (atual_h or {}).get("consultas")
+                                 or ([p.query] if p.query else []),
                 }
             elif atual_h:
                 atual_h["chamadas"] += 1
@@ -224,9 +232,13 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
                 "amostra": podar(corpo, max_amostras),
                 "schema": inferir(corpo),
                 "coletores": achar_coletores(texto_bruto(conteudo)),
+                "consultas": [p.query] if p.query else [],
             }
         else:
             atual["chamadas"] += 1
+            cs = atual.setdefault("consultas", [])
+            if p.query and p.query not in cs and len(cs) < 25:
+                cs.append(p.query)
             # fica com a chamada mais rica: é a que mostra melhor o formato
             if registros > atual["registros"]:
                 atual.update({
@@ -280,8 +292,9 @@ def main() -> int:
     alvos = [a for a in achados if not args.schema or args.schema.lower() in a["caminho"].lower()]
     for a in alvos[:3 if not args.schema else len(alvos)]:
         print(f"\n{'=' * 108}\n{a['metodo']} {a['caminho']}")
-        if a["consulta_exemplo"]:
-            print(f"consulta: ?{a['consulta_exemplo']}")
+        for c in (a.get("consultas") or [a["consulta_exemplo"]]):
+            if c:
+                print(f"consulta: ?{c}")
         print(f"{'-' * 108}")
         if a.get("tipo") == "html":
             print(f"grade HTML — {a['linhas_tabela']} linha(s), {len(a['colunas'])} coluna(s):")
