@@ -127,7 +127,79 @@
         if (!ehAdmin) return '';
         return '<div class="obs-acoes">' +
             '<button id="obs-coletar" class="obs-btn">Atualizar do MDM</button>' +
+            '<button id="obs-cred" class="obs-btn obs-btn--secundario">Credencial do MDM</button>' +
             '<span id="obs-msg" class="obs-msg">' + esc(msg || '') + '</span></div>';
+    }
+
+    /* Formulário da credencial de serviço. Fica aqui, e não só no CLI do
+       cofre, porque exigir acesso ao shell do servidor para ligar o módulo
+       deixaria a entrega pela metade. A senha vai para o cofre e nunca
+       volta: o formulário só informa se está configurada e qual o usuário. */
+    function formCredencial(estado) {
+        var cfg = estado && estado.configurada;
+        return '<div class="obs-card obs-cred-card">' +
+            '<h2>Credencial de serviço do MDM</h2>' +
+            '<p class="obs-sub-card">' +
+                (cfg ? 'Configurada para <b>' + esc(estado.usuario) + '</b>. Salvar de novo substitui.'
+                     : 'Ainda não configurada — sem ela a coleta não roda.') +
+            '</p>' +
+            '<div class="obs-campos">' +
+                '<label>Usuário<input id="obs-cred-user" type="text" autocomplete="off" ' +
+                    'placeholder="renner\\seulogin" value="' + esc((estado && estado.usuario) || '') + '"></label>' +
+                '<label>Senha<input id="obs-cred-senha" type="password" autocomplete="new-password" ' +
+                    'placeholder="a mesma do ServiceNow"></label>' +
+            '</div>' +
+            '<p class="obs-kpi-nota" style="margin:10px 0 14px">' +
+                'É uma conta de <b>serviço</b>, não a sua sessão: a coleta roda sem ninguém logado. ' +
+                'A senha vai cifrada para o cofre e nunca é exibida de volta.</p>' +
+            '<div class="obs-acoes" style="margin:0">' +
+                '<button id="obs-cred-salvar" class="obs-btn">Salvar no cofre</button>' +
+                '<button id="obs-cred-fechar" class="obs-btn obs-btn--secundario">Fechar</button>' +
+                '<span id="obs-cred-msg" class="obs-msg"></span>' +
+            '</div></div>';
+    }
+
+    function abrirCredencial() {
+        fetch('/api/obsolescencia/credencial', { credentials: 'include' })
+            .then(function (r) { return r.ok ? r.json() : {}; })
+            .catch(function () { return {}; })
+            .then(function (estado) {
+                var caixa = document.getElementById('obs-cred-box');
+                if (!caixa) {
+                    caixa = document.createElement('div');
+                    caixa.id = 'obs-cred-box';
+                    alvo.insertBefore(caixa, alvo.firstChild.nextSibling);
+                }
+                caixa.innerHTML = formCredencial(estado);
+                document.getElementById('obs-cred-fechar')
+                    .addEventListener('click', function () { caixa.remove(); });
+                document.getElementById('obs-cred-salvar')
+                    .addEventListener('click', function () { salvarCredencial(caixa); });
+            });
+    }
+
+    function salvarCredencial(caixa) {
+        var u = document.getElementById('obs-cred-user').value.trim();
+        var p = document.getElementById('obs-cred-senha').value;
+        var m = document.getElementById('obs-cred-msg');
+        var b = document.getElementById('obs-cred-salvar');
+        if (!u || !p) { m.textContent = 'Informe usuário e senha.'; return; }
+        b.disabled = true;
+        m.textContent = 'Guardando no cofre…';
+        fetch('/api/obsolescencia/credencial', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usuario: u, senha: p })
+        })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (x) {
+                b.disabled = false;
+                if (!x.ok) throw new Error(x.j.detail || 'Não foi possível guardar.');
+                document.getElementById('obs-cred-senha').value = '';
+                m.textContent = 'Guardada. Já pode usar “Atualizar do MDM”.';
+                setTimeout(function () { caixa.remove(); }, 2200);
+            })
+            .catch(function (e) { b.disabled = false; m.textContent = e.message; });
     }
 
     function pintar(d) {
@@ -174,6 +246,8 @@
     }
 
     function ligarBotao() {
+        var c = document.getElementById('obs-cred');
+        if (c) c.addEventListener('click', abrirCredencial);
         var b = document.getElementById('obs-coletar');
         if (!b) return;
         b.addEventListener('click', function () {
@@ -191,6 +265,8 @@
                 .catch(function (e) {
                     b.disabled = false;
                     if (m) m.textContent = e.message;
+                    // Falta credencial? Abre o formulário em vez de só reclamar.
+                    if (/credencial/i.test(e.message)) abrirCredencial();
                 });
         });
     }
