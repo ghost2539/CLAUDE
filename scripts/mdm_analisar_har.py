@@ -88,6 +88,23 @@ def texto_de_tags(html: str, tag: str) -> list[str]:
     return fora
 
 
+# Assinatura de coletor: diz qual requisição realmente traz a lista.
+RE_COLETOR = re.compile(r"[a-z]{2,6}\d+_coletor", re.I)
+
+
+def achar_coletores(texto: str) -> dict | None:
+    if not texto:
+        return None
+    achados = RE_COLETOR.findall(texto)
+    if not achados:
+        return None
+    unicos = list(dict.fromkeys(a.lower() for a in achados))
+    m = RE_COLETOR.search(texto)
+    ini = max(0, m.start() - 250)
+    return {"total": len(achados), "unicos": len(unicos),
+            "exemplos": unicos[:5], "contexto": texto[ini:m.start() + 450]}
+
+
 def achar_lista(corpo):
     """Acha a lista principal da resposta (Devices, data, results, rows...)."""
     if not isinstance(corpo, (dict, list)):
@@ -179,7 +196,8 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
                     "chamadas": (atual_h["chamadas"] + 1) if atual_h else 1,
                     "registros": linhas, "campo_lista": None,
                     "linhas_tabela": linhas, "colunas": colunas,
-                    "bytes": len(html), "trecho": html[:1200],
+                    "bytes": len(html), "coletores": achar_coletores(html),
+                    "trecho": html[:1200],
                 }
             elif atual_h:
                 atual_h["chamadas"] += 1
@@ -202,6 +220,7 @@ def analisar(har: dict, max_amostras: int) -> list[dict]:
                 "campo_lista": lista[0] if lista else None,
                 "amostra": podar(corpo, max_amostras),
                 "schema": inferir(corpo),
+                "coletores": achar_coletores(texto_bruto(conteudo)),
             }
         else:
             atual["chamadas"] += 1
@@ -250,8 +269,10 @@ def main() -> int:
     print("-" * 112)
     for a in achados:
         desc = a.get("campo_lista") or (f"{len(a['colunas'])} coluna(s)" if a.get("colunas") else "-")
+        col = a.get("coletores")
+        marca = f" ★{col['unicos']} coletores" if col else ""
         print(f"{a['registros']:>9}  {a['chamadas']:>4}  {a.get('tipo','json'):<5}  {a['metodo']:<6}  "
-              f"{desc:<22}  {a['caminho'][:52]}")
+              f"{desc:<22}  {a['caminho'][:52]}{marca}")
 
     alvos = [a for a in achados if not args.schema or args.schema.lower() in a["caminho"].lower()]
     for a in alvos[:3 if not args.schema else len(alvos)]:

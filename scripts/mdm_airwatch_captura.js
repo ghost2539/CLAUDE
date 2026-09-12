@@ -177,6 +177,28 @@
         return fora;
     }
 
+    // Assinatura de coletor: ljr001_coletor, ljrar13001_coletor, etc.
+    // Contar isso em cada resposta diz, sem chutar, QUAL requisição traz a
+    // lista — mesmo que ela venha como JSON dentro de <script>.
+    var RE_COLETOR = /[a-z]{2,6}\d+_coletor/gi;
+
+    function acharColetores(texto) {
+        if (typeof texto !== 'string') return null;
+        var achados = texto.match(RE_COLETOR);
+        if (!achados || !achados.length) return null;
+        var unicos = [];
+        achados.forEach(function (x) {
+            x = x.toLowerCase();
+            if (unicos.indexOf(x) === -1) unicos.push(x);
+        });
+        var pos = texto.search(RE_COLETOR);
+        return {
+            total: achados.length, unicos: unicos.length,
+            exemplos: unicos.slice(0, 5),
+            contexto: texto.slice(Math.max(0, pos - 250), pos + 450)
+        };
+    }
+
     function registrarHtml(metodo, url, status, corpoResp) {
         if (typeof corpoResp !== 'string' || corpoResp.length < 200) return;
         if (corpoResp.indexOf('<') === -1) return;
@@ -196,10 +218,15 @@
                 consulta_exemplo: p.consulta, status: status, chamadas: 1,
                 registros: linhas, campo_lista: null,
                 bytes: corpoResp.length, linhas_tabela: linhas, colunas: colunas,
+                coletores: acharColetores(corpoResp),
                 trecho: corpoResp.slice(0, 1200),
                 visto_em: new Date().toISOString()
             };
-            if (linhas > 1 || colunas.length) {
+            var col = mapa[chave].coletores;
+            if (col) {
+                console.log('%c[MDM] ★ ACHOU ' + col.unicos + ' coletor(es) em ' + metodo + ' ' +
+                    p.caminho, 'color:#fff;background:#0a7;font-weight:bold;padding:2px 6px');
+            } else if (linhas > 1 || colunas.length) {
                 console.log('%c[MDM/html] ' + metodo + ' ' + p.caminho + ' → ' + linhas +
                     ' linha(s), ' + colunas.length + ' coluna(s)', 'color:#a0f');
             }
@@ -211,6 +238,7 @@
                 atual.colunas = colunas;
                 atual.bytes = corpoResp.length;
                 atual.consulta_exemplo = p.consulta;
+                atual.coletores = acharColetores(corpoResp);
                 atual.trecho = corpoResp.slice(0, 1200);
             }
         }
@@ -235,6 +263,7 @@
                 status: status, chamadas: 1, registros: registros,
                 campo_lista: lista ? lista.campo : null,
                 requisicao: podar(jsonSeguro(corpoReq)),
+                coletores: acharColetores(typeof corpoResp === 'string' ? corpoResp : JSON.stringify(corpoResp)),
                 amostra: podar(resp), schema: inferir(resp),
                 visto_em: new Date().toISOString()
             };
@@ -314,6 +343,7 @@
                 tipo: x.tipo || 'json', metodo: x.metodo, caminho: x.caminho,
                 chamadas: x.chamadas, registros: x.registros,
                 campo_lista: x.campo_lista || (x.colunas ? x.colunas.length + ' coluna(s)' : null),
+                COLETORES: x.coletores ? x.coletores.unicos : 0,
                 status: x.status
             };
         }));
