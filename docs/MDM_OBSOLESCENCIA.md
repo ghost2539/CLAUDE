@@ -95,13 +95,13 @@ Capturar a ação de **Export** da lista: é o caminho de 1 requisição para as
 
 O usuário do coletor carrega a loja: `<sigla><numero>_coletor`.
 
-| Sigla | BU | País | Prefixo numérico |
-|---|---|---|---|
+| Sigla | BU | País | Prefixo numérico | |
+|---|---|---|---|---|
 | LJR | Renner | BR | — |
 | CM | Camicado | BR | — |
 | LAS | Ashua | BR | — |
 | YC | Youcom | BR | — |
-| CD | Centro de Distribuição | BR | — |
+| CD | Centro de Distribuição | BR | — | **fora do painel** |
 | LJRAR | Renner Argentina | AR | 13 |
 | LJRUY | Renner Uruguai | UY | 11 |
 
@@ -114,10 +114,13 @@ como a BU `LJR` seguida de `ar13001` — essa era a armadilha do parsing.
 Dois achados que só os dados reais revelaram:
 
 - **`CD`** (Centro de Distribuição) existe no parque (`cd504_coletor`) e não
-  estava na lista original de identificadores. **Confirmar com a área** se o
-  CD entra nos números do painel ou fica de fora.
-- **Sufixo de sequência**: `ljr417_coletor_2` é o segundo coletor da mesma
-  loja. O sufixo é guardado à parte; a loja continua sendo a 417.
+  estava na lista original. Definido pela área: **não é loja, fica fora dos
+  números do painel**. Ainda assim é reconhecido de propósito, com
+  `e_loja = False`, para não cair em "Não identificado" — que é o sinal de
+  dado sujo e precisa continuar significando só isso.
+- **Sufixo de sequência**: `ljr417_coletor_2` é o segundo coletor da loja 417.
+  A regra é direta: `<identificador da BU><número da loja>_coletor`, e o que
+  vier depois não muda a loja.
 O que não bate no padrão vira "Não identificado" em vez de ser descartado:
 sumir com o registro esconderia coletor do painel.
 
