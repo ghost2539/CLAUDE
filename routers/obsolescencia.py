@@ -128,6 +128,12 @@ LIMITE_SEM_VER = 30      # dias sem comunicar
 # Como combinar os critérios. Começa em "todos" (E), como a área definiu,
 # mas fica configurável: com "qualquer" (OU) o número dispara, e a diferença
 # entre os dois é o tamanho do investimento que o painel vai sustentar.
+# Modelos em fim de vida, definidos pela área. A comparação é por conteúdo,
+# sem acento e sem caixa: "EF500" casa com "Bluebird EF500" e "EF500R".
+# ATENÇÃO: NÃO casa com "EF501R", que é o que aparece nas amostras do parque
+# — são strings diferentes. Se o EF501R também for EOL, precisa entrar aqui.
+MODELOS_EOL = ("EF500", "EF500R")
+
 MODO_TODOS = "todos"
 MODO_QUALQUER = "qualquer"
 MODO_PADRAO = MODO_TODOS
