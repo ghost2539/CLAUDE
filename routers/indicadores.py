@@ -463,8 +463,13 @@ def indicadores_page_slash():
 
 
 @router.get("/api/indicadores/dados")
-def indicadores_dados(referencia: str = ""):
-    """Retorna o snapshot mais recente (ou de um mês YYYY-MM), do banco próprio."""
+def indicadores_dados(req: Request, referencia: str = ""):
+    """Retorna o snapshot mais recente (ou de um mês YYYY-MM), do banco próprio.
+
+    Leitura pública, como a tela — mas com limite de taxa: sem ele, a rota
+    era o único ponto do módulo sem qualquer contenção."""
+    from core.security import check_rate_limit
+    check_rate_limit(req, "api")
     snap = db.obter_snapshot(referencia) if referencia else db.ultimo_snapshot()
     return {
         "snapshot": snap,
@@ -548,10 +553,15 @@ def indicadores_diag_backlog(req: Request, field: str = ""):
 
 
 @router.get("/api/indicadores/diag-slas")
-def indicadores_diag_slas(like: str = ""):
+def indicadores_diag_slas(req: Request, like: str = ""):
     """Diagnóstico: lista os NOMES de ANS (task_sla) e a contagem de cada um,
     para confirmarmos o filtro correto (o que tem 'SPARE' no nome). Use
-    ?like=SPARE para restringir, ou vazio para ver todos ligados à fila."""
+    ?like=SPARE para restringir, ou vazio para ver todos ligados à fila.
+
+    Somente ADMIN, como o diag-backlog: expõe a estrutura da fila no
+    ServiceNow e consulta com a conta de serviço."""
+    from core.security import require_permission
+    require_permission(req, "parametros", "admin")
     termo = like or SLA_NAME_LIKE
     q = "sla.nameLIKE" + termo if termo else f"task.assignment_group.name={QUEUE}"
     try:
@@ -571,7 +581,16 @@ def indicadores_diag_slas(like: str = ""):
 
 @router.post("/api/indicadores/atualizar")
 def indicadores_atualizar(req: Request, referencia: str = ""):
-    """Recalcula os indicadores no ServiceNow (conta de serviço) e grava snapshot."""
+    """Recalcula os indicadores no ServiceNow (conta de serviço) e grava snapshot.
+
+    A LEITURA desta tela é pública de propósito; esta rota não é. Ela consulta
+    o ServiceNow com a conta de serviço e grava snapshot — aberta, qualquer um
+    sem login consumiria a cota da conta de serviço e poluiria o histórico.
+    O agendador interno chama `_calcular_tudo()` direto, sem passar por aqui.
+    """
+    from core.security import get_session, check_rate_limit
+    check_rate_limit(req, "api")
+    get_session(req)
     ref = referencia or datetime.now().strftime("%Y-%m")
     dados = _calcular_tudo()
     if all(dados.get(k) is None for k in ("kpis", "tratado_por_mes", "sla")):
