@@ -43,13 +43,17 @@ BUS: dict[str, dict] = {
     "CM":    {"nome": "Camicado",         "pais": "BR", "prefixo": ""},
     "LAS":   {"nome": "Ashua",            "pais": "BR", "prefixo": ""},
     "YC":    {"nome": "Youcom",           "pais": "BR", "prefixo": ""},
+    # Apareceu nos dados reais (cd504_coletor) e na árvore de organização
+    # do MDM; não estava na lista original de identificadores.
+    "CD":    {"nome": "Centro de Distribuição", "pais": "BR", "prefixo": ""},
     "LJRAR": {"nome": "Renner Argentina", "pais": "AR", "prefixo": "13"},
     "LJRUY": {"nome": "Renner Uruguai",   "pais": "UY", "prefixo": "11"},
 }
 
 # Letras e dígitos são separados pela própria regex, então "ljrar13001"
 # nunca é confundido com a BU "LJR" seguida de "ar13001".
-_RE_COLETOR = re.compile(r"^([a-z]+)(\d+)_coletor\b", re.I)
+# O sufixo opcional cobre o segundo coletor da mesma loja: ljr417_coletor_2.
+_RE_COLETOR = re.compile(r"^([a-z]+)(\d+)_coletor(?:[_-](\S+))?$", re.I)
 
 
 def identificar_loja(usuario: str) -> dict:
@@ -63,14 +67,15 @@ def identificar_loja(usuario: str) -> dict:
     m = _RE_COLETOR.match(bruto)
     if not m:
         return {"reconhecido": False, "bu": "", "bu_nome": "Não identificado",
-                "pais": "", "loja": "", "usuario": bruto}
+                "pais": "", "loja": "", "sufixo": "", "usuario": bruto}
 
     sigla = m.group(1).upper()
     digitos = m.group(2)
+    sufixo = m.group(3) or ""
     info = BUS.get(sigla)
     if not info:
         return {"reconhecido": False, "bu": "", "bu_nome": "Não identificado",
-                "pais": "", "loja": digitos, "usuario": bruto}
+                "pais": "", "loja": digitos, "sufixo": sufixo, "usuario": bruto}
 
     loja = digitos
     prefixo = info["prefixo"]
@@ -79,7 +84,7 @@ def identificar_loja(usuario: str) -> dict:
         loja = digitos[len(prefixo):]
 
     return {"reconhecido": True, "bu": sigla, "bu_nome": info["nome"],
-            "pais": info["pais"], "loja": loja, "usuario": bruto}
+            "pais": info["pais"], "loja": loja, "sufixo": sufixo, "usuario": bruto}
 
 
 # ── Tags ──────────────────────────────────────────────────────────

@@ -206,8 +206,11 @@
         var p = partes(url);
         metodo = String(metodo || 'GET').toUpperCase();
         var chave = metodo + ' ' + p.caminho + ' [html]';
-        var corpoTab = corpoResp.match(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/i);
-        var alvoLinhas = corpoTab ? corpoTab[1] : corpoResp;
+        // Somar TODOS os <tbody>: o primeiro da página costuma ser um
+        // template vazio, e contar só ele dava 0 numa grade cheia.
+        var corpos = corpoResp.match(/<tbody\b[^>]*>[\s\S]*?<\/tbody>/gi);
+        var alvoLinhas = corpos ? corpos.join('')
+            : corpoResp.replace(/<thead\b[^>]*>[\s\S]*?<\/thead>/gi, '');
         var linhas = (alvoLinhas.match(/<tr[\s>]/gi) || []).length;
         var colunas = textoDeTags(corpoResp, 'th');
 
