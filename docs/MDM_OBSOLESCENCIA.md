@@ -71,3 +71,45 @@ O coletor é **somente leitura**. Nunca chamar `Devices/DeleteDevice`,
 
 Capturar a ação de **Export** da lista: é o caminho de 1 requisição para as
 15.8 mil linhas, em vez de paginar ~316 telas de HTML.
+
+## Identidade da loja e da BU
+
+O usuário do coletor carrega a loja: `<sigla><numero>_coletor`.
+
+| Sigla | BU | País | Prefixo numérico |
+|---|---|---|---|
+| LJR | Renner | BR | — |
+| CM | Camicado | BR | — |
+| LAS | Ashua | BR | — |
+| YC | Youcom | BR | — |
+| LJRAR | Renner Argentina | AR | 13 |
+| LJRUY | Renner Uruguai | UY | 11 |
+
+Argentina e Uruguai trazem um prefixo numérico fixo que **não** faz parte do
+número da loja: `ljrar13001_coletor` é a loja 001, não a 13001.
+
+A separação letras/dígitos é feita por regex, então `ljrar13001` nunca é lido
+como a BU `LJR` seguida de `ar13001` — essa era a armadilha do parsing.
+O que não bate no padrão vira "Não identificado" em vez de ser descartado:
+sumir com o registro esconderia coletor do painel.
+
+## Tags acompanhadas
+
+Só três, contadas separadamente: **Inatividade**, **Manutenção**,
+**Movimentação**. A comparação é por conteúdo, sem acento e sem caixa, então
+"Em Manutenção - CD" conta como Manutenção. Qualquer outra tag é ignorada.
+
+## Recortes que o painel deve entregar
+
+1. Coletores por Loja / BU
+2. Quantos dentro dos critérios de obsolescência
+3. Os mais antigos do parque
+4. Sem comunicar há mais de 30 dias
+5. Por tag (Inatividade, Manutenção, Movimentação), separadamente
+
+## Em aberto
+
+- **Regra E ou OU?** Implementado como os três critérios juntos (E), conforme
+  o enunciado. Muda muito o número — com OU, o total dispara.
+- **Data de aquisição**: o MDM só tem a inscrição. Falta a origem real.
+- **Lista de modelos EOL**: não vem do MDM, precisa ser mantida no portal.
