@@ -200,14 +200,85 @@ série e para enriquecer o cadastro:
 | `GET /Device/Details/Content/{id}` | conteúdo (50) |
 | `POST /Device/Details/ReloadTags?deviceId=` | tags do aparelho |
 
+## Contrato confirmado (diagnóstico de 12/09/2026)
+
+### Varredura do parque
+
+    GET /AirWatch/Device/List/Search?Page=N&Sort=DeviceFriendlyName&Order=Ascending
+    X-Requested-With: XMLHttpRequest
+
+- **`Page` é BASE ZERO**: `Page=0` é a primeira página. Confirmado pelo
+  próprio paginador do HTML, que marca `data-page="0"` no botão "1".
+  `Page=2` devolveu os itens 201-300.
+- 100 por página → **159 páginas** para os 15.819.
+- **Ordenar por nome é obrigatório.** O padrão é `Sort=LastPingDate`
+  decrescente, e a lista se reordena sozinha enquanto a varredura roda: sem
+  ordem estável a coleta repete uns coletores e pula outros.
+- O progresso vem do rodapé `Items X - Y of Z`, não da contagem de linhas.
+- `Context.Size` é o campo de tamanho de página, mas rejeitou 500 e caiu
+  para 50. Não é necessário: com `Page` e 100 por página a varredura fecha.
+
+### Leitura de uma linha
+Pelos atributos, nunca pela posição da coluna (o usuário pode reordenar):
+
+| Campo | Onde |
+|---|---|
+| id do aparelho | `data-view-url="…/Summary/691477"` |
+| nome | `data-property="FriendlyName"` → `id="FriendlyName"` |
+| usuário / loja | `class="PartialPath"` → último trecho (`ljr234_coletor`) |
+| caminho da organização | `data-ats-id="og-path"` |
+| plataforma / modelo / versão | `data-ats-id="platform"` / `display-model"` / `os-version"` |
+| último contato | `data-property="LastPingDate"` → `data-ats-id="device-last-seen"` |
+| propriedade / gerenciamento | `data-ats-id="ownership"` / `"management"` |
+| conformidade | `data-property="ComplianceStatusName"` |
+| ações permitidas | `data-action-names` (traz `ManageTags`, `DeleteDevice`) |
+
+Implementado e testado contra HTML real em `integracoes/mdm_airwatch.py`.
+
+### Busca
+`SearchText` filtra (15.819 → 53 buscando `ljr234_coletor`). **Busca por
+série ainda não foi provada** — o diagnóstico não achou uma série de verdade
+na grade para testar; o que ele pegou era o id do tenant.
+
+### Escrita de tag — contrato completo, obtido sem escrever
+
+    GET  /AirWatch/Devices/TagAssignment/{id}    → devolve o formulário
+    POST /AirWatch/Devices/ManageTagsBulkDevices
+         __RequestVerificationToken = <token do GET acima>
+         SelectedDeviceIds          = 691477
+         AddedAssignedTags          = <ids>
+         RemovedAssignedTags        = <ids>
+
+**Tem anti-CSRF.** Não dá para postar direto: é preciso buscar o formulário
+antes e reaproveitar o token daquela resposta.
+
+### Data de aquisição: confirmado que vem do EBS
+Os atributos customizados do MDM são configuração do agente
+(`androidAgent.logLevel`, `app-group`, `ca-value`) — não têm data de compra
+nem patrimônio. A idade real do ativo só sai do EBS.
+
+### As tags reais — decisão pendente
+A comparação por conteúdo pega mais do que três. Existem no MDM:
+
+| Tag | id |
+|---|---|
+| Manutenção | 11607 |
+| Em manutenção | 11644 |
+| Backlog de manutenção | 11643 |
+| Manutenção de Bloqueio | 11640 |
+| Bloqueio - Inatividade N1 | 11616 |
+| Bloqueio - Inatividade +14 | 11765 |
+| Bloqueio - Movimentação N1 | 11615 |
+| Bloqueio - Movimentação N2 | 11635 |
+| HML BLOQUEIO MOVIMENTAÇÃO | 11768 |
+
+Contar por conteúdo joga as nove em três baldes e infla os números. Falta a
+área dizer se o painel conta **só as tags exatas** ou **todas que contenham
+o nome**.
+
 ## Próximo passo
 
-Falta capturar, e a captura agora guarda corpo de requisição:
-
-1. **Paginação** de `/Device/List/Search` (parâmetro de página / page size).
-2. **Busca por série** — qual endpoint e qual parâmetro.
-3. **Corpo do `ManageTagsBulkDevices`** ao inserir e ao remover uma tag,
-   para saber como identificar aparelho e tag na chamada.
+Construir a coleta sob demanda usando o contrato acima.
 
 ## Identidade da loja e da BU
 
