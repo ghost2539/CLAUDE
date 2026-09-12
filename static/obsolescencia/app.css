@@ -226,3 +226,17 @@
 .obs-btn[disabled] { opacity: .5; cursor: default; }
 .obs-btn--secundario { background: transparent; border: 1px solid var(--border-light); color: var(--text-secondary); }
 .obs-msg { font-size: .8rem; color: var(--text-secondary); }
+
+/* ── Credencial ───────────────────────────────────────────────── */
+.obs-cred-card { max-width: 620px; margin-bottom: 20px; border-left: 3px solid var(--color-gold); }
+.obs-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.obs-campos label { display: flex; flex-direction: column; gap: 5px; font-size: .8rem; color: var(--text-secondary); }
+.obs-campos input {
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border-light);
+    border-radius: 7px;
+    padding: 9px 11px;
+    color: var(--text-primary);
+    font-size: .88rem;
+}
+.obs-campos input:focus { outline: none; border-color: var(--color-primary); }
