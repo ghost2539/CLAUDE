@@ -38,16 +38,17 @@ router = APIRouter()
 #   ljruy11001_coletor -> Uruguai,  loja 001
 # A ordem aqui não importa para o casamento (a regex separa letras de
 # dígitos), mas a lista é a fonte única das BUs válidas.
+# `e_loja` decide quem entra nos números do painel. O CD é reconhecido de
+# propósito — para não cair em "Não identificado", que é o sinal de dado
+# sujo —, mas fica fora das contagens por loja/BU: não é loja.
 BUS: dict[str, dict] = {
-    "LJR":   {"nome": "Renner",           "pais": "BR", "prefixo": ""},
-    "CM":    {"nome": "Camicado",         "pais": "BR", "prefixo": ""},
-    "LAS":   {"nome": "Ashua",            "pais": "BR", "prefixo": ""},
-    "YC":    {"nome": "Youcom",           "pais": "BR", "prefixo": ""},
-    # Apareceu nos dados reais (cd504_coletor) e na árvore de organização
-    # do MDM; não estava na lista original de identificadores.
-    "CD":    {"nome": "Centro de Distribuição", "pais": "BR", "prefixo": ""},
-    "LJRAR": {"nome": "Renner Argentina", "pais": "AR", "prefixo": "13"},
-    "LJRUY": {"nome": "Renner Uruguai",   "pais": "UY", "prefixo": "11"},
+    "LJR":   {"nome": "Renner",           "pais": "BR", "prefixo": "",   "e_loja": True},
+    "CM":    {"nome": "Camicado",         "pais": "BR", "prefixo": "",   "e_loja": True},
+    "LAS":   {"nome": "Ashua",            "pais": "BR", "prefixo": "",   "e_loja": True},
+    "YC":    {"nome": "Youcom",           "pais": "BR", "prefixo": "",   "e_loja": True},
+    "LJRAR": {"nome": "Renner Argentina", "pais": "AR", "prefixo": "13", "e_loja": True},
+    "LJRUY": {"nome": "Renner Uruguai",   "pais": "UY", "prefixo": "11", "e_loja": True},
+    "CD":    {"nome": "Centro de Distribuição", "pais": "BR", "prefixo": "", "e_loja": False},
 }
 
 # Letras e dígitos são separados pela própria regex, então "ljrar13001"
@@ -59,23 +60,28 @@ _RE_COLETOR = re.compile(r"^([a-z]+)(\d+)_coletor(?:[_-](\S+))?$", re.I)
 def identificar_loja(usuario: str) -> dict:
     """Extrai BU e número da loja do usuário do coletor.
 
-    Devolve sempre um dicionário; `reconhecido` diz se o nome bate com o
-    padrão e com uma BU conhecida. O que não bate vira "não identificado"
-    em vez de ser descartado em silêncio — some do painel se descartar.
+    Devolve sempre um dicionário. `reconhecido` diz se o nome bate com o
+    padrão e com uma BU conhecida; `e_loja` diz se entra nos números do
+    painel — o CD é reconhecido mas não é loja, então fica de fora.
+
+    O que não bate vira "não identificado" em vez de ser descartado em
+    silêncio: coletor que some do painel é coletor que ninguém troca.
     """
     bruto = (usuario or "").strip()
     m = _RE_COLETOR.match(bruto)
     if not m:
-        return {"reconhecido": False, "bu": "", "bu_nome": "Não identificado",
-                "pais": "", "loja": "", "sufixo": "", "usuario": bruto}
+        return {"reconhecido": False, "e_loja": False, "bu": "",
+                "bu_nome": "Não identificado", "pais": "", "loja": "",
+                "sufixo": "", "usuario": bruto}
 
     sigla = m.group(1).upper()
     digitos = m.group(2)
     sufixo = m.group(3) or ""
     info = BUS.get(sigla)
     if not info:
-        return {"reconhecido": False, "bu": "", "bu_nome": "Não identificado",
-                "pais": "", "loja": digitos, "sufixo": sufixo, "usuario": bruto}
+        return {"reconhecido": False, "e_loja": False, "bu": "",
+                "bu_nome": "Não identificado", "pais": "", "loja": digitos,
+                "sufixo": sufixo, "usuario": bruto}
 
     loja = digitos
     prefixo = info["prefixo"]
@@ -83,8 +89,9 @@ def identificar_loja(usuario: str) -> dict:
     if prefixo and digitos.startswith(prefixo) and len(digitos) > len(prefixo):
         loja = digitos[len(prefixo):]
 
-    return {"reconhecido": True, "bu": sigla, "bu_nome": info["nome"],
-            "pais": info["pais"], "loja": loja, "sufixo": sufixo, "usuario": bruto}
+    return {"reconhecido": True, "e_loja": info["e_loja"], "bu": sigla,
+            "bu_nome": info["nome"], "pais": info["pais"], "loja": loja,
+            "sufixo": sufixo, "usuario": bruto}
 
 
 # ── Tags ──────────────────────────────────────────────────────────
