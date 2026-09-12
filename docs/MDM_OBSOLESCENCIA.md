@@ -158,6 +158,34 @@ Por isso:
 4. **Confirmação explícita** na tela antes de deletar.
 5. A rotina noturna não tem acesso a esse caminho.
 
+## O console exige cabeçalho de AJAX
+
+`/Device/List/Search` é ASP.NET MVC e olha o `X-Requested-With` para decidir
+o que devolver:
+
+| Requisição | Resposta |
+|---|---|
+| sem `X-Requested-With` | a **página inteira** do console (3,2 MB) — e **todo parâmetro é ignorado** |
+| com `X-Requested-With: XMLHttpRequest` | o fragmento da grade, e aí os parâmetros valem |
+
+Isso custou uma rodada inteira de investigação: sem o cabeçalho, 28
+parâmetros diferentes devolveram exatamente o mesmo resultado, o que parecia
+"a paginação é estado de sessão" quando na verdade a grade nem estava sendo
+chamada. O coletor **tem que** mandar esse cabeçalho.
+
+Sinal de que veio a coisa certa: o corpo contém `DeviceGrid` e **não** contém
+`<html`.
+
+## Modelos em EOL
+
+Definido pela área: **EF500**.
+
+⚠️ **A conferir antes de valer:** o parque tem `Bluebird EF501R`, e a string
+"EF500" não está contida em "EF501R". Do jeito que a comparação é feita hoje
+(por conteúdo), EF501R **não** seria marcado como EOL. Se a intenção é que a
+família EF500 inclua o EF501R, a lista precisa dizer isso explicitamente —
+senão o painel devolve zero obsoletos e ninguém percebe o motivo.
+
 ## Endpoints do detalhe de um coletor
 
 Vieram de brinde numa captura, ao abrir um aparelho. Úteis para a busca por
