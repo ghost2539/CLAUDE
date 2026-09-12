@@ -103,8 +103,13 @@ parsing virar deleção em massa às 3h da manhã, sem ninguém olhando.
 
 ## Arquitetura definida
 
-### Coleta noturna
-Roda de madrugada, lê o parque inteiro e grava no banco próprio do módulo.
+### Coleta — sob demanda primeiro, agendada depois
+**Decisão da área: nada de madrugada neste primeiro momento.** A coleta roda
+por botão, com alguém acompanhando, até o comportamento estar conhecido —
+volume real, tempo de execução, estabilidade da sessão. O agendamento entra
+depois, e a rotina já nasce preparada para ser chamada por horário.
+
+Quando rodar, lê o parque inteiro e grava no banco próprio do módulo.
 A cada rodada, compara com o que já existe:
 
 - **coletor novo** → entra na base;
@@ -152,6 +157,20 @@ Por isso:
    do MDM. Independente do log do próprio MDM.
 4. **Confirmação explícita** na tela antes de deletar.
 5. A rotina noturna não tem acesso a esse caminho.
+
+## Endpoints do detalhe de um coletor
+
+Vieram de brinde numa captura, ao abrir um aparelho. Úteis para a busca por
+série e para enriquecer o cadastro:
+
+| Endpoint | O que traz |
+|---|---|
+| `GET /Device/Details/Summary/{id}` | página do aparelho (modelo, usuário, versão) |
+| `POST /Devices/QueryAll/{id}` | força o aparelho a reportar |
+| `GET /Devices/SearchCustomAttributesGrid` | atributos customizados (23) — **ver se guardam patrimônio/aquisição** |
+| `GET /Devices/DeviceApplicationSearch` | apps instalados (43) |
+| `GET /Device/Details/Content/{id}` | conteúdo (50) |
+| `POST /Device/Details/ReloadTags?deviceId=` | tags do aparelho |
 
 ## Próximo passo
 
