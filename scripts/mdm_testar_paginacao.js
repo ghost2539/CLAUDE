@@ -23,17 +23,37 @@
     'use strict';
 
     var BASE = '/AirWatch/Device/List/Search';
-    var RE = /[a-z]{2,6}\d+_coletor/gi;
+    // Cada linha da grade tem um link para o detalhe com o id do aparelho.
+    // Contar isso é contar LINHA; contar usuário não serve — o mesmo usuário
+    // atende vários aparelhos e ainda aparece nos filtros do fragmento.
+    var RE = /Device\/Details\/Summary\/(\d+)/gi;
     var PAUSA = 350;          // respira entre chamadas, para não martelar
     var resultado = { base: null, paginacao: [], tamanho: [], busca: [] };
 
     function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
     function conjunto(txt) {
-        var m = txt.match(RE) || [];
-        var s = {};
-        m.forEach(function (x) { s[x.toLowerCase()] = 1; });
+        var s = {}, m;
+        RE.lastIndex = 0;
+        while ((m = RE.exec(txt)) !== null) { s[m[1]] = 1; }
         return Object.keys(s);
+    }
+
+    // O rodapé da grade diz "Items 1 - 50 of 15819". Este é o sinal EXATO:
+    // não depende de quais aparelhos vieram, e a lista é ordenada por Last
+    // Seen e se reordena sozinha entre chamadas — comparar conjuntos mente.
+    var RE_ITENS = /Items?\s+([\d.,]+)\s*[-–]\s*([\d.,]+)\s+of\s+([\d.,]+)/i;
+
+    function faixa(txt) {
+        var m = txt.match(RE_ITENS);
+        if (!m) return null;
+        var n = function (x) { return parseInt(String(x).replace(/[.,]/g, ''), 10); };
+        return { de: n(m[1]), ate: n(m[2]), total: n(m[3]) };
+    }
+
+    function faixaTexto(f) {
+        return f ? (f.de + '-' + f.ate + ' de ' + f.total + ' (' + (f.ate - f.de + 1) + ' por página)')
+                 : 'rodapé não encontrado';
     }
 
     // O console é ASP.NET MVC: sem o cabeçalho de AJAX ele devolve a PÁGINA
@@ -47,7 +67,7 @@
         var t = await r.text();
         return {
             qs: qs || '(sem parâmetro)', status: r.status,
-            itens: conjunto(t), bytes: t.length,
+            itens: conjunto(t), bytes: t.length, faixa: faixa(t),
             fragmento: t.indexOf('DeviceGrid') !== -1 && t.indexOf('<html') === -1
         };
     }
@@ -74,7 +94,23 @@
         console.log('%c[MDM] Testando paginação e busca. Aguarde…', 'color:#0a7;font-weight:bold');
 
         var base = await pegar('');
+        await esperar(PAUSA);
+        var base2 = await pegar('');        // mesma chamada, de novo
+        var deriva = base.itens.length
+            ? Math.round(100 * (1 - sobreposicao(base.itens, base2.itens) / base.itens.length))
+            : 0;
         resultado.base = base;
+        resultado.deriva_pct = deriva;
+        console.log('%cRuído de fundo: duas chamadas idênticas diferem em ' + deriva +
+            '% — a grade é ordenada por Last Seen e se move sozinha, por isso ' +
+            'a conclusão usa o rodapé, não os aparelhos.',
+            deriva > 20 ? 'color:#c60' : 'color:#888');
+        console.log('%cRodapé da base: ' + faixaTexto(base.faixa),
+            base.faixa ? 'color:#06c;font-weight:bold' : 'color:#c00;font-weight:bold');
+        if (!base.faixa) {
+            console.log('%c[MDM] Não achei o rodapé "Items X - Y of Z". A conclusão ' +
+                'abaixo cai para contagem de linhas, que é menos confiável.', 'color:#c60');
+        }
         console.log('%cBase: ' + base.itens.length + ' coletor(es), ' +
             Math.round(base.bytes / 1024) + ' KB, fragmento da grade: ' + base.fragmento,
             'color:#06c;font-weight:bold');
@@ -94,39 +130,51 @@
         for (var i = 0; i < PAGINA.length; i++) {
             await esperar(PAUSA);
             var r = await pegar(PAGINA[i]);
-            var mudou = !iguais(base.itens, r.itens);
-            var comuns = sobreposicao(base.itens, r.itens);
-            resultado.paginacao.push({ qs: r.qs, itens: r.itens.length, comuns: comuns, mudou: mudou });
-            console.log((mudou && comuns === 0 ? '%c★ ' : '%c  ') + r.qs +
-                ' → ' + r.itens.length + ' coletor(es), ' + comuns + ' em comum com a base' +
-                (mudou && comuns === 0 ? '   <<< PAGINOU' : ''),
-                mudou && comuns === 0 ? 'color:#fff;background:#0a7;font-weight:bold' : 'color:#888');
+            // Paginou = o rodapé começa em outro item. Sinal exato.
+            var paginou = !!(base.faixa && r.faixa && r.faixa.de > base.faixa.de);
+            resultado.paginacao.push({ qs: r.qs, linhas: r.itens.length,
+                                       faixa: r.faixa, paginou: paginou });
+            console.log((paginou ? '%c★ ' : '%c  ') + r.qs + ' → ' + faixaTexto(r.faixa) +
+                (paginou ? '   <<< PAGINOU' : ''),
+                paginou ? 'color:#fff;background:#0a7;font-weight:bold' : 'color:#888');
         }
 
         console.log('%c── Qual parâmetro muda o tamanho da página? ──', 'color:#666');
         for (var j = 0; j < TAMANHO.length; j++) {
             await esperar(PAUSA);
             var t = await pegar(TAMANHO[j]);
-            var cresceu = t.itens.length > base.itens.length;
-            resultado.tamanho.push({ qs: t.qs, itens: t.itens.length, cresceu: cresceu });
-            console.log((cresceu ? '%c★ ' : '%c  ') + t.qs + ' → ' + t.itens.length +
-                ' coletor(es)' + (cresceu ? '   <<< AUMENTOU' : ''),
+            // Aumentou = o rodapé passa a cobrir mais itens por página.
+            var porPag = t.faixa ? (t.faixa.ate - t.faixa.de + 1) : t.itens.length;
+            var porPagBase = base.faixa ? (base.faixa.ate - base.faixa.de + 1) : base.itens.length;
+            var cresceu = porPag >= porPagBase * 1.6;
+            resultado.tamanho.push({ qs: t.qs, por_pagina: porPag, faixa: t.faixa, cresceu: cresceu });
+            console.log((cresceu ? '%c★ ' : '%c  ') + t.qs + ' → ' + faixaTexto(t.faixa) +
+                (cresceu ? '   <<< AUMENTOU' : ''),
                 cresceu ? 'color:#fff;background:#0a7;font-weight:bold' : 'color:#888');
         }
 
         // Busca por série: usa uma série real, tirada da própria base.
         console.log('%c── Qual parâmetro busca por série? ──', 'color:#666');
-        var alvo = base.itens[0];
+        // Pega um usuário real do próprio fragmento para usar como alvo.
+        var htmlBase = await (await fetch(BASE, { credentials: 'include',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' } })).text();
+        var mu = htmlBase.match(/[a-z]{2,6}\d+_coletor/i);
+        var alvo = mu ? mu[0] : '';
+        if (!alvo) { console.log('   (não achei um alvo para buscar)'); return; }
         console.log('   (procurando por um coletor conhecido: ' + alvo + ')');
         var BUSCA = ['SearchText=', 'searchText=', 'searchtext=', 'search=',
                      'Search=', 'SerialNumber=', 'serialNumber=', 'Serial='];
         for (var k = 0; k < BUSCA.length; k++) {
             await esperar(PAUSA);
             var b = await pegar(BUSCA[k] + encodeURIComponent(alvo));
-            var filtrou = b.itens.length > 0 && b.itens.length < base.itens.length;
-            resultado.busca.push({ qs: BUSCA[k], itens: b.itens.length, filtrou: filtrou });
-            console.log((filtrou ? '%c★ ' : '%c  ') + BUSCA[k] + '… → ' + b.itens.length +
-                ' coletor(es)' + (filtrou ? '   <<< FILTROU' : ''),
+            // Filtrar de verdade é cair para pouquíssimas linhas, não oscilar.
+            // Filtrou = o TOTAL do rodapé despencou (não o que veio na página).
+            var totalB = b.faixa ? b.faixa.total : b.itens.length;
+            var totalBase = base.faixa ? base.faixa.total : base.itens.length;
+            var filtrou = totalB > 0 && totalB < totalBase * 0.5;
+            resultado.busca.push({ qs: BUSCA[k], total: totalB, faixa: b.faixa, filtrou: filtrou });
+            console.log((filtrou ? '%c★ ' : '%c  ') + BUSCA[k] + '… → ' + faixaTexto(b.faixa) +
+                (filtrou ? '   <<< FILTROU' : ''),
                 filtrou ? 'color:#fff;background:#0a7;font-weight:bold' : 'color:#888');
         }
 
