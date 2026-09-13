@@ -1,8 +1,21 @@
-# Trilha do Ativo e Separação
+# Ciclo do Ativo — contrato dos módulos
 
-Contrato dos dois módulos que implementam o desenho de processos da área.
-A Trilha é o núcleo — mede tempo. A Separação é o primeiro processo montado
-em cima dela.
+Os módulos que implementam o desenho de processos da área. A Trilha é o
+núcleo — mede tempo. Os demais são processos montados em cima dela.
+
+| Cód. | Processo | Módulo |
+|---|---|---|
+| A01 | Recebimento (entrada na trilha) | gancho em `routers/recebimento.py` |
+| A02 A03 A04 | Bancadas de triagem e reparo | `bancada` |
+| A05 A14 | Assistência externa e devolução | `externo` |
+| A06 A07 A08.2 | Configuração, montagem, internalização | `preparacao` |
+| A09 a A13 | Descaracterização, lote, venda, descarte, doação | `destinacao` |
+| A15 | Separação e expedição | `separacao` |
+| A20 | Atendimento a chamados | `atendimento` |
+| T1 T2 | Trilha do ativo e Torre de Controle | `torre` |
+
+Cada um tem banco próprio, carrega isolado no `main.py`, e nenhum escreve no
+banco de outro. O que compartilham é o núcleo e o calendário.
 
 ---
 
@@ -165,3 +178,46 @@ Separação que usa o calendário:
 
 Cada linha do mapa de atendimento mostra a consulta que vai de fato para o
 ServiceNow. Parâmetro que não deixa ver o que produz só serve depois do erro.
+
+
+---
+
+## 4. Como um estado novo entra no sistema
+
+O ciclo é uma máquina de estados distribuída: cada módulo conhece as suas
+entradas e saídas, e o núcleo não conhece nenhuma. Para acrescentar uma etapa:
+
+1. Dê nome ao estado em `db/trilha.py`, no `ROTULO_ESTADO`. Sem isso o painel
+   mostra `AG_COISA` em vez de "Aguardando coisa".
+2. Diga a que frente ele pertence em `routers/torre.py`, no `FRENTE_DA_ETAPA`.
+3. No módulo que produz o estado, chame `mover()` com o `processo` certo.
+4. No módulo que o consome, leia a fila pelos intervalos abertos naquele
+   estado — é assim que `bancada`, `preparacao`, `destinacao` e `externo`
+   montam as filas deles.
+
+O passo 4 é o que evita fila fantasma: um estado que ninguém lê vira ativo
+parado para sempre, e foi exatamente o que aconteceu com `AG_CONFIGURACAO` e
+`AG_ASSISTENCIA` entre um commit e outro.
+
+---
+
+## 5. O que ainda não existe
+
+| Cód. | Processo | Situação |
+|---|---|---|
+| A16 | Projetos de loja (inauguração e reforma) | a aba de Inauguração usa a tela de separação; falta o item de projeto como token e os estados de exceção |
+| A17 | Logística reversa | falta o token Coleta e a comparação esperado × recebido |
+| A18 A19 | Inventário e regularização | não existe |
+| G01 a G14 | Bloco de gestão | só G02 (obsolescência de coletores) existe |
+| T3 | Ponte ServiceNow | leitura e escrita existem; falta fila de reprocessamento na falha |
+| T4 | Notificações | o canal de e-mail existe (`core/notificador.py`); falta a notificação por pedido |
+| T5 | Perfis | os cinco níveis existem; falta o comportamento de ADMIN com justificativa nas telas |
+
+Também em aberto, e que dependem de decisão fora do código:
+
+- **Embalagem, NF e etiqueta** entre separar e despachar (`EX_EMBALAGEM`,
+  `EX_FISCAL`, `AG_POSTAGEM`). Hoje o envio é um passo só, porque o portal não
+  emite NF nem etiqueta.
+- **Retenção dos anexos** de conformidade em `data/uploads/destinacao`. Estão
+  no disco do servidor, com backup do servidor. Documento que a empresa
+  apresenta em questionamento provavelmente merece política própria.
