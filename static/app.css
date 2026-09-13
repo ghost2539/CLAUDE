@@ -1061,3 +1061,10 @@ textarea:focus-visible, input[type="checkbox"]:focus-visible {
 .sidebar-grupo.fechado .sidebar-grupo-titulo::after { transform: rotate(-90deg); }
 .sidebar-grupo.fechado .sidebar-item { display: none !important; }
 .sidebar-bottom .sidebar-item { padding-top: 4px; padding-bottom: 4px; }
+
+/* ── Torre · Tendência (colunas por dia) ───────────────────────── */
+.torre-colunas { display: flex; align-items: flex-end; gap: 3px; height: 140px; overflow-x: auto; padding-bottom: 18px; position: relative; }
+.torre-coluna { flex: 1 0 14px; max-width: 28px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+.torre-coluna-pista { position: relative; flex: 1; display: flex; align-items: flex-end; }
+.torre-coluna-fita { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px 2px 0 0; min-height: 1px; }
+.torre-coluna-rotulo { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 9.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }

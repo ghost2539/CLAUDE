@@ -382,17 +382,43 @@ python3 scripts/verificar_inventario.py
 
 ---
 
-## 3. Parâmetros
+## 3. Configuração
 
-**Parâmetros → Separação** (admin) reúne os dois módulos, porque hoje é a
-Separação que usa o calendário:
+**Configuração → Ciclo do ativo** (admin) reúne o que molda o ciclo inteiro:
 
 - estoque, reserva, envio, chamado e prazos — do A15;
-- **calendário de expediente** — do núcleo, vale para todos os módulos.
+- prazos dos módulos (projetos, reversa, inventário, regularização, bancada,
+  preparação, destinação, assistência, atendimento, obsolescência);
+- **metas por etapa** — horas úteis por estado (tabela `trl_meta`);
+- **calendário de expediente** — do núcleo, vale para todos os módulos,
+  incluindo o horário da foto diária da Torre (`snapshot_hora`).
 
 Cada linha do mapa de atendimento mostra a consulta que vai de fato para o
 ServiceNow. Parâmetro que não deixa ver o que produz só serve depois do erro.
 
+
+### Metas e foto diária (Torre)
+
+A Torre mede o tempo de cada ativo na etapa em que está. Sem meta, o alerta
+usa um limite global (`sla_horas`, ou duas jornadas). Com meta por etapa
+(`PUT /api/torre/metas`, admin), cada estado tem o seu próprio limite, e o
+painel passa a mostrar **% dentro da meta** — a leitura que vale para o gestor.
+
+Uma vez por dia, na hora configurada no calendário, o serviço grava a foto do
+dia em `trl_snapshot`: por estado, quantos estavam na fila, o mais antigo,
+quantos fora da meta, e o que fechou naquele dia (quantidade, média, p90, na
+meta). O dia é o civil local do calendário. Rodar de novo no mesmo dia
+substitui a foto. O admin pode tirar uma foto fora de hora pela aba
+Tendência ("Tirar foto agora") ou por `POST /api/torre/snapshot`.
+
+A aba **Tendência** lê `GET /api/torre/historico?dias=&frente=`: fila e
+fora da meta por dia, fechados por dia, uma coluna por frente, e a comparação
+dos últimos 7 dias com os 7 anteriores. Estados finais (ENTREGUE, DESCARTADO…)
+fecham com duração zero e ficam de fora dos fechados — são o registro da
+saída, não uma fila que terminou.
+
+Verificação: `python3 scripts/verificar_torre.py` (metas, área, snapshot,
+histórico, horário e fuso).
 
 ---
 

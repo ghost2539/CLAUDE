@@ -313,6 +313,42 @@ class Intervalo(Base):
     )
 
 
+class Meta(Base):
+    """Meta de tempo útil por estado (horas). É o que transforma "parado
+    há 20h" em "fora da meta": sem meta, a Torre só tem um limite global."""
+    __tablename__ = "trl_meta"
+
+    estado: Mapped[str] = mapped_column(String(40), primary_key=True)
+    horas_uteis: Mapped[float] = mapped_column(default=0.0)
+    ativa: Mapped[bool] = mapped_column(Boolean, default=True)
+    atualizado_por: Mapped[str] = mapped_column(String(80), default="")
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Snapshot(Base):
+    """Foto diária de cada estado: quantos estavam na fila, o mais antigo,
+    quantos fora da meta, e o que fechou no dia (n, média, p90 em segundos
+    úteis). Sem isto a Torre é uma foto; com isto, um filme."""
+    __tablename__ = "trl_snapshot"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dia: Mapped[str] = mapped_column(String(10), index=True)          # AAAA-MM-DD
+    estado: Mapped[str] = mapped_column(String(40), index=True)
+    frente: Mapped[str] = mapped_column(String(40), default="")
+    quantidade: Mapped[int] = mapped_column(Integer, default=0)
+    mais_antigo: Mapped[int] = mapped_column(Integer, default=0)
+    media_aberto: Mapped[int] = mapped_column(Integer, default=0)
+    fora_da_meta: Mapped[int] = mapped_column(Integer, default=0)
+    fechados: Mapped[int] = mapped_column(Integer, default=0)
+    fechados_media: Mapped[int] = mapped_column(Integer, default=0)
+    fechados_p90: Mapped[int] = mapped_column(Integer, default=0)
+    fechados_na_meta: Mapped[int] = mapped_column(Integer, default=0)
+    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_trl_snapshot_dia_estado", "dia", "estado", unique=True),)
+
+
 class Config(Base):
     """Parâmetros do núcleo, em chave/valor para não migrar a cada ajuste."""
     __tablename__ = "trl_config"
@@ -334,6 +370,8 @@ PADROES = {
     # Metas de SLA por etapa, em horas úteis: "ESTADO=horas" por vírgula.
     # Vazio de propósito: o documento recomenda o primeiro mês só medindo.
     "sla_horas": "",
+    # Hora local em que a foto diária da Torre é tirada.
+    "snapshot_hora": "23:55",
 }
 
 
