@@ -2,6 +2,8 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 sqlalchemy>=2.0,<3
 psycopg[binary]>=3.1,<4
+# A produção conecta com postgresql+psycopg2://; o driver 2 precisa existir também.
+psycopg2-binary>=2.9
 # Driver MySQL (servidor novo). PyMySQL é puro-Python (fácil de instalar);
 # 'cryptography' é exigido pelo auth caching_sha2_password do MySQL 8.
 PyMySQL>=1.1,<2
