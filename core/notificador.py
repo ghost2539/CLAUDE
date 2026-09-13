@@ -186,6 +186,9 @@ def _montar(c: dict, destinos: list[str], assunto: str, texto: str, html: str) -
 def enviar(assunto: str, texto: str, html: str = "", chave: str = "",
            ignorar_limite: bool = False) -> tuple[bool, str]:
     """Envia um e-mail agora (síncrono). Retorna (ok, detalhe) e nunca levanta."""
+    if getattr(_cfg, "TESTES", False):
+        _log.info("notificador: e-mail suprimido (AMBIENTE=testes): %s", assunto)
+        return False, "ambiente de testes: e-mail não enviado"
     try:
         c = config()
         if not c.get("ativo") and not ignorar_limite:
