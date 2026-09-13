@@ -61,6 +61,45 @@ r = c.post("/api/consulta", json={"identificadores": ["ABC123"]})
 checar(r.status_code == 200 and r.json()["encontrados"] == 1, f"POST /api/consulta → 200 com resultado (veio {r.status_code})")
 checar(chamadas.get("login") == ("svc", "segredo"), "login no EBS com a credencial protegida")
 
+print("\n[4] URLs da API do EBS (regressão: _urls chamava a si mesma → RecursionError)")
+import db.monitoramento as _mon
+_mon.obter_config = lambda chave: {}
+u = ebs._urls()
+checar(u == (os.environ["EBS_LOGIN_URL"], os.environ["EBS_SEARCH_URL"]),
+       f"sem configuração no portal, usa o ambiente (veio {u})")
+_mon.obter_config = lambda chave: {"login_url": " http://portal/login ", "search_url": ""}
+u = ebs._urls()
+checar(u == ("http://portal/login", os.environ["EBS_SEARCH_URL"]),
+       "login_url do portal vence o ambiente; search_url em branco cai no ambiente")
+_mon.obter_config = lambda chave: {"search_url": "http://portal/search"}
+checar(ebs._urls() == (os.environ["EBS_LOGIN_URL"], "http://portal/search"), "só search_url configurado")
+def _explode(chave):
+    raise RuntimeError("banco de monitoramento fora")
+_mon.obter_config = _explode
+checar(ebs._urls() == (os.environ["EBS_LOGIN_URL"], os.environ["EBS_SEARCH_URL"]),
+       "banco de configuração fora → cai no ambiente, sem estourar")
+_mon.obter_config = lambda chave: {}
+
+# O login usa _urls()[0]: era por aí que a consulta batia na recursão.
+import requests
+chamou = {}
+class _Resp:
+    status_code = 200
+    def json(self): return {"token": "abc"}
+class _Sess:
+    cookies = requests.cookies.RequestsCookieJar()
+    def post(self, url, **k):
+        chamou["url"] = url
+        return _Resp()
+_orig_session = requests.Session
+requests.Session = lambda: _Sess()
+try:
+    auth = ebs.login("u", "p")
+    checar(chamou.get("url") == os.environ["EBS_LOGIN_URL"] and auth["token"] == "abc",
+           "login chama a URL de login resolvida, sem recursão")
+finally:
+    requests.Session = _orig_session
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)

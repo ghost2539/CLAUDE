@@ -473,18 +473,44 @@ Group=$USUARIO}"
         [ -n "$CREDS" ] && UNIT_TXT="${UNIT_TXT}${CREDS}
 "
     fi
+    echo "-- Serviço $SERVICO"
     printf '%s' "$UNIT_TXT" > "/etc/systemd/system/$SERVICO.service"
+    echo "   unit gravado; daemon-reload"
     systemctl daemon-reload
-    systemctl enable --now "$SERVICO" >/dev/null 2>&1 || systemctl restart "$SERVICO"
-    systemctl restart "$SERVICO"
+    systemctl enable "$SERVICO" >/dev/null 2>&1 || true
+    systemctl reset-failed "$SERVICO" >/dev/null 2>&1 || true
+    # Sem bloquear: `restart` normal espera o processo antigo morrer, e um
+    # uvicorn que demora a encerrar prende o script até o TimeoutStopSec.
+    if systemctl is-active --quiet "$SERVICO"; then
+        echo "   parando a instância anterior"
+        systemctl kill -s TERM "$SERVICO" >/dev/null 2>&1 || true
+        for _ in $(seq 1 20); do systemctl is-active --quiet "$SERVICO" || break; sleep 1; done
+        systemctl is-active --quiet "$SERVICO" && { echo "   ainda no ar; forçando"; systemctl kill -s KILL "$SERVICO" >/dev/null 2>&1 || true; sleep 2; }
+    fi
+    echo "   iniciando"
+    systemctl start --no-block "$SERVICO"
+    SUBIU=0
+    for _ in $(seq 1 30); do
+        if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$TEST_PORT/" 2>/dev/null; then SUBIU=1; break; fi
+        systemctl is-failed --quiet "$SERVICO" && break
+        sleep 1
+    done
+    if [ "$SUBIU" -eq 1 ]; then
+        echo "   no ar (systemctl: $(systemctl is-active "$SERVICO" 2>/dev/null))"
+    else
+        echo "   AVISO: o serviço não respondeu em 30 s. Estado: $(systemctl is-active "$SERVICO" 2>/dev/null). Últimas linhas do log:"
+        journalctl -u "$SERVICO" -n 25 --no-pager 2>/dev/null | sed 's/^/      /'
+    fi
     COMO_VER="systemctl status $SERVICO   |   journalctl -u $SERVICO -f"
     COMO_PARAR="systemctl disable --now $SERVICO && rm /etc/systemd/system/$SERVICO.service"
 elif [ "$SYSTEMD" -eq 1 ] && systemctl --user show-environment >/dev/null 2>&1; then
     mkdir -p "$HOME/.config/systemd/user"
     printf '%s' "$UNIT_TXT" | sed 's/^NoNewPrivileges=yes/NoNewPrivileges=true/' > "$HOME/.config/systemd/user/$SERVICO.service"
     systemctl --user daemon-reload
-    systemctl --user enable --now "$SERVICO" >/dev/null 2>&1
-    systemctl --user restart "$SERVICO"
+    systemctl --user enable "$SERVICO" >/dev/null 2>&1 || true
+    systemctl --user kill -s TERM "$SERVICO" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do systemctl --user is-active --quiet "$SERVICO" || break; sleep 1; done
+    systemctl --user start --no-block "$SERVICO"
     COMO_VER="systemctl --user status $SERVICO   |   journalctl --user -u $SERVICO -f"
     COMO_PARAR="systemctl --user disable --now $SERVICO"
 else
@@ -493,8 +519,12 @@ else
     COMO_PARAR="PORTAL_APP_DIR=$TEST_DIR PORTAL_ENVFILE=$TEST_ENVFILE PORTAL_STATE_DIR=$STATE $TEST_DIR/deploy/portal.sh stop"
 fi
 
-sleep 4
-CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://127.0.0.1:$TEST_PORT/" 2>/dev/null || true)"
+CODE=""
+for _ in $(seq 1 15); do
+    CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$TEST_PORT/" 2>/dev/null || true)"
+    [ "$CODE" = "200" ] && break
+    sleep 1
+done
 cat <<EOF
 
 == Ambiente de testes pronto ==
