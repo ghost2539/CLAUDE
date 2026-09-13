@@ -53,10 +53,16 @@ DOCUMENTO_EXIGIDO = {
 }
 
 
+# Tipos de anexo aceitos: os documentos exigidos por destino, mais um
+# genérico. Texto livre entrava no nome do arquivo e qualquer string
+# passava por "certificado de destinação" na conferência do lote.
+TIPOS_ANEXO = {t for t, _ in DOCUMENTO_EXIGIDO.values()} | {"outro"}
+
+
 def _pasta_anexos() -> Path:
     # data/uploads é o único lugar de gravação previsto pelas normas do
     # projeto; nada é escrito fora dali.
-    destino = Path(_cfg.STATIC).parent / "data" / "uploads" / "destinacao"
+    destino = Path(_cfg.UPLOAD) / "destinacao"
     destino.mkdir(parents=True, exist_ok=True)
     return destino
 
@@ -85,6 +91,13 @@ def api_fila(req: Request):
             .order_by(dbt.Intervalo.inicio)
         ).all()
 
+    # Sem destino há tempo demais vira alerta: é decisão de gestor, não
+    # de bancada, e é onde equipamento descaracterizado vira volume morto.
+    try:
+        dias_alerta = float(db.ler_config().get("alerta_sem_destino_dias") or 0)
+    except ValueError:
+        dias_alerta = 0
+
     fila, curso, sem_destino = [], [], []
     for i, a in linhas:
         item = {
@@ -92,6 +105,8 @@ def api_fila(req: Request):
             "usuario": i.usuario,
             "segundos": duracao_util(_utc(i.inicio), None, cal, agora),
         }
+        if i.estado == AG_DEFINICAO_DESTINO and dias_alerta > 0:
+            item["atrasado"] = prazo_util(_utc(i.inicio), dias_alerta, cal) < agora
         if i.estado == AG_DESCARACTERIZACAO:
             fila.append(item)
         elif i.estado == EX_DESCARACTERIZACAO:
@@ -413,6 +428,9 @@ async def api_lote_anexo(numero: str, req: Request,
                          tipo: str = Form(...),
                          arquivo: UploadFile = File(...)):
     sd = require_permission(req, "destinacao", "edit")
+    tipo = (tipo or "").strip().lower()
+    if tipo not in TIPOS_ANEXO:
+        raise HTTPException(400, "Tipo de documento inválido.")
     with SessionLocal() as s:
         lote = _buscar_lote(s, numero)
         await _guardar_anexo(s, arquivo, "lote", lote.id, tipo,

@@ -207,10 +207,50 @@ def api_concluir(body: ConclusaoIn, req: Request):
     if estacao == MONTAGEM:
         _consumir_componentes(serial, body.componentes, usuario)
 
+    # Internalizado com endereço: o ServiceNow precisa saber onde está,
+    # senão o catálogo da Separação (que lê o corredor de lá) nunca
+    # enxerga o que a bancada produziu. Tolerante a falha: o equipamento
+    # já está na prateleira; a falha vai para o log e para a resposta.
+    no_servicenow = None
+    if estacao == INTERNALIZACAO and not devolve:
+        no_servicenow = _endereçar_no_servicenow(req, serial, body.endereco or "")
+
     _log.info("preparacao: %s concluiu %s em %s → %s",
               usuario, serial, estacao, proximo)
     return {"ok": True, "serial": serial, "proximo_estado": proximo,
-            "devolvido": devolve}
+            "devolvido": devolve, "no_servicenow": no_servicenow}
+
+
+def _endereçar_no_servicenow(req: Request, serial: str, endereco: str) -> dict:
+    """Grava corredor e situação de estoque do ativo, como o usuário logado."""
+    cfg = db.ler_config()
+    if (cfg.get("escrever_no_servicenow") or "").strip().lower() not in ("1", "sim", "true"):
+        return {"ativo": False}
+    try:
+        from routers.servicenow import (
+            _sn_session_from_portal, _sn_query, _sn_update, HARDWARE_TABLE, termo_sn,
+        )
+        import db.separacao as dbsep
+        campo = (dbsep.ler_config().get("campo_local") or "aisle_space_location").strip()
+        session = _sn_session_from_portal(req)
+        achados = _sn_query(session, HARDWARE_TABLE,
+                            f"serial_number={termo_sn(serial, 'série')}",
+                            "sys_id,serial_number", limit=1, display_value=False)
+        if not achados:
+            return {"ativo": True, "ok": False, "motivo": "série não existe no ServiceNow"}
+        sys_id = achados[0].get("sys_id")
+        sys_id = sys_id.get("value") if isinstance(sys_id, dict) else sys_id
+        alteracao = {campo: endereco.strip().upper()}
+        status = (cfg.get("status_disponivel") or "").strip()
+        if status:
+            alteracao["install_status"] = status
+        ok = _sn_update(session, HARDWARE_TABLE, sys_id, alteracao)
+        if not ok:
+            _log.error("preparacao: %s internalizado, ServiceNow recusou o endereço", serial)
+        return {"ativo": True, "ok": bool(ok), "campos": alteracao}
+    except Exception as exc:  # noqa: BLE001
+        _log.error("preparacao: %s internalizado sem endereço no ServiceNow: %s", serial, exc)
+        return {"ativo": True, "ok": False, "motivo": str(exc)}
 
 
 def _exigencias(estacao: str, body: ConclusaoIn) -> None:

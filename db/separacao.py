@@ -242,6 +242,8 @@ PADROES = {
 
 def init_db() -> None:
     Base.metadata.create_all(bind=get_engine())
+    from db._esquema import migrar_colunas
+    migrar_colunas(Base, get_engine(), "separacao")
     with SessionLocal() as s:
         existentes = {c for (c,) in s.execute(select(Config.chave))}
         novas = [Config(chave=k, valor=v)

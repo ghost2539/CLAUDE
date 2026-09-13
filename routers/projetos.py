@@ -334,6 +334,18 @@ def api_fila(req: Request, estado: str = ""):
             "atrasados": sum(1 for x in linhas if x["atrasado"])}
 
 
+@router.get("/chamado/{numero}")
+def api_chamado(numero: str, req: Request):
+    """Valida o chamado com os prefixos do projeto, pela permissão do projeto."""
+    require_permission(req, "projetos", "view")
+    check_rate_limit(req)
+    from routers.separacao import consultar_chamado
+    cfg = db.ler_config()
+    return consultar_chamado(req, numero, {
+        "chamado_prefixos": cfg["chamado_prefixos"],
+        "chamado_estados_bloqueados": cfg["chamado_estados_bloqueados"]})
+
+
 @router.get("/catalogo")
 def api_catalogo(req: Request):
     """Saldo do estoque de inauguração, lido pelo módulo de Separação."""
@@ -577,15 +589,17 @@ def api_bipar(numero: str, item_id: int, body: BipeIn, req: Request):
             raise HTTPException(
                 409, f"{i.modelo} já tem as {i.quantidade} unidades do item.")
 
+        # Mesma ordem da Separação: gravar local (flush) → reservar → commit.
+        unidade = UnidadeProjeto(projeto_id=i.projeto_id, item_id=i.id,
+                                 serial=serial, separada_por=usuario)
+        s.add(unidade)
+        s.flush()
         achado = localizar_no_estoque(req, serial, tipo_estoque)
         _escrever_reserva(req, achado["sys_id"], serial, reservar=True)
-
-        trilha_id = _mover_unidade(
+        unidade.sys_id = achado["sys_id"]
+        unidade.trilha_ativo_id = _mover_unidade(
             serial, EX_SEPARACAO_PROJ, usuario, dbt.TRATATIVA,
             detalhe=f'{{"projeto": "{numero.upper()}", "item": "{i.token}"}}')
-        s.add(UnidadeProjeto(projeto_id=i.projeto_id, item_id=i.id,
-                             serial=serial, sys_id=achado["sys_id"],
-                             trilha_ativo_id=trilha_id, separada_por=usuario))
         s.commit()
     _log.info("projetos: %s reservou %s para %s", usuario, serial, numero.upper())
     return api_detalhe(numero, req)

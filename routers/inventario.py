@@ -200,9 +200,20 @@ def _comparar(esperados: list[Esperado], contados: list[Contado]) -> dict:
             "divergente": bool(faltantes or sobras)}
 
 
+def _prazo(c: Ciclo, cal: Calendario) -> datetime | None:
+    try:
+        dias = float(db.ler_config().get("prazo_contagem_dias") or 0)
+    except ValueError:
+        dias = 0
+    return prazo_util(_utc(c.aberto_em), dias, cal) if dias > 0 else None
+
+
 def _resumo(c: Ciclo, cal: Calendario, agora: datetime) -> dict:
     fim = _utc(c.encerrado_em) if c.estado in ESTADOS_FINAIS else None
+    prazo = _prazo(c, cal)
     return {
+        "prazo": prazo.isoformat() if prazo else None,
+        "atrasado": bool(prazo and c.estado not in ESTADOS_FINAIS and prazo < agora),
         "numero": c.numero, "descricao": c.descricao, "prefixo": c.prefixo,
         "filtro": c.filtro,
         "estado": c.estado, "estado_rotulo": ROTULO_ESTADO.get(c.estado, c.estado),

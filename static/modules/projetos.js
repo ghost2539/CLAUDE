@@ -341,7 +341,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             if (!numero) return;
             info.innerHTML = '<span class="text-muted">Consultando o ServiceNow...</span>';
             try {
-                chamado = await S.api('/separacao/chamado/' + encodeURIComponent(numero));
+                chamado = await S.api('/projetos/chamado/' + encodeURIComponent(numero));
                 info.innerHTML = '<div class="detail-grid">' +
                     '<div><label style="font-size:12px;color:var(--text-secondary)">Loja</label><div>' +
                         S.esc(chamado.destino || '—') + '</div></div>' +
