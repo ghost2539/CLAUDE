@@ -92,8 +92,8 @@ FROTA = "FROTA"    # coletores e sleds
 FRENTES = (LOJA, FROTA)
 
 ROTULO_FRENTE = {
-    LOJA: "Loja",
-    FROTA: "Frota móvel",
+    LOJA: "Frente e Retaguarda",
+    FROTA: "Mobilidade",
 }
 
 # ── Estados. O que pausa o relógio do atendente está marcado. ──────
