@@ -234,6 +234,7 @@ async function _renderEbs(S) {
             campo('ebs-senha', 'Senha' + (o.senha_definida ? ' (definida — ' + S.esc(o.senha_fonte) + ')' : ''), '',
                   ' type="password" autocomplete="new-password" placeholder="' + (o.senha_definida ? 'em branco mantém' : 'obrigatória') + '"' + (o.cofre_disponivel ? ' disabled title="Vem do cofre"' : '')) +
             campo('ebs-lib', 'Instant Client (lib_dir)', o.lib_dir) +
+            campo('ebs-cofre', 'Chave da senha no cofre' + (o.cofre_disponivel ? ' (encontrada)' : ' (não encontrada)'), o.cofre_chave) +
         '</div>' +
         '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button>' +
         '<button id="ebs-testar" class="btn btn-outline">Testar conexão</button><span id="ebs-res" class="text-muted"></span></div>';
@@ -242,7 +243,7 @@ async function _renderEbs(S) {
         try {
             await S.api('/parametros/ebs', { method: 'PUT', body: {
                 host: v('ebs-host'), porta: v('ebs-porta'), servico: v('ebs-servico'), usuario: v('ebs-usuario'),
-                lib_dir: v('ebs-lib'), senha: document.getElementById('ebs-senha').value || null,
+                lib_dir: v('ebs-lib'), cofre_chave: v('ebs-cofre'), senha: document.getElementById('ebs-senha').value || null,
                 login_url: v('ebs-login'), search_url: v('ebs-search') } });
             S.toast('EBS reconfigurado. Vale na próxima consulta.', 'success'); _renderEbs(S);
         } catch (e) { S.toast(e.message, 'error'); }

@@ -57,9 +57,18 @@ def _do_portal() -> dict:
         return {}
 
 
+def _chave_cofre(c: dict) -> str:
+    """Nome da chave da senha no cofre, configurável pelo portal.
+
+    O cofre só o processo do serviço lê; a tela guarda apenas a
+    REFERÊNCIA. Assim a senha continua onde deve estar e mesmo assim
+    ninguém precisa mexer em código para apontar outra chave."""
+    return (c.get("cofre_chave") or "").strip() or "ORACLE_EBS_PASS"
+
+
 def _senha(c: dict) -> tuple[str, str]:
-    """(senha, fonte). Cofre > cifrada no portal > ambiente."""
-    do_cofre = _secret("ORACLE_EBS_PASS")
+    """(senha, fonte). Cofre (pela chave configurada) > cifrada no portal > ambiente."""
+    do_cofre = _secret(_chave_cofre(c))
     if do_cofre:
         return str(do_cofre), "cofre"
     try:
@@ -98,15 +107,17 @@ def config_publica() -> dict:
     host, _, resto = efetiva["dsn"].partition(":")
     porta, _, servico = resto.partition("/")
     _s, fonte = _senha(c)
+    chave = _chave_cofre(c)
     return {"host": host, "porta": porta, "servico": servico, "usuario": efetiva["user"],
             "lib_dir": efetiva["lib_dir"], "senha_definida": fonte != "nenhuma",
-            "senha_fonte": fonte, "cofre_disponivel": bool(_secret("ORACLE_EBS_PASS"))}
+            "senha_fonte": fonte, "cofre_chave": chave,
+            "cofre_disponivel": bool(_secret(chave))}
 
 
 def salvar_configuracao(dados: dict, senha: str | None = None) -> dict:
     """Grava host/porta/serviço/usuário/lib_dir; a senha só quando enviada."""
     import db.monitoramento as _mon
-    novo = {k: str(dados.get(k, "")).strip() for k in ("host", "porta", "servico", "usuario", "lib_dir")}
+    novo = {k: str(dados.get(k, "")).strip() for k in ("host", "porta", "servico", "usuario", "lib_dir", "cofre_chave")}
     if senha:
         from core.notificador import cifrar
         algo, blob = cifrar(senha)
