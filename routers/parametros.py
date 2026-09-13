@@ -323,6 +323,7 @@ class EbsIn(BaseModel):
     servico: str = ""
     usuario: str = ""
     lib_dir: str = ""
+    cofre_chave: str = ""
     senha: str | None = None
     login_url: str = ""
     search_url: str = ""
