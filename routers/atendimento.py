@@ -1,8 +1,8 @@
 """Atendimento a Chamados (A20) — o relógio de quem atende.
 
 O chamado vive no ServiceNow; aqui fica o espelho do que a área mede.
-Duas frentes, como no desenho: Loja (frente, retaguarda, inaugurações e
-reformas) e Frota móvel (coletores e sleds).
+Duas frentes, como no desenho: Frente e Retaguarda (loja, inaugurações e
+reformas) e Mobilidade (coletores e sleds).
 
 O estado que justifica o módulo é o `AG_EQUIPAMENTO`. Quando a
 resolução depende de equipamento a separar, o relógio do atendente

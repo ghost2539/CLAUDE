@@ -1,7 +1,8 @@
 /* ================================================================
    Módulo: Atendimento a Chamados (A20)
 
-   Duas frentes, como no desenho: Loja e Frota móvel. O chamado vive no
+   Duas frentes: Frente e Retaguarda (loja) e Mobilidade (coletores e
+   sleds). O chamado vive no
    ServiceNow; aqui fica o relógio da área e o que ele move.
 
    A ação que dá sentido à tela é "Preciso de equipamento": ela abre a
@@ -12,7 +13,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
 (function () {
     var S = null;
-    var FRENTES = [['LOJA', 'Loja'], ['FROTA', 'Frota móvel']];
+    var FRENTES = [['LOJA', 'Frente e Retaguarda'], ['FROTA', 'Mobilidade']];
     var ROTA = { loja: 'LOJA', frota: 'FROTA' };
     var SUB = { LOJA: 'loja', FROTA: 'frota' };
     var TIPOS_SEP = [

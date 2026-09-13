@@ -1881,9 +1881,9 @@ async function renderSeparacaoConfig(c, S) {
                   _sepCampo('Destinação: tamanho máximo do anexo (MB)', 'sc-dst-mb', ds.anexo_tamanho_mb) +
                   _sepCampo('Destinação: alerta sem destino (dias úteis)', 'sc-dst-alerta', ds.alerta_sem_destino_dias) : '') +
             (ex ? _sepCampo('Assistência: alerta de atraso (dias)', 'sc-ext-alerta', ex.alerta_atraso_dias) : '') +
-            (at ? _sepCampo('Atendimento: categorias de frota', 'sc-atd-frota', at.categorias_frota) +
-                  _sepCampo('Atendimento: prazo loja (dias úteis)', 'sc-atd-loja', at.prazo_loja) +
-                  _sepCampo('Atendimento: prazo frota (dias úteis)', 'sc-atd-frt', at.prazo_frota) : '') +
+            (at ? _sepCampo('Atendimento: categorias de Mobilidade', 'sc-atd-frota', at.categorias_frota) +
+                  _sepCampo('Atendimento: prazo Frente e Retaguarda (dias úteis)', 'sc-atd-loja', at.prazo_loja) +
+                  _sepCampo('Atendimento: prazo Mobilidade (dias úteis)', 'sc-atd-frt', at.prazo_frota) : '') +
             '</div>';
         c.appendChild(_sepCartao('Bancada, preparação, destinação, assistência e atendimento', ofi, largura));
     }
