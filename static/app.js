@@ -15,6 +15,7 @@
         gestao_ativos:  'Gestão de Ativos',
         atendimento:    'Atendimento',
         bancada:        'Bancada',
+        preparacao:     'Preparação',
         separacao:      'Separação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',

@@ -206,6 +206,12 @@ class Settings:
         _sqlite("bancada"),
     )
 
+    # ── Preparação: configuração, montagem e internalização ─────────────
+    PREPARACAO_DATABASE_URL: str = os.getenv(
+        "PREPARACAO_DATABASE_URL",
+        _sqlite("preparacao"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

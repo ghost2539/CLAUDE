@@ -26,6 +26,11 @@ normativo.
    nenhum escreve no banco de outro módulo.
 2. **Rota nova** → em `routers/`, sob `/api/<área>`. Nunca na raiz.
 3. **Sistema externo novo** → cliente em `integracoes/`.
+   3.1. Índice composto declarado em `__table_args__` não pode ter o mesmo
+   nome do índice automático de uma coluna com `index=True` — o SQLAlchemy
+   gera `ix_<tabela>_<coluna>` e o `create_all` falha com "index already
+   exists", derrubando o módulo inteiro no boot. Sufixe o composto
+   (`ix_<tabela>_<coluna>_<algo>`).
 4. **Nada gravado em disco fora de `data/`.**
 5. **Nada que exija login pode morar em `static/`** — ali é público.
    As telas de TV (`/cockpit-spare`, `/dash-*`) são a exceção deliberada:

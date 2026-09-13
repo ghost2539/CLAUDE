@@ -266,6 +266,20 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Preparação (A06, A07, A08.2) — banco próprio ────────────────────
+    # Fecha os caminhos que a bancada abre: coletor apto vai configurar,
+    # sled é montado, e tudo termina internalizado no estoque.
+    try:
+        import db.preparacao as _db_prp
+        _db_prp.init_db()
+        from routers.preparacao import router as preparacao_router
+        app.include_router(preparacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("preparacao").error(
+            "Módulo Preparação NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

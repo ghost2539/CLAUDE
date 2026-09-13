@@ -1090,7 +1090,8 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'bancada', 'trilha',
+        'servicenow', 'atendimento', 'separacao', 'bancada', 'preparacao',
+        'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
         'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
@@ -1100,6 +1101,7 @@ async function renderPermissions(c, S) {
         identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
         atendimento: 'Atendimento', separacao: 'Separação',
         bancada: 'Bancada (triagem e reparo)',
+        preparacao: 'Preparação (configuração e estoque)',
         // Sem tela própria ainda: dá acesso à trilha de um ativo e ao
         // painel de filas, que outros módulos consultam.
         trilha: 'Trilha do Ativo', rastreio: 'Correios',
