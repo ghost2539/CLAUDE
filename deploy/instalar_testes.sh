@@ -109,8 +109,29 @@ else
 fi
 echo "   commit: $(git -C "$TEST_DIR" log --oneline -1)"
 
-# ── 2. Python ──────────────────────────────────────────────────────────────
-command -v python3 >/dev/null 2>&1 || { echo "ERRO: python3 não encontrado."; exit 1; }
+# ── 2. Ferramentas de sistema pelo dnf (Oracle Linux / RHEL) ───────────────
+# O que vem do repositório do sistema, vem do dnf: Python, pip, sqlite3,
+# cliente do Postgres e git. As bibliotecas Python do portal NÃO vêm de lá:
+# o repositório traz SQLAlchemy 1.x e não traz FastAPI, Pydantic 2, psycopg 3
+# nem oracledb — o portal exige SQLAlchemy 2 e essas demais.
+if [ "$ROOT" -eq 1 ] && command -v dnf >/dev/null 2>&1; then
+    FALTAM=""
+    command -v python3 >/dev/null 2>&1 || FALTAM="$FALTAM python3"
+    python3 -c 'import venv, ensurepip' 2>/dev/null || FALTAM="$FALTAM python3-pip"
+    command -v sqlite3 >/dev/null 2>&1 || FALTAM="$FALTAM sqlite"
+    command -v git >/dev/null 2>&1 || FALTAM="$FALTAM git"
+    case "$(set -a; . "$PROD_ENVFILE" >/dev/null 2>&1; set +a; printf '%s' "${DATABASE_URL:-}")" in
+        postgres*) command -v pg_dump >/dev/null 2>&1 || FALTAM="$FALTAM postgresql" ;;
+    esac
+    if [ -n "$FALTAM" ]; then
+        echo "-- dnf: instalando$FALTAM"
+        dnf install -y -q $FALTAM || echo "AVISO: dnf não conseguiu instalar:$FALTAM (o script segue; pode faltar algo adiante)."
+    else
+        echo "-- dnf: ferramentas de sistema já presentes"
+    fi
+fi
+
+command -v python3 >/dev/null 2>&1 || { echo "ERRO: python3 não encontrado (dnf install python3)."; exit 1; }
 
 # Proxy: o pip não enxerga o do dnf/yum sozinho. Se não vier do ambiente,
 # usa o que o servidor já tem configurado para o dnf.
