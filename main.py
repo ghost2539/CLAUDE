@@ -251,6 +251,21 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Bancadas de triagem e reparo (A02, A03, A04) ────────────────────
+    # Primeiro módulo que usa a Trilha como fonte de estado: a fila é
+    # lida dos intervalos abertos do núcleo. Sem a trilha no ar, a fila
+    # aparece vazia — por isso carrega isolado e depois dela.
+    try:
+        import db.bancada as _db_bnc
+        _db_bnc.init_db()
+        from routers.bancada import router as bancada_router
+        app.include_router(bancada_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("bancada").error(
+            "Módulo Bancada NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

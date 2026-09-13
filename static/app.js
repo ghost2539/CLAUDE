@@ -14,6 +14,7 @@
         identificacao:  'Identificação',
         gestao_ativos:  'Gestão de Ativos',
         atendimento:    'Atendimento',
+        bancada:        'Bancada',
         separacao:      'Separação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',

@@ -200,6 +200,12 @@ class Settings:
         _sqlite("atendimento"),
     )
 
+    # ── Bancadas de triagem e reparo (A02, A03, A04) ────────────────────
+    BANCADA_DATABASE_URL: str = os.getenv(
+        "BANCADA_DATABASE_URL",
+        _sqlite("bancada"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

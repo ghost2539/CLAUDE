@@ -1090,15 +1090,16 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'trilha', 'rastreio',
-        'reparos', 'status', 'parametros', 'orcamento', 'orcamento_spare',
-        'orcamento_manutencao'];
+        'servicenow', 'atendimento', 'separacao', 'bancada', 'trilha',
+        'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
+        'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
         // permissão já existe nos usuários); só o nome no menu mudou.
         identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
         atendimento: 'Atendimento', separacao: 'Separação',
+        bancada: 'Bancada (triagem e reparo)',
         // Sem tela própria ainda: dá acesso à trilha de um ativo e ao
         // painel de filas, que outros módulos consultam.
         trilha: 'Trilha do Ativo', rastreio: 'Correios',

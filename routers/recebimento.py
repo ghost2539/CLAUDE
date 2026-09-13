@@ -1,6 +1,8 @@
 """Recebimento (receiving) router — scan, list, update, dashboard, lots."""
 from __future__ import annotations
 
+import logging
+
 import csv
 import io
 import unicodedata
@@ -280,6 +282,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     created = 0
     skipped = 0
     errors: list[str] = []
+    entrando: list[dict] = []
 
     with SessionLocal.begin() as s:
         for item in body.items:
@@ -343,16 +346,103 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     username=sd["username"],
                 ))
                 created += 1
+                entrando.append({
+                    "serial": item.numero_serie or item.etiqueta or item.ativo,
+                    "modelo": item.modelo,
+                    "categoria": item.categoria or "",
+                    "numero_ativo": item.ativo or "",
+                })
             except Exception as e:
                 ident = item.etiqueta or item.ativo or item.numero_serie
                 errors.append(f"{ident}: {e}")
+
+    # Entrada na Trilha do Ativo (A01). Aditivo e tolerante a falha: o
+    # recebimento já foi gravado, e não se desfaz um recebimento porque
+    # o núcleo de medição não respondeu.
+    na_trilha = _entrar_na_trilha(entrando, sd["username"])
 
     return {
         "ok": True,
         "criados": created,
         "ignorados": skipped,
         "erros": errors,
+        "na_trilha": na_trilha,
     }
+
+
+# ── Ponte com a Trilha do Ativo (A01) ───────────────────────────────
+
+# Para onde cada família vai depois do recebimento. A bancada da frota
+# e a de loja compartilham o estado de fila; quem separa as duas é o
+# tipo do equipamento, lido na própria fila.
+_FILA_POR_FAMILIA = {
+    "frota": "AG_TRIAGEM",
+    "loja": "AG_TRIAGEM",
+    "conectividade": "AG_TRIAGEM_CONECT",
+}
+
+_PALAVRAS_FROTA = ("coletor", "sled", "mc33", "tc2", "ef50", "rfr")
+_PALAVRAS_CONECT = ("access point", "acess point", " ap ", "switch",
+                    "roteador", "router", "wifi", "wi-fi")
+
+
+def _familia(modelo: str, categoria: str) -> str:
+    """Frota, loja ou conectividade, pelo modelo e pela categoria.
+
+    Heurística de texto porque nem o EBS nem o ServiceNow têm um campo
+    que separe as três famílias do jeito que a área trabalha. Na dúvida
+    cai em loja, que é a bancada com mais gente — errar para lá é mais
+    fácil de perceber e de corrigir.
+    """
+    texto = f" {modelo} {categoria} ".lower()
+    if any(p in texto for p in _PALAVRAS_CONECT):
+        return "conectividade"
+    if any(p in texto for p in _PALAVRAS_FROTA):
+        return "frota"
+    return "loja"
+
+
+def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
+    """Cria o token de cada ativo recebido e o põe na fila da bancada."""
+    if not itens:
+        return {"criados": 0, "ja_existiam": 0, "falhas": 0}
+    resumo = {"criados": 0, "ja_existiam": 0, "falhas": 0}
+    try:
+        import db.trilha as dbt
+        from routers.trilha import abrir_ativo, mover, TrilhaInvalida
+    except Exception as exc:  # noqa: BLE001 — trilha fora do ar
+        logging.getLogger("recebimento").error(
+            "Trilha indisponível; %d ativo(s) recebidos sem medição: %s",
+            len(itens), exc)
+        return {"criados": 0, "ja_existiam": 0, "falhas": len(itens)}
+
+    for it in itens:
+        serial = (it.get("serial") or "").strip()
+        if not serial:
+            resumo["falhas"] += 1
+            continue
+        familia = _familia(it.get("modelo", ""), it.get("categoria", ""))
+        try:
+            with dbt.SessionLocal() as s:
+                ativo = abrir_ativo(
+                    s, serial=serial, usuario=usuario,
+                    modelo=it.get("modelo", ""),
+                    numero_ativo=it.get("numero_ativo", ""),
+                    tipo_equipamento=familia, origem="RECEBIMENTO")
+                mover(s, ativo, estado=_FILA_POR_FAMILIA[familia],
+                      tipo=dbt.FILA, processo="A01", usuario=usuario)
+                s.commit()
+            resumo["criados"] += 1
+        except TrilhaInvalida:
+            # Serial repetido é reentrada do mesmo equipamento — comum, e
+            # não é erro de recebimento. Fica registrado só no resumo.
+            resumo["ja_existiam"] += 1
+        except Exception as exc:  # noqa: BLE001
+            resumo["falhas"] += 1
+            logging.getLogger("recebimento").error(
+                "Trilha: série %s recebida mas não entrou na fila: %s",
+                serial, exc)
+    return resumo
 
 
 @router.delete("/recebimentos/{cycle_id}")
