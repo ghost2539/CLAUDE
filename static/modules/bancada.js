@@ -59,8 +59,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho(d.rotulo,
-            'Triagem e reparo. A fila vem da trilha do ativo.'));
+        c.appendChild(cabecalho(d.rotulo, ''));
 
         c.appendChild(indicadores([
             ['Na fila', d.aguardando.length, 'accent-gold'],
@@ -231,9 +230,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                     extra.innerHTML =
                         '<div class="form-group"><label for="bnc-just">' +
                         'Por que o reparo é inviável</label>' +
-                        '<textarea id="bnc-just" class="form-control" rows="2"></textarea>' +
-                        '<span class="text-muted" style="font-size:11.5px">É o que ' +
-                        'sustenta a baixa do ativo depois.</span></div>';
+                        '<textarea id="bnc-just" class="form-control" rows="2"></textarea></div>';
                 } else {
                     extra.innerHTML = '';
                 }

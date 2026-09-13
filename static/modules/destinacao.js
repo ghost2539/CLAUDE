@@ -51,8 +51,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         catch (e) { return falha(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Descaracterização',
-            'Remoção de mídia e análise de condição antes de o ativo sair da área.'));
+        c.appendChild(cabecalho('Descaracterização', ''));
         c.appendChild(indicadores([
             ['Aguardando baixa', d.aguardando.length, 'accent-gold'],
             ['Em bancada', d.em_curso.length, 'accent-teal'],
@@ -142,9 +141,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                     '<div class="form-grid cols-2">' +
                       '<div class="form-group"><label for="dst-serie-midia">' +
                         'Série da mídia</label><input id="dst-serie-midia" ' +
-                        'class="form-control"><span class="text-muted" ' +
-                        'style="font-size:11.5px">A rastreabilidade é por ' +
-                        'série da mídia, não do equipamento.</span></div>' +
+                        'class="form-control"></div>' +
                       '<div class="form-group"><label for="dst-metodo">Método' +
                         '</label><select id="dst-metodo" class="form-control">' +
                           '<option value="REMOCAO_FISICA">Remoção física</option>' +
@@ -155,9 +152,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                       'Evidência da remoção</label>' +
                       '<input id="dst-evidencia" type="file" class="form-control" ' +
                         'accept=".pdf,.jpg,.jpeg,.png">' +
-                      '<span class="text-muted" style="font-size:11.5px">' +
-                      'Obrigatória. Sem ela a descaracterização não conclui.' +
-                      '</span></div>' : '';
+                      '</div>' : '';
             }
             document.getElementsByName('dst-midia').forEach(function (r) {
                 r.addEventListener('change', pintar);
@@ -212,8 +207,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         } catch (e) { return falha(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Lotes de destinação',
-            'Venda, descarte e doação. Cada destino tem o seu documento.',
+        c.appendChild(cabecalho('Lotes de destinação', '',
             fila.aguardando_destino.length
                 ? [botao('Formar lote', 'btn-primary', function () {
                       formarLote(c, fila.aguardando_destino);
@@ -360,8 +354,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var doc = S.el('div', { className: 'card-body' });
         doc.innerHTML = '<p class="text-muted" style="font-size:13px;margin:0 0 12px">' +
             S.esc(d.documento_exigido
-                ? 'O lote não fecha sem o ' + d.documento_exigido + '.'
-                : 'Sem documento obrigatório para este destino.') + '</p>';
+                ? 'Documento exigido: ' + d.documento_exigido
+                : 'Documento: não exigido') + '</p>';
         d.anexos.forEach(function (a) {
             var l = S.el('div', { className: 'sep-total mt-1' });
             l.innerHTML = '<span>' + S.esc(a.nome) + '</span>';

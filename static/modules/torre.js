@@ -60,8 +60,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         catch (e) { return falha(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Torre de Controle',
-            'Filas, backlogs e o que está parado há mais tempo.'));
+        c.appendChild(cabecalho('Torre de Controle', ''));
 
         if (d.calendario_corrido) {
             c.appendChild(S.el('div', {
@@ -85,8 +84,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var g1 = S.el('div', { className: 'card-body' });
         if (!filas.length) {
             g1.appendChild(S.el('p', { className: 'sep-vazio',
-                textContent: 'Nenhum ativo em curso. A trilha começa a encher ' +
-                             'quando o primeiro recebimento acontecer.' }));
+                textContent: 'Nenhum ativo em curso.' }));
         } else {
             g1.appendChild(barras(filas, 'quantidade', function (f) {
                 return String(f.quantidade);
@@ -95,8 +93,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             }));
             g1.appendChild(S.el('p', {
                 className: 'text-muted mt-2', style: 'font-size:11.5px;margin-bottom:0',
-                textContent: 'Em âmbar, as etapas com ativo parado há mais de ' +
-                             duracao(d.limite_alerta) + '.'
+                textContent: 'Alerta acima de ' + duracao(d.limite_alerta)
             }));
         }
         c.appendChild(cartao('Quantos ativos em cada etapa', g1));
@@ -172,8 +169,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaTrilha(c, serial) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Trilha do ativo',
-            'Tudo que aconteceu com um equipamento desde que entrou na área.'));
+        c.appendChild(cabecalho('Trilha do ativo', ''));
 
         var busca = S.el('div', { className: 'card-body' });
         var campo = S.el('input', {
@@ -209,8 +205,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             d = await S.api('/torre/ativos/' + encodeURIComponent(serial));
         } catch (e) {
             alvo.innerHTML = '';
-            alvo.appendChild(S.el('div', { className: 'alert alert-danger',
-                                           textContent: e.message }));
+            var msg = /not found|não encontrad/i.test(e.message)
+                ? 'Série ' + serial.toUpperCase() + ' ainda não passou pela área.'
+                : e.message;
+            alvo.appendChild(S.el('div', { className: 'alert alert-danger', textContent: msg }));
             return;
         }
 
@@ -270,11 +268,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         });
         if (corrigidas.length) {
             var cor = S.el('div', { className: 'card-body' });
-            cor.innerHTML = '<p class="text-muted" style="font-size:12.5px;' +
-                'margin:0 0 10px">Movimentações feitas manualmente por ' +
-                'administrador. A trilha não se apaga: correção é uma linha ' +
-                'nova com justificativa.</p>' +
-                corrigidas.map(function (m) {
+            cor.innerHTML = corrigidas.map(function (m) {
                     return '<div class="sep-linha"><div>' +
                         '<div style="font-size:13px">' +
                         S.esc(m.de_rotulo || '—') + ' → ' +
@@ -316,9 +310,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         } catch (e) { return falha(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho(login ? d.login : 'Minha produção',
-            'Últimos ' + d.dias + ' dias. Só o tempo em que o equipamento ' +
-            'esteve com você — fila e espera de terceiro não entram.'));
+        c.appendChild(cabecalho(login ? d.login : 'Minha produção', 'Últimos ' + d.dias + ' dias'));
 
         c.appendChild(indicadores([
             ['Tempo em bancada', duracao(d.segundos_tratativa), 'accent-teal'],
@@ -349,9 +341,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         catch (e) { return falha(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Equipe',
-            'Últimos ' + d.dias + ' dias, só tempo de tratativa. Fila e espera ' +
-            'externa não entram na conta de ninguém.'));
+        c.appendChild(cabecalho('Equipe', 'Últimos ' + d.dias + ' dias'));
 
         var corpo = S.el('div', { className: 'card-body' });
         if (!d.pessoas.length) {

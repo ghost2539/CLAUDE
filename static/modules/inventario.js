@@ -120,7 +120,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var rodape = S.el('div', { className: 'card-footer' });
         var previa = botao('Ver quantos itens', 'btn-secondary', async function () {
             var alvo = corpo.querySelector('#inv-previa');
-            alvo.innerHTML = '<span class="text-muted">Lendo o ServiceNow...</span>';
+            alvo.innerHTML = '<span class="text-muted">Lendo…</span>';
             try {
                 var p = await S.api('/inventario/previa?prefixo=' + encodeURIComponent(corpo.querySelector('#inv-prefixo').value.trim()));
                 var html = '<div class="sep-total"><span>Itens no recorte</span><b>' + p.total + '</b></div>' +

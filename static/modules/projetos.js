@@ -339,7 +339,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         async function validar() {
             var numero = campo.value.trim().toUpperCase();
             if (!numero) return;
-            info.innerHTML = '<span class="text-muted">Consultando o ServiceNow...</span>';
+            info.innerHTML = '<span class="text-muted">Consultando…</span>';
             try {
                 chamado = await S.api('/projetos/chamado/' + encodeURIComponent(numero));
                 info.innerHTML = '<div class="detail-grid">' +

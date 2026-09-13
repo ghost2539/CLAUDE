@@ -296,7 +296,8 @@ def auth_login(body: LoginIn, req: Request):
         raise
     except Exception as e:  # noqa: BLE001 — falha de credencial externa etc.
         _registrar_falha(login, source, str(e), client_ip(req), pendente=False)
-        raise HTTPException(401, str(e))
+        log.error("login: falha interna na autenticação: %s", e, exc_info=True)
+        raise HTTPException(401, "Não foi possível autenticar agora. Tente de novo em instantes.")
 
 
 @router.get("/me")

@@ -69,12 +69,9 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
     function textoDaEstacao() {
         return ({
-            CONFIGURACAO: 'Coletor apto recebe a baseline da frota antes de ' +
-                          'voltar ao estoque.',
-            MONTAGEM: 'Componentes entram, um sled sai. É o único processo ' +
-                      'que transforma ativos.',
-            INTERNALIZACAO: 'Conferência e endereçamento. Daqui o equipamento ' +
-                            'entra no saldo.'
+            CONFIGURACAO: '',
+            MONTAGEM: '',
+            INTERNALIZACAO: ''
         })[vista.estacao];
     }
 
@@ -164,9 +161,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                     'Componentes consumidos</label>' +
                     '<input id="prp-comp" class="form-control" ' +
                            'placeholder="séries separadas por vírgula">' +
-                    '<span class="text-muted" style="font-size:11.5px">' +
-                    'Cada série informada é encerrada na trilha como ' +
-                    'consumida nesta montagem.</span></div>' +
+                    '</div>' +
                 '</div>' + testeFuncional();
         } else {
             f.innerHTML =
@@ -184,9 +179,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                            'placeholder="espaço e corredor"></div>' +
                   '<div class="form-group"><label for="prp-obs">Observação' +
                     '</label><input id="prp-obs" class="form-control"></div>' +
-                '</div>' +
-                '<p class="text-muted mt-2" style="font-size:12px">Conferência ' +
-                'reprovada devolve o equipamento para a bancada, com o motivo.</p>';
+                '</div>';
         }
         return f;
     }

@@ -418,6 +418,10 @@
         if (!ROUTES[module]) module = 'bemvindo';
         state.current = module;
         location.hash = route;
+        // Modal é global: um erro deixado aberto numa tela não pode
+        // acompanhar o usuário para a próxima.
+        closeModal();
+        document.body.classList.remove('menu-aberto');
 
         // Update active sidebar item
         $$('.sidebar-item').forEach(function (x) {
@@ -440,6 +444,20 @@
         } catch (e) {
             content.innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>';
         }
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { closeModal(); document.body.classList.remove('menu-aberto'); }
+    });
+    var _menuBtn = document.getElementById('menu-toggle');
+    if (_menuBtn) {
+        _menuBtn.onclick = function () { document.body.classList.toggle('menu-aberto'); };
+        document.addEventListener('click', function (e) {
+            if (document.body.classList.contains('menu-aberto') &&
+                !e.target.closest('.sidebar') && !e.target.closest('#menu-toggle')) {
+                document.body.classList.remove('menu-aberto');
+            }
+        });
     }
 
     window.addEventListener('hashchange', function () {
