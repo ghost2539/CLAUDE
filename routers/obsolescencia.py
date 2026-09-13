@@ -1020,7 +1020,7 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
     resumo diz por quê.
     """
     resumo = {"tentados": 0, "removidos": 0, "pendentes": 0, "nao_encontrados": 0,
-              "falhas": [], "motivo": ""}
+              "falhas": [], "motivo": "", "por_serie": {}}
     if not itens:
         return resumo
     import db.obsolescencia as _db
@@ -1078,6 +1078,10 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
                 alvo = s.get(_db.Coletor, c.id)
                 if alvo is not None:
                     s.delete(alvo)
+        # Por série para quem chamou poder registrar no próprio processo
+        # (o Recebimento guarda o desfecho no ciclo do ativo).
+        resumo["por_serie"][(c.serie or "").strip().upper()] = {
+            "ok": ok, "detalhe": detalhe, "mdm_id": c.mdm_id}
         if ok:
             resumo["removidos"] += 1
         else:

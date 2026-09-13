@@ -386,6 +386,9 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     # está mais com a loja. Só o que passou por aqui — a base do MDM não é
     # tocada. Aditivo: recebimento gravado não se desfaz por causa do MDM.
     do_mdm = _remover_do_mdm(entrando, sd["username"])
+    # O ciclo guarda o desfecho: o recebimento foi o gatilho da remoção.
+    # Movimento de origem MDM — rastro, não item de tela.
+    _registrar_mdm_no_ciclo(entrando, do_mdm, sd["username"])
 
     return {
         "ok": True,
@@ -573,6 +576,60 @@ def _remover_do_mdm(itens: list[dict], usuario: str) -> dict:
         logging.getLogger("recebimento").warning(
             "MDM: %d recebido(s) sem remoção: %s", len(itens), exc)
         return {"tentados": 0, "removidos": 0, "pendentes": 0, "falhas": [str(exc)]}
+
+
+def _registrar_mdm_no_ciclo(itens: list[dict], resultado: dict, usuario: str) -> int:
+    """Guarda o desfecho da remoção no MDM no ciclo do ativo recebido.
+
+    O livro das escritas no MDM continua na Obsolescência — quem fala com o
+    console é quem registra lá. Isto aqui é o rastro do lado de cá: o
+    recebimento foi o gatilho, então o ciclo guarda o que aconteceu. Fica
+    como movimento de origem MDM, fora do que a tela de recebimento lista.
+    """
+    por_serie = (resultado or {}).get("por_serie") or {}
+    if not por_serie:
+        return 0
+    gravados = 0
+    try:
+        with SessionLocal.begin() as s:
+            for item in itens:
+                chave = str(item.get("serial") or "").strip().upper()
+                desfecho = por_serie.get(chave)
+                if not desfecho:
+                    continue
+                a = s.scalar(
+                    select(Asset).where(
+                        or_(Asset.serial_number == item.get("serial"),
+                            Asset.tag_number == item.get("etiqueta"))
+                    ).order_by(Asset.id.desc())
+                )
+                if a is None:
+                    continue
+                ciclo = s.scalar(
+                    select(ReceiptCycle)
+                    .where(ReceiptCycle.asset_id == a.id)
+                    .order_by(ReceiptCycle.id.desc())
+                )
+                if ciclo is None:
+                    continue
+                nota = ("Removido do MDM" if desfecho.get("ok")
+                        else "Remoção do MDM pendente")
+                detalhe = str(desfecho.get("detalhe") or "").strip()
+                if detalhe and not desfecho.get("ok"):
+                    nota = f"{nota}: {detalhe}"
+                s.add(Movement(
+                    asset_id=a.id,
+                    cycle_id=ciclo.id,
+                    origin="MDM",
+                    note=nota[:400],
+                    username=usuario,
+                ))
+                gravados += 1
+    except Exception as exc:  # noqa: BLE001 — rastro não desfaz recebimento
+        logging.getLogger("recebimento").warning(
+            "MDM: desfecho não registrado no ciclo: %s", exc)
+        return 0
+    return gravados
 
 
 def _casar_com_coleta(itens: list[dict], usuario: str) -> dict:
