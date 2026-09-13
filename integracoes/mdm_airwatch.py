@@ -279,20 +279,59 @@ def varrer(sessao, base: str = "", max_paginas: int = 400, progresso=None) -> di
 
 # ── Remoção de dispositivo ────────────────────────────────────────
 # Apagar do MDM é irreversível e o caminho varia por versão do console,
-# então o endpoint é CONFIGURÁVEL (Configuração → Obsolescência) em vez de
-# ficar chutado no código. Sem endpoint configurado nada é enviado: a
-# remoção fica na fila, registrada, esperando a configuração.
+# então o endpoint segue CONFIGURÁVEL (Configuração → Obsolescência). O
+# padrão é o que a leitura da grade já mapeou: cada linha traz
+# `data-action-names` com DeleteDevice, e o id do aparelho é o mesmo do
+# `Device/Details/Summary/<id>`. Em branco nada é enviado: a remoção fica
+# na fila, registrada.
+#
+# O console é ASP.NET MVC e valida anti-CSRF nas escritas (foi assim que a
+# escrita de tag se provou). Antes de postar, então, buscamos um
+# formulário do próprio aparelho e reaproveitamos o token daquela resposta.
 
 class RemocaoNaoConfigurada(RuntimeError):
     """Não há endpoint de remoção configurado — nada foi enviado."""
 
 
+_RE_TOKEN = re.compile(r"<input[^>]*__RequestVerificationToken[^>]*>", re.I)
+_RE_VALOR = re.compile(r"value\s*=\s*[\"']([^\"']+)[\"']", re.I)
+
+# Páginas do próprio aparelho que trazem o formulário com o token.
+FORMULARIOS_TOKEN = ("/AirWatch/Devices/TagAssignment/{id}",
+                     "/AirWatch/Device/Details/Summary/{id}")
+
+
+def token_verificacao(sessao, mdm_id: str, base: str = "") -> str:
+    """Token anti-CSRF do console, lido de um formulário do aparelho.
+
+    Devolve "" quando não achar: a escrita pode não exigir token nesta
+    versão do console, e quem chama registra a resposta de qualquer jeito.
+    """
+    for caminho in FORMULARIOS_TOKEN:
+        url = (base or "") + caminho.replace("{id}", str(mdm_id))
+        try:
+            r = sessao.get(url, headers=CABECALHOS, timeout=30)
+        except Exception:  # noqa: BLE001 — sem token seguimos e registramos
+            continue
+        if getattr(r, "status_code", 0) != 200:
+            continue
+        campo = _RE_TOKEN.search(getattr(r, "text", "") or "")
+        if not campo:
+            continue
+        valor = _RE_VALOR.search(campo.group(0))
+        if valor:
+            return valor.group(1)
+    return ""
+
+
 def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
-                        metodo: str = "POST", campo: str = "id") -> tuple[bool, str]:
+                        metodo: str = "POST", campo: str = "SelectedDeviceIds",
+                        ) -> tuple[bool, str]:
     """Remove um dispositivo do console. Devolve (ok, detalhe).
 
-    `endpoint` aceita `{id}` no caminho; sem ele o id vai no corpo, no
-    campo indicado. Nunca levanta por falha de rede: quem chama registra.
+    `endpoint` aceita `{id}` no caminho; com ou sem ele o id também vai no
+    corpo, no campo indicado, porque as ações do console leem de lá.
+    Nunca levanta por falha de rede: quem chama registra.
     """
     mdm_id = str(mdm_id or "").strip()
     if not mdm_id:
@@ -304,15 +343,20 @@ def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
 
     caminho = endpoint.replace("{id}", mdm_id)
     url = caminho if caminho.startswith("http") else (base or "") + caminho
-    corpo = None if "{id}" in endpoint else {campo: mdm_id}
+    corpo = {(campo or "SelectedDeviceIds"): mdm_id}
+    cabecalhos = dict(CABECALHOS)
+    token = token_verificacao(sessao, mdm_id, base)
+    if token:
+        corpo["__RequestVerificationToken"] = token
+        cabecalhos["RequestVerificationToken"] = token
     try:
-        r = sessao.request(metodo.upper() or "POST", url, json=corpo,
-                           headers=CABECALHOS, timeout=60)
+        r = sessao.request((metodo or "POST").upper(), url, data=corpo,
+                           headers=cabecalhos, timeout=60)
     except Exception as exc:  # noqa: BLE001 — a rede não pode derrubar o lote
         return False, f"falha de rede: {exc}"
     if 200 <= r.status_code < 300:
         texto = (getattr(r, "text", "") or "")[:200]
-        if "login" in getattr(r, "url", "").lower():
+        if "login" in (getattr(r, "url", "") or "").lower():
             return False, "o console devolveu a tela de login (sessão expirada)"
         return True, texto or f"HTTP {r.status_code}"
     return False, f"HTTP {r.status_code}: {(getattr(r, 'text', '') or '')[:200]}"

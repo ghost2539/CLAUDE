@@ -435,9 +435,24 @@ Coletor que chega ao CD pelo Recebimento é removido do console: ele voltou
 para o estoque e não está mais com a loja. Vale **só** para o que passou
 pelo Recebimento, casado por série — a base do MDM não é varrida.
 
+O caminho é o que a leitura do console já tinha mapeado — as linhas da
+grade trazem `data-action-names` com `DeleteDevice`, e o id do aparelho é o
+mesmo do `Device/Details/Summary/<id>`:
+
+    POST /AirWatch/Devices/DeleteDevice/{id}
+         SelectedDeviceIds          = <id>
+         __RequestVerificationToken = <token do formulário do aparelho>
+
+Como as escritas do console têm anti-CSRF (provado na escrita de tag), o
+token é lido antes, de um formulário do próprio aparelho
+(`Devices/TagAssignment/{id}`, e na falta dele `Device/Details/Summary/{id}`),
+e vai no corpo e no cabeçalho. Console que não exigir token não trava a
+remoção.
+
 Apagar do MDM é irreversível e o caminho muda com a versão do console, por
-isso o endpoint é configurado (`mdm_remocao_endpoint`, com `{id}` no
-caminho, mais método e nome do campo). **Sem endpoint configurado nada é
+isso ele continua configurável (`mdm_remocao_endpoint`, com `{id}` no
+caminho, mais método e nome do campo) — o mapeado é só o padrão, e um valor
+já escolhido pela área não é sobrescrito. **Com o endpoint em branco nada é
 enviado**: a remoção fica pendente, o resumo do recebimento diz o motivo e
 cada tentativa entra na trilha de escrita (`obs_escrita`, ação `deletar`),
 com sucesso ou falha. `remover_do_mdm_no_recebimento = 0` desliga.

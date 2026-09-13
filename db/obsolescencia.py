@@ -206,9 +206,13 @@ PADROES = {
     # nunca para a base inteira. Apagar é irreversível, então o caminho
     # do console é configurado aqui, e sem ele a remoção só fica na fila.
     "remover_do_mdm_no_recebimento": "1",
-    "mdm_remocao_endpoint": "",
+    # Caminho mapeado na leitura do console (data-action-names traz
+    # DeleteDevice; o id do aparelho é o mesmo da grade, o do
+    # Device/Details/Summary/<id>). Fica configurável porque muda com a
+    # versão do console; em branco, nada é enviado.
+    "mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}",
     "mdm_remocao_metodo": "POST",
-    "mdm_remocao_campo": "id",
+    "mdm_remocao_campo": "SelectedDeviceIds",
     # PDVs no ServiceNow. Deixado configurável porque o rótulo da tela
     # ("Origem da descoberta") pode não bater com o nome interno do campo.
     "pdv_tabela": "cmdb_ci_computer",
@@ -223,6 +227,15 @@ def init_db() -> None:
         for chave, valor in PADROES.items():
             if chave not in existentes:
                 s.add(Config(chave=chave, valor=valor))
+        # O caminho de remoção nasceu em branco (era desconhecido) e foi
+        # gravado assim nas bases que já rodaram. Quem nunca o preencheu
+        # passa a usar o mapeado; quem preencheu não é tocado.
+        linha = s.get(Config, "mdm_remocao_endpoint")
+        if linha is not None and not (linha.valor or "").strip():
+            linha.valor = PADROES["mdm_remocao_endpoint"]
+        linha = s.get(Config, "mdm_remocao_campo")
+        if linha is not None and (linha.valor or "").strip() == "id":
+            linha.valor = PADROES["mdm_remocao_campo"]
 
 
 def ler_config() -> dict:
