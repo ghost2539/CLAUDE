@@ -266,3 +266,21 @@ são obrigatórios) e uma aba de instruções;
 origens, marcando as incompletas com o motivo.
 
 Verificação: `python3 scripts/verificar_consulta_times.py`.
+
+### Recebimento espelhado no ServiceNow
+
+Ao confirmar um recebimento, o portal reflete no ServiceNow o que chegou:
+
+- **Espaço e Corredor é obrigatório** e é pedido na tela antes de gravar.
+  Recusa-se o lote inteiro antes de escrever, para não deixar recebimento
+  gravado e ServiceNow pela metade.
+- **Ativo que já existe** é atualizado com os dados do recebimento
+  (modelo, categoria, identificador que faltava) e passa a estar em
+  estoque, no `SPARE - CD324`, no espaço informado.
+- **Ativo que não existe é criado** ali mesmo, com os mesmos campos.
+  Antes ficava invisível até alguém lembrar da Entrada de Estoque
+  (`criar_ausentes = false` volta ao comportamento antigo).
+- Modelo e categoria só entram quando o ServiceNow os reconhece: mandar
+  texto livre num campo de referência apagaria o valor atual.
+
+Verificação: `python3 scripts/verificar_recebimento_sn.py`.

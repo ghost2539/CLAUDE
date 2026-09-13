@@ -78,6 +78,9 @@ class BulkSubmitItem(BaseModel):
 
 class BulkSubmitIn(BaseModel):
     items: list[BulkSubmitItem]
+    # Onde o lote foi guardado. Obrigatório quando o espelho no ServiceNow
+    # está ligado: "em estoque" sem dizer onde não fecha inventário depois.
+    espaco_corredor: str = ""
 
 
 class LotCreateIn(BaseModel):
@@ -276,6 +279,12 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     """Save validated assets from the temporary session to the database."""
     sd = require_permission(req, "recebimento", "create")
     check_rate_limit(req)
+    # O espelho no ServiceNow escreve estoque E local. Sem o local, gravaria
+    # "em estoque" sem dizer onde, e a conferência não fecharia depois.
+    # Recusa-se ANTES de gravar, para não deixar o recebimento pela metade.
+    if _config_servicenow().get("ativo", True) and not (body.espaco_corredor or "").strip():
+        raise HTTPException(400, "Informe o Espaço e Corredor onde os ativos "
+                                 "ficaram guardados antes de confirmar o recebimento.")
 
     if not body.items:
         raise HTTPException(400, "Nenhum ativo para enviar.")
@@ -366,12 +375,17 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     # Espelho no ServiceNow: o que chegou fisicamente está no CD, e lá
     # precisa aparecer em estoque. Também aditivo — recebimento gravado
     # não se desfaz porque o ServiceNow recusou.
-    no_servicenow = _marcar_no_servicenow(entrando, req)
+    no_servicenow = _marcar_no_servicenow(entrando, req, body.espaco_corredor)
 
     # Logística reversa (A17): série que bate com uma coleta em aberto
     # entra como recebida nela — a caixa está no CD, quem confirmou foi
     # quem recebeu. Aditivo e tolerante a falha, como os outros ganchos.
     na_coleta = _casar_com_coleta(entrando, sd["username"])
+
+    # Coletor que chegou ao CD sai do MDM: ele voltou para o estoque e não
+    # está mais com a loja. Só o que passou por aqui — a base do MDM não é
+    # tocada. Aditivo: recebimento gravado não se desfaz por causa do MDM.
+    do_mdm = _remover_do_mdm(entrando, sd["username"])
 
     return {
         "ok": True,
@@ -381,6 +395,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
         "na_trilha": na_trilha,
         "no_servicenow": no_servicenow,
         "na_coleta": na_coleta,
+        "mdm": do_mdm,
     }
 
 
@@ -503,14 +518,6 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
 CONFIG_SN = "recebimento_servicenow"
 
 
-class _ItemSN:
-    """Casca com os dois campos que o alm_hardware casa."""
-
-    def __init__(self, etiqueta: str, serial: str):
-        self.asset_tag = etiqueta
-        self.serial_number = serial
-
-
 def _config_servicenow() -> dict:
     with SessionLocal() as s:
         x = s.get(Setting, CONFIG_SN)
@@ -518,12 +525,15 @@ def _config_servicenow() -> dict:
     cfg.setdefault("ativo", True)
     cfg.setdefault("stockroom", "")
     cfg.setdefault("install_status", "")
+    # Ativo recebido que o ServiceNow não conhece é criado no ato. Sem isto
+    # ele fica invisível até alguém lembrar da Entrada de Estoque.
+    cfg.setdefault("criar_ausentes", True)
     return cfg
 
 
-def _marcar_no_servicenow(itens: list[dict], req: Request) -> dict:
-    """Põe em estoque, no CD, os recebidos que já existem no ServiceNow."""
-    resumo = {"ativo": False, "encontrados": 0, "atualizados": 0,
+def _marcar_no_servicenow(itens: list[dict], req: Request, espaco: str = "") -> dict:
+    """Espelha o recebimento no ServiceNow: cria o que falta, atualiza o resto."""
+    resumo = {"ativo": False, "encontrados": 0, "atualizados": 0, "criados": 0,
               "nao_encontrados": 0, "falhas": []}
     if not itens:
         return resumo
@@ -537,12 +547,12 @@ def _marcar_no_servicenow(itens: list[dict], req: Request) -> dict:
         )
         # A escrita sai no nome de quem recebeu, como manda a norma.
         session = _sn_session_from_portal(req)
-        pares = [_ItemSN(it.get("etiqueta", ""), it.get("serial", ""))
-                 for it in itens]
         r = marcar_recebidos_em_estoque(
-            session, pares,
+            session, itens,
             stockroom=cfg.get("stockroom", ""),
-            install_status=cfg.get("install_status", ""))
+            install_status=cfg.get("install_status", ""),
+            aisle_space=espaco,
+            criar=bool(cfg.get("criar_ausentes", True)))
         resumo.update(r)
     except Exception as exc:  # noqa: BLE001 — ServiceNow fora do ar
         resumo["falhas"] = [str(exc)]
@@ -550,6 +560,19 @@ def _marcar_no_servicenow(itens: list[dict], req: Request) -> dict:
             "ServiceNow: %d ativo(s) recebidos sem marcação de estoque: %s",
             len(itens), exc)
     return resumo
+
+
+def _remover_do_mdm(itens: list[dict], usuario: str) -> dict:
+    """Tira do MDM os coletores recebidos. Módulo ausente não trava nada."""
+    if not itens:
+        return {"tentados": 0, "removidos": 0, "pendentes": 0}
+    try:
+        from routers.obsolescencia import remover_recebidos_do_mdm
+        return remover_recebidos_do_mdm(itens, usuario)
+    except Exception as exc:  # noqa: BLE001 — módulo fora do ar
+        logging.getLogger("recebimento").warning(
+            "MDM: %d recebido(s) sem remoção: %s", len(itens), exc)
+        return {"tentados": 0, "removidos": 0, "pendentes": 0, "falhas": [str(exc)]}
 
 
 def _casar_com_coleta(itens: list[dict], usuario: str) -> dict:

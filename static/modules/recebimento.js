@@ -40,6 +40,17 @@ function renderNovo(c, S) {
                 '<div id="scan-feedback" class="mt-2"></div>' +
             '</div>' +
         '</div>' +
+        // Onde o lote foi guardado. Vai junto para o ServiceNow: sem o
+        // local, o ativo ficaria "em estoque" sem dizer onde.
+        '<div class="card mb-3">' +
+            '<div class="card-header">Onde os ativos foram guardados</div>' +
+            '<div class="card-body">' +
+                '<label for="rec-espaco">Espaço e Corredor <span style="color:#dc2626">*</span></label>' +
+                '<input id="rec-espaco" class="form-control" style="max-width:320px" ' +
+                    'list="rec-corredores" autocomplete="off" placeholder="Ex.: A-12">' +
+                '<datalist id="rec-corredores"></datalist>' +
+            '</div>' +
+        '</div>' +
         '<div class="btn-row mb-3">' +
             '<button id="btn-select-ready" class="btn btn-secondary">Selecionar Prontos</button>' +
             '<button id="btn-submit-base" class="btn btn-primary">Enviar para Base</button>' +
@@ -348,6 +359,13 @@ function renderNovo(c, S) {
             S.toast(notReady.length + ' ativo(s) selecionado(s) não estão prontos para envio.', 'warning');
             return;
         }
+        var campoEspaco = document.getElementById('rec-espaco');
+        var espaco = (campoEspaco && campoEspaco.value || '').trim();
+        if (!espaco) {
+            S.toast('Informe o Espaço e Corredor onde os ativos ficaram guardados.', 'warning');
+            if (campoEspaco) campoEspaco.focus();
+            return;
+        }
         try {
             S.loading(true);
             var payload = selected.map(function (x) {
@@ -367,12 +385,23 @@ function renderNovo(c, S) {
             });
             var d = await S.api('/recebimento/bulk-submit', {
                 method: 'POST',
-                body: { items: payload }
+                body: { items: payload, espaco_corredor: espaco }
             });
             var msg = d.criados + ' ativo(s) enviado(s) para a base.';
             if (d.ignorados) msg += ' ' + d.ignorados + ' já possuíam recebimento aberto.';
             if (d.erros && d.erros.length) msg += ' ' + d.erros.length + ' erro(s).';
-            S.toast(msg, d.erros && d.erros.length ? 'warning' : 'success');
+            var sn = d.no_servicenow || {};
+            if (sn.ativo) {
+                var partes = [];
+                if (sn.criados) partes.push(sn.criados + ' criado(s) no ServiceNow');
+                if (sn.atualizados) partes.push(sn.atualizados + ' atualizado(s)');
+                if (partes.length) msg += ' ' + partes.join(', ') + '.';
+                if (sn.falhas && sn.falhas.length) msg += ' ServiceNow: ' + sn.falhas[0];
+            }
+            var mdm = d.mdm || {};
+            if (mdm.removidos) msg += ' ' + mdm.removidos + ' coletor(es) removido(s) do MDM.';
+            else if (mdm.pendentes) msg += ' ' + mdm.pendentes + ' remoção(ões) do MDM pendente(s): ' + (mdm.motivo || (mdm.falhas || [])[0] || '');
+            S.toast(msg, (d.erros && d.erros.length) || (sn.falhas && sn.falhas.length) ? 'warning' : 'success');
             sessionItems = sessionItems.filter(function (x) { return !x._selected; });
             drawSession();
         } catch (x) {
@@ -381,6 +410,12 @@ function renderNovo(c, S) {
             S.loading(false);
         }
     };
+
+    S.api('/servicenow/gestao-ativos/config').then(function (cfg) {
+        var dl = document.getElementById('rec-corredores');
+        if (dl) dl.innerHTML = (cfg.corredores || []).map(function (x) {
+            return '<option value="' + S.esc(x) + '">'; }).join('');
+    }).catch(function () {});
 
     drawSession();
 

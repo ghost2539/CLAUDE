@@ -275,3 +275,45 @@ def varrer(sessao, base: str = "", max_paginas: int = 400, progresso=None) -> di
 
     return {"total": total, "paginas": pagina + 1,
             "coletores": list(achados.values())}
+
+
+# ── Remoção de dispositivo ────────────────────────────────────────
+# Apagar do MDM é irreversível e o caminho varia por versão do console,
+# então o endpoint é CONFIGURÁVEL (Configuração → Obsolescência) em vez de
+# ficar chutado no código. Sem endpoint configurado nada é enviado: a
+# remoção fica na fila, registrada, esperando a configuração.
+
+class RemocaoNaoConfigurada(RuntimeError):
+    """Não há endpoint de remoção configurado — nada foi enviado."""
+
+
+def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
+                        metodo: str = "POST", campo: str = "id") -> tuple[bool, str]:
+    """Remove um dispositivo do console. Devolve (ok, detalhe).
+
+    `endpoint` aceita `{id}` no caminho; sem ele o id vai no corpo, no
+    campo indicado. Nunca levanta por falha de rede: quem chama registra.
+    """
+    mdm_id = str(mdm_id or "").strip()
+    if not mdm_id:
+        return False, "sem id do dispositivo"
+    endpoint = (endpoint or "").strip()
+    if not endpoint:
+        raise RemocaoNaoConfigurada(
+            "Endpoint de remoção do MDM não configurado (Configuração → Obsolescência).")
+
+    caminho = endpoint.replace("{id}", mdm_id)
+    url = caminho if caminho.startswith("http") else (base or "") + caminho
+    corpo = None if "{id}" in endpoint else {campo: mdm_id}
+    try:
+        r = sessao.request(metodo.upper() or "POST", url, json=corpo,
+                           headers=CABECALHOS, timeout=60)
+    except Exception as exc:  # noqa: BLE001 — a rede não pode derrubar o lote
+        return False, f"falha de rede: {exc}"
+    if 200 <= r.status_code < 300:
+        texto = (getattr(r, "text", "") or "")[:200]
+        if "login" in getattr(r, "url", "").lower():
+            return False, "o console devolveu a tela de login (sessão expirada)"
+        return True, texto or f"HTTP {r.status_code}"
+    return False, f"HTTP {r.status_code}: {(getattr(r, 'text', '') or '')[:200]}"
+
