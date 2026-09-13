@@ -142,6 +142,11 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">EBS — API de consulta e banco Oracle</div>' +
+            '<div class="card-body" id="cm-ebs"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — famílias e prefixos</div>' +
             '<div class="card-body" id="cm-familias"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
         '</div>' +
@@ -166,6 +171,7 @@ function renderConfigModulos(c, S) {
     _renderConsultaColunas(S);
     _renderGestaoAtivos(S);
     _renderFamilias(S);
+    _renderEbs(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -201,6 +207,53 @@ function renderConfigModulos(c, S) {
         } finally {
             S.loading(false);
         }
+    };
+}
+
+/* EBS: URLs da API e conexão Oracle. Aplicado na próxima consulta, sem reiniciar. */
+async function _renderEbs(S) {
+    var host = document.getElementById('cm-ebs');
+    if (!host) return;
+    var d;
+    try { d = await S.api('/parametros/ebs'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    var o = d.oracle, a = d.api;
+    function campo(id, rotulo, val, extra) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<input id="' + id + '" class="form-control" value="' + S.esc(val || '') + '"' + (extra || '') + '></div>';
+    }
+    host.innerHTML =
+        '<div class="form-grid cols-2">' +
+            campo('ebs-login', 'API — URL de login', a.login_url) +
+            campo('ebs-search', 'API — URL de busca', a.search_url) +
+        '</div>' +
+        '<div class="form-grid cols-2 mt-2">' +
+            campo('ebs-host', 'Oracle — host (SCAN)', o.host) +
+            campo('ebs-porta', 'Porta', o.porta) +
+            campo('ebs-servico', 'Service name', o.servico) +
+            campo('ebs-usuario', 'Usuário', o.usuario) +
+            campo('ebs-senha', 'Senha' + (o.senha_definida ? ' (definida — ' + S.esc(o.senha_fonte) + ')' : ''), '',
+                  ' type="password" autocomplete="new-password" placeholder="' + (o.senha_definida ? 'em branco mantém' : 'obrigatória') + '"' + (o.cofre_disponivel ? ' disabled title="Vem do cofre"' : '')) +
+            campo('ebs-lib', 'Instant Client (lib_dir)', o.lib_dir) +
+        '</div>' +
+        '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button>' +
+        '<button id="ebs-testar" class="btn btn-outline">Testar conexão</button><span id="ebs-res" class="text-muted"></span></div>';
+    var v = function (id) { return document.getElementById(id).value.trim(); };
+    document.getElementById('ebs-salvar').onclick = async function () {
+        try {
+            await S.api('/parametros/ebs', { method: 'PUT', body: {
+                host: v('ebs-host'), porta: v('ebs-porta'), servico: v('ebs-servico'), usuario: v('ebs-usuario'),
+                lib_dir: v('ebs-lib'), senha: document.getElementById('ebs-senha').value || null,
+                login_url: v('ebs-login'), search_url: v('ebs-search') } });
+            S.toast('EBS reconfigurado. Vale na próxima consulta.', 'success'); _renderEbs(S);
+        } catch (e) { S.toast(e.message, 'error'); }
+    };
+    document.getElementById('ebs-testar').onclick = async function () {
+        var res = document.getElementById('ebs-res'); res.textContent = 'Testando…';
+        try {
+            var r = await S.api('/parametros/ebs/testar', { method: 'POST' });
+            res.textContent = r.ok ? 'Conectou em ' + r.ms + ' ms (' + r.dsn + ')' : 'Falhou: ' + r.erro;
+            res.style.color = r.ok ? 'var(--color-teal)' : 'var(--color-danger)';
+        } catch (e) { res.textContent = e.message; }
     };
 }
 
