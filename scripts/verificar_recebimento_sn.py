@@ -124,6 +124,8 @@ ob.sessao_mdm = lambda forcar=False: object()
 dbo.gravar_config({"mdm_remocao_endpoint": "/AirWatch/Device/Delete/{id}"})
 r = ob.remover_recebidos_do_mdm([ITEM_NOVO], usuario="t")
 checar(r["removidos"] == 1 and chamadas == ["m-1"], "com endpoint, remove só o coletor recebido")
+checar(r["por_serie"].get("SN-NOVO-1", {}).get("ok") is True,
+       "o desfecho volta por série, para o Recebimento registrar no ciclo")
 with dbo.SessionLocal() as s:
     restantes = {c.mdm_id for c in s.query(dbo.Coletor).all()}
 checar(restantes == {"m-2"}, "o outro coletor da base continua intacto")
@@ -204,6 +206,41 @@ try:
     checar(False, "endpoint em branco deveria levantar RemocaoNaoConfigurada")
 except mdm.RemocaoNaoConfigurada:
     checar(True, "endpoint em branco levanta RemocaoNaoConfigurada")
+
+print("\n[8] O ciclo do recebimento guarda o desfecho da remoção no MDM")
+import routers.recebimento as rec  # noqa: E402
+from db.portal import (  # noqa: E402
+    Base as _PBase, engine as _peng, SessionLocal as _PS, Asset as _Asset,
+    ReceiptCycle as _Ciclo, Movement as _Mov,
+)
+_PBase.metadata.create_all(_peng)
+with _PS.begin() as _s:
+    _a = _Asset(serial_number="SN-NOVO-1", tag_number="RN-NOVO-1", model="Zebra TC21")
+    _b = _Asset(serial_number="SN-OUTRO", tag_number="RN-OUTRO", model="Zebra TC21")
+    _s.add_all([_a, _b]); _s.flush()
+    _s.add_all([_Ciclo(asset_id=_a.id, cycle_number=1, created_by="t"),
+                _Ciclo(asset_id=_b.id, cycle_number=1, created_by="t")])
+
+_res = {"por_serie": {
+    "SN-NOVO-1": {"ok": True, "detalhe": "ok", "mdm_id": "m-1"},
+    "SN-OUTRO": {"ok": False, "detalhe": "HTTP 403", "mdm_id": "m-2"},
+}}
+_itens = [ITEM_NOVO, {"serial": "SN-OUTRO", "etiqueta": "RN-OUTRO"},
+          {"serial": "SEM-CICLO", "etiqueta": ""}]
+checar(rec._registrar_mdm_no_ciclo(_itens, _res, "t") == 2,
+       "grava um movimento por ativo com desfecho, e só por esses")
+with _PS() as _s:
+    _movs = {m.asset_id: m for m in _s.query(_Mov).filter(_Mov.origin == "MDM").all()}
+    _ids = {a.serial_number: a.id for a in _s.query(_Asset).all()}
+checar(len(_movs) == 2, "nada foi gravado para série sem ativo/ciclo")
+checar(_movs[_ids["SN-NOVO-1"]].note == "Removido do MDM", "sucesso fica registrado")
+checar("HTTP 403" in _movs[_ids["SN-OUTRO"]].note and
+       _movs[_ids["SN-OUTRO"]].note.startswith("Remoção do MDM pendente"),
+       f"pendência guarda o motivo ({_movs[_ids['SN-OUTRO']].note})")
+checar(all(m.username == "t" and m.cycle_id for m in _movs.values()),
+       "movimento fica preso ao ciclo e a quem recebeu")
+checar(rec._registrar_mdm_no_ciclo(_itens, {"tentados": 0}, "t") == 0,
+       "sem desfecho por série, nada é gravado")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
