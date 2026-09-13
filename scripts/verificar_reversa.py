@@ -59,7 +59,7 @@ def esperar(codigo: int, descricao: str, funcao) -> None:
 
 
 # ── Dublês ─────────────────────────────────────────────────────────
-sep.consultar_chamado = lambda req, numero: {
+sep.consultar_chamado = lambda req, numero, cfg=None: {
     "chamado": numero.upper(), "tipo": "INC", "resumo": "Devolução de coletores",
     "destino": "LOJA 123", "solicitante": "x", "estado": "2"}
 rastreio = {"encontrado": False, "eventos": [], "entrega": None}

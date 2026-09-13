@@ -84,8 +84,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         });
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Logística reversa',
-            'O que a loja combinou devolver, e o que de fato chegou.',
+        c.appendChild(cabecalho('Logística reversa', '',
             [botao('Nova coleta', 'btn-primary', function () {
                 vista.tela = 'nova'; desenhar(c);
             })]));
@@ -156,8 +155,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaNova(c) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Nova coleta',
-            'Combine com a loja o que volta e até quando ela posta.',
+        c.appendChild(cabecalho('Nova coleta', '',
             [botao('Cancelar', 'btn-outline', function () {
                 vista.tela = 'fila'; desenhar(c);
             })]));
@@ -188,8 +186,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
         var corpoIt = S.el('div', { className: 'card-body' });
         corpoIt.innerHTML =
-            '<p class="text-muted" style="font-size:12.5px;margin:0 0 12px">Série ou etiqueta — ' +
-              'a que a loja conseguir ler. É com ela que o recebimento casa sozinho.</p>' +
             '<div class="form-grid cols-2">' +
               '<div class="form-group"><label for="rev-serial">Série</label>' +
                 '<input id="rev-serial" class="form-control" autocomplete="off"></div>' +
@@ -210,14 +206,14 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             corpoIt.querySelector('#rev-serial').focus();
             pintarItens();
         }));
-        esquerda.appendChild(cartao('O que a loja vai mandar', corpoIt));
+        esquerda.appendChild(cartao('Equipamentos esperados', corpoIt));
 
         function pintarItens() {
             direita.innerHTML = '';
             var corpo = S.el('div', { className: 'card-body' });
             if (!itens.length) {
                 corpo.appendChild(S.el('p', { className: 'sep-vazio',
-                    textContent: 'Nenhum equipamento esperado ainda.' }));
+                    textContent: 'Nenhum equipamento.' }));
             } else {
                 itens.forEach(function (i, k) {
                     var linha = S.el('div', { className: 'sep-linha' });
@@ -416,7 +412,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                 var r = await S.api('/reversa/coletas/' + encodeURIComponent(d.numero) + '/bipar',
                                     { method: 'POST', body: { serial: valor } });
                 S.toast(r.casou ? valor.toUpperCase() + ' conferido.'
-                                : valor.toUpperCase() + ' não estava na lista — registrado como inesperado.',
+                                : valor.toUpperCase() + ' não esperado.',
                         r.casou ? 'success' : 'warning');
                 desenhar(c);
             } catch (e) {
@@ -452,7 +448,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (cmp.divergente) {
             corpo.appendChild(S.el('div', { className: 'alert alert-warning',
                 textContent: 'Faltam ' + cmp.faltantes.length + ' e sobraram ' + cmp.inesperados.length +
-                             '. A coleta fecha como divergente e cada diferença vira uma regularização.' }));
+                             '.' }));
         }
         var obs = S.el('textarea', { className: 'form-control', rows: '3',
             placeholder: cmp.divergente ? 'O que aconteceu (obrigatório)' : 'Observação (opcional)' });

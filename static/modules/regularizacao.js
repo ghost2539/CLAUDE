@@ -83,8 +83,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         });
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Regularização de ativos',
-            'Toda divergência tem dono e prazo. Sem os dois, é relatório.',
+        c.appendChild(cabecalho('Regularização de ativos', '',
             [botao('Abrir divergência', 'btn-primary', function () { vista.tela = 'nova'; desenhar(c); })]));
 
         var n = d.contagem || {};
@@ -150,15 +149,15 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaNova(c) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Abrir divergência', 'Para o que você viu e nenhum processo registrou.',
+        c.appendChild(cabecalho('Abrir divergência', '',
             [botao('Cancelar', 'btn-outline', function () { vista.tela = 'fila'; desenhar(c); })]));
         var corpo = S.el('div', { className: 'card-body' });
         corpo.innerHTML =
             '<div class="form-grid cols-2">' +
               '<div class="form-group"><label for="reg-tipo">Tipo</label><select id="reg-tipo" class="form-control">' +
-                '<option value="FALTANTE">Faltante — deveria estar, não está</option>' +
-                '<option value="INESPERADO">Inesperado — está, e não se sabe de onde veio</option>' +
-                '<option value="LOCAL_ERRADO">Local errado — está, mas o sistema diz outro lugar</option></select></div>' +
+                '<option value="FALTANTE">Faltante</option>' +
+                '<option value="INESPERADO">Inesperado</option>' +
+                '<option value="LOCAL_ERRADO">Local errado</option></select></div>' +
               '<div class="form-group"><label for="reg-serial">Série</label><input id="reg-serial" class="form-control" autocomplete="off"></div>' +
               '<div class="form-group"><label for="reg-etiqueta">Etiqueta</label><input id="reg-etiqueta" class="form-control" autocomplete="off"></div>' +
               '<div class="form-group"><label for="reg-modelo">Modelo</label><input id="reg-modelo" class="form-control"></div>' +
@@ -274,7 +273,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         }
         var prazo = S.el('input', { type: 'date', className: 'form-control mb-2' });
         var nota = S.el('textarea', { className: 'form-control', rows: '2', placeholder: 'Opcional' });
-        corpo.appendChild(S.el('label', { textContent: 'Prazo (em branco usa o padrão da área)' }));
+        corpo.appendChild(S.el('label', { textContent: 'Prazo' }));
         corpo.appendChild(prazo);
         corpo.appendChild(S.el('label', { textContent: 'Nota' }));
         corpo.appendChild(nota);
@@ -292,7 +291,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             BAIXA_SN: 'Baixado no ServiceNow', DEVOLVIDO_LOJA: 'Devolvido pela loja',
             PERDA: 'Perda reconhecida', DUPLICIDADE: 'Era duplicidade de registro' };
         Object.keys(res).forEach(function (k) { sel.appendChild(S.el('option', { value: k, textContent: res[k] })); });
-        var det = S.el('textarea', { className: 'form-control', rows: '3', placeholder: 'Como foi resolvida (obrigatório para perda)' });
+        var det = S.el('textarea', { className: 'form-control', rows: '3', placeholder: '' });
         corpo.appendChild(S.el('label', { textContent: 'Resolução' }));
         corpo.appendChild(sel);
         corpo.appendChild(S.el('label', { textContent: 'Detalhe' }));
@@ -326,7 +325,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             S.loading(true);
             await S.api('/regularizacao/divergencias/' + encodeURIComponent(vista.numero) + '/' + qual,
                         { method: 'POST', body: body });
-            S.toast(({ assumir: 'Divergência com dono e prazo.', anotar: 'Anotado.',
+            S.toast(({ assumir: 'Divergência assumida.', anotar: 'Anotado.',
                        resolver: 'Divergência resolvida.', cancelar: 'Divergência cancelada.' })[qual] || 'Feito.', 'success');
             vista.tela = qual === 'cancelar' ? 'fila' : 'detalhe';
             desenhar(c);

@@ -135,9 +135,6 @@ function renderConfigModulos(c, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — marcação no ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p class="text-muted">Ao concluir um recebimento, o ativo que já ' +
-                    'existe no ServiceNow passa a "em estoque" no depósito do CD. ' +
-                    'Ativo que ainda não existe lá não é criado aqui.</p>' +
                 '<div id="cm-rec-sn"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
             '</div>' +
         '</div>' +
@@ -1578,8 +1575,7 @@ async function renderSeparacaoConfig(c, S) {
     var estoque = S.el('div', { className: 'card-body' });
     estoque.innerHTML =
         '<div class="form-grid cols-2">' +
-          _sepCampo('Campo do espaço e corredor', 'sc-campo', cfg.campo_local,
-                    'No ServiceNow aparece como "Aisle and Space".') +
+          _sepCampo('Campo do espaço e corredor', 'sc-campo', cfg.campo_local) +
           _sepSelect('Comparação', 'sc-comp', cfg.comparacao,
                      [['STARTSWITH', 'Começa com'], ['=', 'É igual a'],
                       ['LIKE', 'Contém']]) +
@@ -1611,14 +1607,10 @@ async function renderSeparacaoConfig(c, S) {
     /* Reserva e envio ---------------------------------------------- */
     var reserva = S.el('div', { className: 'card-body' });
     reserva.innerHTML =
-        '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
-          'Ao bipar, o equipamento sai do saldo disponível na hora. É o que ' +
-          'impede duas pessoas separarem a mesma unidade.</p>' +
         '<div class="form-grid cols-2">' +
           _sepCampo('Campo da reserva', 'sc-res-campo', cfg.reserva_campo) +
           _sepCampo('Valor quando reservado', 'sc-res-valor', cfg.reserva_valor) +
-          _sepCampo('Valor quando livre', 'sc-res-livre', cfg.reserva_valor_livre,
-                    'Usado ao cancelar uma solicitação.') +
+          _sepCampo('Valor quando livre', 'sc-res-livre', cfg.reserva_valor_livre) +
           _sepCampo('Situação no envio', 'sc-envio-status', cfg.envio_status,
                     'Código de install_status. 1 é "In use".') +
           _sepCampo('Campo do local no envio', 'sc-envio-local', cfg.envio_campo_local) +
@@ -1643,9 +1635,6 @@ async function renderSeparacaoConfig(c, S) {
     if (prj) {
         var projetos = S.el('div', { className: 'card-body' });
         projetos.innerHTML =
-            '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
-              'O prazo do item é a soma das três etapas, contado da criação. ' +
-              'Estoque, reserva e envio são os parâmetros acima.</p>' +
             '<div class="form-grid cols-2">' +
               _sepCampo('Definição (dias úteis)', 'sc-prj-def', prj.prazo_definicao) +
               _sepCampo('Separação (dias úteis)', 'sc-prj-sep', prj.prazo_separacao) +
@@ -1653,8 +1642,7 @@ async function renderSeparacaoConfig(c, S) {
               _sepCampo('Folga antes da abertura (dias úteis)', 'sc-prj-folga',
                         prj.folga_antes_abertura) +
               _sepCampo('Prefixos de chamado aceitos', 'sc-prj-ch', prj.chamado_prefixos) +
-              _sepCampo('Estado da unidade reprovada', 'sc-prj-rep', prj.estado_reparo,
-                        'Para onde vai o equipamento reprovado na configuração.') +
+              _sepCampo('Estado da unidade reprovada', 'sc-prj-rep', prj.estado_reparo) +
             '</div>';
         c.appendChild(_sepCartao('Projetos de loja', projetos, largura));
     }
@@ -1663,12 +1651,8 @@ async function renderSeparacaoConfig(c, S) {
     if (rev) {
         var reversa = S.el('div', { className: 'card-body' });
         reversa.innerHTML =
-            '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
-              'O prazo da loja é corrido: ela não segue o expediente do CD. ' +
-              'O de conferência conta em dias úteis a partir da chegada.</p>' +
             '<div class="form-grid cols-2">' +
-              _sepCampo('Loja posta em (dias corridos)', 'sc-rev-post', rev.prazo_postagem_dias,
-                        'Usado quando quem abre não informa a data acordada.') +
+              _sepCampo('Loja posta em (dias corridos)', 'sc-rev-post', rev.prazo_postagem_dias) +
               _sepCampo('Conferir em (dias úteis)', 'sc-rev-conf', rev.prazo_conferencia_dias) +
               _sepCampo('Prefixos de chamado aceitos', 'sc-rev-ch', rev.chamado_prefixos) +
               _sepSelect('Divergência abre regularização', 'sc-rev-reg', rev.abrir_regularizacao,
@@ -1682,8 +1666,7 @@ async function renderSeparacaoConfig(c, S) {
         var ctrl = S.el('div', { className: 'card-body' });
         ctrl.innerHTML =
             '<div class="form-grid cols-2">' +
-            (inv ? _sepCampo('Inventário: situação em estoque', 'sc-inv-status', inv.status_estoque,
-                             'Código de install_status do retrato.') +
+            (inv ? _sepCampo('Inventário: situação em estoque', 'sc-inv-status', inv.status_estoque) +
                    _sepCampo('Inventário: campo do corredor', 'sc-inv-campo', inv.campo_local) +
                    _sepCampo('Inventário: prazo da contagem (dias úteis)', 'sc-inv-prazo', inv.prazo_contagem_dias) +
                    _sepSelect('Inventário: divergência abre regularização', 'sc-inv-reg', inv.abrir_regularizacao,
@@ -1697,10 +1680,6 @@ async function renderSeparacaoConfig(c, S) {
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
-        '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
-          'Vale para todos os módulos: é o que define o que conta como tempo ' +
-          'de fila e de bancada. Como os horários são gravados crus, mudar ' +
-          'aqui recalcula o histórico inteiro.</p>' +
         '<div class="form-grid cols-2">' +
           _sepCampo('Dias de expediente', 'sc-cal-dias', cal.expediente_dias,
                     '0 é segunda, 6 é domingo. Em branco, o relógio corre direto.') +

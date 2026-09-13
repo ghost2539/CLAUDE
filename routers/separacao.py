@@ -141,8 +141,9 @@ def localizar_no_estoque(req: Request, serial: str, tipo: str) -> dict:
     uma reposição. A mensagem precisa dizer isso, não "não encontrado".
     """
     from routers.servicenow import (
-        _sn_session_from_portal, _sn_query, HARDWARE_TABLE,
+        _sn_session_from_portal, _sn_query, HARDWARE_TABLE, termo_sn,
     )
+    serial = termo_sn(serial, "série")
     cfg = db.ler_config()
     session = _sn_session_from_portal(req)
     campos = ("sys_id,serial_number,asset_tag,model,install_status,substatus,"
@@ -197,15 +198,19 @@ def _escrever_reserva(req: Request, sys_id: str, serial: str, reservar: bool) ->
 #  Chamado de origem
 # ══════════════════════════════════════════════════════════════════
 
-def consultar_chamado(req: Request, numero: str) -> dict:
-    """Valida o chamado e devolve o que a solicitação herda dele."""
-    from routers.servicenow import _sn_session_from_portal, _sn_query
+def consultar_chamado(req: Request, numero: str, cfg: dict | None = None) -> dict:
+    """Valida o chamado e devolve o que a solicitação herda dele.
 
-    numero = (numero or "").strip().upper()
+    `cfg` permite a outro módulo (projetos, reversa) usar os próprios
+    prefixos e estados bloqueados sem mexer no estado global.
+    """
+    from routers.servicenow import _sn_session_from_portal, _sn_query, termo_sn
+
+    numero = termo_sn((numero or "").strip().upper(), "chamado")
     if not numero:
         raise HTTPException(400, "Informe o número do chamado.")
 
-    cfg = db.ler_config()
+    cfg = {**db.ler_config(), **(cfg or {})}
     prefixos = [p.strip().upper()
                 for p in (cfg.get("chamado_prefixos") or "").split(",") if p.strip()]
     prefixo = next((p for p in prefixos if numero.startswith(p)), "")
@@ -642,6 +647,10 @@ def api_enviar(numero: str, req: Request):
     _log.info("separacao: %s enviada por %s para %s (%d unidade(s))",
               pedido_num, usuario, destino, len(unidades))
 
+    # O relógio do equipamento fecha aqui: ENTREGUE é estado final. Sem
+    # isto a tratativa de quem bipou ficaria aberta para sempre.
+    _fechar_relogios(unidades, usuario, pedido_num)
+
     # Avisa o atendimento, se ele estiver no ar. O import é tardio e a
     # falha é engolida de propósito: a separação já aconteceu no
     # ServiceNow, e não pode ser desfeita porque o espelho do chamado
@@ -683,7 +692,45 @@ def api_cancelar(numero: str, body: CancelaIn, req: Request):
         ped.separada_em = db.utcnow()
         ped.separada_por = sd.get("username", "")
         s.commit()
+    # As unidades voltam ao estoque, e o relógio volta a ser fila.
+    _devolver_relogios(unidades, sd.get("username", ""), numero.upper())
     return api_detalhe(numero, req)
+
+
+def _fechar_relogios(unidades, usuario: str, pedido: str) -> None:
+    """Encerra na trilha cada unidade enviada. Falha vai para o log."""
+    from routers.trilha import encerrar
+    for u in unidades:
+        if not u.trilha_ativo_id:
+            continue
+        try:
+            with dbt.SessionLocal() as st:
+                ativo = st.get(dbt.Ativo, u.trilha_ativo_id)
+                if ativo is not None and not ativo.encerrado:
+                    encerrar(st, ativo, estado="ENTREGUE", processo="A15",
+                             usuario=usuario)
+                    st.commit()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("separacao: %s enviada, série %s sem encerrar na trilha: %s",
+                       pedido, u.serial, exc)
+
+
+def _devolver_relogios(unidades, usuario: str, pedido: str) -> None:
+    """Cancelamento: a unidade volta a DISPONIVEL (fila), não fica em tratativa."""
+    for u in unidades:
+        if not u.trilha_ativo_id:
+            continue
+        try:
+            with dbt.SessionLocal() as st:
+                ativo = st.get(dbt.Ativo, u.trilha_ativo_id)
+                if ativo is not None and not ativo.encerrado:
+                    mover(st, ativo, estado="DISPONIVEL", tipo=dbt.FILA,
+                          processo="A15", usuario=usuario,
+                          detalhe=f'{{"cancelada": "{pedido}"}}')
+                    st.commit()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("separacao: %s cancelada, série %s sem voltar ao estoque: %s",
+                       pedido, u.serial, exc)
 
 
 # ══════════════════════════════════════════════════════════════════

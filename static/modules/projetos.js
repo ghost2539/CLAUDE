@@ -94,8 +94,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         } catch (e) { return erro(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Fila por etapa',
-            'Itens de todos os projetos, do mais urgente ao mais folgado.',
+        c.appendChild(cabecalho('Fila por etapa', '',
             [botao('Novo projeto', 'btn-primary', function () {
                 vista.tela = 'novo'; desenhar(c);
             })]));
@@ -178,8 +177,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         } catch (e) { return erro(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Projetos de loja',
-            'Inaugurações e reformas em andamento.',
+        c.appendChild(cabecalho('Projetos de loja', '',
             [botao('Novo projeto', 'btn-primary', function () {
                 vista.tela = 'novo'; desenhar(c);
             })]));
@@ -240,8 +238,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaNovo(c) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Novo projeto de loja',
-            'O escopo pode entrar agora ou depois, item por item.',
+        c.appendChild(cabecalho('Novo projeto de loja', '',
             [botao('Cancelar', 'btn-outline', function () {
                 vista.tela = 'projetos'; desenhar(c);
             })]));
@@ -296,7 +293,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             pintarItens();
         });
         corpoIt.appendChild(addBtn);
-        esquerda.appendChild(cartao('Escopo (opcional agora)', corpoIt));
+        esquerda.appendChild(cartao('Escopo', corpoIt));
 
         /* Sugestão de modelos a partir do estoque de inauguração. Só
            ajuda a digitar igual ao ServiceNow; não limita o escopo, que
@@ -313,8 +310,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             var corpo = S.el('div', { className: 'card-body' });
             if (!itens.length) {
                 corpo.appendChild(S.el('p', { className: 'sep-vazio',
-                    textContent: 'Nenhum item ainda. Pode abrir o projeto vazio e ' +
-                                 'incluir o escopo depois.' }));
+                    textContent: 'Nenhum item.' }));
             } else {
                 itens.forEach(function (i, k) {
                     var linha = S.el('div', { className: 'sep-linha' });
@@ -428,7 +424,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var corpo = S.el('div', { className: 'card-body' });
         if (!d.itens.length) {
             corpo.appendChild(S.el('p', { className: 'sep-vazio',
-                textContent: 'O projeto ainda não tem escopo. Inclua os itens.' }));
+                textContent: 'Nenhum item.' }));
         }
         d.itens.forEach(function (i) { corpo.appendChild(blocoItem(i, d, c)); });
         c.appendChild(cartao('Itens do projeto', corpo));
@@ -631,15 +627,15 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                         '/itens/' + itemId + '/' + qual,
                         { method: 'POST', body: body || undefined });
             S.toast(({
-                definir: 'Escopo definido: item na fila de separação.',
+                definir: 'Escopo definido.',
                 separar: 'Separação assumida.',
-                'concluir-separacao': 'Separação concluída: item na fila de configuração.',
-                'sem-estoque': 'Item em espera de estoque. O relógio não conta contra a fila.',
+                'concluir-separacao': 'Separação concluída.',
+                'sem-estoque': 'Item em espera de estoque.',
                 retomar: 'Item de volta à fila de separação.',
                 configurar: 'Configuração assumida.',
                 'concluir-configuracao': 'Item pronto para envio.',
-                reprovar: 'Unidade devolvida à bancada. Item aguarda reparo.',
-                enviar: 'Envio registrado: equipamentos alocados na loja.',
+                reprovar: 'Unidade reprovada.',
+                enviar: 'Envio registrado.',
                 cancelar: 'Item cancelado.'
             })[qual] || 'Feito.', 'success');
             vista.tela = 'detalhe'; vista.numero = numero; desenhar(c);

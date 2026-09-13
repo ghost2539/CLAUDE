@@ -419,10 +419,11 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
     """Cria o token de cada ativo recebido e o põe na fila da bancada."""
     if not itens:
         return {"criados": 0, "ja_existiam": 0, "falhas": 0}
-    resumo = {"criados": 0, "ja_existiam": 0, "falhas": 0}
+    resumo = {"criados": 0, "reentradas": 0, "ja_existiam": 0, "falhas": 0}
     try:
         import db.trilha as dbt
-        from routers.trilha import abrir_ativo, mover, TrilhaInvalida
+        from routers.trilha import abrir_ativo, mover, reabrir_ativo, TrilhaInvalida
+        from sqlalchemy import select as _select
     except Exception as exc:  # noqa: BLE001 — trilha fora do ar
         logging.getLogger("recebimento").error(
             "Trilha indisponível; %d ativo(s) recebidos sem medição: %s",
@@ -447,9 +448,26 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
                 s.commit()
             resumo["criados"] += 1
         except TrilhaInvalida:
-            # Serial repetido é reentrada do mesmo equipamento — comum, e
-            # não é erro de recebimento. Fica registrado só no resumo.
-            resumo["ja_existiam"] += 1
+            # Serial repetido. Se o ciclo anterior já encerrou (saiu para a
+            # loja e voltou), é reentrada: reabre e mede o segundo ciclo.
+            # Se ainda está em curso, é leitura duplicada — não mexe.
+            try:
+                with dbt.SessionLocal() as s:
+                    ativo = s.execute(_select(dbt.Ativo).where(
+                        dbt.Ativo.serial == serial.upper())).scalar_one_or_none()
+                    if ativo is not None and ativo.encerrado:
+                        reabrir_ativo(s, ativo, usuario=usuario, origem="RECEBIMENTO")
+                        mover(s, ativo, estado=_FILA_POR_FAMILIA[familia],
+                              tipo=dbt.FILA, processo="A01", usuario=usuario,
+                              detalhe='{"reentrada": true}')
+                        s.commit()
+                        resumo["reentradas"] += 1
+                    else:
+                        resumo["ja_existiam"] += 1
+            except Exception as exc:  # noqa: BLE001
+                resumo["falhas"] += 1
+                logging.getLogger("recebimento").error(
+                    "Trilha: reentrada da série %s não registrada: %s", serial, exc)
         except Exception as exc:  # noqa: BLE001
             resumo["falhas"] += 1
             logging.getLogger("recebimento").error(

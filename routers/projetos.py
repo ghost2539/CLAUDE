@@ -397,10 +397,12 @@ def api_criar(body: ProjetoIn, req: Request):
     # Mesma regra do resto da área: nada nasce sem chamado, e é dele que
     # vem a loja de destino — o destino não se digita.
     from routers.separacao import consultar_chamado
-    ch = consultar_chamado(req, body.chamado)
+    cfg = db.ler_config()
+    ch = consultar_chamado(req, body.chamado, {
+        "chamado_prefixos": cfg["chamado_prefixos"],
+        "chamado_estados_bloqueados": cfg["chamado_estados_bloqueados"]})
 
     usuario = sd.get("username", "")
-    cfg = db.ler_config()
     with SessionLocal() as s:
         ja = s.execute(
             select(Projeto).where(
@@ -778,8 +780,7 @@ def api_enviar(numero: str, item_id: int, req: Request):
                 select(UnidadeProjeto).where(
                     UnidadeProjeto.item_id == i.id,
                     UnidadeProjeto.devolvida_em.is_(None))).scalars():
-            _mover_unidade(u.serial, "ENTREGUE", usuario, dbt.FILA,
-                           detalhe=f'{{"projeto": "{numero.upper()}"}}')
+            _encerrar_unidade(u.serial, "ENTREGUE", usuario)
         # Projeto acabou quando não sobra item pendente.
         pendentes = s.execute(
             select(ItemProjeto).where(ItemProjeto.projeto_id == p.id,
@@ -792,6 +793,20 @@ def api_enviar(numero: str, item_id: int, req: Request):
     _log.info("projetos: %s enviou %s para %s (%d unidade(s))",
               usuario, token, loja, len(unidades))
     return api_detalhe(numero, req)
+
+
+def _encerrar_unidade(serial: str, estado: str, usuario: str) -> None:
+    """Estado final do equipamento real: o relógio dele fecha."""
+    try:
+        with dbt.SessionLocal() as st:
+            ativo = st.execute(
+                select(dbt.Ativo).where(dbt.Ativo.serial == serial)
+            ).scalar_one_or_none()
+            if ativo is not None and not ativo.encerrado:
+                encerrar(st, ativo, estado=estado, processo="A16", usuario=usuario)
+                st.commit()
+    except Exception as exc:  # noqa: BLE001
+        _log.error("projetos: série %s sem encerrar em %s: %s", serial, estado, exc)
 
 
 def _soltar_unidades(s, i: ItemProjeto, req: Request, motivo: str) -> None:
@@ -813,6 +828,9 @@ def _soltar_unidades(s, i: ItemProjeto, req: Request, motivo: str) -> None:
                            u.serial, exc.detail)
         u.devolvida_em = db.utcnow()
         u.devolvida_motivo = motivo
+        # Volta ao estoque na trilha: fila, não tratativa de ninguém.
+        _mover_unidade(u.serial, "DISPONIVEL", "", dbt.FILA,
+                       detalhe=f'{{"cancelado_em": "{i.token}"}}')
 
 
 @router.post("/projetos/{numero}/itens/{item_id}/cancelar")

@@ -288,19 +288,10 @@ class ColetaIn(BaseModel):
 def _consultar_chamado(req: Request, numero: str) -> dict:
     """Valida no ServiceNow pela função da Separação, com os prefixos daqui."""
     from routers.separacao import consultar_chamado
-    import db.separacao as dbsep
     cfg = db.ler_config()
-    # A Separação lê os prefixos dela; a reversa aceita os mesmos por
-    # padrão, mas o parâmetro é próprio para poder divergir.
-    original = dbsep.ler_config
-    try:
-        dbsep.ler_config = lambda: {**original(),
-                                    "chamado_prefixos": cfg["chamado_prefixos"],
-                                    "chamado_estados_bloqueados":
-                                        cfg["chamado_estados_bloqueados"]}
-        return consultar_chamado(req, numero)
-    finally:
-        dbsep.ler_config = original
+    return consultar_chamado(req, numero, {
+        "chamado_prefixos": cfg["chamado_prefixos"],
+        "chamado_estados_bloqueados": cfg["chamado_estados_bloqueados"]})
 
 
 @router.post("/coletas")
@@ -394,7 +385,8 @@ def api_rastrear(numero: str, req: Request):
     """
     from routers.correios import consultar_rastreio
 
-    sd = require_permission(req, "reversa", "view")
+    # Muda estado da coleta: é edição, ainda que a fonte seja uma consulta.
+    sd = require_permission(req, "reversa", "edit")
     check_rate_limit(req)
     usuario = sd.get("username", "")
     with SessionLocal() as s:
@@ -647,6 +639,9 @@ def registrar_recebimento(itens: list[dict], usuario: str) -> dict:
                 s.add(r)
                 recebidos.append(r)
                 ja.add(chave)
+                # Uma série só chega uma vez: sai do conjunto para não
+                # casar também na próxima coleta que a esperava.
+                chaves.discard(chave)
                 resumo["casados"] += 1
                 mexeu = True
             if mexeu:

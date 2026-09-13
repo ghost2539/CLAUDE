@@ -135,7 +135,9 @@ def situacao_no_sistema(req: Request, serial: str, cfg: dict[str, str]) -> dict:
     """O que o ServiceNow diz de uma série que não estava no retrato."""
     from routers.servicenow import (
         _sn_session_from_portal, _sn_query, HARDWARE_TABLE, INSTALL_STATUS_MAP,
+        termo_sn,
     )
+    serial = termo_sn(serial, "série")
     campo = (cfg.get("campo_local") or "aisle_space_location").strip()
     achados = _sn_query(_sn_session_from_portal(req), HARDWARE_TABLE,
                         f"serial_number={serial}^ORasset_tag={serial}", _CAMPOS, limit=1)

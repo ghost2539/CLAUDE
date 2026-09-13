@@ -291,11 +291,10 @@ def get_setting(key: str, req: Request):
 
 @router.put("/config/{key}")
 def put_setting(key: str, payload: dict, req: Request):
-    sd = get_session(req)
-    if (key in ("visual", "tv", "correios", "dashboards",
-                "recebimento_servicenow")
-            and not sd.get("is_admin")):
-        raise HTTPException(403, "Permissão insuficiente.")
+    # Toda chave é configuração do portal (visual, dashboards, controle de
+    # acesso, integrações). Nenhum fluxo de operador grava por aqui, então
+    # a regra é uma só: administrar.
+    sd = require_permission(req, "parametros", "admin")
     with SessionLocal.begin() as s:
         x = s.get(Setting, key)
         if not x:

@@ -333,7 +333,12 @@ class Settings:
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao"
+        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
+        # Ciclo do ativo. Sem a lista aqui, a tela de permissões não grava
+        # a linha e require_permission nega para todo não-admin.
+        "trilha", "torre", "atendimento", "bancada", "preparacao", "separacao",
+        "projetos", "reversa", "inventario", "regularizacao", "externo",
+        "destinacao", "obsolescencia",
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

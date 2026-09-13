@@ -61,7 +61,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         try { d = await S.api('/inventario/ciclos'); } catch (e) { return erro(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho('Inventário', 'O retrato do ServiceNow contra a prateleira.',
+        c.appendChild(cabecalho('Inventário', '',
             [botao('Novo ciclo', 'btn-primary', function () { vista.tela = 'novo'; desenhar(c); })]));
         var n = d.contagem || {};
         c.appendChild(indicadores([
@@ -106,7 +106,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaNovo(c) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Novo ciclo de contagem', 'Escolha o recorte. O retrato é tirado na abertura e não se move.',
+        c.appendChild(cabecalho('Novo ciclo de contagem', '',
             [botao('Cancelar', 'btn-outline', function () { vista.tela = 'ciclos'; desenhar(c); })]));
         var corpo = S.el('div', { className: 'card-body' });
         corpo.innerHTML =
@@ -124,7 +124,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             try {
                 var p = await S.api('/inventario/previa?prefixo=' + encodeURIComponent(corpo.querySelector('#inv-prefixo').value.trim()));
                 var html = '<div class="sep-total"><span>Itens no recorte</span><b>' + p.total + '</b></div>' +
-                    '<p class="text-muted" style="font-size:12px;margin:6px 0 10px">' + S.esc(p.filtro) + '</p>';
+                    '';
                 if (p.por_local.length) {
                     html += '<div class="inv-locais">' + p.por_local.map(function (l) {
                         return '<span><b>' + S.esc(l.local) + '</b> ' + l.quantidade + '</span>';
@@ -210,7 +210,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var info = S.el('div', { className: 'card-body' });
         info.innerHTML =
             '<div class="sep-total"><span>Situação</span><b>' + S.esc(d.estado_rotulo) + '</b></div>' +
-            '<div class="sep-total mt-2"><span>Retrato</span><b style="font-weight:400;font-size:12px">' + S.esc(d.filtro) + '</b></div>' +
             (d.contado_por ? '<div class="sep-total mt-2"><span>Contando</span><b>' + S.esc(d.contado_por) + '</b></div>' : '') +
             (d.encerrado_em ? '<div class="sep-total mt-2"><span>Encerrado</span><b>' + S.esc(data(d.encerrado_em)) + '</b></div>' : '');
         if (d.observacao) info.appendChild(S.el('p', { className: 'text-muted prj-obs', textContent: d.observacao }));
@@ -254,7 +253,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             try {
                 var r = await S.api('/inventario/ciclos/' + encodeURIComponent(d.numero) + '/bipar',
                                     { method: 'POST', body: { serial: valor, local: vista.local } });
-                S.toast(r.casou ? valor.toUpperCase() + ' contado.' : valor.toUpperCase() + ' não está no retrato — sobra (' + (r.situacao || 'sem informação') + ').',
+                S.toast(r.casou ? valor.toUpperCase() + ' contado.' : valor.toUpperCase() + ' não esperado (' + (r.situacao || 'sem informação') + ').',
                         r.casou ? 'success' : 'warning');
                 desenhar(c);
             } catch (e) { S.toast(e.message, 'danger'); serie.select(); }
@@ -273,7 +272,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (cmp.divergente) {
             corpo.appendChild(S.el('div', { className: 'alert alert-warning',
                 textContent: 'Faltam ' + cmp.faltantes.length + ' e sobram ' + cmp.sobras.length +
-                             '. O ciclo fecha como divergente e cada diferença vira uma regularização com dono e prazo.' }));
+                             '.' }));
         }
         var obs = S.el('textarea', { className: 'form-control', rows: '3', placeholder: cmp.divergente ? 'Como foi a contagem (obrigatório)' : 'Observação (opcional)' });
         corpo.appendChild(S.el('label', { textContent: 'Observação' }));

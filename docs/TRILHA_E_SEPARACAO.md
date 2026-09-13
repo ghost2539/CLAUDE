@@ -92,6 +92,21 @@ aberto, e ativo já encerrado.
 Não entram. A contagem começa nos novos, sem retroativo — decisão da área.
 Processo que topa com um ativo fora da trilha segue normalmente, só não mede.
 
+### Reentrada
+
+Serial que já encerrou um ciclo (saiu como `ENTREGUE`, `SUBSTITUIDO`…) e
+volta pelo Recebimento é **reaberto** (`reabrir_ativo()`), não recusado: o
+segundo ciclo entra em `AG_TRIAGEM` com `detalhe {"reentrada": true}` e o
+histórico mostra os dois ciclos inteiros. Serial cujo ciclo ainda está em
+curso é leitura duplicada e não mexe em nada.
+
+### Termos vindos do usuário nas consultas ao ServiceNow
+
+Toda série, etiqueta ou número de chamado que entra numa encoded query
+passa por `routers.servicenow.termo_sn()`, que recusa `^ = , !` e afins.
+Sem isso um bipe `X^ORinstall_status=6` casaria outro registro e a reserva
+cairia no `sys_id` errado.
+
 ### Verificação
 
 ```
@@ -151,8 +166,8 @@ AG_SEPARACAO  →  EX_SEPARACAO  →  SEPARADA  →  ENVIADA
 |---|---|
 | Bipar a série | `substatus = reserved` — sai do saldo disponível na hora |
 | Concluir | nada; é marco interno |
-| Enviar | `install_status = 1` e `location` = loja de destino |
-| Cancelar | `substatus = available` nas unidades já bipadas |
+| Enviar | `install_status = 1` e `location` = loja de destino; na trilha, cada unidade é **encerrada** como `ENTREGUE` |
+| Cancelar | `substatus = available` nas unidades já bipadas; na trilha, cada uma volta a `DISPONIVEL` (fila) |
 
 A ordem no bipe importa e está explícita no código: **localizar, reservar, e só
 então gravar**. Se o ServiceNow recusar a reserva, nada fica registrado no
@@ -220,6 +235,7 @@ primeiro item definido e vira `CONCLUIDO` quando não sobra item pendente.
 ### Verificação
 
 ```
+python3 scripts/verificar_separacao.py   # A15: envio fecha o relógio, cancelamento devolve
 python3 scripts/verificar_projetos.py
 ```
 

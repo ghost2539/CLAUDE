@@ -207,6 +207,22 @@ def abrir_ativo(s, *, serial: str, usuario: str, modelo: str = "",
     return ativo
 
 
+def reabrir_ativo(s, ativo: Ativo, *, usuario: str, origem: str = "") -> None:
+    """Segundo ciclo do mesmo serial: o equipamento que saiu voltou.
+
+    Encerrar parou o relógio; reabrir só tira a trava. O estado final
+    (ENTREGUE, SUBSTITUIDO…) fica na movimentação — a próxima chamada de
+    mover() é que diz onde ele entra de novo, e o histórico mostra os
+    dois ciclos inteiros.
+    """
+    if not ativo.encerrado:
+        raise TrilhaInvalida(f"Ativo {ativo.serial} não está encerrado.")
+    ativo.encerrado = False
+    if origem:
+        ativo.origem = origem
+    s.flush()
+
+
 def mover(s, ativo: Ativo, *, estado: str, tipo: str, processo: str = "",
           trilha: str = FISICA, usuario: str = "", justificativa: str = "",
           origem: str = PORTAL, detalhe: str = "",

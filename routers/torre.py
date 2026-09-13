@@ -67,6 +67,11 @@ FRENTE_DA_ETAPA = {
 # tempo é do planejamento, não um gargalo a destravar.
 FORA_DA_FILA = ("DISPONIVEL",)
 
+# Tokens sintéticos (item de projeto, coleta, ciclo, divergência) usam o
+# mesmo relógio, mas não são equipamento: entram nas filas, não nas
+# contagens de entrada de ativo.
+ESPECIES_TOKEN = ("item_projeto", "coleta", "ciclo_inventario", "divergencia")
+
 
 def _rotulo(estado: str) -> str:
     return dbt.rotulo_estado(estado)
@@ -120,7 +125,8 @@ def api_area(req: Request):
         ).scalar_one()
         entradas = s.execute(
             select(func.count(dbt.Ativo.id))
-            .where(dbt.Ativo.criado_em >= inicio_dia)
+            .where(dbt.Ativo.criado_em >= inicio_dia,
+                   dbt.Ativo.tipo_equipamento.notin_(ESPECIES_TOKEN))
         ).scalar_one()
 
     etapas: dict[str, dict] = {}
@@ -143,6 +149,7 @@ def api_area(req: Request):
                 alvo["em_alerta"] += 1
             parados.append({
                 "serial": a.serial, "modelo": a.modelo,
+                "token": a.tipo_equipamento in ESPECIES_TOKEN,
                 "estado": i.estado, "rotulo": _rotulo(i.estado),
                 "usuario": i.usuario, "segundos": seg,
                 "em_alerta": seg > limite,

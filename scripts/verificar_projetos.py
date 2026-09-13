@@ -60,7 +60,7 @@ def esperar_409(descricao: str, funcao) -> None:
 # ── Dublês ─────────────────────────────────────────────────────────
 anotado = {"reservas": [], "liberacoes": [], "atualizacoes": []}
 
-sep.consultar_chamado = lambda req, numero: {
+sep.consultar_chamado = lambda req, numero, cfg=None: {
     "chamado": numero.upper(), "tipo": "RITM", "resumo": "Inauguração loja 999",
     "destino": "LOJA 999", "solicitante": "x", "estado": "2"}
 sep.localizar_no_estoque = lambda req, serial, tipo: {"sys_id": "sys-" + serial}

@@ -90,8 +90,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         } catch (e) { return erro(c, e); }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho(rotulo(vista.tipo),
-            'Solicitações de separação de equipamento.',
+        c.appendChild(cabecalho(rotulo(vista.tipo), '',
             [botao('Nova solicitação', 'btn-primary', function () {
                 vista.tela = 'nova'; desenhar(c);
             })]));
@@ -108,7 +107,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (!d.solicitacoes.length) {
             corpo.appendChild(S.el('p', {
                 className: 'sep-vazio',
-                textContent: 'Nenhuma solicitação neste atendimento ainda.'
+                textContent: 'Nenhuma solicitação.'
             }));
         } else {
             corpo.appendChild(tabelaFila(d.solicitacoes, c));
@@ -165,8 +164,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        ============================================================ */
     function telaNova(c) {
         c.innerHTML = '';
-        c.appendChild(cabecalho('Nova solicitação de separação',
-            rotulo(vista.tipo) + ' · o pedido entra na fila assim que for enviado.',
+        c.appendChild(cabecalho('Nova solicitação de separação', rotulo(vista.tipo),
             [botao('Cancelar', 'btn-outline', function () {
                 vista.tela = 'fila'; desenhar(c);
             })]));
@@ -600,7 +598,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             S.toast(({
                 iniciar: 'Separação assumida.',
                 concluir: 'Separação concluída.',
-                enviar: 'Envio registrado: equipamentos alocados na loja.'
+                enviar: 'Envio registrado.'
             })[qual], 'success');
             desenhar(c);
         } catch (e) {

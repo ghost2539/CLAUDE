@@ -127,11 +127,12 @@ def _frente_da_categoria(categoria: str, resumo: str) -> str:
 
 
 def ler_do_servicenow(req: Request, numero: str) -> dict:
-    from routers.servicenow import _sn_session_from_portal, _sn_query
+    from routers.servicenow import _sn_session_from_portal, _sn_query, termo_sn
 
     numero = (numero or "").strip().upper()
     if not numero:
         raise HTTPException(400, "Informe o número do chamado.")
+    numero = termo_sn(numero, "chamado")
     tabela = "sc_req_item" if numero.startswith("RITM") else "incident"
     campos = ("number,short_description,state,location,u_loja,caller_id,"
               "category,subcategory,cmdb_ci,assignment_group")
@@ -326,7 +327,7 @@ def api_assumir(numero: str, req: Request):
         if lido.get("ci"):
             _vincular(s, ch, SERIAL, lido["ci"], usuario)
 
-        mover(s, ch, estado=EX_ATENDIMENTO, usuario=usuario)
+        _tentar(mover, s, ch, estado=EX_ATENDIMENTO, usuario=usuario)
         s.commit()
     _log.info("atendimento: %s assumido por %s", lido["numero"], usuario)
     return api_detalhe(numero, req)

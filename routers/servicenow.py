@@ -319,6 +319,23 @@ def _resolve_ref(session, field, value):
     return "", False
 
 
+_TERMO_SN_RE = re.compile(r"^[A-Za-z0-9._/ -]{1,80}$")
+
+
+def termo_sn(valor: str, rotulo: str = "valor") -> str:
+    """Um valor vindo do usuário que vai entrar numa encoded query.
+
+    A query do ServiceNow é montada por concatenação; `^`, `=`, `,` e
+    `!` mudam o significado dela. Uma série bipada como
+    `X^ORinstall_status=6` faria a busca casar outro registro — e a
+    reserva e o envio cairiam no sys_id errado.
+    """
+    valor = (valor or "").strip()
+    if not _TERMO_SN_RE.match(valor):
+        raise HTTPException(400, f"{rotulo.capitalize()} com caracteres inválidos.")
+    return valor
+
+
 def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_value=True):
     """Query ServiceNow via JSONv2 API (works with SSO cookies).
     Returns list of records."""

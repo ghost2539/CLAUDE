@@ -182,6 +182,14 @@ ROTULO_ESTADO = {
     "EX_TRATATIVA_REG": "Divergência em tratativa",
     "RESOLVIDA_REG": "Divergência resolvida",
     "CANCELADA_REG": "Divergência cancelada",
+    # Estados finais dos equipamentos (encerram o relógio).
+    "ENTREGUE": "Entregue à loja",
+    "VENDIDO": "Vendido",
+    "DESCARTADO": "Descartado",
+    "DOADO": "Doado",
+    "DEVOLVIDO": "Devolvido ao terceiro",
+    "SUBSTITUIDO": "Substituído pela assistência",
+    "CONSUMIDO_EM_MONTAGEM": "Consumido em montagem",
 }
 
 
