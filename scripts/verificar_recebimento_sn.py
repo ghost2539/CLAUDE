@@ -136,6 +136,75 @@ r = ob.remover_recebidos_do_mdm([{"serial": "SN-OUTRO"}], usuario="t")
 checar(r["tentados"] == 0 and "desligado" in r["motivo"], "configuração desliga a remoção")
 dbo.gravar_config({"remover_do_mdm_no_recebimento": "1"})
 
+print("\n[7] Remoção no console: caminho mapeado, token anti-CSRF e corpo")
+import importlib  # noqa: E402
+mdm = importlib.reload(importlib.import_module("integracoes.mdm_airwatch"))
+
+checar(dbo.PADROES["mdm_remocao_endpoint"] == "/AirWatch/Devices/DeleteDevice/{id}",
+       "o padrão é o caminho mapeado na leitura do console")
+checar(dbo.PADROES["mdm_remocao_campo"] == "SelectedDeviceIds",
+       "o campo do corpo é o das ações do console")
+
+
+class _Resp:
+    def __init__(self, status=200, texto="", url=""):
+        self.status_code, self.text, self.url = status, texto, url
+
+
+FORM = ('<form><input name="__RequestVerificationToken" type="hidden" '
+        'value="tok-123" /></form>')
+
+
+class _Sessao:
+    def __init__(self, status=200, form=FORM):
+        self.status, self.form = status, form
+        self.gets, self.posts = [], []
+
+    def get(self, url, **kw):
+        self.gets.append(url)
+        return _Resp(200, self.form)
+
+    def request(self, metodo, url, data=None, headers=None, **kw):
+        self.posts.append((metodo, url, data or {}, headers or {}))
+        return _Resp(self.status, "ok")
+
+
+ses = _Sessao()
+ok, detalhe = mdm.remover_dispositivo(
+    ses, "691477", "https://mdm.exemplo",
+    dbo.PADROES["mdm_remocao_endpoint"], "POST", dbo.PADROES["mdm_remocao_campo"])
+checar(ok, f"remoção aceita quando o console responde 200 ({detalhe})")
+metodo, url, corpo, cab = ses.posts[0]
+checar(url == "https://mdm.exemplo/AirWatch/Devices/DeleteDevice/691477",
+       f"o id entra no caminho ({url})")
+checar(metodo == "POST", "método POST")
+checar(corpo.get("SelectedDeviceIds") == "691477", f"o id também vai no corpo ({corpo})")
+checar(corpo.get("__RequestVerificationToken") == "tok-123",
+       "o token do formulário vai no corpo")
+checar(cab.get("RequestVerificationToken") == "tok-123", "e no cabeçalho")
+checar(ses.gets and ses.gets[0].endswith("/AirWatch/Devices/TagAssignment/691477"),
+       f"o token é buscado num formulário do próprio aparelho ({ses.gets[:1]})")
+
+ses = _Sessao(form="<form></form>")
+ok, _ = mdm.remover_dispositivo(ses, "1", "", "/x/{id}")
+checar(ok and "__RequestVerificationToken" not in ses.posts[0][2],
+       "console sem token não impede a remoção")
+checar(len(ses.gets) == len(mdm.FORMULARIOS_TOKEN),
+       "sem token, tenta todos os formulários conhecidos e desiste")
+
+ses = _Sessao(status=403)
+ok, detalhe = mdm.remover_dispositivo(ses, "1", "", "/x/{id}")
+checar(not ok and "403" in detalhe, f"erro do console vira falha registrada ({detalhe})")
+
+ok, detalhe = mdm.remover_dispositivo(_Sessao(), "", "", "/x/{id}")
+checar(not ok and "sem id" in detalhe, "sem id do aparelho nada é enviado")
+
+try:
+    mdm.remover_dispositivo(_Sessao(), "1", "", "")
+    checar(False, "endpoint em branco deveria levantar RemocaoNaoConfigurada")
+except mdm.RemocaoNaoConfigurada:
+    checar(True, "endpoint em branco levanta RemocaoNaoConfigurada")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)

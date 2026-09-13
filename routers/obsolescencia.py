@@ -1064,7 +1064,7 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
                 ok, detalhe = mdm.remover_dispositivo(
                     sessao, c.mdm_id, base, endpoint,
                     cfg.get("mdm_remocao_metodo", "POST"),
-                    cfg.get("mdm_remocao_campo", "id"))
+                    cfg.get("mdm_remocao_campo") or "SelectedDeviceIds")
             except mdm.RemocaoNaoConfigurada as exc:
                 ok, detalhe = False, str(exc)
             except Exception as exc:  # noqa: BLE001 — um aparelho não derruba o lote

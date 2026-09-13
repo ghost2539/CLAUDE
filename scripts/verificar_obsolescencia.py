@@ -251,6 +251,18 @@ r4 = ob.aplicar_coleta(brutos2, usuario="t", total_mdm=7, paginas=1)
 checar(r4["descartados"] == 0 and r4["coletores"] == 7, "filtro desligado pela configuração traz tudo")
 db.gravar_config({"somente_coletores": "1"})
 
+print("\n[8] Caminho de remoção mapeado chega às bases antigas")
+db.gravar_config({"mdm_remocao_endpoint": "", "mdm_remocao_campo": "id"})
+db.init_db()
+_cfg = db.ler_config()
+checar(_cfg["mdm_remocao_endpoint"] == "/AirWatch/Devices/DeleteDevice/{id}",
+       "endpoint em branco de coleta antiga passa a usar o mapeado")
+checar(_cfg["mdm_remocao_campo"] == "SelectedDeviceIds", "e o campo do corpo também")
+db.gravar_config({"mdm_remocao_endpoint": "/outro/{id}"})
+db.init_db()
+checar(db.ler_config()["mdm_remocao_endpoint"] == "/outro/{id}",
+       "endpoint escolhido pela área não é sobrescrito")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)
