@@ -224,13 +224,26 @@ case "$PROD_DATABASE_URL" in
         PG_NOME="${PG_BASE##*/}"
         PG_SERVIDOR="${PG_BASE%/*}"
         PG_TESTE="${PG_NOME}_testes"
-        TEST_DATABASE_URL="$(printf '%s' "$PROD_DATABASE_URL" | sed -E "s|/$PG_NOME(\?|$)|/$PG_TESTE\1|")" ;;
+        TEST_DATABASE_URL="$(PROD_URL="$PROD_DATABASE_URL" NOME="$PG_NOME" TESTE="$PG_TESTE" python3 - <<'PY'
+import os
+u, nome, teste = os.environ["PROD_URL"], os.environ["NOME"], os.environ["TESTE"]
+base, sep, query = u.partition("?")
+if base.endswith("/" + nome):
+    base = base[: -len(nome)] + teste
+print(base + sep + query, end="")
+PY
+)" ;;
     *)
         echo "ERRO: DATABASE_URL da produção não reconhecido: ${PROD_DATABASE_URL:-(vazio)}"; exit 1 ;;
 esac
-if [ "$TEST_DATABASE_URL" = "$PROD_DATABASE_URL" ]; then
-    echo "ERRO: a URL do banco de teste ficou igual à de produção ($PROD_DATABASE_URL). Abortando."; exit 1
+mascarar() { printf '%s' "$1" | sed -E 's#(://[^:/@]+):[^@]*@#\1:***@#'; }
+if [ -z "$TEST_DATABASE_URL" ]; then
+    echo "ERRO: não consegui derivar a URL do banco de teste a partir de $(mascarar "$PROD_DATABASE_URL")."; exit 1
 fi
+if [ "$TEST_DATABASE_URL" = "$PROD_DATABASE_URL" ]; then
+    echo "ERRO: a URL do banco de teste ficou igual à de produção ($(mascarar "$PROD_DATABASE_URL")). Abortando."; exit 1
+fi
+echo "   banco do teste: $(mascarar "$TEST_DATABASE_URL")"
 
 if [ "$BANCOS_JA_COPIADOS" -eq 1 ] && [ "$RECOPIAR" -eq 0 ]; then
     echo "-- Bancos já copiados antes (use --recopiar-bancos para refazer a cópia)"
@@ -333,7 +346,7 @@ SEGREDO="$("$TEST_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_u
     grep -vE '^\s*(#|$)' "$PROD_ENVFILE" | grep -vE '^(DATABASE_URL|[A-Z_]*_DATABASE_URL|PORT|HOST|WORKERS|AMBIENTE|CONSULTA_TIMES_PORTA|CONSULTA_TIMES_HOST|SSL_CERTFILE|SSL_KEYFILE|PORTAL_SESSION_SECRET|SMTP_HOST|ALERTA_EMAIL_TO)='
     echo ""
     echo "AMBIENTE=testes"
-    echo "DATABASE_URL=$TEST_DATABASE_URL"
+    printf "DATABASE_URL='%s'\n" "$(printf '%s' "$TEST_DATABASE_URL" | sed "s/'/'\\\\''/g")"
     echo "PORTAL_SESSION_SECRET=$SEGREDO"
     echo "HOST=0.0.0.0"
     echo "PORT=$TEST_PORT"
@@ -375,9 +388,13 @@ try:
     from config import get_settings
     c = get_settings()
     assert c.TESTES, "AMBIENTE=testes não pegou"
+    assert c.DATABASE_URL.strip(), "DATABASE_URL vazio no ambiente do teste"
     print(f"   OK — porta {c.PORT}, banco {c.DATABASE_URL.split('@')[-1]}")
 except Exception as exc:
-    print(f"   FALHOU: {exc}"); sys.exit(1)
+    print(f"   FALHOU: {exc}")
+    import os
+    print("   DATABASE_URL lido:", repr((os.environ.get("DATABASE_URL") or "")[:12] + "…"))
+    sys.exit(1)
 PY
 ) || { echo "ERRO: a aplicação de teste não subiu."; exit 1; }
 
