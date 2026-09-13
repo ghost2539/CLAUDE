@@ -368,3 +368,29 @@ painel se tiver coletor atribuído.
   o enunciado. Muda muito o número — com OU, o total dispara.
 - **Data de aquisição**: o MDM só tem a inscrição. Falta a origem real.
 - **Lista de modelos EOL**: não vem do MDM, precisa ser mantida no portal.
+
+
+## Regra configurável (atualização)
+
+`GET/PUT /api/obsolescencia/config` (PUT exige admin). Chaves em
+`db/obsolescencia.py: PADROES`:
+
+| Chave | Efeito |
+|---|---|
+| `modo_regra` | `todos` (E) ou `qualquer` (OU) |
+| `limite_anos` | idade a partir da qual o critério de idade atende |
+| `limite_sem_ver` | dias sem comunicar que entram no recorte "sem ver" |
+| `modelos_eol` | lista por conteúdo (`EF500,EF501`) |
+| `versao_os_minima` | Android abaixo disto = travado |
+| `modelos_sem_update` | modelo que o fabricante não atualiza = travado |
+
+Três defeitos que zeravam o painel foram corrigidos: a data do tooltip do
+MDM (`dd/mm/aaaa HH:MM`) não era interpretada (`dias_sem_ver` sempre
+`None`); o limite de anos era constante e ignorava a config; o critério
+Android nunca era calculado. O resumo agora traz `criterios` (quantos
+atendem cada critério), `em_risco` (2 de 3), `por_modelo` e
+`por_versao_os`. Verificação: `python3 scripts/verificar_obsolescencia.py`.
+
+Continua pendente a idade real via EBS (o parser da grade não traz a
+série; `idade_desconhecida` fica verdadeira até isso existir) e a coleta
+de PDVs por rota.

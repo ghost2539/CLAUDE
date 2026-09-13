@@ -189,37 +189,76 @@ MODO_QUALQUER = "qualquer"
 MODO_PADRAO = MODO_TODOS
 
 
+_FORMATOS_DATA = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+                  "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p", "%m/%d/%Y")
+
+
+def interpretar_data(valor) -> datetime | None:
+    """Data em ISO ou no formato do tooltip do MDM (dd/mm/aaaa HH:MM).
+
+    O parser da grade entrega a data absoluta como texto do tooltip, não
+    ISO. Tratar só ISO fazia `dias_sem_ver` devolver None para o parque
+    inteiro — e o painel mostrava zero "sem comunicar" sem ninguém
+    perceber o motivo.
+    """
+    if not valor:
+        return None
+    if isinstance(valor, datetime):
+        dt = valor
+    else:
+        texto = str(valor).strip()
+        dt = None
+        try:
+            dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+        except ValueError:
+            for fmt in _FORMATOS_DATA:
+                try:
+                    dt = datetime.strptime(texto[:19], fmt)
+                    break
+                except ValueError:
+                    continue
+        if dt is None:
+            return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def dias_sem_ver(last_seen, agora=None) -> int | None:
     """Dias desde a última comunicação. None quando a data não veio."""
-    if not last_seen:
+    dt = interpretar_data(last_seen)
+    if dt is None:
         return None
     agora = agora or datetime.now(timezone.utc)
-    if isinstance(last_seen, str):
-        try:
-            last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if last_seen.tzinfo is None:
-        last_seen = last_seen.replace(tzinfo=timezone.utc)
-    return max(0, (agora - last_seen).days)
+    return max(0, (agora - dt).days)
+
+
+def _versao_major(texto: str) -> int | None:
+    m = re.search(r"(\d+)", str(texto or ""))
+    return int(m.group(1)) if m else None
+
+
+def android_travado(versao_os: str, modelo: str, versao_minima: str,
+                    modelos_sem_update=()) -> bool:
+    """Sem atualização possível: versão abaixo da mínima ou modelo sem update."""
+    modelo_n = _sem_acento(modelo)
+    if any(_sem_acento(m) and _sem_acento(m) in modelo_n for m in modelos_sem_update):
+        return True
+    atual, minima = _versao_major(versao_os), _versao_major(versao_minima)
+    return bool(atual is not None and minima is not None and atual < minima)
 
 
 def idade_anos(data_aquisicao, agora=None) -> float | None:
     if not data_aquisicao:
         return None
     agora = agora or datetime.now(timezone.utc)
-    if isinstance(data_aquisicao, str):
-        try:
-            data_aquisicao = datetime.fromisoformat(data_aquisicao.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if data_aquisicao.tzinfo is None:
-        data_aquisicao = data_aquisicao.replace(tzinfo=timezone.utc)
-    return (agora - data_aquisicao).days / 365.25
+    dt = interpretar_data(data_aquisicao)
+    if dt is None:
+        return None
+    return (agora - dt).days / 365.25
 
 
 def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None,
-                          modo: str = MODO_PADRAO) -> dict:
+                          modo: str = MODO_PADRAO,
+                          limite_anos: float = LIMITE_ANOS) -> dict:
     """Aplica a regra: 5 anos de uso, Android travado sem update possível e
     EOL do modelo atingido.
 
@@ -232,7 +271,7 @@ def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None,
     eol = any(_sem_acento(m) and _sem_acento(m) in modelo for m in modelos_eol)
 
     criterios = {
-        "idade_5_anos": bool(idade is not None and idade >= LIMITE_ANOS),
+        "idade_5_anos": bool(idade is not None and idade >= limite_anos),
         "android_travado": bool(coletor.get("android_travado")),
         "modelo_eol": eol,
     }
@@ -335,6 +374,23 @@ def config_ler(req: Request):
     get_session(req)
     import db.obsolescencia as _db
     _db.init_db()
+    return _db.ler_config()
+
+
+@router.put("/api/obsolescencia/config")
+def config_gravar(req: Request, corpo: dict):
+    """Regra de obsolescência. A próxima coleta reavalia o parque com ela."""
+    sd = _exigir_admin(req)
+    import db.obsolescencia as _db
+    _db.init_db()
+    validos = set(_db.PADROES)
+    pares = {k: str(v).strip() for k, v in (corpo or {}).items() if k in validos}
+    if not pares:
+        raise HTTPException(400, "Nada para gravar.")
+    if pares.get("modo_regra") not in (None, MODO_TODOS, MODO_QUALQUER):
+        raise HTTPException(400, "modo_regra deve ser 'todos' ou 'qualquer'.")
+    _db.gravar_config(pares)
+    _log.info("obsolescencia: regra alterada por %s: %s", sd.get("username", "?"), ", ".join(pares))
     return _db.ler_config()
 
 
@@ -526,6 +582,12 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
     cfg = _db.ler_config()
     modo = cfg.get("modo_regra", MODO_PADRAO)
     eol = [m.strip() for m in (cfg.get("modelos_eol") or "").split(",") if m.strip()]
+    sem_update = [m.strip() for m in (cfg.get("modelos_sem_update") or "").split(",") if m.strip()]
+    versao_minima = cfg.get("versao_os_minima") or ""
+    try:
+        limite_anos = float(cfg.get("limite_anos") or LIMITE_ANOS)
+    except ValueError:
+        limite_anos = LIMITE_ANOS
     agora = datetime.now(timezone.utc)
 
     novos = atualizados = 0
@@ -543,11 +605,15 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
                 continue
             loja = identificar_loja(bruto.get("usuario"))
             tags = tags_relevantes(bruto.get("tags"))
+            travado = bruto.get("android_travado")
+            if travado is None:
+                travado = android_travado(bruto.get("versao_os"), bruto.get("modelo"),
+                                          versao_minima, sem_update)
             aval = avaliar_obsolescencia(
                 {"modelo": bruto.get("modelo"),
                  "data_aquisicao": bruto.get("data_aquisicao"),
-                 "android_travado": bruto.get("android_travado")},
-                eol, agora, modo)
+                 "android_travado": travado},
+                eol, agora, modo, limite_anos)
 
             linha = existentes.get(mdm_id)
             if linha is None:
@@ -572,6 +638,7 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
             linha.gerenciamento = _limpar(bruto.get("gerenciamento"))
             linha.conformidade = _limpar(bruto.get("conformidade"))
             linha.visto_relativo = _limpar(bruto.get("visto_relativo"))
+            linha.visto_em = interpretar_data(bruto.get("visto_em"))
             linha.dias_sem_ver = dias_sem_ver(bruto.get("visto_em"), agora)
             linha.tags = "|".join(tags)
             linha.idade_anos = aval["idade_anos"]
@@ -699,7 +766,45 @@ def resumo_parque() -> dict:
 
     tags = contar_tags([{"tags": c.tags.split("|") if c.tags else []} for c in ativos])
 
+    # Por modelo e por versão de Android: é onde a obsolescência aparece
+    # antes de virar número — e é o que o widget do MDM esconde.
+    import json as _json
+    por_modelo: dict[str, dict] = {}
+    por_versao: dict[str, int] = {}
+    criterios_qtd = {"idade_5_anos": 0, "android_travado": 0, "modelo_eol": 0}
+    em_risco = 0
+    for c in ativos:
+        m = por_modelo.setdefault(c.modelo or "?", {"modelo": c.modelo or "?", "coletores": 0,
+                                                    "obsoletos": 0, "idades": []})
+        m["coletores"] += 1
+        m["obsoletos"] += 1 if c.obsoleto else 0
+        if c.idade_anos is not None:
+            m["idades"].append(c.idade_anos)
+        v = (c.versao_os or "?").split(".")[0]
+        por_versao[v] = por_versao.get(v, 0) + 1
+        try:
+            crit = _json.loads(c.criterios or "{}")
+        except ValueError:
+            crit = {}
+        atendidos = 0
+        for k in criterios_qtd:
+            if crit.get(k):
+                criterios_qtd[k] += 1
+                atendidos += 1
+        if atendidos >= 2 and not c.obsoleto:
+            em_risco += 1
+
     return {
+        "em_risco": em_risco,
+        "criterios": criterios_qtd,
+        "por_modelo": sorted(
+            ({"modelo": m["modelo"], "coletores": m["coletores"], "obsoletos": m["obsoletos"],
+              "idade_media": round(sum(m["idades"]) / len(m["idades"]), 1) if m["idades"] else None}
+             for m in por_modelo.values()), key=lambda x: -x["coletores"]),
+        "por_versao_os": sorted(({"versao": k, "coletores": v} for k, v in por_versao.items()),
+                                key=lambda x: -x["coletores"]),
+        "limites": {"anos": cfg.get("limite_anos"), "versao_os_minima": cfg.get("versao_os_minima"),
+                    "modelos_eol": cfg.get("modelos_eol")},
         "coletado_em": ultima.fim.isoformat() if ultima and ultima.fim else None,
         "total": len(ativos),
         "em_lojas": len(de_loja),

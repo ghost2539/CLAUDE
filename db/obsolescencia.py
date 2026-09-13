@@ -190,6 +190,11 @@ PADROES = {
     "limite_anos": "5",
     "limite_sem_ver": "30",
     "modelos_eol": "EF500,EF500R",
+    # Android travado: versão abaixo da mínima suportada OU modelo que o
+    # fabricante não atualiza mais. É o critério mais barato e o que mais
+    # fala com Segurança.
+    "versao_os_minima": "11",
+    "modelos_sem_update": "",
     # PDVs no ServiceNow. Deixado configurável porque o rótulo da tela
     # ("Origem da descoberta") pode não bater com o nome interno do campo.
     "pdv_tabela": "cmdb_ci_computer",
