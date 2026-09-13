@@ -205,6 +205,22 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Trilha do Ativo — núcleo de rastreabilidade e relógios ──────────
+    # Espinha dos processos da área: o token do ativo, a movimentação
+    # imutável e os intervalos de que saem todos os indicadores de tempo.
+    # Carregamento isolado como os demais — mas note que, diferente deles,
+    # os módulos de processo dependem deste para registrar trilha.
+    try:
+        import db.trilha as _db_trilha
+        _db_trilha.init_db()
+        from routers.trilha import router as trilha_router
+        app.include_router(trilha_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("trilha").error(
+            "Núcleo da Trilha do Ativo NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

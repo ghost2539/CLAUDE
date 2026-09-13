@@ -180,6 +180,14 @@ class Settings:
     # Console do MDM de Coletores (Workspace ONE / AirWatch).
     MDM_BASE_URL: str = os.getenv("MDM_BASE_URL", "https://cn258.awmdm.com")
 
+    # ── Trilha do Ativo (núcleo de rastreabilidade e relógios) ──────────
+    # Banco próprio: é a espinha dos processos e não divide arquivo com
+    # nenhum módulo de tela.
+    TRILHA_DATABASE_URL: str = os.getenv(
+        "TRILHA_DATABASE_URL",
+        _sqlite("trilha"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
