@@ -28,6 +28,7 @@
 #    TEST_PORT     porta do teste               (padrão: 8999)
 #    TEST_BRANCH   branch a testar              (padrão: desenvolvimento)
 #    TEST_REPO     URL do git                   (padrão: o remoto "origin" da produção)
+#    TEST_ENVDIR   pasta do arquivo de ambiente (padrão: /etc/portal_operacoes_spare_testes ou ~/.config/portal-spare-testes)
 # ============================================================================
 set -uo pipefail
 
@@ -53,15 +54,17 @@ if [ -z "$PROD_ENVFILE" ]; then
     elif [ -r "$HOME/.config/portal-spare/environment" ]; then PROD_ENVFILE="$HOME/.config/portal-spare/environment"
     fi
 fi
+# systemd só conta se estiver mesmo no comando (contêiner e WSL têm o
+# binário sem o init).
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then SYSTEMD=1; else SYSTEMD=0; fi
 if [ "$ROOT" -eq 1 ]; then
     TEST_DIR="${TEST_DIR:-/opt/portal-spare-testes}"
-    TEST_ENVDIR=/etc/portal_operacoes_spare_testes
-    SERVICO=portal-spare-testes
+    TEST_ENVDIR="${TEST_ENVDIR:-/etc/portal_operacoes_spare_testes}"
 else
     TEST_DIR="${TEST_DIR:-$HOME/portal-spare-testes}"
-    TEST_ENVDIR="$HOME/.config/portal-spare-testes"
-    SERVICO=portal-spare-testes
+    TEST_ENVDIR="${TEST_ENVDIR:-$HOME/.config/portal-spare-testes}"
 fi
+SERVICO=portal-spare-testes
 TEST_ENVFILE="$TEST_ENVDIR/environment"
 TEST_PORT="${TEST_PORT:-8999}"
 TEST_BRANCH="${TEST_BRANCH:-desenvolvimento}"
@@ -129,22 +132,34 @@ TEST_DATABASE_URL=""
 
 url_pg() { printf '%s' "$1" | sed -E 's|^postgres(ql)?\+[a-z0-9_]+://|postgresql://|; s|^postgres://|postgresql://|'; }
 
+# A URL do banco do teste deriva da de produção: SQLite vira o arquivo da
+# pasta do teste; Postgres vira o banco "<nome>_testes" no mesmo servidor.
+case "$PROD_DATABASE_URL" in
+    sqlite*)
+        TEST_DATABASE_URL="sqlite:///$TEST_DIR/data/db/portal.db" ;;
+    postgres*)
+        PG_URL="$(url_pg "$PROD_DATABASE_URL")"
+        PG_BASE="${PG_URL%%\?*}"
+        PG_NOME="${PG_BASE##*/}"
+        PG_SERVIDOR="${PG_BASE%/*}"
+        PG_TESTE="${PG_NOME}_testes"
+        TEST_DATABASE_URL="$(printf '%s' "$PROD_DATABASE_URL" | sed -E "s|/$PG_NOME(\?|$)|/$PG_TESTE\1|")" ;;
+    *)
+        echo "ERRO: DATABASE_URL da produção não reconhecido: ${PROD_DATABASE_URL:-(vazio)}"; exit 1 ;;
+esac
+if [ "$TEST_DATABASE_URL" = "$PROD_DATABASE_URL" ]; then
+    echo "ERRO: a URL do banco de teste ficou igual à de produção ($PROD_DATABASE_URL). Abortando."; exit 1
+fi
+
 if [ "$BANCOS_JA_COPIADOS" -eq 1 ] && [ "$RECOPIAR" -eq 0 ]; then
     echo "-- Bancos já copiados antes (use --recopiar-bancos para refazer a cópia)"
-    TEST_DATABASE_URL="$(grep -E '^DATABASE_URL=' "$TEST_ENVFILE" 2>/dev/null | head -1 | cut -d= -f2-)"
 else
     echo "-- Copiando os bancos da produção (somente leitura na produção)"
     case "$PROD_DATABASE_URL" in
         sqlite*)
             echo "   portal: SQLite"
-            TEST_DATABASE_URL="sqlite:///$TEST_DIR/data/db/portal.db"
             ;;
         postgres*)
-            PG_URL="$(url_pg "$PROD_DATABASE_URL")"
-            PG_BASE="${PG_URL%%\?*}"
-            PG_NOME="${PG_BASE##*/}"
-            PG_SERVIDOR="${PG_BASE%/*}"
-            PG_TESTE="${PG_NOME}_testes"
             echo "   portal: Postgres $PG_NOME → $PG_TESTE"
             command -v pg_dump >/dev/null 2>&1 && command -v pg_restore >/dev/null 2>&1 && command -v psql >/dev/null 2>&1 \
                 || { echo "ERRO: pg_dump/pg_restore/psql não instalados (postgresql-client)."; exit 1; }
@@ -160,10 +175,7 @@ else
             pg_restore --no-owner --no-acl --dbname="$PG_SERVIDOR/$PG_TESTE" "$DUMP" 2>"$STATE/pg_restore.err" \
                 || { echo "AVISO: pg_restore terminou com avisos (veja $STATE/pg_restore.err)"; }
             rm -f "$DUMP"
-            TEST_DATABASE_URL="$(printf '%s' "$PROD_DATABASE_URL" | sed -E "s|/$PG_NOME(\?|$)|/$PG_TESTE\1|")"
             ;;
-        *)
-            echo "ERRO: DATABASE_URL da produção não reconhecido: ${PROD_DATABASE_URL:-(vazio)}"; exit 1 ;;
     esac
 
     echo "   SQLite dos módulos"
@@ -267,7 +279,7 @@ RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 "
-if [ "$ROOT" -eq 1 ] && command -v systemctl >/dev/null 2>&1; then
+if [ "$ROOT" -eq 1 ] && [ "$SYSTEMD" -eq 1 ]; then
     # Mesmo usuário da produção, se existir: assim o cofre de senhas que só
     # ele lê continua funcionando no teste.
     USUARIO="$(grep -E '^User=' /etc/systemd/system/portal_spare.service 2>/dev/null | cut -d= -f2)"
@@ -287,7 +299,7 @@ Group=$USUARIO}"
     systemctl restart "$SERVICO"
     COMO_VER="systemctl status $SERVICO   |   journalctl -u $SERVICO -f"
     COMO_PARAR="systemctl disable --now $SERVICO && rm /etc/systemd/system/$SERVICO.service"
-elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+elif [ "$SYSTEMD" -eq 1 ] && systemctl --user show-environment >/dev/null 2>&1; then
     mkdir -p "$HOME/.config/systemd/user"
     printf '%s' "$UNIT_TXT" | sed 's/^NoNewPrivileges=yes/NoNewPrivileges=true/' > "$HOME/.config/systemd/user/$SERVICO.service"
     systemctl --user daemon-reload
