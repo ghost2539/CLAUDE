@@ -359,7 +359,8 @@ def trilha_do_ativo(serial: str) -> dict:
         total_area += seg
         por_estado[i.estado] = por_estado.get(i.estado, 0) + seg
         linhas.append({
-            "estado": i.estado, "processo": i.processo, "trilha": i.trilha,
+            "estado": i.estado, "rotulo": db.rotulo_estado(i.estado),
+            "processo": i.processo, "trilha": i.trilha,
             "tipo": i.tipo, "sessao": i.sessao,
             "inicio": inicio.isoformat(),
             "fim": fim.isoformat() if fim else None,
@@ -374,6 +375,7 @@ def trilha_do_ativo(serial: str) -> dict:
             "modelo": ativo.modelo, "tipo_equipamento": ativo.tipo_equipamento,
             "origem": ativo.origem, "bu": ativo.bu,
             "estado_fisico": ativo.estado_fisico,
+            "estado_rotulo": db.rotulo_estado(ativo.estado_fisico),
             "estado_administrativo": ativo.estado_administrativo,
             "encerrado": ativo.encerrado,
             "criado_em": _utc(ativo.criado_em).isoformat(),
@@ -382,11 +384,14 @@ def trilha_do_ativo(serial: str) -> dict:
         "intervalos": linhas,
         "movimentacoes": [{
             "quando": _utc(m.quando).isoformat(), "trilha": m.trilha,
-            "de": m.estado_de, "para": m.estado_para, "processo": m.processo,
+            "de": m.estado_de, "de_rotulo": db.rotulo_estado(m.estado_de),
+            "para": m.estado_para, "para_rotulo": db.rotulo_estado(m.estado_para),
+            "processo": m.processo,
             "usuario": m.usuario, "origem": m.origem,
             "justificativa": m.justificativa,
         } for m in movs],
-        "por_estado": [{"estado": e, "segundos_uteis": v}
+        "por_estado": [{"estado": e, "rotulo": db.rotulo_estado(e),
+                        "segundos_uteis": v}
                        for e, v in sorted(por_estado.items(), key=lambda x: -x[1])],
         # O indicador que a área não tem hoje: quanto tempo o equipamento
         # ficou na mão do SPARE, somando fila e tratativa.

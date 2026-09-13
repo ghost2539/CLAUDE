@@ -122,6 +122,50 @@ AUTOMACAO = "AUTOMACAO"    # rotina do próprio portal
 ORIGENS = (PORTAL, ADMIN, AUTOMACAO)
 
 
+# Nome legível de cada etapa. O painel fala a língua de quem opera, não
+# a do banco: "aguardando triagem" e não AG_TRIAGEM.
+ROTULO_ESTADO = {
+    "AG_RECEBIMENTO": "Aguardando recebimento",
+    "EX_RECEBIMENTO": "Em recebimento",
+    "AG_TRIAGEM": "Aguardando triagem",
+    "EX_REPARO": "Em reparo",
+    "AG_PECAS": "Aguardando peça",
+    "AG_TRIAGEM_CONECT": "Aguardando triagem de rede",
+    "EX_TRIAGEM_CONECT": "Em triagem de rede",
+    "AG_ASSISTENCIA": "Aguardando envio à assistência",
+    "EM_ASSISTENCIA": "Na assistência",
+    "EX_CONFERENCIA_RETORNO": "Conferindo retorno",
+    "AG_CONFIGURACAO": "Aguardando configuração",
+    "EX_CONFIGURACAO": "Em configuração",
+    "AG_MONTAGEM": "Aguardando montagem",
+    "EX_MONTAGEM": "Em montagem",
+    "AG_INTERNALIZACAO": "Aguardando internalização",
+    "EX_INTERNALIZACAO": "Internalizando",
+    "DISPONIVEL": "Disponível em estoque",
+    "AG_SEPARACAO": "Aguardando separação",
+    "EX_SEPARACAO": "Em separação",
+    "AG_DESCARACTERIZACAO": "Aguardando descaracterização",
+    "EX_DESCARACTERIZACAO": "Em descaracterização",
+    "AG_DEFINICAO_DESTINO": "Aguardando destino",
+    "AG_VENDA": "Aguardando venda",
+    "AG_DESCARTE": "Aguardando descarte",
+    "AG_DOACAO": "Aguardando doação",
+    "AG_DEVOLUCAO": "Aguardando devolução",
+    "AG_CONFIRMACAO": "Aguardando confirmação do terceiro",
+}
+
+
+def rotulo_estado(estado: str) -> str:
+    """Nome do estado como quem opera fala.
+
+    Mora aqui e não no painel porque é vocabulário do domínio: a trilha,
+    a torre e qualquer módulo futuro precisam dizer a mesma coisa sobre
+    o mesmo estado.
+    """
+    return ROTULO_ESTADO.get(
+        estado, (estado or "").replace("_", " ").capitalize())
+
+
 class Ativo(Base):
     """O token que atravessa os processos.
 

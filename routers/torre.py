@@ -33,37 +33,6 @@ _log = logging.getLogger("torre")
 
 router = APIRouter(prefix="/api/torre", tags=["Torre de Controle"])
 
-# Nome legível de cada etapa. O painel fala a língua de quem opera, não
-# a do banco: "aguardando triagem" e não AG_TRIAGEM.
-ROTULO_ETAPA = {
-    "AG_RECEBIMENTO": "Aguardando recebimento",
-    "EX_RECEBIMENTO": "Em recebimento",
-    "AG_TRIAGEM": "Aguardando triagem",
-    "EX_REPARO": "Em reparo",
-    "AG_PECAS": "Aguardando peça",
-    "AG_TRIAGEM_CONECT": "Aguardando triagem de rede",
-    "EX_TRIAGEM_CONECT": "Em triagem de rede",
-    "AG_ASSISTENCIA": "Aguardando envio à assistência",
-    "EM_ASSISTENCIA": "Na assistência",
-    "EX_CONFERENCIA_RETORNO": "Conferindo retorno",
-    "AG_CONFIGURACAO": "Aguardando configuração",
-    "EX_CONFIGURACAO": "Em configuração",
-    "AG_MONTAGEM": "Aguardando montagem",
-    "EX_MONTAGEM": "Em montagem",
-    "AG_INTERNALIZACAO": "Aguardando internalização",
-    "EX_INTERNALIZACAO": "Internalizando",
-    "DISPONIVEL": "Disponível em estoque",
-    "AG_SEPARACAO": "Aguardando separação",
-    "EX_SEPARACAO": "Em separação",
-    "AG_DESCARACTERIZACAO": "Aguardando descaracterização",
-    "EX_DESCARACTERIZACAO": "Em descaracterização",
-    "AG_DEFINICAO_DESTINO": "Aguardando destino",
-    "AG_VENDA": "Aguardando venda",
-    "AG_DESCARTE": "Aguardando descarte",
-    "AG_DOACAO": "Aguardando doação",
-    "AG_DEVOLUCAO": "Aguardando devolução",
-    "AG_CONFIRMACAO": "Aguardando confirmação do terceiro",
-}
 
 # Agrupamento por frente, para a visão de macroprocesso.
 FRENTE_DA_ETAPA = {
@@ -89,7 +58,7 @@ FORA_DA_FILA = ("DISPONIVEL",)
 
 
 def _rotulo(estado: str) -> str:
-    return ROTULO_ETAPA.get(estado, estado.replace("_", " ").capitalize())
+    return dbt.rotulo_estado(estado)
 
 
 def _calendario() -> Calendario:

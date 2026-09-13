@@ -18,7 +18,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
 (function () {
     var S = null;
-    var ABAS = [['area', 'Área'], ['minha', 'Minha produção']];
+    var ABAS = [['area', 'Área'], ['trilha', 'Trilha do ativo'],
+                ['minha', 'Minha produção']];
     var vista = { aba: 'area' };
 
     /* Uma cor para as barras e as de severidade à parte. Cor de estado
@@ -28,14 +29,21 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     var COR_ALERTA = '#C79105';
     var COR_GRAVE = '#D4626C';
 
+    function abasVisiveis() {
+        var u = S.user() || {};
+        var abas = ABAS.slice();
+        if (u.is_admin) abas.push(['equipe', 'Equipe']);
+        return abas;
+    }
+
     window.SPARE_MODULES.torre = {
         render: function (container, sub) {
             S = window.SPARE;
-            var u = S.user() || {};
-            var abas = ABAS.slice();
-            if (u.is_admin) abas.push(['equipe', 'Equipe']);
-            vista.aba = ['area', 'minha', 'equipe'].indexOf(sub) >= 0 ? sub : 'area';
+            var abas = abasVisiveis();
+            vista.aba = ['area', 'trilha', 'minha', 'equipe'].indexOf(sub) >= 0
+                ? sub : 'area';
             S.tabs(abas, vista.aba, 'torre');
+            if (vista.aba === 'trilha') return telaTrilha(container);
             if (vista.aba === 'minha') return telaPessoa(container);
             if (vista.aba === 'equipe') return telaEquipe(container);
             return telaArea(container);
@@ -129,7 +137,9 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             tab.innerHTML = '<thead><tr><th>Série</th><th>Modelo</th>' +
                 '<th>Etapa</th><th>Com</th><th>Parado há</th></tr></thead><tbody>' +
                 d.parados.map(function (p) {
-                    return '<tr><td class="sep-serie">' + S.esc(p.serial) + '</td>' +
+                    return '<tr class="torre-clicavel" data-serial="' +
+                        S.esc(p.serial) + '"><td class="sep-serie">' +
+                        S.esc(p.serial) + '</td>' +
                         '<td>' + S.esc(p.modelo || '—') + '</td>' +
                         '<td>' + S.esc(p.rotulo) + '</td>' +
                         '<td>' + S.esc(p.usuario || '—') + '</td>' +
@@ -139,8 +149,159 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             var w = S.el('div', { className: 'table-wrapper' });
             w.appendChild(tab);
             t.appendChild(w);
+            // Clicar na linha abre a trilha daquele ativo: quem olha um
+            // parado quer saber por onde ele andou, não copiar a série.
+            tab.querySelectorAll('.torre-clicavel').forEach(function (tr) {
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', function () {
+                    vista.aba = 'trilha';
+                    S.tabs(abasVisiveis(), 'trilha', 'torre');
+                    telaTrilha(c, tr.dataset.serial);
+                });
+            });
         }
         c.appendChild(cartao('Parados há mais tempo', t));
+    }
+
+    /* ============================================================
+       Trilha do ativo (T1)
+
+       A linha do tempo completa de um equipamento. É a tela que se
+       abre numa auditoria, e por isso mostra tudo: cada estado, quanto
+       durou, quem estava com ele e o que foi justificado.
+       ============================================================ */
+    function telaTrilha(c, serial) {
+        c.innerHTML = '';
+        c.appendChild(cabecalho('Trilha do ativo',
+            'Tudo que aconteceu com um equipamento desde que entrou na área.'));
+
+        var busca = S.el('div', { className: 'card-body' });
+        var campo = S.el('input', {
+            id: 'torre-serie', className: 'form-control form-control-inline',
+            style: 'min-width:280px', autocomplete: 'off',
+            placeholder: 'Série do equipamento'
+        });
+        if (serial) campo.value = serial;
+        var linha = S.el('div', { className: 'form-row-inline' });
+        linha.appendChild(campo);
+        linha.appendChild(S.el('button', {
+            className: 'btn btn-secondary', type: 'button', textContent: 'Buscar',
+            onClick: function () { carregarTrilha(c, campo.value.trim()); }
+        }));
+        busca.appendChild(linha);
+        campo.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); carregarTrilha(c, campo.value.trim()); }
+        });
+        c.appendChild(cartao('Buscar', busca));
+
+        var alvo = S.el('div', { id: 'torre-trilha' });
+        c.appendChild(alvo);
+        setTimeout(function () { campo.focus(); }, 60);
+        if (serial) carregarTrilha(c, serial);
+    }
+
+    async function carregarTrilha(c, serial) {
+        if (!serial) return;
+        var alvo = document.getElementById('torre-trilha');
+        alvo.innerHTML = carregando();
+        var d;
+        try {
+            d = await S.api('/trilha/ativos/' + encodeURIComponent(serial));
+        } catch (e) {
+            alvo.innerHTML = '';
+            alvo.appendChild(S.el('div', { className: 'alert alert-danger',
+                                           textContent: e.message }));
+            return;
+        }
+
+        alvo.innerHTML = '';
+        var a = d.ativo;
+
+        var ficha = S.el('div', { className: 'card-body' });
+        ficha.innerHTML = '<div class="detail-grid">' +
+            dado('Série', a.serial) + dado('Modelo', a.modelo || '—') +
+            dado('Nº de ativo', a.numero_ativo || '—') +
+            dado('Origem', a.origem || '—') +
+            dado('Estado atual', a.encerrado
+                ? 'Encerrado — ' + (a.estado_rotulo || a.estado_fisico)
+                : (a.estado_rotulo || '—')) +
+            dado('Na área desde', dataHora(a.criado_em)) +
+            '</div>';
+        alvo.appendChild(cartao(a.serial, ficha));
+
+        // O número que a área não tinha: quanto tempo o equipamento
+        // passou com o SPARE, somando fila e bancada.
+        alvo.appendChild(indicadores([
+            ['Tempo total na área', duracao(d.tempo_total_uteis), 'accent-orange'],
+            ['Etapas percorridas', String(d.por_estado.length), 'accent-teal'],
+            ['Movimentações', String(d.movimentacoes.length), 'accent-gold']
+        ]));
+
+        if (d.por_estado.length) {
+            var g = S.el('div', { className: 'card-body' });
+            g.appendChild(barras(d.por_estado.map(function (e) {
+                return { rotulo: e.rotulo, valor: e.segundos_uteis };
+            }), 'valor', function (e) { return duracao(e.valor); },
+               function () { return COR_BARRA; }));
+            alvo.appendChild(cartao('Onde o tempo foi gasto', g));
+        }
+
+        var tl = S.el('div', { className: 'card-body' });
+        var ul = S.el('ul', { className: 'atd-tl' });
+        d.intervalos.forEach(function (i) {
+            var li = S.el('li', { className: i.aberto ? 'atual' : 'ok' });
+            li.innerHTML =
+                '<div class="atd-tl-quando">' + S.esc(dataHora(i.inicio)) +
+                    (i.sessao > 1 ? ' · ' + i.sessao + 'ª vez' : '') + '</div>' +
+                '<div class="atd-tl-que">' + S.esc(i.rotulo) +
+                    ' — ' + S.esc(duracao(i.segundos_uteis)) +
+                    (i.aberto ? ' (em curso)' : '') + '</div>' +
+                '<div class="atd-tl-quem">' +
+                    S.esc(i.processo || '—') +
+                    (i.usuario ? ' · ' + S.esc(i.usuario) : '') +
+                    ' · ' + S.esc(rotuloTipo(i.tipo)) + '</div>';
+            ul.appendChild(li);
+        });
+        tl.appendChild(ul);
+        alvo.appendChild(cartao('Linha do tempo', tl));
+
+        var corrigidas = d.movimentacoes.filter(function (m) {
+            return m.origem === 'ADMIN';
+        });
+        if (corrigidas.length) {
+            var cor = S.el('div', { className: 'card-body' });
+            cor.innerHTML = '<p class="text-muted" style="font-size:12.5px;' +
+                'margin:0 0 10px">Movimentações feitas manualmente por ' +
+                'administrador. A trilha não se apaga: correção é uma linha ' +
+                'nova com justificativa.</p>' +
+                corrigidas.map(function (m) {
+                    return '<div class="sep-linha"><div>' +
+                        '<div style="font-size:13px">' +
+                        S.esc(m.de_rotulo || '—') + ' → ' +
+                        S.esc(m.para_rotulo) + '</div>' +
+                        '<div class="text-muted" style="font-size:11.5px">' +
+                        S.esc(dataHora(m.quando)) + ' · ' + S.esc(m.usuario) +
+                        ' · ' + S.esc(m.justificativa) + '</div></div></div>';
+                }).join('');
+            alvo.appendChild(cartao('Correções manuais', cor));
+        }
+    }
+
+    function rotuloTipo(tipo) {
+        return ({ FILA: 'fila', TRATATIVA: 'com alguém',
+                  EXTERNO: 'espera externa' })[tipo] || tipo;
+    }
+
+    function dado(rot, valor) {
+        return '<div><label style="font-size:12px;color:var(--text-secondary)">' +
+            S.esc(rot) + '</label><div>' + S.esc(valor) + '</div></div>';
+    }
+
+    function dataHora(iso) {
+        if (!iso) return '—';
+        return new Date(iso).toLocaleString('pt-BR',
+            { day: '2-digit', month: '2-digit', year: '2-digit',
+              hour: '2-digit', minute: '2-digit' });
     }
 
     /* ============================================================
