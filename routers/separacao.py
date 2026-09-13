@@ -641,6 +641,18 @@ def api_enviar(numero: str, req: Request):
         s.commit()
     _log.info("separacao: %s enviada por %s para %s (%d unidade(s))",
               pedido_num, usuario, destino, len(unidades))
+
+    # Avisa o atendimento, se ele estiver no ar. O import é tardio e a
+    # falha é engolida de propósito: a separação já aconteceu no
+    # ServiceNow, e não pode ser desfeita porque o espelho do chamado
+    # não respondeu.
+    try:
+        from routers.atendimento import equipamento_disponivel
+        equipamento_disponivel(pedido_num, usuario)
+    except Exception as exc:  # noqa: BLE001
+        _log.error("separacao: %s enviada, mas o atendimento não foi avisado: %s",
+                   pedido_num, exc)
+
     return api_detalhe(numero, req)
 
 

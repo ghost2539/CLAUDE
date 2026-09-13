@@ -236,6 +236,21 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Atendimento a chamados (A20) — banco próprio ────────────────────
+    # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
+    # ligar o atendimento à separação. Carregamento isolado: a separação
+    # funciona sem ele (só não devolve o chamado à fila sozinha).
+    try:
+        import db.atendimento as _db_atd
+        _db_atd.init_db()
+        from routers.atendimento import router as atendimento_router
+        app.include_router(atendimento_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("atendimento").error(
+            "Módulo Atendimento NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

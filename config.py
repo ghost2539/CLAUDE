@@ -194,6 +194,12 @@ class Settings:
         _sqlite("separacao"),
     )
 
+    # ── Atendimento a chamados (A20) ────────────────────────────────────
+    ATENDIMENTO_DATABASE_URL: str = os.getenv(
+        "ATENDIMENTO_DATABASE_URL",
+        _sqlite("atendimento"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
