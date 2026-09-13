@@ -17,6 +17,7 @@
         bancada:        'Bancada',
         preparacao:     'Preparação',
         separacao:      'Separação',
+        destinacao:     'Destinação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',

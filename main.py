@@ -280,6 +280,20 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Destinação (A09 a A13) — banco próprio ──────────────────────────
+    # Fecha o caminho do reparo inviável. Guarda anexos comprobatórios em
+    # data/uploads/destinacao — é o único módulo que grava arquivo.
+    try:
+        import db.destinacao as _db_dst
+        _db_dst.init_db()
+        from routers.destinacao import router as destinacao_router
+        app.include_router(destinacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("destinacao").error(
+            "Módulo Destinação NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

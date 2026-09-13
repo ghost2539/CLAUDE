@@ -212,6 +212,12 @@ class Settings:
         _sqlite("preparacao"),
     )
 
+    # ── Destinação (A09 a A13) ──────────────────────────────────────────
+    DESTINACAO_DATABASE_URL: str = os.getenv(
+        "DESTINACAO_DATABASE_URL",
+        _sqlite("destinacao"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
