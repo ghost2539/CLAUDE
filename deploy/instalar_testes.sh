@@ -180,10 +180,22 @@ if [ "$VENV_OK" -eq 0 ]; then
         sed -i "1s#^\#!.*/venv/bin/python[0-9.]*#\#!$TEST_DIR/venv/bin/python#" "$f"
     done
     grep -rlZ "$PROD_DIR/venv" "$TEST_DIR/venv/bin" 2>/dev/null | xargs -0 -r sed -i "s#$PROD_DIR/venv#$TEST_DIR/venv#g"
-    # Dependência nova que a produção ainda não tenha: tenta o pip; se não
-    # der, o módulo correspondente fica de fora e o portal sobe sem ele.
-    "$PY_TESTE" -m pip install -q --timeout 20 --retries 0 -r "$TEST_DIR/requirements.txt" 2>/dev/null \
-        || echo "   AVISO: requisitos novos não instalados (sem rede); módulos que dependam deles ficam de fora."
+    # Sem rede o pip já falhou uma vez; não se tenta de novo. Requisito
+    # novo que a produção ainda não tenha fica de fora, e o portal sobe sem
+    # o módulo que depender dele (o log de boot diz qual).
+    FALTANDO="$(cd "$TEST_DIR" && "$PY_TESTE" - <<'PY' 2>/dev/null
+import re, importlib.metadata as m
+nomes = []
+for l in open("requirements.txt", encoding="utf-8"):
+    l = l.split("#")[0].strip()
+    if not l: continue
+    n = re.split(r"[<>=!\[;]", l)[0].strip()
+    try: m.version(n)
+    except m.PackageNotFoundError: nomes.append(n)
+print(" ".join(nomes))
+PY
+)"
+    [ -n "$FALTANDO" ] && echo "   AVISO: sem rede, não instalados (a produção não os tem): $FALTANDO"
     "$PY_TESTE" -c 'import fastapi, sqlalchemy, pandas, openpyxl, uvicorn' || { echo "ERRO: venv copiado não carrega as bibliotecas básicas."; exit 1; }
 fi
 echo "   Python do teste: $("$PY_TESTE" -c 'import sys; print(sys.version.split()[0])') em $TEST_DIR/venv"
