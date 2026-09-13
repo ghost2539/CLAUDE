@@ -387,7 +387,9 @@ SEGREDO="$("$TEST_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_u
     echo "# Ambiente de TESTES do Portal SPARE — gerado em $(date '+%d/%m/%Y %H:%M') a partir de $PROD_ENVFILE."
     echo "# Bancos: cópia da produção. Nada aqui aponta para a produção."
     # Herda tudo da produção, menos o que identifica a instância.
-    grep -vE '^\s*(#|$)' "$PROD_ENVFILE" | grep -vE '^(DATABASE_URL|[A-Z_]*_DATABASE_URL|PORT|HOST|WORKERS|AMBIENTE|CONSULTA_TIMES_PORTA|CONSULTA_TIMES_HOST|SSL_CERTFILE|SSL_KEYFILE|PORTAL_SESSION_SECRET|SMTP_HOST|ALERTA_EMAIL_TO)='
+    # CREDENTIALS_DIRECTORY também fica de fora: é o diretório privado do
+    # serviço de produção; o systemd define o do serviço de testes sozinho.
+    grep -vE '^\s*(#|$)' "$PROD_ENVFILE" | grep -vE '^(DATABASE_URL|[A-Z_]*_DATABASE_URL|PORT|HOST|WORKERS|AMBIENTE|CONSULTA_TIMES_PORTA|CONSULTA_TIMES_HOST|SSL_CERTFILE|SSL_KEYFILE|PORTAL_SESSION_SECRET|SMTP_HOST|ALERTA_EMAIL_TO|CREDENTIALS_DIRECTORY)='
     echo ""
     echo "AMBIENTE=testes"
     printf "DATABASE_URL='%s'\n" "$(printf '%s' "$TEST_DATABASE_URL" | sed "s/'/'\\\\''/g")"

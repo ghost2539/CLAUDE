@@ -47,14 +47,24 @@ class PublicQueryIn(BaseModel):
 # ── Internal helpers ──────────────────────────────────────────────
 
 def _credential(name: str) -> str:
+    """Credencial entregue pelo systemd (LoadCredentialEncrypted).
+
+    Sem ela a consulta ao EBS não tem como acontecer: devolve 503 dizendo
+    o que falta, em vez de um 500 mudo. O diretório vem de
+    CREDENTIALS_DIRECTORY, que o systemd define para o próprio serviço —
+    outro serviço (um ambiente de testes, por exemplo) tem o dele.
+    """
     directory = _cfg.CREDENTIALS_DIRECTORY
     path = os.path.join(directory, name) if directory else ""
     if not path or not os.path.isfile(path):
-        raise RuntimeError(f"Credencial protegida não carregada: {name}")
+        raise HTTPException(
+            503, f"Credencial protegida do EBS não carregada ({name}). O serviço precisa de "
+                 f"LoadCredentialEncrypted no unit e CREDENTIALS_DIRECTORY apontando para o "
+                 f"diretório dele (atual: {directory or 'em branco'}).")
     with open(path, "r", encoding="utf-8") as handle:
         value = handle.read().strip()
     if not value:
-        raise RuntimeError(f"Credencial protegida vazia: {name}")
+        raise HTTPException(503, f"Credencial protegida do EBS vazia ({name}).")
     return value
 
 
