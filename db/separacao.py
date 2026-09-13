@@ -93,13 +93,15 @@ ROTULO_TIPO = {
 AG_SEPARACAO = "AG_SEPARACAO"
 EX_SEPARACAO = "EX_SEPARACAO"
 SEPARADA = "SEPARADA"
+ENVIADA = "ENVIADA"
 CANCELADA = "CANCELADA"
-ESTADOS = (AG_SEPARACAO, EX_SEPARACAO, SEPARADA, CANCELADA)
+ESTADOS = (AG_SEPARACAO, EX_SEPARACAO, SEPARADA, ENVIADA, CANCELADA)
 
 ROTULO_ESTADO = {
     AG_SEPARACAO: "Aguardando separação",
     EX_SEPARACAO: "Em separação",
     SEPARADA: "Separada",
+    ENVIADA: "Enviada",
     CANCELADA: "Cancelada",
 }
 
@@ -133,6 +135,9 @@ class Solicitacao(Base):
         DateTime(timezone=True), default=utcnow, index=True)
     separada_por: Mapped[str] = mapped_column(String(80), default="")
     separada_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None)
+    enviada_por: Mapped[str] = mapped_column(String(80), default="")
+    enviada_em: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None)
 
     __table_args__ = (
@@ -200,6 +205,18 @@ PADROES = {
     # O que separa um estoque do outro: o começo do espaço/corredor.
     "prefixo_reposicao": "REP",
     "prefixo_inauguracao": "IN",
+
+    # Reserva. Ao bipar, o equipamento sai do saldo disponível na hora —
+    # é o que impede duas pessoas separarem a mesma unidade. O campo é
+    # configurável porque "reservado" pode ser substatus ou um valor
+    # próprio de install_status, dependendo de como a área modelou.
+    "reserva_campo": "substatus",
+    "reserva_valor": "reserved",
+    "reserva_valor_livre": "available",   # ao cancelar, volta para cá
+
+    # Envio: o equipamento passa a estar em uso, na loja de destino.
+    "envio_status": "1",                  # In use
+    "envio_campo_local": "location",
 
     # Qual estoque cada tipo de atendimento consome. Mobilidade é
     # reposição: o mesmo modelo existe nos dois, e é a prateleira que

@@ -28,7 +28,7 @@ import db.trilha as dbt
 from db.separacao import (
     Solicitacao, Item, Unidade, SessionLocal,
     TIPOS_ATENDIMENTO, ROTULO_TIPO, ROTULO_ESTADO,
-    AG_SEPARACAO, EX_SEPARACAO, SEPARADA, CANCELADA,
+    AG_SEPARACAO, EX_SEPARACAO, SEPARADA, ENVIADA, CANCELADA,
 )
 from core.security import require_permission, check_rate_limit
 from routers.trilha import Calendario, duracao_util, mover, _utc
@@ -76,7 +76,16 @@ def montar_filtro(cfg: dict[str, str], tipo: str) -> str:
                  "em Parâmetros → Separação.")
     comp = (cfg.get("comparacao") or "STARTSWITH").strip()
     status = (cfg.get("status_estoque") or "6").strip()
-    return f"install_status={status}^{campo}{comp}{prefixo}"
+    filtro = f"install_status={status}^{campo}{comp}{prefixo}"
+
+    # Reservado não é saldo: assim que alguém bipa, a unidade some do
+    # catálogo de todo mundo. Sem esta cláusula, duas separações
+    # simultâneas prometeriam o mesmo equipamento.
+    reserva_campo = (cfg.get("reserva_campo") or "").strip()
+    reserva_valor = (cfg.get("reserva_valor") or "").strip()
+    if reserva_campo and reserva_valor:
+        filtro += f"^{reserva_campo}!={reserva_valor}"
+    return filtro
 
 
 def _campos_catalogo() -> str:
@@ -122,6 +131,66 @@ def catalogo(req: Request, tipo: str) -> dict:
         "total": sum(i["saldo"] for i in itens),
         "itens": itens,
     }
+
+
+def localizar_no_estoque(req: Request, serial: str, tipo: str) -> dict:
+    """Acha a unidade no estoque daquele tipo, ou explica por que não achou.
+
+    Bipar uma série que não está naquele estoque é o erro mais provável
+    da bancada — pegar o coletor do corredor da inauguração para atender
+    uma reposição. A mensagem precisa dizer isso, não "não encontrado".
+    """
+    from routers.servicenow import (
+        _sn_session_from_portal, _sn_query, HARDWARE_TABLE,
+    )
+    cfg = db.ler_config()
+    session = _sn_session_from_portal(req)
+    campos = ("sys_id,serial_number,asset_tag,model,install_status,substatus,"
+              "aisle_space_location,stockroom")
+
+    no_estoque = _sn_query(session, HARDWARE_TABLE,
+                           f"{montar_filtro(cfg, tipo)}^serial_number={serial}",
+                           campos, limit=2)
+    if no_estoque:
+        return no_estoque[0]
+
+    # Não está no estoque certo. Buscar solto só para dizer onde está.
+    solto = _sn_query(session, HARDWARE_TABLE,
+                      f"serial_number={serial}", campos, limit=1)
+    if not solto:
+        raise HTTPException(404, f"Série {serial} não existe no ServiceNow.")
+
+    onde = (solto[0].get("aisle_space_location") or "").strip() or "sem espaço/corredor"
+    reserva_valor = (cfg.get("reserva_valor") or "").strip()
+    sub = (solto[0].get("substatus") or "").strip()
+    if reserva_valor and sub == reserva_valor:
+        raise HTTPException(
+            409, f"Série {serial} já está reservada para outra separação.")
+    raise HTTPException(
+        409, f"Série {serial} não está no estoque de "
+             f"{ROTULO_TIPO.get(tipo, tipo)} — está em {onde}.")
+
+
+def _escrever_reserva(req: Request, sys_id: str, serial: str, reservar: bool) -> None:
+    """Marca ou solta a reserva da unidade no ServiceNow.
+
+    A escrita usa a sessão do usuário logado, como manda a norma do
+    projeto: no ServiceNow o registro tem que sair no nome de quem fez.
+    """
+    from routers.servicenow import (
+        _sn_session_from_portal, _sn_update, HARDWARE_TABLE,
+    )
+    cfg = db.ler_config()
+    campo = (cfg.get("reserva_campo") or "").strip()
+    if not campo:
+        return
+    valor = (cfg.get("reserva_valor" if reservar else "reserva_valor_livre") or "").strip()
+    ok = _sn_update(_sn_session_from_portal(req), HARDWARE_TABLE, sys_id,
+                    {campo: valor})
+    if not ok:
+        raise HTTPException(
+            502, f"Série {serial}: o ServiceNow não aceitou a "
+                 f"{'reserva' if reservar else 'liberação'}. Tente de novo.")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -180,7 +249,10 @@ def _calendario() -> Calendario:
 
 
 def _resumo(s: Solicitacao, cal: Calendario, agora: datetime) -> dict:
-    fim = _utc(s.separada_em) if s.estado in (SEPARADA, CANCELADA) else None
+    # O pedido só está fechado quando o equipamento sai. Parar o relógio
+    # na conclusão da separação esconderia o tempo entre separar e enviar.
+    fim = (_utc(s.enviada_em) or _utc(s.separada_em)
+           if s.estado in (ENVIADA, CANCELADA) else None)
     return {
         "numero": s.numero,
         "chamado": s.chamado,
@@ -198,6 +270,7 @@ def _resumo(s: Solicitacao, cal: Calendario, agora: datetime) -> dict:
         "atrasada": bool(s.prazo and s.estado in (AG_SEPARACAO, EX_SEPARACAO)
                          and _utc(s.prazo) < agora),
         "separada_por": s.separada_por,
+        "enviada_em": _utc(s.enviada_em).isoformat() if s.enviada_em else None,
         "segundos_uteis": duracao_util(_utc(s.aberta_em), fim, cal, agora),
         # Preenchido só no detalhe: a fila não carrega item por item.
         "itens": None,
@@ -409,10 +482,19 @@ def api_bipar(numero: str, body: BipeIn, req: Request):
             raise HTTPException(
                 409, f"{item.modelo} já tem as {item.quantidade} unidades pedidas.")
 
+        # A reserva vem ANTES de gravar: se o ServiceNow recusar, nada
+        # fica registrado aqui. O contrário deixaria a unidade contada
+        # como separada e ainda disponível no saldo de todo mundo.
+        achado = localizar_no_estoque(req, serial, ped.tipo_atendimento)
+        _escrever_reserva(req, achado["sys_id"], serial, reservar=True)
+
         trilha_id = _registrar_na_trilha(serial, usuario, ped.numero)
         s.add(Unidade(solicitacao_id=ped.id, item_id=item.id, serial=serial,
-                      trilha_ativo_id=trilha_id, separada_por=usuario))
+                      sys_id=achado["sys_id"], trilha_ativo_id=trilha_id,
+                      separada_por=usuario))
         s.commit()
+    _log.info("separacao: %s reservou a série %s (%s)",
+              usuario, serial, numero.upper())
     return api_detalhe(numero, req)
 
 
@@ -467,6 +549,76 @@ def api_concluir(numero: str, req: Request):
     return api_detalhe(numero, req)
 
 
+@router.post("/solicitacoes/{numero}/enviar")
+def api_enviar(numero: str, req: Request):
+    """Expedição: o equipamento passa a estar em uso, na loja de destino.
+
+    É aqui que a reserva vira alocação: o ativo sai do CD e o local no
+    ServiceNow deixa de ser o corredor e passa a ser a loja.
+    """
+    from routers.servicenow import (
+        _sn_session_from_portal, _sn_update, _lookup_reference, _get_http,
+        HARDWARE_TABLE,
+    )
+    sd = require_permission(req, "separacao", "edit")
+    usuario = sd.get("username", "")
+    cfg = db.ler_config()
+
+    with SessionLocal() as s:
+        ped = _buscar(s, numero)
+        if ped.estado != SEPARADA:
+            raise HTTPException(
+                409, "Só uma solicitação já separada pode ser enviada.")
+        if not (ped.destino or "").strip():
+            raise HTTPException(
+                409, "A solicitação não tem destino — confira o chamado de origem.")
+        unidades = s.execute(
+            select(Unidade).where(Unidade.solicitacao_id == ped.id)).scalars().all()
+        destino, pedido_num = ped.destino, ped.numero
+
+    session = _sn_session_from_portal(req)
+    _req, BS = _get_http()
+    local_id = _lookup_reference(session, "location", destino, {}, BS)
+    if not local_id:
+        raise HTTPException(
+            409, f"O destino '{destino}' não foi encontrado como local no "
+                 "ServiceNow. Corrija o local no chamado e tente de novo.")
+
+    campo_local = (cfg.get("envio_campo_local") or "location").strip()
+    reserva_campo = (cfg.get("reserva_campo") or "").strip()
+    alteracao = {
+        "install_status": (cfg.get("envio_status") or "1").strip(),
+        campo_local: local_id,
+    }
+    # A unidade deixa de estar reservada: ela não está mais no CD.
+    if reserva_campo:
+        alteracao[reserva_campo] = ""
+
+    falhas = []
+    for u in unidades:
+        if not u.sys_id:
+            falhas.append(f"{u.serial} (sem vínculo no ServiceNow)")
+            continue
+        if not _sn_update(session, HARDWARE_TABLE, u.sys_id, alteracao):
+            falhas.append(u.serial)
+    if falhas:
+        # Parcial é pior que nada: quem operar precisa saber exatamente
+        # quais séries ficaram para trás para tratar uma a uma.
+        raise HTTPException(
+            502, "O ServiceNow não aceitou a mudança destas séries: "
+                 + ", ".join(falhas))
+
+    with SessionLocal() as s:
+        ped = _buscar(s, numero)
+        ped.estado = ENVIADA
+        ped.enviada_por = usuario
+        ped.enviada_em = db.utcnow()
+        s.commit()
+    _log.info("separacao: %s enviada por %s para %s (%d unidade(s))",
+              pedido_num, usuario, destino, len(unidades))
+    return api_detalhe(numero, req)
+
+
 class CancelaIn(BaseModel):
     motivo: str
 
@@ -478,8 +630,17 @@ def api_cancelar(numero: str, body: CancelaIn, req: Request):
         raise HTTPException(400, "Informe o motivo do cancelamento.")
     with SessionLocal() as s:
         ped = _buscar(s, numero)
-        if ped.estado in (SEPARADA, CANCELADA):
+        if ped.estado in (ENVIADA, CANCELADA):
             raise HTTPException(409, "A solicitação já está encerrada.")
+        unidades = s.execute(
+            select(Unidade).where(Unidade.solicitacao_id == ped.id)).scalars().all()
+
+        # Cancelar sem soltar a reserva deixaria equipamento invisível no
+        # saldo para sempre — o pior desfecho possível de um cancelamento.
+        for u in unidades:
+            if u.sys_id:
+                _escrever_reserva(req, u.sys_id, u.serial, reservar=False)
+
         ped.estado = CANCELADA
         ped.motivo = f"{ped.motivo}\n[cancelada] {body.motivo.strip()}".strip()
         ped.separada_em = db.utcnow()
