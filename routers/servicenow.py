@@ -1307,32 +1307,45 @@ RECEBIMENTO_STOCKROOM_PADRAO = "SPARE - CD324"
 RECEBIMENTO_STATUS_PADRAO = "6"          # In stock
 
 
+def _campo_item(item, *nomes: str) -> str:
+    """Lê um campo do item, aceitando dict ou objeto (compatibilidade)."""
+    for n in nomes:
+        v = item.get(n) if isinstance(item, dict) else getattr(item, n, None)
+        if v:
+            return str(v).strip()
+    return ""
+
+
 def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
-                                install_status: str = "") -> dict:
-    """Põe em estoque, no CD, os ativos recebidos que já existem no SN.
+                                install_status: str = "", aisle_space: str = "",
+                                criar: bool = True) -> dict:
+    """Reflete no ServiceNow o que chegou fisicamente ao CD.
 
-    Recebimento é a chegada física: o equipamento está no CD, e o
-    ServiceNow precisa dizer isso. Ativo que ainda não existe lá não é
-    criado aqui — quem cria é a Entrada de Estoque, que tem os campos
-    fiscais e de modelo que este fluxo não tem.
+    Quem já existe é ATUALIZADO com os dados do recebimento (modelo,
+    categoria, identificadores) e passa a estar em estoque, no CD, no
+    espaço e corredor informados. Quem não existe é CRIADO ali mesmo:
+    equipamento no CD que o ServiceNow não conhece é ativo invisível, e
+    esperar a Entrada de Estoque deixava a diferença aberta.
 
-    A escrita usa a sessão de quem está logado, como manda a norma: no
-    ServiceNow o registro sai no nome de quem recebeu.
+    `aisle_space` é obrigatório: gravar "em estoque" sem dizer onde é o
+    que faz o inventário não fechar depois. A escrita usa a sessão de
+    quem está logado — no ServiceNow o registro sai no nome de quem
+    recebeu.
     """
-    resumo = {"encontrados": 0, "atualizados": 0, "falhas": [],
-              "nao_encontrados": 0}
+    resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
+              "nao_encontrados": 0, "falhas": []}
     if not itens:
         return resumo
 
     stockroom = (stockroom or RECEBIMENTO_STOCKROOM_PADRAO).strip()
     status = (install_status or RECEBIMENTO_STATUS_PADRAO).strip()
     status = INSTALL_STATUS_MAP.get(status.lower(), status)
+    aisle = (aisle_space or "").strip()
+    if not aisle:
+        raise HTTPException(400, "Informe o Espaço e Corredor antes de subir ao ServiceNow.")
 
     registros = _hardware_records(session, itens)
     resumo["encontrados"] = len(registros)
-    resumo["nao_encontrados"] = max(0, len(itens) - len(registros))
-    if not registros:
-        return resumo
 
     _req, BS = _get_http()
     cache: dict = {}
@@ -1345,15 +1358,69 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
             f"estoque '{stockroom}' não encontrado no ServiceNow")
         return resumo
 
-    alteracao = {"install_status": status, "stockroom": stockroom_id}
-    for r in registros:
-        if not r.get("sys_id"):
-            continue
-        if _sn_update(session, HARDWARE_TABLE, r["sys_id"], alteracao):
-            resumo["atualizados"] += 1
-        else:
-            resumo["falhas"].append(
-                r.get("asset_tag") or r.get("serial_number") or r["sys_id"])
+    # Índice do que já existe, por etiqueta e por série.
+    por_tag = {r["asset_tag"].upper(): r for r in registros if r.get("asset_tag")}
+    por_serie = {r["serial_number"].upper(): r for r in registros if r.get("serial_number")}
+
+    base = {"install_status": status, "stockroom": stockroom_id,
+            "aisle_space_location": aisle}
+
+    for item in itens:
+        tag = _campo_item(item, "etiqueta", "asset_tag", "tag_number")
+        serie = _campo_item(item, "serial", "serial_number", "numero_serie")
+        modelo = _campo_item(item, "modelo", "model")
+        categoria = _campo_item(item, "categoria", "category")
+        rotulo = tag or serie or "(sem identificador)"
+
+        existente = por_tag.get(tag.upper()) if tag else None
+        if existente is None and serie:
+            existente = por_serie.get(serie.upper())
+
+        # Modelo e categoria só entram quando o ServiceNow os reconhece:
+        # mandar texto livre num campo de referência apaga o valor atual.
+        dados = dict(base)
+        if modelo:
+            mid = _lookup_reference(session, "model", modelo, cache, BS)
+            if mid:
+                dados["model"] = mid
+        if categoria:
+            cid = _lookup_reference(session, "model_category", categoria, cache, BS)
+            if cid:
+                dados["model_category"] = cid
+
+        try:
+            if existente is not None:
+                alteracao = dict(dados)
+                # Completa identificador que faltava no registro do SN.
+                if tag and not existente.get("asset_tag"):
+                    alteracao["asset_tag"] = tag
+                if serie and not existente.get("serial_number"):
+                    alteracao["serial_number"] = serie
+                if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
+                    resumo["atualizados"] += 1
+                else:
+                    resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
+            elif criar:
+                if not (tag or serie):
+                    resumo["falhas"].append("item sem etiqueta e sem série não pode ser criado")
+                    continue
+                registro = dict(dados)
+                if tag:
+                    registro["asset_tag"] = tag
+                if serie:
+                    registro["serial_number"] = serie
+                ok, _sys_id, detalhe = _insert_record(session, registro)
+                if ok:
+                    resumo["criados"] += 1
+                else:
+                    resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
+            else:
+                resumo["nao_encontrados"] += 1
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — um item ruim não derruba o lote
+            resumo["falhas"].append(f"{rotulo}: {exc}")
+
     return resumo
 
 

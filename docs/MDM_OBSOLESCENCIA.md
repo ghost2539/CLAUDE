@@ -428,3 +428,16 @@ O que já estava gravado fora desse padrão, de coletas antigas, é removido
 na próxima coleta. O resumo mostra `coleta.total_mdm`, `coleta.lidos` e
 `coleta.descartados`, para a pergunta "não trouxe tudo?" ter resposta na
 tela. `somente_coletores = 0` desliga o filtro.
+
+## Coletor recebido sai do MDM
+
+Coletor que chega ao CD pelo Recebimento é removido do console: ele voltou
+para o estoque e não está mais com a loja. Vale **só** para o que passou
+pelo Recebimento, casado por série — a base do MDM não é varrida.
+
+Apagar do MDM é irreversível e o caminho muda com a versão do console, por
+isso o endpoint é configurado (`mdm_remocao_endpoint`, com `{id}` no
+caminho, mais método e nome do campo). **Sem endpoint configurado nada é
+enviado**: a remoção fica pendente, o resumo do recebimento diz o motivo e
+cada tentativa entra na trilha de escrita (`obs_escrita`, ação `deletar`),
+com sucesso ou falha. `remover_do_mdm_no_recebimento = 0` desliga.

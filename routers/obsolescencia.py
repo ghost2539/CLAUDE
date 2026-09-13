@@ -1005,3 +1005,86 @@ def resumo_parque() -> dict:
             for c in mais_antigos],
         "modo_regra": cfg.get("modo_regra"),
     }
+
+
+# ── Coletor recebido sai do MDM ───────────────────────────────────
+def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
+    """Remove do MDM os coletores que acabaram de ser recebidos no CD.
+
+    Vale SÓ para o que passou pelo Recebimento: a base inteira não é
+    tocada. Só sai quem está no parque (foi coletado como coletor de
+    loja) e casa por série. Cada tentativa fica na trilha de escrita, com
+    sucesso ou motivo da falha — apagar do MDM não tem volta.
+
+    Sem endpoint configurado nada é enviado: a remoção fica pendente e o
+    resumo diz por quê.
+    """
+    resumo = {"tentados": 0, "removidos": 0, "pendentes": 0, "nao_encontrados": 0,
+              "falhas": [], "motivo": ""}
+    if not itens:
+        return resumo
+    import db.obsolescencia as _db
+    from sqlalchemy import select as _select
+    from integracoes import mdm_airwatch as mdm
+
+    cfg = _db.ler_config()
+    if str(cfg.get("remover_do_mdm_no_recebimento", "1")).strip().lower() not in ("1", "sim", "true"):
+        resumo["motivo"] = "desligado na configuração"
+        return resumo
+
+    seriais = {str(it.get("serial") or "").strip().upper() for it in itens}
+    seriais.discard("")
+    if not seriais:
+        return resumo
+
+    with _db.SessionLocal() as s:
+        alvos = [c for c in s.execute(_select(_db.Coletor)).scalars()
+                 if (c.serie or "").strip().upper() in seriais]
+    resumo["nao_encontrados"] = len(seriais) - len(alvos)
+    if not alvos:
+        return resumo
+    resumo["tentados"] = len(alvos)
+
+    endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
+    base = getattr(_cfg, "MDM_BASE_URL", "")
+    sessao = None
+    if endpoint:
+        try:
+            sessao = sessao_mdm()
+        except HTTPException as exc:
+            resumo["motivo"] = str(exc.detail)
+    else:
+        resumo["motivo"] = ("endpoint de remoção do MDM não configurado "
+                            "(Configuração → Obsolescência)")
+
+    for c in alvos:
+        ok, detalhe = False, resumo["motivo"] or "não enviado"
+        if sessao is not None:
+            try:
+                ok, detalhe = mdm.remover_dispositivo(
+                    sessao, c.mdm_id, base, endpoint,
+                    cfg.get("mdm_remocao_metodo", "POST"),
+                    cfg.get("mdm_remocao_campo", "id"))
+            except mdm.RemocaoNaoConfigurada as exc:
+                ok, detalhe = False, str(exc)
+            except Exception as exc:  # noqa: BLE001 — um aparelho não derruba o lote
+                ok, detalhe = False, str(exc)[:200]
+        with _db.SessionLocal.begin() as s:
+            s.add(_db.Escrita(usuario=usuario, acao="deletar", mdm_id=c.mdm_id,
+                              serie=c.serie or "", origem="recebimento",
+                              sucesso=ok, resposta=detalhe[:400],
+                              detalhe="coletor recebido no CD"))
+            if ok:
+                alvo = s.get(_db.Coletor, c.id)
+                if alvo is not None:
+                    s.delete(alvo)
+        if ok:
+            resumo["removidos"] += 1
+        else:
+            resumo["pendentes"] += 1
+            if detalhe not in resumo["falhas"]:
+                resumo["falhas"].append(detalhe)
+    _log.info("MDM: %d coletor(es) recebido(s), %d removido(s), %d pendente(s)",
+              resumo["tentados"], resumo["removidos"], resumo["pendentes"])
+    return resumo
+
