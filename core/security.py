@@ -84,6 +84,27 @@ def require_permission(req: Request, module: str, action: str = "view") -> dict:
     return sd
 
 
+def admin_geral_login() -> str:
+    return (_cfg.ADMIN_GERAL_LOGIN or _cfg.INITIAL_ADMIN_LOGIN or "").strip().lower()
+
+
+def is_admin_geral(sd: dict | None) -> bool:
+    """Admin geral: o login configurado. Sem login configurado, qualquer admin."""
+    if not sd:
+        return False
+    alvo = admin_geral_login()
+    if not alvo:
+        return bool(sd.get("is_admin"))
+    return (sd.get("username") or "").strip().lower() == alvo
+
+
+def require_admin_geral(req: Request) -> dict:
+    sd = get_session(req)
+    if not is_admin_geral(sd):
+        raise HTTPException(403, "Somente o administrador geral pode alterar isto.")
+    return sd
+
+
 def client_ip(req: Request) -> str:
     forwarded = req.headers.get("x-forwarded-for", "")
     if forwarded:

@@ -2,11 +2,11 @@
 
 O fim da vida do ativo na área, em duas etapas com donos diferentes:
 
-- **A09 Descaracterização** (Sergio) — remoção de mídia com evidência,
+- **A09 Descaracterização** — remoção de mídia com evidência,
   análise de condição física, e o ativo sai pronto para ter destino.
-- **A10 Definição de destino** (Lucas) — forma lotes e decide entre
+- **A10 Definição de destino** — forma lotes e decide entre
   venda, descarte e doação.
-- **A11 Venda** e **A12 Descarte** (Leonardo), **A13 Doação** (Lucas) —
+- **A11 Venda**, **A12 Descarte** e **A13 Doação** —
   cada um com o seu documento obrigatório.
 
 ## O token muda de mãos aqui
@@ -233,7 +233,7 @@ PADROES = {
     "anexo_extensoes": ".pdf,.jpg,.jpeg,.png",
     "anexo_tamanho_mb": "20",
     # Quantos dias o lote pode ficar sem destino definido antes de virar
-    # alerta. É o tempo entre a baixa e a decisão do Lucas.
+    # alerta. É o tempo entre a baixa e a decisão do destino.
     "alerta_sem_destino_dias": "15",
 }
 

@@ -59,10 +59,15 @@ def create_app() -> FastAPI:
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        path = _cfg.STATIC / "favicon.svg"
-        if path.exists():
-            return FileResponse(path, media_type="image/svg+xml")
-        return FileResponse(_cfg.STATIC / "favicon.ico")
+        # O ícone enviado pelo admin geral (data/branding) vence o padrão.
+        # no-cache: o navegador revalida e troca sem reiniciar nada.
+        tipos = {".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon"}
+        from routers.parametros import favicon_atual
+        path = favicon_atual() or (_cfg.STATIC / "favicon.svg")
+        if not path.exists():
+            path = _cfg.STATIC / "favicon.ico"
+        return FileResponse(path, media_type=tipos.get(path.suffix, "image/x-icon"),
+                            headers={"Cache-Control": "no-cache"})
 
     # ── Register routers ────────────────────────────────────────────────
     from routers.auth import router as auth_router

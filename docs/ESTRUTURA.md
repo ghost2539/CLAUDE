@@ -188,3 +188,13 @@ muda.
   dashboard medido pelo núcleo); a API continua em `/api/bancada`, com a
   permissão `reparos`. O registro manual de reparo saiu; o dashboard antigo
   (`/api/reparos/dashboard`) fica só para o histórico.
+
+### Ícone do portal (favicon)
+
+`/favicon.ico` serve o ícone enviado pelo admin geral em `data/branding/`
+(SVG, PNG ou ICO, até 256 KB, SVG sem script) e, na falta dele, o padrão de
+`static/favicon.svg`. Todas as páginas apontam para `/favicon.ico`, então a
+troca vale para o portal, obsolescência, orçamentos, cockpit e formulários
+sem reiniciar nada. Só o **admin geral** altera: o login em
+`ADMIN_GERAL_LOGIN` (em branco, o `INITIAL_ADMIN_LOGIN`). A tela fica em
+Configuração → Visual.

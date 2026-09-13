@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -21,7 +22,8 @@ from db.portal import (
     User, Permission, LotSequence, LocalAsset, LoadHistory,
     AccessLog, hash_password,
 )
-from core.security import get_session, require_permission, client_ip, check_rate_limit
+from core.security import (get_session, require_permission, client_ip, check_rate_limit,
+                           require_admin_geral, is_admin_geral)
 from routers.helpers import reapply_classification, reclassify_all
 
 _cfg = get_settings()
@@ -302,6 +304,95 @@ def put_setting(key: str, payload: dict, req: Request):
             s.add(x)
         x.value = payload
         x.updated_by = sd["username"]
+    return {"ok": True}
+
+
+# ── Ícone do portal (favicon) — só o admin geral altera ──────────────
+FAVICON_DIR = _cfg.DATA / "branding"
+FAVICON_TIPOS = {"image/svg+xml": ".svg", "image/png": ".png",
+                 "image/x-icon": ".ico", "image/vnd.microsoft.icon": ".ico"}
+FAVICON_MAX = 256 * 1024
+
+
+def favicon_atual() -> Path | None:
+    """O arquivo enviado pelo admin geral, se houver."""
+    if not FAVICON_DIR.exists():
+        return None
+    for ext in (".svg", ".png", ".ico"):
+        p = FAVICON_DIR / f"favicon{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def _sniff_favicon(conteudo: bytes, tipo: str) -> str:
+    """Confere o conteúdo, não só o Content-Type. Devolve a extensão."""
+    if conteudo.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if conteudo.startswith(b"\x00\x00\x01\x00"):
+        return ".ico"
+    cabeca = conteudo[:4096].lstrip().lower()
+    if cabeca.startswith(b"<?xml") or cabeca.startswith(b"<svg"):
+        baixo = conteudo.lower()
+        # SVG é documento: sem script, sem handlers, sem carregar de fora.
+        if b"<script" in baixo or b"javascript:" in baixo or b"<foreignobject" in baixo \
+                or re.search(rb"\son[a-z]+\s*=", baixo) or b"xlink:href=\"http" in baixo \
+                or b"href=\"http" in baixo:
+            raise HTTPException(400, "SVG com script ou conteúdo externo não é aceito.")
+        return ".svg"
+    raise HTTPException(400, "Envie um arquivo SVG, PNG ou ICO.")
+
+
+@router.get("/favicon")
+def favicon_info(req: Request):
+    sd = get_session(req)
+    atual = favicon_atual()
+    with SessionLocal() as s:
+        x = s.get(Setting, "portal_favicon")
+        meta = x.value if x else {}
+    return {"personalizado": atual is not None, "pode_alterar": is_admin_geral(sd),
+            "atualizado_por": meta.get("atualizado_por", ""), "atualizado_em": meta.get("atualizado_em", ""),
+            "versao": meta.get("versao", 0)}
+
+
+@router.post("/favicon")
+async def favicon_enviar(req: Request, arquivo: UploadFile = File(...)):
+    sd = require_admin_geral(req)
+    check_rate_limit(req)
+    conteudo = await arquivo.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(conteudo) > FAVICON_MAX:
+        raise HTTPException(400, "Ícone acima de 256 KB.")
+    ext = _sniff_favicon(conteudo, arquivo.content_type or "")
+    FAVICON_DIR.mkdir(parents=True, exist_ok=True)
+    for velho in FAVICON_DIR.glob("favicon.*"):
+        velho.unlink()
+    (FAVICON_DIR / f"favicon{ext}").write_bytes(conteudo)
+    with SessionLocal.begin() as s:
+        x = s.get(Setting, "portal_favicon")
+        if not x:
+            x = Setting(key="portal_favicon")
+            s.add(x)
+        versao = int((x.value or {}).get("versao", 0)) + 1
+        x.value = {"extensao": ext, "atualizado_por": sd["username"],
+                   "atualizado_em": date.today().isoformat(), "versao": versao}
+        x.updated_by = sd["username"]
+    return {"ok": True, "versao": versao}
+
+
+@router.delete("/favicon")
+def favicon_restaurar(req: Request):
+    sd = require_admin_geral(req)
+    if FAVICON_DIR.exists():
+        for velho in FAVICON_DIR.glob("favicon.*"):
+            velho.unlink()
+    with SessionLocal.begin() as s:
+        x = s.get(Setting, "portal_favicon")
+        if x:
+            x.value = {**(x.value or {}), "extensao": "", "atualizado_por": sd["username"],
+                       "atualizado_em": date.today().isoformat(),
+                       "versao": int((x.value or {}).get("versao", 0)) + 1}
     return {"ok": True}
 
 

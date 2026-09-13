@@ -133,14 +133,14 @@ db.gravar_config({
 })
 
 with db.SessionLocal() as s:
-    ativo = abrir_ativo(s, serial="tst-0001", usuario="raphael",
+    ativo = abrir_ativo(s, serial="tst-0001", usuario="operador",
                         modelo="EF501R", origem="FORNECEDOR")
     s.commit()
     checar(ativo.serial == "TST-0001", "o serial é normalizado em maiúsculas")
 
 with db.SessionLocal() as s:
     esperar_erro("serial repetido é recusado",
-                 lambda: abrir_ativo(s, serial="TST-0001", usuario="raphael"))
+                 lambda: abrir_ativo(s, serial="TST-0001", usuario="operador"))
     s.rollback()
 
 with db.SessionLocal() as s:
@@ -148,7 +148,7 @@ with db.SessionLocal() as s:
     mover(s, a, estado="AG_RECEBIMENTO", tipo=FILA, processo="A01",
           quando=h(8, 9))
     mover(s, a, estado="EX_RECEBIMENTO", tipo=TRATATIVA, processo="A01",
-          usuario="sergio", quando=h(8, 10))
+          usuario="tecnico", quando=h(8, 10))
     s.commit()
 
 with db.SessionLocal() as s:
@@ -170,7 +170,7 @@ with db.SessionLocal() as s:
     trat = [i for i in s.query(db.Intervalo)
             .filter(db.Intervalo.estado == "EX_RECEBIMENTO").all()][0]
     checar(fila.usuario == "", "intervalo de fila não fica no nome de ninguém")
-    checar(trat.usuario == "sergio", "intervalo de tratativa registra quem assumiu")
+    checar(trat.usuario == "tecnico", "intervalo de tratativa registra quem assumiu")
 
 # ── 3. Sessões: pausar e retomar ───────────────────────────────────
 print("\nSessões (pausa e retomada)")
@@ -247,7 +247,7 @@ with db.SessionLocal() as s:
 with db.SessionLocal() as s:
     a = s.get(db.Ativo, ativo.id)
     mov = mover(s, a, estado="AG_INTERNALIZACAO", tipo=FILA, origem=ADMIN,
-                usuario="raphael", justificativa="bipe registrado na bancada errada",
+                usuario="operador", justificativa="bipe registrado na bancada errada",
                 quando=h(9, 11))
     s.commit()
     checar(mov.justificativa != "", "correção com justificativa é aceita e guardada")
@@ -275,7 +275,7 @@ with db.SessionLocal() as s:
 print("\nPainel de filas")
 
 with db.SessionLocal() as s:
-    outro = abrir_ativo(s, serial="TST-0002", usuario="raphael")
+    outro = abrir_ativo(s, serial="TST-0002", usuario="operador")
     mover(s, outro, estado="AG_TRIAGEM", tipo=FILA, processo="A02", quando=h(8, 9))
     s.commit()
 

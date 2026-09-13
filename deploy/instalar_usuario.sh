@@ -92,7 +92,7 @@ INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
 # ── Alertas por e-mail (opcional) ──
 # SMTP_HOST=
 # SMTP_PORT=25
-# ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
+# ALERTA_EMAIL_TO=
 EOF
     chmod 600 "$ENVFILE"
     echo "   >> AJUSTE o INITIAL_ADMIN_LOGIN antes de subir."
