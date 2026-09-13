@@ -567,6 +567,42 @@ def _limpar(v) -> str:
     return str(v or "").strip()
 
 
+def _dpis_da_base() -> dict[str, datetime]:
+    """Série / imobilizado / etiqueta → DPIS, da base de ativos do portal.
+
+    Um dicionário só, carregado uma vez por coleta: o parque tem
+    milhares de linhas e consultar um a um levaria minutos.
+    """
+    try:
+        from sqlalchemy import select as _select
+        from db.portal import SessionLocal as _Portal, Asset
+        mapa: dict[str, datetime] = {}
+        with _Portal() as s:
+            for serial, tag, asset_id, asset_number, d in s.execute(
+                    _select(Asset.serial_number, Asset.tag_number, Asset.asset_id,
+                            Asset.asset_number, Asset.dpis).where(Asset.dpis.isnot(None))):
+                dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+                for chave in (serial, tag, asset_id, asset_number):
+                    chave = (chave or "").strip().upper()
+                    if chave:
+                        mapa.setdefault(chave, dt)
+        return mapa
+    except Exception as exc:  # noqa: BLE001 — sem base, sem idade; não derruba a coleta
+        _log.warning("obsolescencia: base de ativos indisponível para a DPIS: %s", exc)
+        return {}
+
+
+def _achar_dpis(mapa: dict, bruto: dict) -> datetime | None:
+    """Tenta série, nome e usuário do coletor contra o mapa da base."""
+    if not mapa:
+        return None
+    for campo in ("serie", "nome", "usuario"):
+        chave = _limpar(bruto.get(campo)).upper()
+        if chave and chave in mapa:
+            return mapa[chave]
+    return None
+
+
 def aplicar_coleta(coletores: list[dict], usuario: str = "",
                    total_mdm: int = 0, paginas: int = 0) -> dict:
     """Grava o resultado de uma varredura e apura o que mudou.
@@ -589,6 +625,7 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
     except ValueError:
         limite_anos = LIMITE_ANOS
     agora = datetime.now(timezone.utc)
+    dpis = _dpis_da_base()
 
     novos = atualizados = 0
     with _db.SessionLocal.begin() as s:
@@ -605,6 +642,11 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
                 continue
             loja = identificar_loja(bruto.get("usuario"))
             tags = tags_relevantes(bruto.get("tags"))
+            # Idade real: a DPIS (ativação) da base local do portal, casada
+            # por série, imobilizado ou etiqueta. O MDM só tem a data de
+            # inscrição, que rejuvenesce a cada reinscrição.
+            if not bruto.get("data_aquisicao"):
+                bruto["data_aquisicao"] = _achar_dpis(dpis, bruto)
             travado = bruto.get("android_travado")
             if travado is None:
                 travado = android_travado(bruto.get("versao_os"), bruto.get("modelo"),

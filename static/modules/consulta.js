@@ -24,7 +24,7 @@ window.SPARE_MODULES.consulta = {
             '</div>' +
             '<div id="q-bg-results"></div>';
 
-        var columns = [
+        var TODAS = [
             { key: 'empresa',       label: 'Empresa' },
             { key: 'imobilizado',   label: 'Imobilizado',  render: function (v, r) { return r.ativo || v || ''; } },
             { key: 'etiqueta',      label: 'Etiqueta' },
@@ -36,6 +36,47 @@ window.SPARE_MODULES.consulta = {
             { key: 'erro',          label: 'Erro' },
             { key: 'local_atribuido', label: 'Local Atribuído' }
         ];
+        var columns = TODAS.slice();
+        var pref = null;
+        // Colunas da pessoa (ou o padrão da área). Falha aqui não impede
+        // a consulta: cai na lista completa.
+        S.api('/consulta/colunas').then(function (p) {
+            pref = p;
+            columns = TODAS.filter(function (c) { return p.minhas.indexOf(c.key) >= 0; });
+            columns.sort(function (a, b) { return p.minhas.indexOf(a.key) - p.minhas.indexOf(b.key); });
+        }).catch(function () {});
+
+        var btnCol = S.el('button', { className: 'btn btn-outline', textContent: 'Colunas', type: 'button' });
+        document.querySelector('#q-bg-xlsx').insertAdjacentElement('afterend', btnCol);
+        btnCol.onclick = function () {
+            var corpo = S.el('div');
+            var atuais = columns.map(function (c) { return c.key; });
+            TODAS.forEach(function (c) {
+                var l = S.el('label', { style: 'display:flex;gap:8px;align-items:center;margin:4px 0' });
+                var cb = S.el('input', { type: 'checkbox', value: c.key });
+                cb.checked = atuais.indexOf(c.key) >= 0;
+                l.appendChild(cb); l.appendChild(document.createTextNode(c.label));
+                corpo.appendChild(l);
+            });
+            S.openModal('Colunas da consulta', corpo, [
+                S.el('button', { className: 'btn btn-outline', textContent: 'Padrão da área', onClick: async function () {
+                    S.closeModal();
+                    try { pref = await S.api('/consulta/colunas', { method: 'PUT', body: { colunas: [] } }); aplicar(pref); }
+                    catch (e) { S.toast(e.message, 'error'); }
+                } }),
+                S.el('button', { className: 'btn btn-primary', textContent: 'Salvar', onClick: async function () {
+                    var sel = Array.from(corpo.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+                    if (!sel.length) { S.toast('Escolha ao menos uma coluna.', 'warning'); return; }
+                    S.closeModal();
+                    try { pref = await S.api('/consulta/colunas', { method: 'PUT', body: { colunas: sel } }); aplicar(pref); }
+                    catch (e) { S.toast(e.message, 'error'); }
+                } })
+            ]);
+        };
+        function aplicar(p) {
+            columns = TODAS.filter(function (c) { return p.minhas.indexOf(c.key) >= 0; });
+            S.toast('Colunas salvas.', 'success');
+        }
 
         function barraProgresso() {
             var wrap = S.el('div', { style: 'margin:8px 0 16px' });

@@ -48,18 +48,17 @@
             <div class="sidebar-brand-text">SPARE</div>
         </div>
         <nav class="sidebar-menu">
-            <a class="sidebar-item" data-route="bemvindo">
-                <span class="sidebar-icon">&#x2302;</span>
-                <span class="sidebar-label">Bem-vindo</span>
-            </a>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Início</div>
             <a class="sidebar-item" data-route="torre" data-perm="torre">
                 <span class="sidebar-icon">&#x25F3;</span>
                 <span class="sidebar-label">Torre de Controle</span>
             </a>
-            <a class="sidebar-item" data-route="consulta">
+            <a class="sidebar-item" data-route="consulta" data-espaco="times">
                 <span class="sidebar-icon">&#x2315;</span>
                 <span class="sidebar-label">Consulta</span>
             </a>
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Entrada</div>
             <a class="sidebar-item" data-route="recebimento">
                 <span class="sidebar-icon">&#x25A3;</span>
                 <span class="sidebar-label">Recebimento</span>
@@ -68,72 +67,104 @@
                 <span class="sidebar-icon">&#x2399;</span>
                 <span class="sidebar-label">Identificação</span>
             </a>
-            <a class="sidebar-item" data-route="gestao_ativos" data-perm="servicenow">
-                <span class="sidebar-icon">&#x21C4;</span>
-                <span class="sidebar-label">Gestão de Ativos</span>
+            <a class="sidebar-item" data-route="reversa" data-perm="reversa">
+                <span class="sidebar-icon">&#x21B6;</span>
+                <span class="sidebar-label">Logística Reversa</span>
             </a>
-            <a class="sidebar-item" data-route="atendimento" data-perm="atendimento">
-                <span class="sidebar-icon">&#x260E;</span>
-                <span class="sidebar-label">Atendimento</span>
-            </a>
-            <a class="sidebar-item" data-route="bancada" data-perm="bancada">
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Central de Reparos</div>
+            <a class="sidebar-item" data-route="reparos/loja" data-perm="reparos">
                 <span class="sidebar-icon">&#x2692;</span>
-                <span class="sidebar-label">Bancada</span>
+                <span class="sidebar-label">Frente e Retaguarda</span>
+            </a>
+            <a class="sidebar-item" data-route="reparos/frota" data-perm="reparos">
+                <span class="sidebar-icon">&#x2692;</span>
+                <span class="sidebar-label">Mobilidade</span>
+            </a>
+            <a class="sidebar-item" data-route="reparos/conectividade" data-perm="reparos">
+                <span class="sidebar-icon">&#x2692;</span>
+                <span class="sidebar-label">Conectividade</span>
             </a>
             <a class="sidebar-item" data-route="preparacao" data-perm="preparacao">
                 <span class="sidebar-icon">&#x2699;</span>
                 <span class="sidebar-label">Preparação</span>
             </a>
+            <a class="sidebar-item" data-route="externo" data-perm="externo">
+                <span class="sidebar-icon">&#x21BB;</span>
+                <span class="sidebar-label">Assistência Externa</span>
+            </a>
+            <a class="sidebar-item" data-route="atendimento" data-perm="atendimento">
+                <span class="sidebar-icon">&#x260E;</span>
+                <span class="sidebar-label">Atendimento</span>
+            </a>
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Saída</div>
             <a class="sidebar-item" data-route="separacao" data-perm="separacao">
-                <span class="sidebar-icon">&#x1F4E4;</span>
+                <span class="sidebar-icon">&#x21E5;</span>
                 <span class="sidebar-label">Separação</span>
             </a>
             <a class="sidebar-item" data-route="projetos" data-perm="projetos">
-                <span class="sidebar-icon">&#x1F3EC;</span>
+                <span class="sidebar-icon">&#x2302;</span>
                 <span class="sidebar-label">Projetos de Loja</span>
-            </a>
-            <a class="sidebar-item" data-route="reversa" data-perm="reversa">
-                <span class="sidebar-icon">&#x1F4E5;</span>
-                <span class="sidebar-label">Logística Reversa</span>
-            </a>
-            <a class="sidebar-item" data-route="inventario" data-perm="inventario">
-                <span class="sidebar-icon">&#x1F4CB;</span>
-                <span class="sidebar-label">Inventário</span>
-            </a>
-            <a class="sidebar-item" data-route="regularizacao" data-perm="regularizacao">
-                <span class="sidebar-icon">&#x2696;</span>
-                <span class="sidebar-label">Regularização</span>
-            </a>
-            <a class="sidebar-item" data-route="externo" data-perm="externo">
-                <span class="sidebar-icon">&#x21BB;</span>
-                <span class="sidebar-label">Assistência</span>
             </a>
             <a class="sidebar-item" data-route="destinacao" data-perm="destinacao">
                 <span class="sidebar-icon">&#x267B;</span>
                 <span class="sidebar-label">Destinação</span>
             </a>
             <a class="sidebar-item" data-route="rastreio">
-                <span class="sidebar-icon">&#x1F4E6;</span>
+                <span class="sidebar-icon">&#x2709;</span>
                 <span class="sidebar-label">Correios</span>
             </a>
-            <a class="sidebar-item" data-route="reparos">
-                <span class="sidebar-icon">&#x2692;</span>
-                <span class="sidebar-label">Central de Reparos</span>
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Gestão de Ativos</div>
+            <a class="sidebar-item" data-route="inventario" data-perm="inventario">
+                <span class="sidebar-icon">&#x2630;</span>
+                <span class="sidebar-label">Inventário</span>
             </a>
+            <a class="sidebar-item" data-route="regularizacao" data-perm="regularizacao">
+                <span class="sidebar-icon">&#x2696;</span>
+                <span class="sidebar-label">Regularização</span>
+            </a>
+            <a class="sidebar-item" data-route="gestao_ativos/entrada" data-espaco="times" data-perm="servicenow">
+                <span class="sidebar-icon">&#x21C4;</span>
+                <span class="sidebar-label">Entrada de Ativos</span>
+            </a>
+            <a class="sidebar-item" data-route="gestao_ativos/saida" data-espaco="times" data-perm="servicenow">
+                <span class="sidebar-icon">&#x21C4;</span>
+                <span class="sidebar-label">Saída de Ativos</span>
+            </a>
+            <a class="sidebar-item" data-route="gestao_ativos/movimentacao" data-espaco="times" data-perm="servicenow">
+                <span class="sidebar-icon">&#x21C4;</span>
+                <span class="sidebar-label">Movimentação Interna</span>
+            </a>
+            <a class="sidebar-item" data-href="/obsolescencia" data-perm="obsolescencia">
+                <span class="sidebar-icon">&#x231B;</span>
+                <span class="sidebar-label">Obsolescência</span>
+            </a>
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Gestão de Fornecedores</div>
             <a class="sidebar-item" data-route="orcamento_manutencao">
-                <span class="sidebar-icon">&#x1F4B0;</span>
-                <span class="sidebar-label">Orçamento</span>
+                <span class="sidebar-icon">&#x1F527;</span>
+                <span class="sidebar-label">Brasil — Manutenção</span>
             </a>
-            <a class="sidebar-item" data-route="status">
-                <span class="sidebar-icon">&#x2301;</span>
-                <span class="sidebar-label">Status</span>
+            </div>
+            <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Controle</div>
+            <a class="sidebar-item" data-href="/orcamento-spare" data-perm="orcamento_spare">
+                <span class="sidebar-icon">&#x2211;</span>
+                <span class="sidebar-label">Orçamento Spare</span>
             </a>
-            <a class="sidebar-item" data-route="parametros">
-                <span class="sidebar-icon">&#x2699;</span>
-                <span class="sidebar-label">Parâmetros</span>
+            <a class="sidebar-item" data-href="/controle-orcamento" data-perm="orcamento">
+                <span class="sidebar-icon">&#x2211;</span>
+                <span class="sidebar-label">Orçamento Infra CSC</span>
             </a>
+            </div>
         </nav>
+
         <div class="sidebar-bottom">
+            <a class="sidebar-item" data-route="status"><span class="sidebar-icon">&#x2301;</span><span class="sidebar-label">Status</span></a>
+            <a class="sidebar-item" data-route="parametros"><span class="sidebar-icon">&#x2699;</span><span class="sidebar-label">Configuração</span></a>
+            <a class="sidebar-item" data-route="consulta_times" data-perm="consulta_times" data-espaco="times"><span class="sidebar-icon">&#x1F511;</span><span class="sidebar-label">Acesso Consulta Times</span></a>
+            <a class="sidebar-item" data-route="parametros/conta" data-perm="parametros"><span class="sidebar-icon">&#x263A;</span><span class="sidebar-label">Minha conta</span></a>
             <button id="logout-btn" class="sidebar-logout-btn">
                 <span>&#x21AA;</span>
                 <span class="sidebar-label">Sair</span>

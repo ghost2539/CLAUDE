@@ -132,6 +132,16 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Consulta — colunas padrão</div>' +
+            '<div class="card-body" id="cm-consulta-cols"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Gestão de Ativos — estoques, corredores e anotações</div>' +
+            '<div class="card-body" id="cm-ga"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — marcação no ServiceNow</div>' +
             '<div class="card-body">' +
                 '<div id="cm-rec-sn"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
@@ -148,6 +158,8 @@ function renderConfigModulos(c, S) {
     _renderIndicadoresConfig(S);
     _renderValorHora(S);
     _renderRecebimentoSN(S);
+    _renderConsultaColunas(S);
+    _renderGestaoAtivos(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -184,6 +196,53 @@ function renderConfigModulos(c, S) {
             S.loading(false);
         }
     };
+}
+
+/* Listas das telas de Entrada / Saída / Movimentação interna. */
+async function _renderGestaoAtivos(S) {
+    var host = document.getElementById('cm-ga');
+    if (!host) return;
+    var c;
+    try { c = await S.api('/servicenow/gestao-ativos/config'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    function area(id, rotulo, lista) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<textarea id="' + id + '" class="form-control" rows="4" placeholder="um por linha">' + S.esc((lista || []).join('\n')) + '</textarea></div>';
+    }
+    host.innerHTML = '<div class="form-grid cols-2">' +
+        area('ga-estoques', 'Estoques (stockroom)', c.estoques) +
+        area('ga-corredores-cfg', 'Corredores e espaços sugeridos', c.corredores) +
+        area('ga-anotacoes-cfg', 'Anotações sugeridas na saída', c.anotacoes) + '</div>' +
+        '<button id="ga-salvar" class="btn btn-primary mt-2">Salvar</button>';
+    document.getElementById('ga-salvar').onclick = async function () {
+        var linhas = function (id) { return document.getElementById(id).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+        try {
+            await S.api('/parametros/config/gestao_ativos', { method: 'PUT', body: {
+                estoques: linhas('ga-estoques'), corredores: linhas('ga-corredores-cfg'), anotacoes: linhas('ga-anotacoes-cfg') } });
+            S.toast('Configuração salva.', 'success');
+        } catch (e) { S.toast(e.message, 'error'); }
+    };
+}
+
+/* Colunas padrão da Consulta (cada usuário pode reduzir a sua). */
+async function _renderConsultaColunas(S) {
+    var host = document.getElementById('cm-consulta-cols');
+    if (!host) return;
+    var p;
+    try { p = await S.api('/consulta/colunas'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    host.innerHTML = '';
+    var grade = S.el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 16px' });
+    p.disponiveis.forEach(function (c) {
+        var l = S.el('label', { style: 'display:flex;gap:8px;align-items:center' });
+        var cb = S.el('input', { type: 'checkbox', value: c.chave }); cb.checked = p.padrao.indexOf(c.chave) >= 0;
+        l.appendChild(cb); l.appendChild(document.createTextNode(c.rotulo)); grade.appendChild(l);
+    });
+    host.appendChild(grade);
+    host.appendChild(S.el('button', { className: 'btn btn-primary mt-2', textContent: 'Salvar', onClick: async function () {
+        var sel = Array.from(grade.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+        if (!sel.length) { S.toast('Escolha ao menos uma coluna.', 'warning'); return; }
+        try { await S.api('/parametros/config/consulta_colunas_padrao', { method: 'PUT', body: { colunas: sel } }); S.toast('Colunas padrão salvas.', 'success'); }
+        catch (e) { S.toast(e.message, 'error'); }
+    } }));
 }
 
 /* Marcação do recebimento no ServiceNow (dentro de Configuração Módulos). */
@@ -762,7 +821,7 @@ async function renderAcessos(c, S) {
                 ], d.pendentes));
                 ph.insertAdjacentHTML('beforeend',
                     '<p class="text-muted mt-2">Libere o acesso em ' +
-                    '<b>Parâmetros → Usuários e Permissões</b>.</p>');
+                    '<b>Configuração → Usuários e Permissões</b>.</p>');
             }
         } catch (e) {
             host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
@@ -1133,11 +1192,11 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'inventario', 'regularizacao', 'bancada', 'preparacao',
+        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'inventario', 'regularizacao', 'preparacao',
         'destinacao', 'externo', 'torre', 'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
         'orcamento_spare', 'orcamento_manutencao', 'obsolescencia',
-        'automacoes', 'ebs_forms'];
+        'automacoes', 'ebs_forms', 'consulta_times'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
@@ -1148,7 +1207,6 @@ async function renderPermissions(c, S) {
         inventario: 'Inventário', regularizacao: 'Regularização',
         obsolescencia: 'Obsolescência do parque', automacoes: 'Automações',
         ebs_forms: 'EBS Forms',
-        bancada: 'Bancada (triagem e reparo)',
         preparacao: 'Preparação (configuração e estoque)',
         destinacao: 'Destinação (baixa, venda, descarte, doação)',
         externo: 'Assistência externa e devolução',
@@ -1157,7 +1215,8 @@ async function renderPermissions(c, S) {
         // Sem tela própria ainda: dá acesso à trilha de um ativo e ao
         // painel de filas, que outros módulos consultam.
         trilha: 'Trilha do Ativo', rastreio: 'Correios',
-        reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
+        reparos: 'Central de Reparos (bancadas)', status: 'Status', parametros: 'Configuração',
+        consulta_times: 'Consulta Times (acesso específico)',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
         orcamento_spare: 'Orçamento SPARE',        // CAPEX da área
@@ -1798,7 +1857,7 @@ async function renderSeparacaoConfig(c, S) {
                     fuso_horas: v('sc-cal-fuso')
                 }
             });
-            S.toast('Parâmetros salvos.', 'success');
+            S.toast('Configuração salva.', 'success');
             renderSeparacaoConfig(c, S);
         } catch (e) {
             S.toast(e.message, 'danger');

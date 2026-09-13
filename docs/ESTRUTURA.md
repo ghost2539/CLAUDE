@@ -93,6 +93,8 @@ docs/                    Documentação
 | Logística reversa (A17) | `data/db/reversa.db` | `REVERSA_DATABASE_URL` |
 | Inventário (A18) | `data/db/inventario.db` | `INVENTARIO_DATABASE_URL` |
 | Regularização (A19) | `data/db/regularizacao.db` | `REGULARIZACAO_DATABASE_URL` |
+| Consulta Times (liberações e acessos) | `data/db/consulta_times.db` | `CONSULTA_TIMES_DATABASE_URL` |
+| Orçamento Spare (clone do Infra CSC) | `data/db/orcamento_spare_exec.db` | `ORCAMENTO_SPARE_EXEC_DATABASE_URL` |
 
 Nenhum módulo isolado escreve no banco do portal, e vice-versa. Toda URL sai
 de `config.py`; nenhum módulo monta caminho por conta própria.
@@ -129,6 +131,7 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/destinacao` | destinacao | `/api/externo` | externo |
 | `/api/projetos` | projetos | `/api/reversa` | reversa |
 | `/api/inventario` | inventario | `/api/regularizacao` | regularizacao |
+| `/consulta-times` `/api/consulta-times` | consulta_times (espaço Times) | `/orcamento-spare` `/api/orcamento-spare-exec` | orcamento_spare_exec (clone do Infra CSC) |
 | `/api/ebs-forms` | ebs_forms | `/api/servicenow/correios` | correios |
 
 O contrato dos módulos do ciclo do ativo (estados, o que cada um escreve
@@ -168,3 +171,20 @@ muda.
 4. Nada gravado em disco fora de `data/`.
 5. Nada que precise de login pode morar em `static/` — ali é público.
 6. Serviço systemd e instalador entram em `deploy/`.
+
+## Espaços e clones
+
+- **Consulta Times** (`/consulta-times`) é o mesmo shell do portal servido
+  com `<body data-espaco="times">`: o `app.js` mostra só Consulta, Entrada /
+  Saída / Movimentação interna e Acessos, e cai na Consulta. Entra quem tem
+  liberação por login (dada na tela Acessos por quem administra) ou a
+  permissão `consulta_times`. A liberação vira permissão de sessão no login
+  (`routers/auth.py`) para `consulta_times`, `consulta` e `servicenow`.
+- **Orçamento Spare** (`/orcamento-spare`) carrega o fonte do Controle de
+  Orçamento uma segunda vez (`routers/orcamento_spare_exec.py`) trocando só
+  banco, permissão (`orcamento_spare`) e caminhos. Correção no original vale
+  para os dois.
+- **Central de Reparos**: a tela é `static/modules/reparos.js` (bancadas +
+  dashboard medido pelo núcleo); a API continua em `/api/bancada`, com a
+  permissão `reparos`. O registro manual de reparo saiu; o dashboard antigo
+  (`/api/reparos/dashboard`) fica só para o histórico.

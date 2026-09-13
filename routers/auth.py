@@ -263,6 +263,21 @@ def auth_login(body: LoginIn, req: Request):
             u.auth_source = source
 
             perms = _get_perms(s, u)
+            # Liberação da Consulta Times (por login, fora do portal): dá a
+            # este espaço as permissões que as telas dele conferem — a
+            # própria, a Consulta e o ServiceNow (Entrada/Saída/Mov. interna).
+            try:
+                import db.consulta_times as _dbct
+                _nivel = _dbct.nivel_do_login(u.login)
+                if _nivel and not u.is_admin:
+                    _edit = _nivel in ("edit", "admin")
+                    _p = {"can_view": True, "can_create": _edit, "can_edit": _edit,
+                          "can_export": True, "can_admin": _nivel == "admin"}
+                    for _m in ("consulta_times", "consulta", "servicenow"):
+                        if not perms.get(_m, {}).get("can_view"):
+                            perms[_m] = dict(_p)
+            except Exception as _exc:  # noqa: BLE001 — módulo fora do ar não trava o login
+                log.warning("consulta_times: liberação não lida no login: %s", _exc)
             data = _user_payload(u, perms)
 
             session_data = {

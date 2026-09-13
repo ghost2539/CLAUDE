@@ -218,6 +218,12 @@ class Settings:
         _sqlite("regularizacao"),
     )
 
+    # ── Consulta Times (acesso específico) ──────────────────────────────
+    CONSULTA_TIMES_DATABASE_URL: str = os.getenv(
+        "CONSULTA_TIMES_DATABASE_URL",
+        _sqlite("consulta_times"),
+    )
+
     # ── Atendimento a chamados (A20) ────────────────────────────────────
     ATENDIMENTO_DATABASE_URL: str = os.getenv(
         "ATENDIMENTO_DATABASE_URL",
@@ -253,6 +259,12 @@ class Settings:
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
         "ORCAMENTO_EXEC_DATABASE_URL",
         _sqlite("controle_orcamento_exec"),
+    )
+    # ── Orçamento Spare (CAPEX + OPEX da área) — mesma tela do Infra CSC,
+    #    banco e permissão próprios ─────────────────────────────────────
+    ORCAMENTO_SPARE_EXEC_DATABASE_URL: str = os.getenv(
+        "ORCAMENTO_SPARE_EXEC_DATABASE_URL",
+        _sqlite("orcamento_spare_exec"),
     )
     # API de CAPEX do EBS (preenche os valores dos projetos).
     EBS_CAPEX_URL: str = os.getenv(
@@ -336,9 +348,9 @@ class Settings:
         "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
         # Ciclo do ativo. Sem a lista aqui, a tela de permissões não grava
         # a linha e require_permission nega para todo não-admin.
-        "trilha", "torre", "atendimento", "bancada", "preparacao", "separacao",
+        "trilha", "torre", "atendimento", "preparacao", "separacao",
         "projetos", "reversa", "inventario", "regularizacao", "externo",
-        "destinacao", "obsolescencia",
+        "destinacao", "obsolescencia", "consulta_times",
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

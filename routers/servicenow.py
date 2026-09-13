@@ -1499,6 +1499,33 @@ def hardware_exists(body: ExisteIn, req: Request):
 
 VALID_STOCKROOMS = ["SPARE-ADM15", "SPARE-CD324", "SPARE-CD504"]
 
+
+# Listas que as telas de Entrada, Saída e Movimentação interna oferecem.
+# Vêm de Configuração → Configuração Módulos (chave gestao_ativos) e
+# valem na hora, sem reiniciar. Os padrões são os de sempre.
+GESTAO_ATIVOS_PADRAO = {
+    "estoques": ["SPARE - CD324", "SPARE-ADM15", "SPARE-CD504"],
+    "corredores": [],
+    "anotacoes": [],
+}
+
+
+def config_gestao_ativos() -> dict:
+    from db.portal import SessionLocal as _Portal, Setting
+    with _Portal() as s:
+        row = s.get(Setting, "gestao_ativos")
+    cfg = dict(GESTAO_ATIVOS_PADRAO)
+    for k, v in ((row.value or {}) if row else {}).items():
+        if k in cfg and isinstance(v, list):
+            cfg[k] = [str(x).strip() for x in v if str(x).strip()]
+    return cfg
+
+
+@router.get("/gestao-ativos/config")
+def gestao_ativos_config(req: Request):
+    require_permission(req, "servicenow", "view")
+    return config_gestao_ativos()
+
 BU_MAP = {
     "renner": "Renner Brasil",
     "youcom": "Youcom",

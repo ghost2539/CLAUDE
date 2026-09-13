@@ -11,11 +11,11 @@
         bemvindo:       'Bem-vindo',
         torre:          'Torre de Controle',
         consulta:       'Consulta',
+        consulta_times: 'Acesso Consulta Times',
         recebimento:    'Recebimento',
         identificacao:  'Identificação',
         gestao_ativos:  'Gestão de Ativos',
         atendimento:    'Atendimento',
-        bancada:        'Bancada',
         preparacao:     'Preparação',
         separacao:      'Separação',
         projetos:       'Projetos de Loja',
@@ -28,7 +28,7 @@
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
         status:         'Status',
-        parametros:     'Parâmetros'
+        parametros:     'Configuração'
     };
 
     // ── State ──────────────────────────────────────────────────────
@@ -267,7 +267,7 @@
         }
         var destino = destinoPedido();
         if (destino) { location.replace(destino); return; }
-        nav(location.hash.slice(1) || 'bemvindo');
+        nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
     }
 
     // Telas fora do SPA (/controle-orcamento, /ebs-forms) mandam quem está sem
@@ -325,7 +325,7 @@
                 });
                 state.user.must_change_password = false;
                 ov.remove();
-                nav(location.hash.slice(1) || 'bemvindo');
+                nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
             } catch (x) {
                 erro(x.message || 'Falha ao alterar a senha.');
             }
@@ -368,19 +368,58 @@
         }
     }
 
+    // ── Espaços ───────────────────────────────────────────────────
+    // O mesmo shell serve o portal inteiro e a Consulta Times. O espaço
+    // vem do <body data-espaco>; fora do espaço padrão só aparecem os
+    // itens marcados para ele, e a rota inicial é a Consulta.
+    var ESPACO = document.body.dataset.espaco || '';
+    var MODULOS_TIMES = ['consulta', 'gestao_ativos', 'consulta_times'];
+    function rotaPermitida(module) {
+        return !ESPACO || MODULOS_TIMES.indexOf(module) >= 0;
+    }
+
     // ── Menu builder (permission-aware) ────────────────────────────
     function buildMenu() {
         $$('.sidebar-item').forEach(function (item) {
-            var route = item.dataset.route;
+            var route = item.dataset.route || '';
+            var href = item.dataset.href || '';
             // Um item pode ter chave de permissão diferente da rota: Gestão de
             // Ativos herda a permissão "servicenow", para que ninguém perca
-            // acesso quando a tela muda de lugar no menu.
-            var perm = item.dataset.perm || route;
-            var visible = state.user.is_admin || state.permissions.indexOf(perm) !== -1;
+            // acesso quando a tela muda de lugar no menu. Sem data-perm, a
+            // chave é o módulo da rota (antes da barra).
+            var perm = item.dataset.perm || route.split('/')[0];
+            var visible = state.user.is_admin || !perm || state.permissions.indexOf(perm) !== -1;
+            // "Minha conta" é de todo mundo.
+            if (route === 'parametros/conta') visible = true;
+            if (ESPACO) {
+                var espacos = (item.dataset.espaco || '').split(' ');
+                visible = espacos.indexOf(ESPACO) >= 0;
+                // No espaço Times a permissão vem da liberação por login,
+                // que o servidor já conferiu ao servir a página.
+            }
             item.style.display = visible ? '' : 'none';
             item.onclick = function (e) {
                 e.preventDefault();
+                if (href) { window.location.href = href; return; }
                 nav(route);
+            };
+        });
+        // Grupo sem item visível some junto.
+        $$('.sidebar-grupo').forEach(function (g) {
+            var algum = $$('.sidebar-item', g).some(function (i) { return i.style.display !== 'none'; });
+            g.style.display = algum ? '' : 'none';
+        });
+        // Grupos recolhíveis; o estado fica no navegador de cada um.
+        var fechados = [];
+        try { fechados = JSON.parse(localStorage.getItem('spare.menu.fechados') || '[]'); } catch (_) {}
+        $$('.sidebar-grupo').forEach(function (g) {
+            var titulo = $('.sidebar-grupo-titulo', g);
+            var nome = titulo.textContent.trim();
+            if (fechados.indexOf(nome) >= 0) g.classList.add('fechado');
+            titulo.onclick = function () {
+                g.classList.toggle('fechado');
+                var lista = $$('.sidebar-grupo.fechado .sidebar-grupo-titulo').map(function (t) { return t.textContent.trim(); });
+                try { localStorage.setItem('spare.menu.fechados', JSON.stringify(lista)); } catch (_) {}
             };
         });
     }
@@ -416,6 +455,7 @@
         var sub = parts.slice(1).join('/') || undefined;
 
         if (!ROUTES[module]) module = 'bemvindo';
+        if (!rotaPermitida(module)) { module = 'consulta'; route = 'consulta'; }
         state.current = module;
         location.hash = route;
         // Modal é global: um erro deixado aberto numa tela não pode
@@ -425,8 +465,12 @@
 
         // Update active sidebar item
         $$('.sidebar-item').forEach(function (x) {
-            x.classList.toggle('active', x.dataset.route === module);
+            var r = x.dataset.route || '';
+            x.classList.toggle('active', r === route || (r.indexOf('/') < 0 && r === module));
         });
+        // O grupo do item ativo abre, mesmo que estivesse fechado.
+        var ativo = $('.sidebar-item.active');
+        if (ativo) { var g = ativo.closest('.sidebar-grupo'); if (g) g.classList.remove('fechado'); }
 
         // Clear sub-tabs and content
         $('#sub-tabs').hidden = true;
@@ -461,7 +505,7 @@
     }
 
     window.addEventListener('hashchange', function () {
-        nav(location.hash.slice(1) || 'bemvindo');
+        nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
     });
 
     // ── Global search ──────────────────────────────────────────────

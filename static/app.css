@@ -32,8 +32,8 @@
     --border-subtle: rgba(255, 255, 255, .06);
     --border-light: rgba(255, 255, 255, .1);
 
-    --sidebar-collapsed: 60px;
-    --sidebar-expanded: 220px;
+    --sidebar-collapsed: 208px;   /* rótulo sempre visível: 21 ícones sem nome não se aprende */
+    --sidebar-expanded: 208px;
     --topbar-h: 56px;
     --radius: 3px;
     --font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1035,3 +1035,29 @@ textarea:focus-visible, input[type="checkbox"]:focus-visible {
 
 .torre-barra-pista { position: relative; }
 .torre-barra-marca { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #C79105; opacity: .9; }
+
+/* ── Menu em grupos ──────────────────────────────────────────────── */
+.sidebar-menu { overflow-y: auto; scrollbar-width: thin; }
+.sidebar-brand-text, .sidebar-label { opacity: 1; }
+.sidebar-grupo { padding: 6px 0 4px; }
+.sidebar-grupo + .sidebar-grupo { border-top: 1px solid rgba(255,255,255,.05); }
+.sidebar-grupo-titulo {
+    padding: 6px 16px 4px; font-size: 10.5px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.sidebar-item { padding-top: 7px; padding-bottom: 7px; }
+.sidebar-bottom .sidebar-item { padding-left: 16px; }
+.sidebar-icon { font-size: 14px; width: 22px; text-align: center; opacity: .75; }
+@media (max-width: 767px) {
+    .sidebar-brand-text, .sidebar-label { opacity: 1; }
+}
+
+/* Menu compacto e grupos recolhíveis: 26 itens não cabem numa tela de
+   1000px sem rolar; o grupo fecha com um clique e o do item ativo abre. */
+.sidebar-item { padding-top: 5px; padding-bottom: 5px; font-size: 13px; }
+.sidebar-grupo { padding: 2px 0; }
+.sidebar-grupo-titulo { cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center; padding: 6px 16px 3px; }
+.sidebar-grupo-titulo::after { content: '\25BE'; font-size: 10px; opacity: .6; transition: transform .15s; }
+.sidebar-grupo.fechado .sidebar-grupo-titulo::after { transform: rotate(-90deg); }
+.sidebar-grupo.fechado .sidebar-item { display: none !important; }
+.sidebar-bottom .sidebar-item { padding-top: 4px; padding-bottom: 4px; }

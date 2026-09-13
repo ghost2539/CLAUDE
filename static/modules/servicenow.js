@@ -24,6 +24,7 @@ window.SPARE_MODULES.servicenow = {
             relatorios: _snRenderRelatorios
         };
         (handlers[sub] || _snRenderUpload)(container, S);
+        _gaCarregarConfig(S);
     }
 
 };
@@ -165,9 +166,10 @@ function _snRenderUpload(container, S) {
             '<div class="card-body">' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
-                        '<input id="sn-stockroom" class="form-control" value="SPARE - CD324"></div>' +
+                        '<select id="sn-stockroom" class="form-control"><option>SPARE - CD324</option></select></div>' +
                     '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
-                        '<input id="sn-aisle" class="form-control" placeholder="Obrigatório"></div>' +
+                        '<input id="sn-aisle" class="form-control" list="ga-corredores" placeholder="Obrigatório" autocomplete="off">' +
+                        '<datalist id="ga-corredores"></datalist></div>' +
                 '</div>' +
             '</div>' +
         '</div>' +
@@ -612,7 +614,8 @@ function _snRenderSaida(container, S) {
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
                         '<label>Observações <span style="color:#dc2626">*</span> (nº do chamado ou motivo)</label>' +
-                        '<input id="sa-notes" class="form-control" placeholder="Ex.: INC0012345 ou devolução de estoque"></div>' +
+                        '<input id="sa-notes" class="form-control" list="ga-anotacoes" placeholder="Ex.: INC0012345 ou devolução de estoque" autocomplete="off">' +
+                        '<datalist id="ga-anotacoes"></datalist></div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
                     '<button class="btn btn-primary" id="sa-search">Buscar ativos</button></div>' +
@@ -911,6 +914,29 @@ function _saMoveAll(S) {
    ================================================================ */
 
 var _miStockrooms = ['SPARE - CD324', 'SPARE-ADM15', 'SPARE-CD504'];
+var _gaCorredores = [];
+var _gaAnotacoes = [];
+/* Estoques, corredores e anotações vêm de Configuração; aplicados na hora. */
+function _gaCarregarConfig(S) {
+    return S.api('/servicenow/gestao-ativos/config').then(function (c) {
+        if (c.estoques && c.estoques.length) _miStockrooms = c.estoques;
+        _gaCorredores = c.corredores || [];
+        _gaAnotacoes = c.anotacoes || [];
+        var dl = document.getElementById('ga-corredores');
+        if (dl) dl.innerHTML = _gaCorredores.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
+        var da = document.getElementById('ga-anotacoes');
+        if (da) da.innerHTML = _gaAnotacoes.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
+        var st = document.getElementById('sn-stockroom');
+        if (st && st.tagName === 'SELECT') {
+            var atual = st.value;
+            st.innerHTML = _miStockrooms.map(function (x) { return '<option value="' + S.esc(x) + '">' + S.esc(x) + '</option>'; }).join('');
+            if (atual) st.value = atual;
+        }
+        document.querySelectorAll('select.mi-stockroom').forEach(function (sel) {
+            var v = sel.value; sel.innerHTML = _miStockroomSelectHtml('', v).replace(/^<select[^>]*>|<\/select>$/g, '');
+        });
+    }).catch(function () {});
+}
 
 function _miStockroomSelectHtml(cls, val) {
     var h = '<select class="form-control' + (cls ? ' ' + cls : '') + '"><option value="">Selecione…</option>';
@@ -954,7 +980,8 @@ function _snRenderMovInterna(container, S) {
                         '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
                             _saStatusSelectHtml('mi-new-status', 'In stock', '') + '</div>' +
                         '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
-                            '<input id="mi-aisle" class="form-control" placeholder="Ex.: A-12"></div>' +
+                            '<input id="mi-aisle" class="form-control" list="ga-corredores" placeholder="Ex.: A-12" autocomplete="off">' +
+                            '<datalist id="ga-corredores"></datalist></div>' +
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
                         '<label>Observações <span style="color:#dc2626">*</span></label>' +
