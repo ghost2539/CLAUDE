@@ -305,6 +305,51 @@ def put_setting(key: str, payload: dict, req: Request):
     return {"ok": True}
 
 
+# ── EBS: API de consulta e banco Oracle, configuráveis sem reiniciar ──
+@router.get("/ebs")
+def ebs_ler(req: Request):
+    require_permission(req, "parametros", "admin")
+    import integracoes.ebs_oracle as _ora
+    import db.monitoramento as _mon
+    api = _mon.obter_config("ebs_api") or {}
+    return {"oracle": _ora.config_publica(),
+            "api": {"login_url": api.get("login_url") or _cfg.EBS_LOGIN_URL,
+                    "search_url": api.get("search_url") or _cfg.EBS_SEARCH_URL}}
+
+
+class EbsIn(BaseModel):
+    host: str = ""
+    porta: str = "1521"
+    servico: str = ""
+    usuario: str = ""
+    lib_dir: str = ""
+    senha: str | None = None
+    login_url: str = ""
+    search_url: str = ""
+
+
+@router.put("/ebs")
+def ebs_gravar(body: EbsIn, req: Request):
+    sd = require_permission(req, "parametros", "admin")
+    check_rate_limit(req)
+    import integracoes.ebs_oracle as _ora
+    import db.monitoramento as _mon
+    _ora.salvar_configuracao(body.model_dump(), senha=(body.senha or None))
+    _mon.salvar_config({"login_url": body.login_url.strip(), "search_url": body.search_url.strip()}, "ebs_api")
+    import logging as _lg
+    _lg.getLogger("parametros").info("EBS reconfigurado por %s (senha %s)",
+                                     sd.get("username", "?"), "alterada" if body.senha else "mantida")
+    return ebs_ler(req)
+
+
+@router.post("/ebs/testar")
+def ebs_testar(req: Request):
+    require_permission(req, "parametros", "admin")
+    check_rate_limit(req)
+    import integracoes.ebs_oracle as _ora
+    return _ora.testar_conexao()
+
+
 @router.post("/visual/reset")
 def visual_reset(req: Request):
     require_permission(req, "parametros", "admin")

@@ -21,7 +21,10 @@ import json
 import os
 import sys
 
-import oracledb
+try:
+    import oracledb
+except ImportError:  # driver ausente: configurar ainda funciona; conectar avisa
+    oracledb = None  # type: ignore[assignment]
 
 
 # ── Segredos (cofre do EBS) ───────────────────────────────────────
@@ -37,13 +40,97 @@ def _secret(nome: str, default=None):
     return os.environ.get(nome, default)
 
 
+# ── Configuração pelo portal (Configuração → Configuração Módulos) ──
+# Lida a cada conexão: mudar host, serviço ou usuário vale na próxima
+# consulta, sem reiniciar. A senha fica cifrada no banco de monitoramento
+# (mesmo esquema da SMTP) e o cofre, quando tiver ORACLE_EBS_PASS, ganha.
+CHAVE_PORTAL = "ebs_oracle"
+_PADRAO = {"host": "rac04-scan", "porta": "1521", "servico": "EBSPRD",
+           "usuario": "inframon", "lib_dir": "/usr/lib/oracle/21/client64/lib"}
+
+
+def _do_portal() -> dict:
+    try:
+        import db.monitoramento as _mon
+        return _mon.obter_config(CHAVE_PORTAL) or {}
+    except Exception:  # noqa: BLE001 — sem banco do portal, segue no cofre/env
+        return {}
+
+
+def _senha(c: dict) -> tuple[str, str]:
+    """(senha, fonte). Cofre > cifrada no portal > ambiente."""
+    do_cofre = _secret("ORACLE_EBS_PASS")
+    if do_cofre:
+        return str(do_cofre), "cofre"
+    try:
+        from core.notificador import decifrar
+        s = decifrar(c.get("senha_algo", ""), c.get("senha_cifrada", ""))
+        if s:
+            return s, "portal"
+    except Exception:  # noqa: BLE001
+        pass
+    amb = os.environ.get("ORACLE_EBS_PASS", "")
+    return (amb, "ambiente") if amb else ("", "nenhuma")
+
+
 def _config() -> dict:
+    c = _do_portal()
+    host = (c.get("host") or "").strip()
+    porta = str(c.get("porta") or "").strip()
+    servico = (c.get("servico") or "").strip()
+    if host and servico:
+        dsn = f"{host}:{porta or '1521'}/{servico}"
+    else:
+        dsn = _secret("ORACLE_EBS_DSN", f"{_PADRAO['host']}:{_PADRAO['porta']}/{_PADRAO['servico']}")
+    senha, _fonte = _senha(c)
     return {
-        "user": _secret("ORACLE_EBS_USER", "inframon"),
-        "password": _secret("ORACLE_EBS_PASS"),
-        "dsn": _secret("ORACLE_EBS_DSN", "rac04-scan:1521/EBSPRD"),
-        "lib_dir": _secret("ORACLE_CLIENT_LIB_DIR", "/usr/lib/oracle/21/client64/lib"),
+        "user": (c.get("usuario") or "").strip() or _secret("ORACLE_EBS_USER", _PADRAO["usuario"]),
+        "password": senha,
+        "dsn": dsn,
+        "lib_dir": (c.get("lib_dir") or "").strip() or _secret("ORACLE_CLIENT_LIB_DIR", _PADRAO["lib_dir"]),
     }
+
+
+def config_publica() -> dict:
+    """Para a tela: tudo menos a senha, mais de onde a senha vem."""
+    c = _do_portal()
+    efetiva = _config()
+    host, _, resto = efetiva["dsn"].partition(":")
+    porta, _, servico = resto.partition("/")
+    _s, fonte = _senha(c)
+    return {"host": host, "porta": porta, "servico": servico, "usuario": efetiva["user"],
+            "lib_dir": efetiva["lib_dir"], "senha_definida": fonte != "nenhuma",
+            "senha_fonte": fonte, "cofre_disponivel": bool(_secret("ORACLE_EBS_PASS"))}
+
+
+def salvar_configuracao(dados: dict, senha: str | None = None) -> dict:
+    """Grava host/porta/serviço/usuário/lib_dir; a senha só quando enviada."""
+    import db.monitoramento as _mon
+    novo = {k: str(dados.get(k, "")).strip() for k in ("host", "porta", "servico", "usuario", "lib_dir")}
+    if senha:
+        from core.notificador import cifrar
+        algo, blob = cifrar(senha)
+        novo["senha_algo"], novo["senha_cifrada"] = algo, blob
+    _mon.salvar_config(novo, CHAVE_PORTAL)
+    return config_publica()
+
+
+def testar_conexao() -> dict:
+    """Abre, faz SELECT 1 FROM DUAL, fecha. Devolve ok, latência e o erro cru."""
+    import time as _t
+    ini = _t.perf_counter()
+    try:
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT SYSDATE FROM DUAL")
+            cur.fetchone()
+        finally:
+            conn.close()
+        return {"ok": True, "ms": int((_t.perf_counter() - ini) * 1000), "dsn": _config()["dsn"]}
+    except Exception as exc:  # noqa: BLE001 — o erro é o que a tela precisa mostrar
+        return {"ok": False, "ms": int((_t.perf_counter() - ini) * 1000),
+                "dsn": _config()["dsn"], "erro": str(exc)[:300]}
 
 
 # ── Cliente Oracle (modo thick com Instant Client) ────────────────
@@ -71,6 +158,8 @@ DEFAULT_ARRAYSIZE = 500      # linhas por fetch (throughput)
 # ── Conexão e execução ────────────────────────────────────────────
 def get_connection():
     """Abre uma conexão nova (não comita nada; use com ``query``)."""
+    if oracledb is None:
+        raise RuntimeError("Driver Oracle (python-oracledb) não instalado neste servidor.")
     c = _config()
     _ensure_client(c["lib_dir"])
     conn = oracledb.connect(user=c["user"], password=c["password"], dsn=c["dsn"])
@@ -90,7 +179,7 @@ def _rows_to_dicts(cur, rows) -> list[dict]:
         for i, val in enumerate(row):
             if val is None:
                 r[cols[i]] = None
-            elif isinstance(val, oracledb.LOB):
+            elif oracledb is not None and isinstance(val, oracledb.LOB):
                 r[cols[i]] = val.read()
             elif hasattr(val, "isoformat"):
                 r[cols[i]] = val.isoformat()
