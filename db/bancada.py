@@ -109,13 +109,15 @@ APTO = "APTO"
 AGUARDANDO_PECAS = "AGUARDANDO_PECAS"
 ASSISTENCIA = "ASSISTENCIA"
 INVIAVEL = "INVIAVEL"
-DESTINOS = (APTO, AGUARDANDO_PECAS, ASSISTENCIA, INVIAVEL)
+DEVOLVER = "DEVOLVER"          # devolução a terceiro (A14): comodato, locação, garantia
+DESTINOS = (APTO, AGUARDANDO_PECAS, ASSISTENCIA, INVIAVEL, DEVOLVER)
 
 ROTULO_DESTINO = {
     APTO: "Apto / reparado",
     AGUARDANDO_PECAS: "Aguardando peças",
     ASSISTENCIA: "Assistência externa",
     INVIAVEL: "Reparo inviável",
+    DEVOLVER: "Devolver ao terceiro",
 }
 
 # Estado seguinte na Trilha. Coletor apto vai configurar antes de voltar
@@ -133,6 +135,11 @@ PROXIMO_ESTADO = {
     (FROTA, INVIAVEL): "AG_DESCARACTERIZACAO",
     (LOJA, INVIAVEL): "AG_DESCARACTERIZACAO",
     (CONECTIVIDADE, INVIAVEL): "AG_DESCARACTERIZACAO",
+    # A14 nasce aqui: sem este destino a fila de devolução do módulo
+    # Assistência não tinha quem a alimentasse.
+    (FROTA, DEVOLVER): "AG_DEVOLUCAO",
+    (LOJA, DEVOLVER): "AG_DEVOLUCAO",
+    (CONECTIVIDADE, DEVOLVER): "AG_DEVOLUCAO",
 }
 
 
