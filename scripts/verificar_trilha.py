@@ -31,7 +31,7 @@ os.environ["TRILHA_DATABASE_URL"] = f"sqlite:///{_TEMP}/trilha.db"
 import db.trilha as db  # noqa: E402
 from db.trilha import FISICA, ADMINISTRATIVA, FILA, TRATATIVA, EXTERNO, ADMIN  # noqa: E402
 from routers.trilha import (  # noqa: E402
-    Calendario, duracao_util, abrir_ativo, mover, encerrar,
+    Calendario, duracao_util, prazo_util, abrir_ativo, mover, encerrar,
     trilha_do_ativo, filas, TrilhaInvalida, _utc,
 )
 
@@ -100,6 +100,24 @@ fuso = Calendario({
 # 11h UTC = 08h em Brasília: o expediente abre exatamente aí.
 checar(duracao_util(h(8, 9), h(8, 12), fuso) == 3600,
        "o fuso desloca a janela do expediente")
+
+# ── 1b. Prazo em dias úteis ────────────────────────────────────────
+print("\nPrazo em dias úteis")
+
+# Segunda 09:00 + 1 dia útil (jornada de 10h) = terça 09:00.
+checar(prazo_util(h(8, 9), 1, util) == h(9, 9),
+       "um dia útil a partir da manhã cai na mesma hora do dia seguinte")
+# Sexta 15:00 + 1 dia útil pula o fim de semana e cai na segunda 15:00.
+checar(prazo_util(h(12, 15), 1, util) == h(15, 15),
+       "o prazo pula o fim de semana")
+# Meio dia útil a partir das 9h = 5h de jornada = 14h do mesmo dia.
+checar(prazo_util(h(8, 9), 0.5, util) == h(8, 14),
+       "meio dia útil cai na tarde do mesmo dia")
+checar(prazo_util(h(8, 9), 0, util) == h(8, 9),
+       "prazo zero devolve o próprio instante")
+checar(prazo_util(h(8, 9), 2, corrido) == h(10, 9),
+       "sem calendário o prazo conta dias corridos")
+
 
 # ── 2. Motor ───────────────────────────────────────────────────────
 print("\nMotor de movimentação")

@@ -31,7 +31,7 @@ from db.separacao import (
     AG_SEPARACAO, EX_SEPARACAO, SEPARADA, ENVIADA, CANCELADA,
 )
 from core.security import require_permission, check_rate_limit
-from routers.trilha import Calendario, duracao_util, mover, _utc
+from routers.trilha import Calendario, duracao_util, prazo_util, mover, _utc
 
 _log = logging.getLogger("separacao")
 
@@ -248,6 +248,28 @@ def _calendario() -> Calendario:
     return Calendario(dbt.ler_config())
 
 
+def _calcular_prazo(abertura: datetime, tipo: str, prioridade: str) -> datetime | None:
+    """Prazo em dias úteis, pelo mesmo calendário que mede tudo no portal.
+
+    Inauguração tem cadência própria e ganha do resto: um pedido de
+    inauguração marcado como urgente continua sendo inauguração.
+    """
+    cfg = db.ler_config()
+    if tipo == "INAUGURACAO_REFORMA":
+        chave = "prazo_inauguracao"
+    elif (prioridade or "").strip().lower() in ("loja_parada", "loja parada"):
+        chave = "prazo_loja_parada"
+    else:
+        chave = "prazo_normal"
+    try:
+        dias = float(cfg.get(chave) or 0)
+    except ValueError:
+        dias = 0
+    if dias <= 0:
+        return None
+    return prazo_util(abertura, dias, _calendario())
+
+
 def _resumo(s: Solicitacao, cal: Calendario, agora: datetime) -> dict:
     # O pedido só está fechado quando o equipamento sai. Parar o relógio
     # na conclusão da separação esconderia o tempo entre separar e enviar.
@@ -399,6 +421,7 @@ def api_criar(body: SolicitacaoIn, req: Request):
                 409, f"O chamado {ch['chamado']} já tem a solicitação {ja.numero} "
                      "em aberto.")
 
+        abertura = db.utcnow()
         ped = Solicitacao(
             numero=db.proximo_numero(s),
             chamado=ch["chamado"], chamado_tipo=ch["tipo"],
@@ -406,7 +429,9 @@ def api_criar(body: SolicitacaoIn, req: Request):
             tipo_atendimento=body.tipo_atendimento,
             prioridade=(body.prioridade or "normal").strip(),
             motivo=(body.motivo or "").strip(),
-            aberta_por=usuario,
+            aberta_por=usuario, aberta_em=abertura,
+            prazo=_calcular_prazo(abertura, body.tipo_atendimento,
+                                  body.prioridade),
         )
         s.add(ped)
         s.flush()

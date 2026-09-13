@@ -136,6 +136,39 @@ def duracao_util(inicio: datetime, fim: datetime | None,
     return int(total)
 
 
+def prazo_util(inicio: datetime, dias_uteis: float, cal: Calendario) -> datetime:
+    """Instante que fica `dias_uteis` dias úteis depois de `inicio`.
+
+    Um dia útil é uma jornada inteira de expediente, não 24 horas: com
+    expediente das 8 às 18, três dias úteis são 30 horas de trabalho, e
+    o prazo cai na tarde do terceiro dia, não na madrugada do quarto.
+    """
+    inicio = _utc(inicio)
+    if dias_uteis <= 0:
+        return inicio
+    if cal.corrido:
+        return inicio + timedelta(days=dias_uteis)
+
+    jornada = (datetime.combine(date(2000, 1, 1), cal.fim)
+               - datetime.combine(date(2000, 1, 1), cal.inicio)).total_seconds()
+    if jornada <= 0:
+        return inicio + timedelta(days=dias_uteis)
+
+    faltam = jornada * dias_uteis
+    # Avança de hora em hora e desconta só o que for útil. Passo grosso
+    # o bastante para ser barato e fino o bastante para o prazo cair na
+    # hora certa do dia — que é o que a fila mostra.
+    quando = inicio
+    passo = timedelta(minutes=30)
+    for _ in range(int(_TETO_DIAS * 48)):
+        proximo = quando + passo
+        faltam -= duracao_util(quando, proximo, cal)
+        quando = proximo
+        if faltam <= 0:
+            return quando
+    return quando
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Motor — a única forma de mover um ativo
 # ══════════════════════════════════════════════════════════════════
