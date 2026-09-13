@@ -61,6 +61,24 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         ], d.liberacoes));
         c.appendChild(cartao('Liberados', corpo));
 
+        // Listas das telas do ServiceNow deste espaço
+        try {
+            var lc = await S.api('/consulta-times/gestao-ativos');
+            var cfg = S.el('div', { className: 'card-body' });
+            function area(id, rotulo, lista) {
+                return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+                    '<textarea id="' + id + '" class="form-control" rows="3" placeholder="um por linha">' + S.esc((lista || []).join('\n')) + '</textarea></div>';
+            }
+            cfg.innerHTML = '<div class="form-grid cols-2">' + area('ct-est', 'Estoques', lc.estoques) +
+                area('ct-cor', 'Corredores e espaços', lc.corredores) + area('ct-ano', 'Anotações sugeridas', lc.anotacoes) + '</div>';
+            cfg.appendChild(S.el('button', { className: 'btn btn-primary mt-2', textContent: 'Salvar', onClick: async function () {
+                var linhas = function (id) { return document.getElementById(id).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+                try { await S.api('/consulta-times/gestao-ativos', { method: 'PUT', body: { estoques: linhas('ct-est'), corredores: linhas('ct-cor'), anotacoes: linhas('ct-ano') } }); S.toast('Configuração salva.', 'success'); }
+                catch (e) { S.toast(e.message, 'error'); }
+            } }));
+            c.appendChild(cartao('Estoques, corredores e anotações (Entrada / Saída / Movimentação)', cfg));
+        } catch (e) { /* sem permissão de leitura: não mostra */ }
+
         var ac = S.el('div', { className: 'card-body' });
         try {
             var a = await S.api('/consulta-times/acessos?limit=100');

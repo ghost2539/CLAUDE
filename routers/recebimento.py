@@ -211,14 +211,15 @@ def receipt_preview(body: ScanIn, req: Request):
     search_terms = [ident]
     bare = ident
     detected_prefix = ""
-    for pfx in DUPLICATE_PREFIXES:
+    prefixos = config_familias()["prefixos_duplicidade"]
+    for pfx in prefixos:
         if ident.upper().startswith(pfx) and len(ident) > len(pfx):
             bare = ident[len(pfx):]
             detected_prefix = pfx
             break
     if bare != ident:
         search_terms.append(bare)
-    for pfx in DUPLICATE_PREFIXES:
+    for pfx in prefixos:
         variant = pfx + bare
         if variant.upper() != ident.upper() and variant not in search_terms:
             search_terms.append(variant)
@@ -398,6 +399,23 @@ _PALAVRAS_FROTA = ("coletor", "sled", "mc33", "tc2", "ef50", "rfr")
 _PALAVRAS_CONECT = ("access point", "acess point", " ap ", "switch",
                     "roteador", "router", "wifi", "wi-fi")
 
+# As palavras acima são só o padrão. O que vale é a configuração
+# (Configuração → Configuração Módulos → Recebimento), lida a cada
+# chamada: modelo novo entra sem release.
+CONFIG_FAMILIAS = "recebimento_familias"
+
+
+def config_familias() -> dict:
+    with SessionLocal() as s:
+        x = s.get(Setting, CONFIG_FAMILIAS)
+        cfg = dict(x.value or {}) if x else {}
+    def lista(chave, padrao):
+        v = cfg.get(chave)
+        return [str(p).strip().lower() for p in v if str(p).strip()] if isinstance(v, list) and v else list(padrao)
+    return {"frota": lista("frota", _PALAVRAS_FROTA),
+            "conectividade": lista("conectividade", _PALAVRAS_CONECT),
+            "prefixos_duplicidade": [p.upper() for p in lista("prefixos_duplicidade", DUPLICATE_PREFIXES)]}
+
 
 def _familia(modelo: str, categoria: str) -> str:
     """Frota, loja ou conectividade, pelo modelo e pela categoria.
@@ -408,9 +426,10 @@ def _familia(modelo: str, categoria: str) -> str:
     fácil de perceber e de corrigir.
     """
     texto = f" {modelo} {categoria} ".lower()
-    if any(p in texto for p in _PALAVRAS_CONECT):
+    cfg = config_familias()
+    if any(p in texto for p in cfg["conectividade"]):
         return "conectividade"
-    if any(p in texto for p in _PALAVRAS_FROTA):
+    if any(p in texto for p in cfg["frota"]):
         return "frota"
     return "loja"
 
@@ -544,6 +563,12 @@ def _casar_com_coleta(itens: list[dict], usuario: str) -> dict:
         logging.getLogger("recebimento").warning(
             "Reversa: %d ativo(s) recebidos sem casar com coleta: %s", len(itens), exc)
         return {"casados": 0, "coletas": [], "falha": str(exc)}
+
+
+@router.get("/recebimento/familias")
+def api_familias(req: Request):
+    require_permission(req, "recebimento", "view")
+    return config_familias()
 
 
 @router.delete("/recebimentos/{cycle_id}")

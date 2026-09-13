@@ -142,6 +142,11 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — famílias e prefixos</div>' +
+            '<div class="card-body" id="cm-familias"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — marcação no ServiceNow</div>' +
             '<div class="card-body">' +
                 '<div id="cm-rec-sn"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
@@ -160,6 +165,7 @@ function renderConfigModulos(c, S) {
     _renderRecebimentoSN(S);
     _renderConsultaColunas(S);
     _renderGestaoAtivos(S);
+    _renderFamilias(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -195,6 +201,31 @@ function renderConfigModulos(c, S) {
         } finally {
             S.loading(false);
         }
+    };
+}
+
+/* Que palavra do modelo manda o ativo para qual bancada; prefixos de duplicidade. */
+async function _renderFamilias(S) {
+    var host = document.getElementById('cm-familias');
+    if (!host) return;
+    var c;
+    try { c = await S.api('/recebimento/familias'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    function area(id, rotulo, lista) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<textarea id="' + id + '" class="form-control" rows="3" placeholder="um por linha">' + S.esc((lista || []).join('\n')) + '</textarea></div>';
+    }
+    host.innerHTML = '<div class="form-grid cols-2">' +
+        area('fam-frota', 'Mobilidade (coletor, sled…)', c.frota) +
+        area('fam-conect', 'Conectividade (AP, switch…)', c.conectividade) +
+        area('fam-dup', 'Prefixos de duplicidade entre empresas', c.prefixos_duplicidade) + '</div>' +
+        '<button id="fam-salvar" class="btn btn-primary mt-2">Salvar</button>';
+    document.getElementById('fam-salvar').onclick = async function () {
+        var linhas = function (id) { return document.getElementById(id).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+        try {
+            await S.api('/parametros/config/recebimento_familias', { method: 'PUT', body: {
+                frota: linhas('fam-frota'), conectividade: linhas('fam-conect'), prefixos_duplicidade: linhas('fam-dup') } });
+            S.toast('Configuração salva.', 'success');
+        } catch (e) { S.toast(e.message, 'error'); }
     };
 }
 
