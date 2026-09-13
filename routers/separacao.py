@@ -512,16 +512,19 @@ def api_bipar(numero: str, body: BipeIn, req: Request):
             raise HTTPException(
                 409, f"{item.modelo} já tem as {item.quantidade} unidades pedidas.")
 
-        # A reserva vem ANTES de gravar: se o ServiceNow recusar, nada
-        # fica registrado aqui. O contrário deixaria a unidade contada
-        # como separada e ainda disponível no saldo de todo mundo.
+        # Ordem: gravar local sem commit → reservar no ServiceNow → commit.
+        # O flush pega a colisão de dois bipes da mesma série ANTES de
+        # qualquer escrita externa; e se o ServiceNow recusar, a sessão
+        # é descartada e nada fica registrado aqui — o contrário deixaria
+        # a unidade contada como separada e ainda disponível no saldo.
+        unidade = Unidade(solicitacao_id=ped.id, item_id=item.id, serial=serial,
+                          separada_por=usuario)
+        s.add(unidade)
+        s.flush()
         achado = localizar_no_estoque(req, serial, ped.tipo_atendimento)
         _escrever_reserva(req, achado["sys_id"], serial, reservar=True)
-
-        trilha_id = _registrar_na_trilha(serial, usuario, ped.numero)
-        s.add(Unidade(solicitacao_id=ped.id, item_id=item.id, serial=serial,
-                      sys_id=achado["sys_id"], trilha_ativo_id=trilha_id,
-                      separada_por=usuario))
+        unidade.sys_id = achado["sys_id"]
+        unidade.trilha_ativo_id = _registrar_na_trilha(serial, usuario, ped.numero)
         s.commit()
     _log.info("separacao: %s reservou a série %s (%s)",
               usuario, serial, numero.upper())

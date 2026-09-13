@@ -236,7 +236,6 @@ PADROES = {
     # e é texto livre no ServiceNow — por isso fica configurável.
     "categorias_frota": "coletor,sled,mobilidade",
     # Situações do ServiceNow que fecham o chamado no espelho.
-    "estados_sn_resolvidos": "6,7",
     # Prazo de atendimento por frente, em dias úteis.
     "prazo_loja": "2",
     "prazo_frota": "2",
@@ -245,6 +244,8 @@ PADROES = {
 
 def init_db() -> None:
     Base.metadata.create_all(bind=get_engine())
+    from db._esquema import migrar_colunas
+    migrar_colunas(Base, get_engine(), "atendimento")
     with SessionLocal() as s:
         existentes = {c for (c,) in s.execute(select(Config.chave))}
         novas = [Config(chave=k, valor=v)

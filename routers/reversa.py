@@ -220,6 +220,13 @@ def _detalhe(s, c: Coleta) -> dict:
     return d
 
 
+@router.get("/chamado/{numero}")
+def api_chamado(numero: str, req: Request):
+    require_permission(req, "reversa", "view")
+    check_rate_limit(req)
+    return _consultar_chamado(req, numero)
+
+
 @router.get("/coletas")
 def api_lista(req: Request, estado: str = "", loja: str = ""):
     require_permission(req, "reversa", "view")

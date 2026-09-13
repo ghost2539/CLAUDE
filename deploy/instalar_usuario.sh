@@ -42,6 +42,22 @@ echo "-- Pastas de dados"
 mkdir -p "$APP_DIR/data/db" "$APP_DIR/data/uploads" "$STATE" "$ENVDIR"
 chmod 700 "$ENVDIR"
 
+# ── 2b. Backup diário (crontab do usuário, idempotente) ─────────────────────
+# Sem isto o backup.sh existe e ninguém o chama. Às 02h, com o APP_DIR
+# desta instalação (o script sozinho assume /opt/portal-spare-v2).
+if command -v crontab >/dev/null 2>&1; then
+    LINHA_CRON="0 2 * * * PORTAL_APP_DIR=$APP_DIR $APP_DIR/scripts/backup.sh >> $STATE/backup.log 2>&1"
+    if ! crontab -l 2>/dev/null | grep -Fq "$APP_DIR/scripts/backup.sh"; then
+        ( crontab -l 2>/dev/null; echo "$LINHA_CRON" ) | crontab - \
+            && echo "-- Backup diário agendado (02h) no crontab do usuário" \
+            || echo "AVISO: não consegui agendar o backup; agende à mão: $LINHA_CRON"
+    else
+        echo "-- Backup diário já agendado"
+    fi
+else
+    echo "AVISO: sem crontab neste servidor; agende o backup à mão (scripts/backup.sh)."
+fi
+
 # ── 3. Arquivo de ambiente ──────────────────────────────────────────────────
 if [ -f "$ENVFILE" ]; then
     echo "-- Arquivo de ambiente já existe (mantido): $ENVFILE"

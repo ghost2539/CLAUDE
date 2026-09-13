@@ -27,7 +27,7 @@ from sqlalchemy import select, func
 
 import db.trilha as dbt
 from core.security import require_permission, get_session, check_rate_limit
-from routers.trilha import Calendario, duracao_util, _utc
+from routers.trilha import Calendario, duracao_util, trilha_do_ativo, _utc
 
 _log = logging.getLogger("torre")
 
@@ -84,9 +84,17 @@ def _calendario() -> Calendario:
 def _limite_alerta() -> int:
     """A partir de quanto tempo um ativo parado vira alerta.
 
-    Duas jornadas de expediente. Não é SLA — é o ponto em que vale a
-    pena alguém olhar, e serve enquanto as metas por etapa não existirem.
+    `sla_horas` do calendário, quando preenchido (horas úteis). Em
+    branco, duas jornadas de expediente — o ponto em que vale a pena
+    alguém olhar, enquanto as metas por etapa não existirem.
     """
+    cfg = dbt.ler_config()
+    try:
+        sla = float(cfg.get("sla_horas") or 0)
+    except ValueError:
+        sla = 0
+    if sla > 0:
+        return int(sla * 3600)
     cal = _calendario()
     if cal.corrido:
         return 2 * 86400
@@ -187,6 +195,18 @@ def api_area(req: Request):
         "parados": parados[:15],
         "calendario_corrido": cal.corrido,
     }
+
+
+@router.get("/ativos/{serial}")
+def api_ativo(serial: str, req: Request):
+    """Ficha do ativo aberta a partir da Torre, pela permissão da Torre.
+
+    Quem vê a fila precisa abrir o item da fila; exigir também a
+    permissão do núcleo deixava um usuário só de Torre sem a ficha.
+    """
+    require_permission(req, "torre", "view")
+    check_rate_limit(req)
+    return trilha_do_ativo(serial)
 
 
 # ══════════════════════════════════════════════════════════════════

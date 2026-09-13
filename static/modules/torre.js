@@ -206,7 +206,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         alvo.innerHTML = carregando();
         var d;
         try {
-            d = await S.api('/trilha/ativos/' + encodeURIComponent(serial));
+            d = await S.api('/torre/ativos/' + encodeURIComponent(serial));
         } catch (e) {
             alvo.innerHTML = '';
             alvo.appendChild(S.el('div', { className: 'alert alert-danger',
