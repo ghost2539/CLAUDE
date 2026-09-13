@@ -219,18 +219,25 @@ case "$PROD_DATABASE_URL" in
     sqlite*)
         TEST_DATABASE_URL="sqlite:///$TEST_DIR/data/db/portal.db" ;;
     postgres*)
+        # Decompõe a URL depois do ÚLTIMO "@": senha com "/", "?" ou "@"
+        # não pode confundir o nome do banco.
         PG_URL="$(url_pg "$PROD_DATABASE_URL")"
-        PG_BASE="${PG_URL%%\?*}"
-        PG_NOME="${PG_BASE##*/}"
-        PG_SERVIDOR="${PG_BASE%/*}"
-        PG_TESTE="${PG_NOME}_testes"
-        TEST_DATABASE_URL="$(PROD_URL="$PROD_DATABASE_URL" NOME="$PG_NOME" TESTE="$PG_TESTE" python3 - <<'PY'
-import os
-u, nome, teste = os.environ["PROD_URL"], os.environ["NOME"], os.environ["TESTE"]
-base, sep, query = u.partition("?")
-if base.endswith("/" + nome):
-    base = base[: -len(nome)] + teste
-print(base + sep + query, end="")
+        eval "$(PROD_URL="$PROD_DATABASE_URL" PG_URL="$PG_URL" python3 - <<'PY'
+import os, shlex
+u, pg = os.environ["PROD_URL"], os.environ["PG_URL"]
+def partes(url):
+    cred, _, resto = url.rpartition("@")          # tudo antes do último @ é credencial
+    caminho, _, query = resto.partition("?")      # host:porta/banco ? opções
+    host, _, banco = caminho.partition("/")
+    return cred, host, banco, query
+cred, host, banco, query = partes(u)
+teste = banco + "_testes"
+novo = f"{cred}@{host}/{teste}" + (f"?{query}" if query else "")
+credp, hostp, _, _ = partes(pg)
+print("PG_NOME=" + shlex.quote(banco))
+print("PG_TESTE=" + shlex.quote(teste))
+print("PG_SERVIDOR=" + shlex.quote(f"{credp}@{hostp}"))
+print("TEST_DATABASE_URL=" + shlex.quote(novo))
 PY
 )" ;;
     *)
