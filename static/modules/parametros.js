@@ -133,6 +133,16 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — marcação no ServiceNow</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted">Ao concluir um recebimento, o ativo que já ' +
+                    'existe no ServiceNow passa a "em estoque" no depósito do CD. ' +
+                    'Ativo que ainda não existe lá não é criado aqui.</p>' +
+                '<div id="cm-rec-sn"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Indicadores — filtros do ServiceNow</div>' +
             '<div class="card-body">' +
                 '<p class="text-muted">Ajusta as consultas do painel de Indicadores. ' +
@@ -144,6 +154,7 @@ function renderConfigModulos(c, S) {
 
     _renderIndicadoresConfig(S);
     _renderValorHora(S);
+    _renderRecebimentoSN(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -174,6 +185,58 @@ function renderConfigModulos(c, S) {
             document.getElementById('cm-local-result').innerHTML =
                 '<div class="alert alert-success">' +
                 d.validos + ' válidos; ' + d.rejeitados + ' rejeitados.</div>';
+        } catch (x) {
+            S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
+}
+
+/* Marcação do recebimento no ServiceNow (dentro de Configuração Módulos). */
+async function _renderRecebimentoSN(S) {
+    var host = document.getElementById('cm-rec-sn');
+    if (!host) return;
+    var cfg = {};
+    try {
+        cfg = await S.api('/parametros/config/recebimento_servicenow') || {};
+    } catch (e) {
+        host.innerHTML = '<div class="alert alert-danger">Não foi possível carregar: ' +
+            S.esc(e.message) + '</div>';
+        return;
+    }
+    var ativo = cfg.ativo !== false;
+    host.innerHTML =
+        '<div class="form-group">' +
+            '<label><input type="checkbox" id="rsn-ativo"' + (ativo ? ' checked' : '') +
+            '> Marcar em estoque ao receber</label>' +
+        '</div>' +
+        '<div class="form-grid cols-2">' +
+            '<div class="form-group"><label>Depósito (stockroom)</label>' +
+                '<input id="rsn-stockroom" class="form-control" value="' +
+                S.esc(cfg.stockroom || '') + '" placeholder="SPARE - CD324">' +
+                '<small class="text-muted">padrão: SPARE - CD324</small>' +
+            '</div>' +
+            '<div class="form-group"><label>Estado (install_status)</label>' +
+                '<input id="rsn-status" class="form-control" value="' +
+                S.esc(cfg.install_status || '') + '" placeholder="6">' +
+                '<small class="text-muted">padrão: 6 (Em estoque)</small>' +
+            '</div>' +
+        '</div>' +
+        '<button class="btn btn-primary mt-2" id="rsn-salvar">Salvar</button>';
+
+    document.getElementById('rsn-salvar').onclick = async function () {
+        try {
+            S.loading(true);
+            await S.api('/parametros/config/recebimento_servicenow', {
+                method: 'PUT',
+                body: {
+                    ativo: document.getElementById('rsn-ativo').checked,
+                    stockroom: document.getElementById('rsn-stockroom').value.trim(),
+                    install_status: document.getElementById('rsn-status').value.trim()
+                }
+            });
+            S.toast('Configuração salva.', 'success');
         } catch (x) {
             S.toast(x.message, 'error');
         } finally {

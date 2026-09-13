@@ -292,7 +292,9 @@ def get_setting(key: str, req: Request):
 @router.put("/config/{key}")
 def put_setting(key: str, payload: dict, req: Request):
     sd = get_session(req)
-    if key in ("visual", "tv", "correios", "dashboards") and not sd.get("is_admin"):
+    if (key in ("visual", "tv", "correios", "dashboards",
+                "recebimento_servicenow")
+            and not sd.get("is_admin")):
         raise HTTPException(403, "Permissão insuficiente.")
     with SessionLocal.begin() as s:
         x = s.get(Setting, key)

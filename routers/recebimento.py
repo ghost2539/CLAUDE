@@ -18,7 +18,7 @@ from sqlalchemy import select, func, or_
 
 from config import get_settings
 from db.portal import (
-    SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot,
+    SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot, Setting,
 )
 from core.security import get_session, require_permission, check_rate_limit
 from routers.helpers import (
@@ -348,6 +348,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                 created += 1
                 entrando.append({
                     "serial": item.numero_serie or item.etiqueta or item.ativo,
+                    "etiqueta": item.etiqueta or "",
                     "modelo": item.modelo,
                     "categoria": item.categoria or "",
                     "numero_ativo": item.ativo or "",
@@ -361,12 +362,18 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     # o núcleo de medição não respondeu.
     na_trilha = _entrar_na_trilha(entrando, sd["username"])
 
+    # Espelho no ServiceNow: o que chegou fisicamente está no CD, e lá
+    # precisa aparecer em estoque. Também aditivo — recebimento gravado
+    # não se desfaz porque o ServiceNow recusou.
+    no_servicenow = _marcar_no_servicenow(entrando, req)
+
     return {
         "ok": True,
         "criados": created,
         "ignorados": skipped,
         "erros": errors,
         "na_trilha": na_trilha,
+        "no_servicenow": no_servicenow,
     }
 
 
@@ -442,6 +449,63 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
             logging.getLogger("recebimento").error(
                 "Trilha: série %s recebida mas não entrou na fila: %s",
                 serial, exc)
+    return resumo
+
+
+# ── Ponte com o ServiceNow (A01) ────────────────────────────────────
+
+# O recebimento não cria ativo no ServiceNow: quem cria é a Entrada de
+# Estoque, que tem os campos fiscais e de modelo. Aqui só se corrige a
+# situação de quem já está lá — em estoque, no CD.
+CONFIG_SN = "recebimento_servicenow"
+
+
+class _ItemSN:
+    """Casca com os dois campos que o alm_hardware casa."""
+
+    def __init__(self, etiqueta: str, serial: str):
+        self.asset_tag = etiqueta
+        self.serial_number = serial
+
+
+def _config_servicenow() -> dict:
+    with SessionLocal() as s:
+        x = s.get(Setting, CONFIG_SN)
+        cfg = dict(x.value or {}) if x else {}
+    cfg.setdefault("ativo", True)
+    cfg.setdefault("stockroom", "")
+    cfg.setdefault("install_status", "")
+    return cfg
+
+
+def _marcar_no_servicenow(itens: list[dict], req: Request) -> dict:
+    """Põe em estoque, no CD, os recebidos que já existem no ServiceNow."""
+    resumo = {"ativo": False, "encontrados": 0, "atualizados": 0,
+              "nao_encontrados": 0, "falhas": []}
+    if not itens:
+        return resumo
+    cfg = _config_servicenow()
+    if not cfg.get("ativo", True):
+        return resumo
+    resumo["ativo"] = True
+    try:
+        from routers.servicenow import (
+            marcar_recebidos_em_estoque, _sn_session_from_portal,
+        )
+        # A escrita sai no nome de quem recebeu, como manda a norma.
+        session = _sn_session_from_portal(req)
+        pares = [_ItemSN(it.get("etiqueta", ""), it.get("serial", ""))
+                 for it in itens]
+        r = marcar_recebidos_em_estoque(
+            session, pares,
+            stockroom=cfg.get("stockroom", ""),
+            install_status=cfg.get("install_status", ""))
+        resumo.update(r)
+    except Exception as exc:  # noqa: BLE001 — ServiceNow fora do ar
+        resumo["falhas"] = [str(exc)]
+        logging.getLogger("recebimento").error(
+            "ServiceNow: %d ativo(s) recebidos sem marcação de estoque: %s",
+            len(itens), exc)
     return resumo
 
 

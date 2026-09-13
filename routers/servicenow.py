@@ -1282,6 +1282,63 @@ def _hardware_records(session, itens: list) -> list[dict]:
     return out
 
 
+# Padrões da marcação automática no recebimento. Ficam aqui porque é
+# aqui que mora o contrato com o ServiceNow; o valor efetivo vem da
+# configuração (Parâmetros → Configuração Módulos).
+RECEBIMENTO_STOCKROOM_PADRAO = "SPARE - CD324"
+RECEBIMENTO_STATUS_PADRAO = "6"          # In stock
+
+
+def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
+                                install_status: str = "") -> dict:
+    """Põe em estoque, no CD, os ativos recebidos que já existem no SN.
+
+    Recebimento é a chegada física: o equipamento está no CD, e o
+    ServiceNow precisa dizer isso. Ativo que ainda não existe lá não é
+    criado aqui — quem cria é a Entrada de Estoque, que tem os campos
+    fiscais e de modelo que este fluxo não tem.
+
+    A escrita usa a sessão de quem está logado, como manda a norma: no
+    ServiceNow o registro sai no nome de quem recebeu.
+    """
+    resumo = {"encontrados": 0, "atualizados": 0, "falhas": [],
+              "nao_encontrados": 0}
+    if not itens:
+        return resumo
+
+    stockroom = (stockroom or RECEBIMENTO_STOCKROOM_PADRAO).strip()
+    status = (install_status or RECEBIMENTO_STATUS_PADRAO).strip()
+    status = INSTALL_STATUS_MAP.get(status.lower(), status)
+
+    registros = _hardware_records(session, itens)
+    resumo["encontrados"] = len(registros)
+    resumo["nao_encontrados"] = max(0, len(itens) - len(registros))
+    if not registros:
+        return resumo
+
+    _req, BS = _get_http()
+    cache: dict = {}
+    stockroom_id = _lookup_reference(session, "stockroom", stockroom, cache, BS)
+    if not stockroom_id:
+        # Sem o estoque resolvido não se escreve nada: gravar só o status
+        # deixaria o ativo "em estoque" sem dizer em qual, que é pior do
+        # que não mexer.
+        resumo["falhas"].append(
+            f"estoque '{stockroom}' não encontrado no ServiceNow")
+        return resumo
+
+    alteracao = {"install_status": status, "stockroom": stockroom_id}
+    for r in registros:
+        if not r.get("sys_id"):
+            continue
+        if _sn_update(session, HARDWARE_TABLE, r["sys_id"], alteracao):
+            resumo["atualizados"] += 1
+        else:
+            resumo["falhas"].append(
+                r.get("asset_tag") or r.get("serial_number") or r["sys_id"])
+    return resumo
+
+
 class EntradaPreviewIn(BaseModel):
     origem: str = "status"           # status | lista
     status: str = ""
