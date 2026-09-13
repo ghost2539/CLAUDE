@@ -171,6 +171,17 @@ ROTULO_ESTADO = {
     "CONFERIDA_REV": "Coleta conferida",
     "DIVERGENTE_REV": "Coleta divergente",
     "CANCELADA_REV": "Coleta cancelada",
+    # Inventário (A18). O token é o ciclo de contagem.
+    "AG_CONTAGEM_INV": "Aguardando contagem",
+    "EX_CONTAGEM_INV": "Em contagem",
+    "CONFERIDO_INV": "Inventário conferido",
+    "DIVERGENTE_INV": "Inventário divergente",
+    "CANCELADO_INV": "Inventário cancelado",
+    # Regularização (A19). O token é a divergência.
+    "AG_TRATATIVA_REG": "Divergência sem dono",
+    "EX_TRATATIVA_REG": "Divergência em tratativa",
+    "RESOLVIDA_REG": "Divergência resolvida",
+    "CANCELADA_REG": "Divergência cancelada",
 }
 
 

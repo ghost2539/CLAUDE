@@ -266,6 +266,33 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Regularização de ativo (A19) — banco próprio ────────────────────
+    # A divergência com dono e prazo. Carrega antes do inventário porque
+    # é quem recebe as divergências dele (e da reversa), por import tardio.
+    try:
+        import db.regularizacao as _db_reg
+        _db_reg.init_db()
+        from routers.regularizacao import router as regularizacao_router
+        app.include_router(regularizacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("regularizacao").error(
+            "Módulo Regularização NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Inventário e contagem (A18) — banco próprio ─────────────────────
+    # O ciclo é o token; o retrato do ServiceNow é congelado na abertura.
+    try:
+        import db.inventario as _db_inv
+        _db_inv.init_db()
+        from routers.inventario import router as inventario_router
+        app.include_router(inventario_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("inventario").error(
+            "Módulo Inventário NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Atendimento a chamados (A20) — banco próprio ────────────────────
     # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
     # ligar o atendimento à separação. Carregamento isolado: a separação

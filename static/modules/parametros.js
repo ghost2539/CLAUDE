@@ -1153,7 +1153,7 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'bancada', 'preparacao',
+        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'inventario', 'regularizacao', 'bancada', 'preparacao',
         'destinacao', 'externo', 'torre', 'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
         'orcamento_spare', 'orcamento_manutencao'];
@@ -1562,6 +1562,9 @@ async function renderSeparacaoConfig(c, S) {
     try { prj = (await S.api('/projetos/config')).config; } catch (_) { prj = null; }
     var rev = null;
     try { rev = (await S.api('/reversa/config')).config; } catch (_) { rev = null; }
+    var inv = null, reg = null;
+    try { inv = (await S.api('/inventario/config')).config; } catch (_) { inv = null; }
+    try { reg = (await S.api('/regularizacao/config')).config; } catch (_) { reg = null; }
 
     c.innerHTML = '';
     c.appendChild(S.el('div', {
@@ -1674,6 +1677,23 @@ async function renderSeparacaoConfig(c, S) {
         c.appendChild(_sepCartao('Logística reversa', reversa, largura));
     }
 
+    /* Inventário (A18) e Regularização (A19) ------------------------ */
+    if (inv || reg) {
+        var ctrl = S.el('div', { className: 'card-body' });
+        ctrl.innerHTML =
+            '<div class="form-grid cols-2">' +
+            (inv ? _sepCampo('Inventário: situação em estoque', 'sc-inv-status', inv.status_estoque,
+                             'Código de install_status do retrato.') +
+                   _sepCampo('Inventário: campo do corredor', 'sc-inv-campo', inv.campo_local) +
+                   _sepCampo('Inventário: prazo da contagem (dias úteis)', 'sc-inv-prazo', inv.prazo_contagem_dias) +
+                   _sepSelect('Inventário: divergência abre regularização', 'sc-inv-reg', inv.abrir_regularizacao,
+                              [['1', 'Sim'], ['0', 'Não']]) : '') +
+            (reg ? _sepCampo('Regularização: prazo padrão ao assumir (dias úteis)', 'sc-reg-prazo', reg.prazo_padrao_dias) +
+                   _sepCampo('Regularização: alerta sem dono após (dias úteis)', 'sc-reg-alerta', reg.alerta_sem_dono_dias) : '') +
+            '</div>';
+        c.appendChild(_sepCartao('Inventário e regularização', ctrl, largura));
+    }
+
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
@@ -1746,6 +1766,15 @@ async function renderSeparacaoConfig(c, S) {
                         abrir_regularizacao: v('sc-rev-reg')
                     }
                 });
+            }
+            if (inv) {
+                await S.api('/inventario/config', { method: 'PUT', body: {
+                    status_estoque: v('sc-inv-status'), campo_local: v('sc-inv-campo'),
+                    prazo_contagem_dias: v('sc-inv-prazo'), abrir_regularizacao: v('sc-inv-reg') } });
+            }
+            if (reg) {
+                await S.api('/regularizacao/config', { method: 'PUT', body: {
+                    prazo_padrao_dias: v('sc-reg-prazo'), alerta_sem_dono_dias: v('sc-reg-alerta') } });
             }
             await S.api('/trilha/config', {
                 method: 'PUT',

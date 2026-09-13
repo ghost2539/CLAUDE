@@ -206,6 +206,18 @@ class Settings:
         _sqlite("reversa"),
     )
 
+    # ── Inventário e contagem (A18) ─────────────────────────────────────
+    INVENTARIO_DATABASE_URL: str = os.getenv(
+        "INVENTARIO_DATABASE_URL",
+        _sqlite("inventario"),
+    )
+
+    # ── Regularização de ativo (A19) ────────────────────────────────────
+    REGULARIZACAO_DATABASE_URL: str = os.getenv(
+        "REGULARIZACAO_DATABASE_URL",
+        _sqlite("regularizacao"),
+    )
+
     # ── Atendimento a chamados (A20) ────────────────────────────────────
     ATENDIMENTO_DATABASE_URL: str = os.getenv(
         "ATENDIMENTO_DATABASE_URL",

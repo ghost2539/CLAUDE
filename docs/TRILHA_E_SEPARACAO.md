@@ -13,6 +13,8 @@ núcleo — mede tempo. Os demais são processos montados em cima dela.
 | A15 | Separação e expedição | `separacao` |
 | A16 | Projetos de loja (inauguração e reforma) | `projetos` |
 | A17 | Logística reversa | `reversa` |
+| A18 | Inventário e contagem | `inventario` |
+| A19 | Regularização de ativo | `regularizacao` |
 | A20 | Atendimento a chamados | `atendimento` |
 | T1 T2 | Trilha do ativo e Torre de Controle | `torre` |
 
@@ -287,6 +289,83 @@ Correios.
 
 ---
 
+## 2.3 Inventário e Contagem (A18)
+
+`db/inventario.py` · `routers/inventario.py` · `static/modules/inventario.js` ·
+banco `data/db/inventario.db`
+
+O token é o **ciclo**: um recorte do estoque (começo do espaço/corredor —
+`REP`, `IN`, `REP-A03` — ou vazio para o depósito inteiro), o **retrato**
+do que o ServiceNow dizia estar lá e a contagem bipe a bipe.
+
+O retrato é tirado **na abertura** e congelado em `inv_esperado`. Contar
+contra o ServiceNow ao vivo faria o alvo se mover enquanto alguém conta.
+Só o `install_status` vai na consulta; o corredor é filtrado em Python,
+porque o JSONv2 aceita `STARTSWITH` sem reclamar e às vezes o ignora.
+
+```
+AG_CONTAGEM_INV → EX_CONTAGEM_INV → CONFERIDO_INV | DIVERGENTE_INV
+```
+
+| Diferença | O que é | Vira em A19 |
+|---|---|---|
+| No retrato, não contado | faltante | `FALTANTE` |
+| Contado, fora do retrato, ServiceNow diz "em estoque em outro corredor" | local errado | `LOCAL_ERRADO` |
+| Contado, fora do retrato, qualquer outra situação | inesperado | `INESPERADO` |
+
+A sobra consulta o ServiceNow na hora do bipe e grava o que ele diz da
+série — é essa informação que decide o tipo no fechamento e é o que quem
+regularizar vai ler. Nada aqui escreve no ServiceNow.
+
+---
+
+## 2.4 Regularização de Ativo (A19)
+
+`db/regularizacao.py` · `routers/regularizacao.py` ·
+`static/modules/regularizacao.js` · banco `data/db/regularizacao.db`
+
+O token é a **divergência**. O mecanismo inteiro são dois campos:
+**responsável** e **prazo**. A divergência não sai da fila sem os dois
+(`assumir`), e não fecha sem dizer **como** (`resolver`, com uma das
+resoluções: encontrado, cadastro corrigido, baixado, devolvido pela loja,
+perda reconhecida, duplicidade). Perda exige justificativa.
+
+```
+AG_TRATATIVA_REG → EX_TRATATIVA_REG → RESOLVIDA_REG
+     (FILA)          (TRATATIVA)           ↓
+                                      CANCELADA_REG (só admin)
+```
+
+Quem abre é outro processo ou uma pessoa:
+
+```python
+from routers.regularizacao import abrir_divergencia
+abrir_divergencia(origem="A17", referencia="COL-2026-0001", tipo="FALTANTE",
+                  serial="ABC123", usuario=login)
+```
+
+Idempotente por (origem, referência, série, tipo). A reversa e o
+inventário chamam por import tardio dentro de `try/except`: a coleta ou o
+ciclo já fecharam como divergentes, e isso não se desfaz porque o módulo
+vizinho não respondeu.
+
+Duas regras de permissão: assumir para si é `edit`; **atribuir a outra
+pessoa**, reatribuir e cancelar são `admin` — distribuir trabalho é papel
+do gestor. Resolver é do responsável ou de quem administra.
+
+Dois alertas na fila, dois donos: **atrasada** (prazo vencido) é do
+responsável; **sem dono há tempo demais** (`alerta_sem_dono_dias`) é do
+gestor.
+
+### Verificação
+
+```
+python3 scripts/verificar_regularizacao.py
+python3 scripts/verificar_inventario.py
+```
+
+---
+
 ## 3. Parâmetros
 
 **Parâmetros → Separação** (admin) reúne os dois módulos, porque hoje é a
@@ -324,7 +403,6 @@ parado para sempre, e foi exatamente o que aconteceu com `AG_CONFIGURACAO` e
 
 | Cód. | Processo | Situação |
 |---|---|---|
-| A18 A19 | Inventário e regularização | não existe |
 | G01 a G14 | Bloco de gestão | só G02 (obsolescência de coletores) existe |
 | T3 | Ponte ServiceNow | leitura e escrita existem; falta fila de reprocessamento na falha |
 | T4 | Notificações | o canal de e-mail existe (`core/notificador.py`); falta a notificação por pedido |

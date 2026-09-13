@@ -20,6 +20,8 @@
         separacao:      'Separação',
         projetos:       'Projetos de Loja',
         reversa:        'Logística Reversa',
+        inventario:     'Inventário',
+        regularizacao:  'Regularização',
         externo:        'Assistência',
         destinacao:     'Destinação',
         rastreio:       'Correios',
