@@ -1843,6 +1843,22 @@ async function renderSeparacaoConfig(c, S) {
         c.appendChild(_sepCartao('Obsolescência do parque', ob, largura));
     }
 
+    /* Metas por etapa (Torre) ---------------------------------------- */
+    try {
+        var mt = await S.api('/torre/metas');
+        var metas = S.el('div', { className: 'card-body' });
+        var grade = S.el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 18px' });
+        (mt.metas || []).forEach(function (m) {
+            var linha = S.el('label', { style: 'display:flex;align-items:center;gap:8px;font-size:13px' });
+            linha.innerHTML = '<span style="flex:1">' + S.esc(m.rotulo) + ' <span class="text-muted">· ' + S.esc(m.frente) + '</span></span>' +
+                '<input class="form-control form-control-inline sc-meta" data-estado="' + S.esc(m.estado) + '" type="number" min="0" step="0.5" style="width:84px" value="' + (m.horas_uteis == null ? '' : m.horas_uteis) + '" placeholder="h">';
+            grade.appendChild(linha);
+        });
+        metas.appendChild(grade);
+        metas.appendChild(S.el('p', { className: 'text-muted', style: 'font-size:12px;margin:10px 0 0', textContent: 'Horas úteis por etapa. Em branco, vale o alerta geral do calendário.' }));
+        c.appendChild(_sepCartao('Metas por etapa (Torre)', metas, largura));
+    } catch (_) { /* Torre fora do ar: cartão não aparece */ }
+
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
@@ -1851,6 +1867,7 @@ async function renderSeparacaoConfig(c, S) {
           _sepCampo('Fuso em relação ao UTC', 'sc-cal-fuso', cal.fuso_horas) +
           _sepCampo('Abre às', 'sc-cal-ini', cal.expediente_inicio) +
           _sepCampo('Fecha às', 'sc-cal-fim', cal.expediente_fim) +
+          _sepCampo('Foto diária da Torre às', 'sc-cal-snap', cal.snapshot_hora) +
         '</div>' +
         '<div class="form-group mt-3">' +
           '<label for="sc-cal-fer">Feriados</label>' +
@@ -1932,6 +1949,10 @@ async function renderSeparacaoConfig(c, S) {
             if (obs) await S.api('/obsolescencia/config', { method: 'PUT', body: {
                 modo_regra: v('sc-obs-modo'), limite_anos: v('sc-obs-anos'), limite_sem_ver: v('sc-obs-semver'),
                 modelos_eol: v('sc-obs-eol'), versao_os_minima: v('sc-obs-android'), modelos_sem_update: v('sc-obs-semupd') } });
+            var metasBody = Array.from(document.querySelectorAll('.sc-meta')).map(function (i) {
+                return { estado: i.dataset.estado, horas_uteis: i.value === '' ? null : parseFloat(i.value), ativa: true };
+            });
+            if (metasBody.length) await S.api('/torre/metas', { method: 'PUT', body: metasBody });
             await S.api('/trilha/config', {
                 method: 'PUT',
                 body: {
@@ -1939,7 +1960,8 @@ async function renderSeparacaoConfig(c, S) {
                     expediente_inicio: v('sc-cal-ini'),
                     expediente_fim: v('sc-cal-fim'),
                     feriados: v('sc-cal-fer'),
-                    fuso_horas: v('sc-cal-fuso')
+                    fuso_horas: v('sc-cal-fuso'),
+                    snapshot_hora: v('sc-cal-snap')
                 }
             });
             S.toast('Configuração salva.', 'success');

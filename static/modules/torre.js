@@ -18,7 +18,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
 (function () {
     var S = null;
-    var ABAS = [['area', 'Área'], ['trilha', 'Trilha do ativo'],
+    var ABAS = [['area', 'Área'], ['tendencia', 'Tendência'], ['trilha', 'Trilha do ativo'],
                 ['minha', 'Minha produção']];
     var vista = { aba: 'area' };
 
@@ -40,9 +40,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         render: function (container, sub) {
             S = window.SPARE;
             var abas = abasVisiveis();
-            vista.aba = ['area', 'trilha', 'minha', 'equipe'].indexOf(sub) >= 0
+            vista.aba = ['area', 'tendencia', 'trilha', 'minha', 'equipe'].indexOf(sub) >= 0
                 ? sub : 'area';
             S.tabs(abas, vista.aba, 'torre');
+            if (vista.aba === 'tendencia') return telaTendencia(container);
             if (vista.aba === 'trilha') return telaTrilha(container);
             if (vista.aba === 'minha') return telaPessoa(container);
             if (vista.aba === 'equipe') return telaEquipe(container);
@@ -77,7 +78,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             ['Mais antigo parado', duracao(d.mais_antigo), 'accent-orange'],
             ['Entradas / saídas hoje', d.entradas_hoje + ' / ' + d.saidas_hoje,
              'accent-green']
-        ]));
+        ,
+            ['Dentro da meta', d.na_meta_pct == null ? '—' : d.na_meta_pct + '%', (d.na_meta_pct != null && d.na_meta_pct < 80) ? 'accent-orange' : 'accent-green']]));
 
         var filas = d.filas.filter(function (f) { return f.estado !== 'DISPONIVEL'; });
 
@@ -422,6 +424,70 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         return t.length > n ? t.slice(0, n - 1) + '…' : t;
     }
 
+    /* ============================================================
+       Tendência — a foto diária vira filme
+       ============================================================ */
+    async function telaTendencia(c) {
+        c.innerHTML = carregando();
+        var dias = vista.dias || 30, d;
+        try { d = await S.api('/torre/historico?dias=' + dias); }
+        catch (e) { return falha(c, e); }
+        c.innerHTML = '';
+        var acoes = [];
+        [7, 30, 90].forEach(function (n) {
+            acoes.push(S.el('button', { className: 'btn btn-sm ' + (n === dias ? 'btn-secondary' : 'btn-outline'),
+                textContent: n + ' dias', onClick: function () { vista.dias = n; telaTendencia(c); } }));
+        });
+        var u = S.user() || {};
+        if (u.is_admin) acoes.push(S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Tirar foto agora',
+            onClick: async function () { try { await S.api('/torre/snapshot', { method: 'POST' }); S.toast('Foto do dia gravada.', 'success'); telaTendencia(c); } catch (e) { S.toast(e.message, 'error'); } } }));
+        c.appendChild(cabecalho('Tendência', d.ultimo_snapshot ? 'Última foto: ' + new Date(d.ultimo_snapshot + 'T00:00:00').toLocaleDateString('pt-BR') : '', acoes));
+
+        if (!d.serie.length) {
+            c.appendChild(S.el('div', { className: 'card' }, S.el('div', { className: 'card-body' },
+                S.el('p', { className: 'sep-vazio', textContent: 'Nenhuma foto diária ainda.' }))));
+            return;
+        }
+        var cmp = d.comparacao || {};
+        function delta(atual, anterior) {
+            if (anterior == null || !anterior) return '';
+            var p = Math.round(100 * (atual - anterior) / anterior);
+            return (p > 0 ? '+' : '') + p + '% vs 7 dias antes';
+        }
+        var ult = d.serie[d.serie.length - 1];
+        c.appendChild(indicadores([
+            ['Fechados nos últimos 7 dias', String(cmp.fechados || 0), 'accent-green', delta(cmp.fechados, cmp.fechados_anterior)],
+            ['Fila média (7 dias)', String(cmp.fila_media || 0), 'accent-teal', delta(cmp.fila_media, cmp.fila_media_anterior)],
+            ['Dentro da meta (última foto)', ult.na_meta_pct == null ? '—' : ult.na_meta_pct + '%', (ult.na_meta_pct != null && ult.na_meta_pct < 80) ? 'accent-orange' : 'accent-gold'],
+            ['Fechados na meta (última foto)', ult.fechados_na_meta_pct == null ? '—' : ult.fechados_na_meta_pct + '%', 'accent-orange']
+        ]));
+
+        c.appendChild(cartao('Fila por dia', colunas(d.serie, 'fila', 'fora_da_meta')));
+        c.appendChild(cartao('Fechados por dia', colunas(d.serie, 'fechados', null)));
+        d.frentes.forEach(function (f) {
+            c.appendChild(cartao(f.frente, colunas(f.serie, 'fila', 'fora_da_meta')));
+        });
+    }
+
+    /* Colunas por dia em HTML: total em teal, a parte fora da meta em âmbar
+       por cima (é subconjunto, não série ao lado). */
+    function colunas(serie, chave, chaveAlerta) {
+        var corpo = S.el('div', { className: 'card-body' });
+        var max = Math.max.apply(null, serie.map(function (x) { return x[chave] || 0; }).concat([1]));
+        var caixa = S.el('div', { className: 'torre-colunas' });
+        serie.forEach(function (x) {
+            var v = x[chave] || 0, a = chaveAlerta ? (x[chaveAlerta] || 0) : 0;
+            var col = S.el('div', { className: 'torre-coluna', title: new Date(x.dia + 'T00:00:00').toLocaleDateString('pt-BR') + ' · ' + v + (a ? ' (' + a + ' fora da meta)' : '') });
+            col.innerHTML = '<div class="torre-coluna-pista">' +
+                '<div class="torre-coluna-fita" style="height:' + (100 * v / max).toFixed(1) + '%;background:' + COR_BARRA + '"></div>' +
+                (a ? '<div class="torre-coluna-fita" style="height:' + (100 * a / max).toFixed(1) + '%;background:' + COR_ALERTA + '"></div>' : '') +
+                '</div><div class="torre-coluna-rotulo">' + x.dia.slice(8) + '/' + x.dia.slice(5, 7) + '</div>';
+            caixa.appendChild(col);
+        });
+        corpo.appendChild(caixa);
+        return corpo;
+    }
+
     /* ── Peças ─────────────────────────────────────────────────── */
     function duracao(seg) {
         if (!seg && seg !== 0) return '—';
@@ -441,12 +507,19 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                                     textContent: e.message || String(e) }));
     }
 
-    function cabecalho(titulo, sub) {
-        var d = S.el('div', { style: 'margin-bottom:18px' });
-        d.appendChild(S.el('h2', { className: 'page-title',
-                                   style: 'margin:0 0 4px', textContent: titulo }));
-        d.appendChild(S.el('p', { className: 'text-muted',
-                                  style: 'margin:0;font-size:13px', textContent: sub }));
+    function cabecalho(titulo, sub, acoes) {
+        var d = S.el('div', { style: 'margin-bottom:18px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap' });
+        var txt = S.el('div');
+        txt.appendChild(S.el('h2', { className: 'page-title',
+                                     style: 'margin:0 0 4px', textContent: titulo }));
+        txt.appendChild(S.el('p', { className: 'text-muted',
+                                    style: 'margin:0;font-size:13px', textContent: sub }));
+        d.appendChild(txt);
+        if (acoes && acoes.length) {
+            var barra = S.el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' });
+            acoes.forEach(function (b) { barra.appendChild(b); });
+            d.appendChild(barra);
+        }
         return d;
     }
 
@@ -455,7 +528,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         lista.forEach(function (x) {
             var card = S.el('div', { className: 'stat-card ' + x[2] });
             card.innerHTML = '<div class="stat-value" style="font-size:24px">' +
-                S.esc(x[1]) + '</div>' +
+                S.esc(x[1]) + (x[3] ? ' <span class="text-muted" style="font-size:12px">' + S.esc(x[3]) + '</span>' : '') + '</div>' +
                 '<div class="stat-label">' + S.esc(x[0]) + '</div>';
             g.appendChild(card);
         });

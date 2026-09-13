@@ -476,6 +476,7 @@ class ConfigIn(BaseModel):
     feriados: str | None = None
     fuso_horas: str | None = None
     sla_horas: str | None = None
+    snapshot_hora: str | None = None
 
 
 @router.put("/config")
@@ -497,6 +498,14 @@ def api_config_gravar(body: ConfigIn, req: Request):
                 date.fromisoformat(p)
             except ValueError:
                 raise HTTPException(400, f"Feriado inválido: {p} (use AAAA-MM-DD).")
+
+    if "snapshot_hora" in pares:
+        try:
+            h, m = str(pares["snapshot_hora"]).split(":")
+            if not (0 <= int(h) < 24 and 0 <= int(m) < 60):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(400, "Horário do snapshot inválido (use HH:MM).")
 
     db.gravar_config(pares)
     _log.info("trilha: calendário alterado por %s: %s",

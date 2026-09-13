@@ -365,8 +365,9 @@ def create_app() -> FastAPI:
     # Não grava nada: tudo é derivado dos intervalos do núcleo. Por isso
     # o painel muda sozinho quando o calendário muda.
     try:
-        from routers.torre import router as torre_router
+        from routers.torre import router as torre_router, start_scheduler as _torre_snapshot
         app.include_router(torre_router)
+        _torre_snapshot()  # foto diária da Torre, na hora configurada
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("torre").error(
             "Torre de Controle NÃO carregada (portal segue sem ela): %s",
