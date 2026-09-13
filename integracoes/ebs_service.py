@@ -81,7 +81,7 @@ def _urls() -> tuple[str, str]:
         c = _mon.obter_config("ebs_api") or {}
     except Exception:  # noqa: BLE001
         c = {}
-    return ((c.get("login_url") or "").strip() or _urls()[0],
+    return ((c.get("login_url") or "").strip() or cfg.EBS_LOGIN_URL,
             (c.get("search_url") or "").strip() or cfg.EBS_SEARCH_URL)
 
 
