@@ -152,6 +152,17 @@ ROTULO_ESTADO = {
     "AG_DOACAO": "Aguardando doação",
     "AG_DEVOLUCAO": "Aguardando devolução",
     "AG_CONFIRMACAO": "Aguardando confirmação do terceiro",
+    # Projetos de loja (A16). O token é o item do projeto, não o ativo.
+    "AG_DEFINICAO": "Aguardando definição",
+    "AG_SEPARACAO_PROJ": "Aguardando separação (projeto)",
+    "EX_SEPARACAO_PROJ": "Em separação (projeto)",
+    "AG_ESTOQUE": "Aguardando estoque",
+    "AG_CONFIGURACAO_PROJ": "Aguardando configuração (projeto)",
+    "EX_CONFIGURACAO_PROJ": "Em configuração (projeto)",
+    "AG_REPARO_PROJ": "Aguardando reparo (projeto)",
+    "PRONTO_PROJ": "Pronto para envio",
+    "ENVIADO_PROJ": "Enviado (projeto)",
+    "CANCELADO_PROJ": "Cancelado (projeto)",
 }
 
 

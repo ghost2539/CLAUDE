@@ -969,3 +969,21 @@ select.form-control-inline { padding-right: 26px; }
     .torre-barra { grid-template-columns: 1fr auto; }
     .torre-barra-pista { grid-column: 1 / -1; }
 }
+
+/* ── Projetos de Loja (A16) ─────────────────────────────────────── */
+.prj-item {
+    padding: 14px 16px;
+    border: 1px solid var(--border-color, #232830);
+    border-radius: var(--radius);
+    background: var(--bg-panel-alt);
+    margin-bottom: 10px;
+}
+.prj-item-pausa { border-left: 3px solid var(--color-gold); }
+.prj-item-topo {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 16px; flex-wrap: wrap;
+}
+.prj-series { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.prj-devolvida { opacity: .55; text-decoration: line-through; }
+.prj-obs { font-size: 12px; white-space: pre-line; margin: 10px 0 0; }
+.prj-acoes { margin-top: 12px; align-items: center; }

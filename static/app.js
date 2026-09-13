@@ -18,6 +18,7 @@
         bancada:        'Bancada',
         preparacao:     'Preparação',
         separacao:      'Separação',
+        projetos:       'Projetos de Loja',
         externo:        'Assistência',
         destinacao:     'Destinação',
         rastreio:       'Correios',

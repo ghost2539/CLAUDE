@@ -103,7 +103,8 @@ def api_area(req: Request):
             .where(dbt.Movimentacao.quando >= inicio_dia,
                    dbt.Movimentacao.estado_para.in_(
                        ("ENTREGUE", "VENDIDO", "DESCARTADO", "DOADO",
-                        "DEVOLVIDO", "SUBSTITUIDO", "CONSUMIDO_EM_MONTAGEM")))
+                        "DEVOLVIDO", "SUBSTITUIDO", "CONSUMIDO_EM_MONTAGEM",
+                        "ENVIADO_PROJ")))
         ).scalar_one()
         entradas = s.execute(
             select(func.count(dbt.Ativo.id))

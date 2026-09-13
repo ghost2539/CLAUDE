@@ -236,6 +236,21 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Projetos de loja (A16) — banco próprio ──────────────────────────
+    # Inauguração e reforma, item por item. Usa o estoque e o chamado
+    # pelas funções da Separação, e o relógio pelo núcleo; carrega
+    # isolado porque a Separação funciona sem ele.
+    try:
+        import db.projetos as _db_prj
+        _db_prj.init_db()
+        from routers.projetos import router as projetos_router
+        app.include_router(projetos_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("projetos").error(
+            "Módulo Projetos NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Atendimento a chamados (A20) — banco próprio ────────────────────
     # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
     # ligar o atendimento à separação. Carregamento isolado: a separação

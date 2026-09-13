@@ -11,6 +11,7 @@ núcleo — mede tempo. Os demais são processos montados em cima dela.
 | A06 A07 A08.2 | Configuração, montagem, internalização | `preparacao` |
 | A09 a A13 | Descaracterização, lote, venda, descarte, doação | `destinacao` |
 | A15 | Separação e expedição | `separacao` |
+| A16 | Projetos de loja (inauguração e reforma) | `projetos` |
 | A20 | Atendimento a chamados | `atendimento` |
 | T1 T2 | Trilha do ativo e Torre de Controle | `torre` |
 
@@ -160,11 +161,66 @@ sempre; por isso o cancelamento libera unidade por unidade.
 
 ### O que ainda não existe
 
-- **A16 (Projetos de loja).** A aba de Inauguração e Reforma usa esta mesma
-  tela por enquanto. O A16 tem token próprio (o item do projeto), a
-  configuração do Leandro no meio e estados de exceção que pausam o relógio.
 - **Embalagem, NF e etiqueta.** O documento prevê `EX_EMBALAGEM`, `EX_FISCAL` e
   `AG_POSTAGEM` entre separar e despachar. Hoje o envio é um passo só.
+
+---
+
+## 2.1 Projetos de Loja (A16)
+
+`db/projetos.py` · `routers/projetos.py` · `static/modules/projetos.js` ·
+banco `data/db/projetos.db`
+
+### O que muda em relação à Separação
+
+O estoque é o mesmo (a prateleira `IN`), lido pelas funções da Separação. O
+que muda é o **token**: na Separação é o chamado; aqui é o **item do
+projeto** — "tantos equipamentos deste modelo, para esta área da loja". Ele
+nasce meses antes de existir série, e cada item anda no próprio ritmo: o
+projeto inteiro não espera a linha que travou.
+
+O item abre um token no núcleo com serial sintético (`PRJ-2026-0001/12`,
+`tipo_equipamento = item_projeto`). É por isso que aparece na Torre, na
+frente **Projetos**, com o mesmo relógio de todo mundo.
+
+### Ciclo do item
+
+```
+AG_DEFINICAO → AG_SEPARACAO_PROJ → EX_SEPARACAO_PROJ → AG_CONFIGURACAO_PROJ
+                     ↑                    ↓                       ↓
+                 AG_ESTOQUE          (bipe reserva)        EX_CONFIGURACAO_PROJ
+                                                              ↓          ↓
+                                                    AG_REPARO_PROJ   PRONTO_PROJ → ENVIADO_PROJ
+```
+
+| Estado | Tipo no núcleo | Por quê |
+|---|---|---|
+| `AG_DEFINICAO`, `AG_ESTOQUE`, `AG_REPARO_PROJ` | `EXTERNO` | O tempo passa e entra no total do projeto, mas não é de ninguém da área |
+| `AG_SEPARACAO_PROJ`, `AG_CONFIGURACAO_PROJ`, `PRONTO_PROJ` | `FILA` | Mede o fluxo |
+| `EX_SEPARACAO_PROJ`, `EX_CONFIGURACAO_PROJ` | `TRATATIVA` | Mede a pessoa que assumiu |
+
+A configuração (etapa entre separar e enviar) é onde o equipamento é
+preparado para a loja. Reprovar uma unidade ali solta a reserva, manda o
+equipamento para `AG_TRIAGEM` (parâmetro `estado_reparo`) e põe o item em
+`AG_REPARO_PROJ`; a linha da unidade fica marcada como devolvida, para a
+conta de retrabalho. A mesma série pode voltar ao mesmo item depois do
+conserto — por isso o índice `(item_id, serial)` **não** é único.
+
+No ServiceNow acontece o mesmo que na Separação: bipe = `substatus =
+reserved`; envio = `install_status = 1` e `location` = loja; cancelar solta
+as reservas. Os parâmetros de reserva e envio são os da Separação — um só
+lugar decide o que "em uso na loja" significa.
+
+O projeto em si não tem relógio: é uma pasta. Sai de `PLANEJAMENTO` no
+primeiro item definido e vira `CONCLUIDO` quando não sobra item pendente.
+
+### Verificação
+
+```
+python3 scripts/verificar_projetos.py
+```
+
+48 casos em banco temporário, com dublês no lugar do ServiceNow.
 
 ---
 
@@ -205,7 +261,6 @@ parado para sempre, e foi exatamente o que aconteceu com `AG_CONFIGURACAO` e
 
 | Cód. | Processo | Situação |
 |---|---|---|
-| A16 | Projetos de loja (inauguração e reforma) | a aba de Inauguração usa a tela de separação; falta o item de projeto como token e os estados de exceção |
 | A17 | Logística reversa | falta o token Coleta e a comparação esperado × recebido |
 | A18 A19 | Inventário e regularização | não existe |
 | G01 a G14 | Bloco de gestão | só G02 (obsolescência de coletores) existe |

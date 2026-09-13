@@ -1153,7 +1153,7 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'bancada', 'preparacao',
+        'servicenow', 'atendimento', 'separacao', 'projetos', 'bancada', 'preparacao',
         'destinacao', 'externo', 'torre', 'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
         'orcamento_spare', 'orcamento_manutencao'];
@@ -1556,6 +1556,10 @@ async function renderSeparacaoConfig(c, S) {
     var d = await S.api('/separacao/config');
     var cal = await S.api('/trilha/config');
     var cfg = d.config;
+    // Projetos de loja carrega isolado: se o módulo não subiu, a aba da
+    // Separação continua inteira e só o cartão dele não aparece.
+    var prj = null;
+    try { prj = (await S.api('/projetos/config')).config; } catch (_) { prj = null; }
 
     c.innerHTML = '';
     c.appendChild(S.el('div', {
@@ -1630,6 +1634,26 @@ async function renderSeparacaoConfig(c, S) {
         '</div>';
     c.appendChild(_sepCartao('Chamado de origem e prazos', chamado, largura));
 
+    /* Projetos de loja (A16) --------------------------------------- */
+    if (prj) {
+        var projetos = S.el('div', { className: 'card-body' });
+        projetos.innerHTML =
+            '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
+              'O prazo do item é a soma das três etapas, contado da criação. ' +
+              'Estoque, reserva e envio são os parâmetros acima.</p>' +
+            '<div class="form-grid cols-2">' +
+              _sepCampo('Definição (dias úteis)', 'sc-prj-def', prj.prazo_definicao) +
+              _sepCampo('Separação (dias úteis)', 'sc-prj-sep', prj.prazo_separacao) +
+              _sepCampo('Configuração (dias úteis)', 'sc-prj-cfg', prj.prazo_configuracao) +
+              _sepCampo('Folga antes da abertura (dias úteis)', 'sc-prj-folga',
+                        prj.folga_antes_abertura) +
+              _sepCampo('Prefixos de chamado aceitos', 'sc-prj-ch', prj.chamado_prefixos) +
+              _sepCampo('Estado da unidade reprovada', 'sc-prj-rep', prj.estado_reparo,
+                        'Para onde vai o equipamento reprovado na configuração.') +
+            '</div>';
+        c.appendChild(_sepCartao('Projetos de loja', projetos, largura));
+    }
+
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
@@ -1679,6 +1703,19 @@ async function renderSeparacaoConfig(c, S) {
                     prazo_inauguracao: v('sc-prazo-in')
                 }
             });
+            if (prj) {
+                await S.api('/projetos/config', {
+                    method: 'PUT',
+                    body: {
+                        prazo_definicao: v('sc-prj-def'),
+                        prazo_separacao: v('sc-prj-sep'),
+                        prazo_configuracao: v('sc-prj-cfg'),
+                        folga_antes_abertura: v('sc-prj-folga'),
+                        chamado_prefixos: v('sc-prj-ch'),
+                        estado_reparo: v('sc-prj-rep')
+                    }
+                });
+            }
             await S.api('/trilha/config', {
                 method: 'PUT',
                 body: {

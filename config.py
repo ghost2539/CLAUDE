@@ -194,6 +194,12 @@ class Settings:
         _sqlite("separacao"),
     )
 
+    # ── Projetos de loja (A16) ──────────────────────────────────────────
+    PROJETOS_DATABASE_URL: str = os.getenv(
+        "PROJETOS_DATABASE_URL",
+        _sqlite("projetos"),
+    )
+
     # ── Atendimento a chamados (A20) ────────────────────────────────────
     ATENDIMENTO_DATABASE_URL: str = os.getenv(
         "ATENDIMENTO_DATABASE_URL",
