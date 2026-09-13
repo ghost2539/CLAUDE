@@ -180,6 +180,39 @@ def revogar(login: str, req: Request):
     return {"ok": True}
 
 
+# ── Listas das telas do ServiceNow, editáveis por quem administra o espaço ──
+class ListasIn(BaseModel):
+    estoques: list[str] = []
+    corredores: list[str] = []
+    anotacoes: list[str] = []
+
+
+@router.get("/api/consulta-times/gestao-ativos")
+def listas_ler(req: Request):
+    _exigir(req, "view")
+    from routers.servicenow import config_gestao_ativos
+    return config_gestao_ativos()
+
+
+@router.put("/api/consulta-times/gestao-ativos")
+def listas_gravar(body: ListasIn, req: Request):
+    """A mesma configuração que o portal usa (chave gestao_ativos): o
+    administrador do espaço muda daqui, sem precisar do portal inteiro."""
+    sd = _exigir(req, "admin")
+    from db.portal import Setting
+    with SessionLocal.begin() as s:
+        row = s.get(Setting, "gestao_ativos")
+        if row is None:
+            row = Setting(key="gestao_ativos")
+            s.add(row)
+        row.value = {"estoques": [x.strip() for x in body.estoques if x.strip()],
+                     "corredores": [x.strip() for x in body.corredores if x.strip()],
+                     "anotacoes": [x.strip() for x in body.anotacoes if x.strip()]}
+        row.updated_by = sd.get("username", "")
+    dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "configurar", "listas do ServiceNow")
+    return listas_ler(req)
+
+
 @router.get("/api/consulta-times/acessos")
 def acessos(req: Request, limit: int = 300):
     _exigir(req, "admin")
