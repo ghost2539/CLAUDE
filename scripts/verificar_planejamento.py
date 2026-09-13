@@ -20,7 +20,7 @@ sys.path.insert(0, str(RAIZ))
 _TEMP = tempfile.mkdtemp(prefix="pln-verif-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEMP}/portal.db")
 os.environ.setdefault("PORTAL_SESSION_SECRET", "verificacao-local")
-for m in ("PLANEJAMENTO", "SEPARACAO", "TRILHA"):
+for m in ("PLANEJAMENTO", "SEPARACAO", "TRILHA", "OBSOLESCENCIA"):
     os.environ[f"{m}_DATABASE_URL"] = f"sqlite:///{_TEMP}/{m.lower()}.db"
 
 from core.previsao import prever, necessidade, meses_entre, mes_seguinte  # noqa: E402
@@ -31,6 +31,8 @@ from routers.planejamento import (  # noqa: E402
     ItemIn, ConfigIn, HistoricoIn, criar_item, alterar_item, excluir_item, listar_itens,
     listar_modelos, ler_configuracao, gravar_configuracao, historico, gravar_historico,
     previsao, consumo_real_por_modelo,
+    AcordoIn, SubstituicaoIn, listar_acordos, criar_acordo, alterar_acordo, excluir_acordo,
+    gravar_plano, previsao_obsolescencia, situacao_acordo,
 )
 
 UTC = timezone.utc
@@ -238,6 +240,116 @@ h = historico(REQ, meses=12)
 por_mes = {p["mes"]: p for p in next(l for l in h["linhas"] if l["item"]["id"] == it["id"])["serie"]}
 checar(por_mes[m2]["origem"] == "imputado" and por_mes[m2]["quantidade"] == 0, "com início mais recente, o mês anterior volta a ser imputado")
 checar(len(previsao(REQ)["itens"][0]["previsao"]["p50"]) == 9, "horizonte configurado vale como padrão")
+
+# ── 6. Acordos de compra ───────────────────────────────────────────
+print("\nAcordos de compra")
+checar(situacao_acordo(None, 60) == "sem_vencimento", "sem vencimento")
+checar(situacao_acordo(date.today() - timedelta(days=1), 60) == "vencido", "vencido ontem")
+checar(situacao_acordo(date.today() + timedelta(days=30), 60) == "vence_em_breve", "vence em 30 dias com alerta de 60")
+checar(situacao_acordo(date.today() + timedelta(days=90), 60) == "vigente", "vigente")
+
+venc = (date.today() + timedelta(days=200)).isoformat()
+ac = criar_acordo(AcordoIn(item_ebs="123456", descricao="PDV Dell 3050 completo", valor=2950.5, fornecedor="3729 - AIDC", vencimento=venc), REQ)
+checar(ac["fornecedor_codigo"] == "3729" and ac["fornecedor_nome"] == "AIDC" and ac["fornecedor"] == "3729 - AIDC", "fornecedor '3729 - AIDC' separado em código e nome")
+checar(ac["situacao"] == "vigente" and ac["vencimento"] == venc, "vencimento e situação")
+erro_http("mesmo item e fornecedor é recusado", lambda: criar_acordo(AcordoIn(item_ebs="123456", valor=1, fornecedor_codigo="3729", fornecedor_nome="AIDC"), REQ), 409)
+erro_http("item vazio é recusado", lambda: criar_acordo(AcordoIn(item_ebs=" ", valor=1), REQ))
+erro_http("data inválida é recusada", lambda: criar_acordo(AcordoIn(item_ebs="1", valor=1, vencimento="31/02/2026x"), REQ))
+ac2 = criar_acordo(AcordoIn(item_ebs="123456", valor=3100, fornecedor_codigo="4001", fornecedor_nome="Outro", vencimento=(date.today() - timedelta(days=5)).isoformat()), REQ)
+checar(ac2["situacao"] == "vencido", "segundo fornecedor, vencido")
+la = listar_acordos(REQ)
+checar(la["resumo"]["total"] == 2 and la["resumo"]["vencidos"] == 1, "listagem e resumo")
+alterar_acordo(ac2["id"], AcordoIn(vencimento=(date.today() + timedelta(days=10)).isoformat()), REQ)
+checar(listar_acordos(REQ)["resumo"]["vencem_em_breve"] == 1, "alterar vencimento muda a situação")
+_sessao["atual"] = LEITOR
+erro_http("quem só lê não cria acordo", lambda: criar_acordo(AcordoIn(item_ebs="9", valor=1), REQ), 403)
+_sessao["atual"] = ADMIN
+
+# Custo do item cai no acordo quando o item não tem custo.
+it3 = criar_item(ItemIn(nome="PDV via acordo", modelos=["Zebra X"], item_ebs="123456", estoque_atual=0), REQ)
+pv = previsao(REQ, horizonte=3)
+x3 = next(x for x in pv["itens"] if x["item"]["id"] == it3["id"])
+checar(x3["acordo"] and x3["acordo"]["fornecedor"] == "3729 - AIDC", "acordo vigente com vencimento mais distante é o escolhido")
+gravar_configuracao(ConfigIn(data_inicio_sistema=m1), REQ)
+gravar_historico([HistoricoIn(item_id=it3["id"], mes=mes_menos(mes_atual, k), quantidade=10) for k in range(2, 9)], REQ)
+pv = previsao(REQ, horizonte=3)
+x3 = next(x for x in pv["itens"] if x["item"]["id"] == it3["id"])
+checar(x3["necessidade"]["necessidade"] > 0 and abs(x3["necessidade"]["valor"] - x3["necessidade"]["necessidade"] * 2950.5) < 0.01,
+       "sem custo no item, o valor usa o acordo (2950,50)")
+alterar_item(it3["id"], ItemIn(custo_unitario=100), REQ)
+x3 = next(x for x in previsao(REQ, horizonte=3)["itens"] if x["item"]["id"] == it3["id"])
+checar(abs(x3["necessidade"]["valor"] - x3["necessidade"]["necessidade"] * 100) < 0.01, "custo digitado no item vence o acordo")
+
+csv_ac = ("Item;Descrição;Valor;Fornecedor;Vencimento\n"
+          "777001;Coletor TC21;2.450,00;3729 - AIDC;31/12/2027\n"
+          "777001;Coletor TC21;2.500,00;5100 - Outro;2027-06-30\n"
+          "123456;PDV Dell 3050;2.999,00;3729 - AIDC;2028-01-31\n"
+          "999;Sem data;10;1 - X;\n"
+          "888;Data ruim;10;1 - X;xx/yy\n").encode("utf-8")
+class _UpAc:
+    filename = "acordos.csv"
+    async def read(self): return csv_ac
+res = asyncio.run(rp.importar_acordos(REQ, _UpAc()))
+checar(res["lidas"] == 5 and res["novos"] == 3 and res["atualizados"] == 1 and len(res["recusados"]) == 1,
+       "importação: 3 novos, 1 atualizado (123456/3729), 1 recusado por data")
+la = listar_acordos(REQ)
+a1 = next(a for a in la["acordos"] if a["item_ebs"] == "777001" and a["fornecedor_codigo"] == "3729")
+checar(a1["valor"] == 2450.0 and a1["vencimento"] == "2027-12-31", "valor em formato brasileiro e data DD/MM/AAAA lidos")
+a2 = next(a for a in la["acordos"] if a["item_ebs"] == "123456" and a["fornecedor_codigo"] == "3729")
+checar(a2["valor"] == 2999.0 and a2["vencimento"] == "2028-01-31" and a2["descricao"] == "PDV Dell 3050", "acordo existente atualizado pela planilha")
+excluir_acordo(a2["id"], REQ)
+erro_http("excluir inexistente", lambda: excluir_acordo(a2["id"], REQ), 404)
+
+# ── 7. Obsolescência: substituição por BU ──────────────────────────
+print("\nObsolescência por BU")
+import db.obsolescencia as dob
+dob.init_db()
+with dob.SessionLocal() as s:
+    col = dob.Coleta(usuario="u", situacao="concluida"); s.add(col); s.flush()
+    n = 0
+    def add(modelo, bu, bu_nome, pais, qtd, obsoleto=True, situacao=dob.ATIVO):
+        global n
+        for _ in range(qtd):
+            n += 1
+            s.add(dob.Coletor(mdm_id=f"m{n}", serie=f"S{n}", bu=bu, bu_nome=bu_nome, pais=pais, loja="001", e_loja=(bu != "CD"),
+                              modelo=modelo, obsoleto=obsoleto, situacao=situacao, visto_na_coleta=col.id))
+    add("Zebra TC20", "LJR", "Renner", "BR", 12)
+    add("Zebra TC20", "CM", "Camicado", "BR", 5)
+    add("Zebra TC20", "CD", "Centro de Distribuição", "BR", 3)
+    add("Zebra MC33", "LJR", "Renner", "BR", 4)
+    add("Zebra MC33", "LJRAR", "Renner Argentina", "AR", 2)
+    add("Zebra TC21", "LJR", "Renner", "BR", 30, obsoleto=False)       # não é obsoleto
+    add("Zebra TC20", "YC", "Youcom", "BR", 7, situacao=dob.SUMIU)     # sumiu: não conta
+    s.commit()
+
+ob = previsao_obsolescencia(REQ)
+tc20 = next(l for l in ob["linhas"] if l["modelo"] == "Zebra TC20")
+checar(ob["resumo"]["aparelhos"] == 26 and ob["resumo"]["modelos"] == 2, "26 aparelhos obsoletos ativos em 2 modelos (TC21 e sumidos fora)")
+checar(tc20["por_bu"] == {"LJR": 12, "CM": 5, "CD": 3}, "TC20 por BU, CD incluído")
+checar({b["bu"] for b in ob["bus"]} == {"LJR", "CM", "CD", "LJRAR"}, "BUs presentes")
+checar(tc20["sem_custo"] and ob["resumo"]["sem_custo"] == 2 and ob["resumo"]["valor"] == 0, "sem plano: sem custo, valor zero, alerta")
+
+itc = criar_item(ItemIn(nome="Coletor TC21 novo", modelos=["Coletor Zebra TC21"], item_ebs="777001"), REQ)
+ob = gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra TC20", item_id=itc["id"], mes_alvo="2027-03"),
+                   SubstituicaoIn(modelo_obsoleto="Zebra MC33", custo_unitario=2000, percentual=50, mes_alvo="2027-03")], REQ)
+tc20 = next(l for l in ob["linhas"] if l["modelo"] == "Zebra TC20")
+mc33 = next(l for l in ob["linhas"] if l["modelo"] == "Zebra MC33")
+checar(tc20["custo"] == 2450.0 and tc20["acordo"]["fornecedor"] == "3729 - AIDC", "custo vem do item substituto → acordo vigente mais distante (2450, AIDC)")
+checar(tc20["unidades"] == 20 and tc20["valor"] == 20 * 2450.0, "TC20: 20 unidades × 2450")
+checar(mc33["unidades_por_bu"] == {"LJR": 2, "LJRAR": 1} and mc33["valor"] == 3 * 2000.0, "MC33: 50% arredondado para cima por BU, custo digitado")
+ljr = next(b for b in ob["por_bu"] if b["bu"] == "LJR")
+checar(ljr["aparelhos"] == 16 and ljr["unidades"] == 14 and ljr["valor"] == 12 * 2450.0 + 2 * 2000.0, "totais da BU Renner")
+checar(ob["por_mes"] == [{"mes": "2027-03", "unidades": 23, "valor": 20 * 2450.0 + 6000.0}], "calendário de compra por mês")
+checar(ob["resumo"]["sem_custo"] == 0 and ob["resumo"]["sem_mes"] == 0, "com plano completo, sem alertas")
+ob = gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra MC33", ativo=False)], REQ)
+checar(next(l for l in ob["linhas"] if l["modelo"] == "Zebra MC33")["unidades"] == 0 and ob["resumo"]["valor"] == 20 * 2450.0, "plano inativo não compra")
+erro_http("mês alvo inválido", lambda: gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra TC20", mes_alvo="03/2027")], REQ))
+erro_http("percentual fora da faixa", lambda: gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra TC20", percentual=120)], REQ))
+erro_http("item substituto inexistente", lambda: gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra TC20", item_id=9999)], REQ), 404)
+_sessao["atual"] = LEITOR
+checar(previsao_obsolescencia(REQ)["resumo"]["aparelhos"] == 26, "quem só lê vê a previsão de obsolescência")
+erro_http("quem só lê não grava plano", lambda: gravar_plano([SubstituicaoIn(modelo_obsoleto="Zebra TC20")], REQ), 403)
+_sessao["atual"] = ADMIN
 
 print(f"\n{feitos - len(falhas)}/{feitos} verificações ok")
 if falhas:

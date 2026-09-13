@@ -224,4 +224,15 @@ próprio Orçamento Spare (view lê; edit e admin alteram).
   item no estoque de reposição (consulta da Separação, como o usuário
   logado).
 
+- **Obsolescência** (sub-aba): aparelhos obsoletos da última coleta do
+  MDM por modelo × BU (o CD entra como BU própria), com plano de
+  substituição por modelo (`pln_substituicao`: item substituto ou custo,
+  percentual, mês alvo). Dá valor por BU e calendário de compra por mês.
+- **Acordos de compra** (Configuração): item EBS, descrição, valor,
+  código e nome do fornecedor ("3729 - AIDC" é aceito num campo só),
+  vencimento; incluídos na tela ou por planilha CSV/XLSX
+  (`pln_acordo`). Situação vigente / vence em breve / vencido, com o
+  prazo do alerta configurável. Um item de planejamento com Item EBS e
+  sem custo digitado usa o valor do acordo vigente.
+
 Verificação: `python3 scripts/verificar_planejamento.py`.
