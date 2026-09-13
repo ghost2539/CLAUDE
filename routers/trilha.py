@@ -207,6 +207,67 @@ def abrir_ativo(s, *, serial: str, usuario: str, modelo: str = "",
     return ativo
 
 
+def dados_da_base(serial: str) -> dict:
+    """Modelo, imobilizado e tipo do ativo, procurados na base do portal.
+
+    Serve para adotar um equipamento antigo sem digitar nada: o que a base
+    já sabe entra junto. Base fora do ar não impede a adoção.
+    """
+    serial = (serial or "").strip().upper()
+    if not serial:
+        return {}
+    try:
+        from db.portal import SessionLocal as _P, Asset, LocalAsset
+        from sqlalchemy import func as _f, or_ as _or
+    except Exception:  # noqa: BLE001
+        return {}
+    try:
+        with _P() as ps:
+            a = ps.execute(select(Asset).where(
+                _or(_f.upper(Asset.serial_number) == serial,
+                    _f.upper(Asset.tag_number) == serial))).scalars().first()
+            if a is not None:
+                return {"modelo": a.model or "", "numero_ativo": a.asset_number or a.asset_id or "",
+                        "tipo_equipamento": a.category or "", "bu": a.company or ""}
+            l = ps.execute(select(LocalAsset).where(
+                _or(_f.upper(LocalAsset.serial_number) == serial,
+                    _f.upper(LocalAsset.tag_number) == serial))).scalars().first()
+            if l is not None:
+                return {"modelo": l.description or "", "numero_ativo": l.asset_number or "",
+                        "tipo_equipamento": "", "bu": l.company or ""}
+    except Exception:  # noqa: BLE001 — sem a base, adota só com a série
+        return {}
+    return {}
+
+
+def adocao_ligada() -> bool:
+    return str(db.ler_config().get("adotar_ativos", "1")).strip().lower() in ("1", "sim", "true")
+
+
+def garantir_ativo(s, serial: str, *, usuario: str, origem: str = "adotado"):
+    """Devolve o ativo da trilha; adota o que existe na base e nunca entrou.
+
+    Antes isto era um 404 pedindo "registre pelo Recebimento". Equipamento
+    que chega à bancada hoje precisa de relógio hoje, mesmo tendo entrado
+    no parque antes do módulo existir. O relógio começa na adoção: o
+    histórico anterior não existe e não se inventa.
+    """
+    serial = (serial or "").strip().upper()
+    ativo = s.execute(select(Ativo).where(Ativo.serial == serial)).scalar_one_or_none()
+    if ativo is not None:
+        if ativo.encerrado:
+            reabrir_ativo(s, ativo, usuario=usuario, origem=origem)
+        return ativo
+    if not adocao_ligada():
+        return None
+    dados = dados_da_base(serial)
+    ativo = abrir_ativo(s, serial=serial, usuario=usuario, origem=origem or "adotado",
+                        modelo=dados.get("modelo", ""), numero_ativo=dados.get("numero_ativo", ""),
+                        tipo_equipamento=dados.get("tipo_equipamento", ""), bu=dados.get("bu", ""))
+    _log.info("trilha: %s adotado por %s (origem %s)", serial, usuario, origem or "adotado")
+    return ativo
+
+
 def reabrir_ativo(s, ativo: Ativo, *, usuario: str, origem: str = "") -> None:
     """Segundo ciclo do mesmo serial: o equipamento que saiu voltou.
 

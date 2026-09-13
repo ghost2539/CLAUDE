@@ -372,6 +372,10 @@ PADROES = {
     "sla_horas": "",
     # Hora local em que a foto diária da Torre é tirada.
     "snapshot_hora": "23:55",
+    # Ativo que existe na base mas nunca passou pelo Recebimento: em vez de
+    # travar a bancada, ele é ADOTADO na hora, com o relógio começando
+    # agora. Não se inventa histórico — mede-se daqui para a frente.
+    "adotar_ativos": "1",
 }
 
 

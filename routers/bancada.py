@@ -35,7 +35,7 @@ from db.bancada import (
 )
 from core.security import require_permission, check_rate_limit
 from routers.trilha import (
-    Calendario, duracao_util, mover, TrilhaInvalida, _utc,
+    Calendario, duracao_util, mover, TrilhaInvalida, garantir_ativo, _utc,
 )
 
 _log = logging.getLogger("bancada")
@@ -320,14 +320,13 @@ def api_bipar(body: BipeIn, req: Request):
 
     destino_estado = TRATATIVA_DA_BANCADA[bancada]
     with dbt.SessionLocal() as s:
-        ativo = s.execute(
-            select(dbt.Ativo).where(dbt.Ativo.serial == serial)
-        ).scalar_one_or_none()
+        # Equipamento que nunca passou pelo Recebimento é adotado aqui, com
+        # o relógio começando agora — travar a bancada não ajudaria ninguém.
+        ativo = garantir_ativo(s, serial, usuario=usuario, origem="bancada")
         if ativo is None:
             raise HTTPException(
-                404, f"A série {serial} não está na trilha. Equipamento "
-                     "anterior ao módulo não tem fila — registre a entrada "
-                     "pelo Recebimento antes.")
+                404, f"A série {serial} não está na trilha e a adoção "
+                     "automática está desligada em Configuração → Ciclo do ativo.")
         if ativo.estado_fisico == destino_estado:
             raise HTTPException(
                 409, f"A série {serial} já está na bancada com "
