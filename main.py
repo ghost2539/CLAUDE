@@ -251,6 +251,21 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Logística reversa (A17) — banco próprio ─────────────────────────
+    # A coleta é o token; esperado × recebido é o indicador. Usa o
+    # rastreio do módulo Correios e o chamado pela Separação; carrega
+    # isolado, e o Recebimento só o chama se ele estiver no ar.
+    try:
+        import db.reversa as _db_rev
+        _db_rev.init_db()
+        from routers.reversa import router as reversa_router
+        app.include_router(reversa_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("reversa").error(
+            "Módulo Logística Reversa NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Atendimento a chamados (A20) — banco próprio ────────────────────
     # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
     # ligar o atendimento à separação. Carregamento isolado: a separação

@@ -12,6 +12,7 @@ núcleo — mede tempo. Os demais são processos montados em cima dela.
 | A09 a A13 | Descaracterização, lote, venda, descarte, doação | `destinacao` |
 | A15 | Separação e expedição | `separacao` |
 | A16 | Projetos de loja (inauguração e reforma) | `projetos` |
+| A17 | Logística reversa | `reversa` |
 | A20 | Atendimento a chamados | `atendimento` |
 | T1 T2 | Trilha do ativo e Torre de Controle | `torre` |
 
@@ -224,6 +225,68 @@ python3 scripts/verificar_projetos.py
 
 ---
 
+## 2.2 Logística Reversa (A17)
+
+`db/reversa.py` · `routers/reversa.py` · `static/modules/reversa.js` ·
+banco `data/db/reversa.db`
+
+### O token é a Coleta; o indicador é esperado × recebido
+
+O caminho de volta: a loja devolve equipamento ao CD. A coleta guarda o
+que se combinou que viria (série ou etiqueta — a que a loja conseguir
+ler), o **prazo acordado** para postar, e o código de rastreio quando
+postar. A etiqueta reversa é emitida fora do portal; aqui fica o código, e
+é por ele que o módulo acompanha nos Correios (`consultar_rastreio`, do
+módulo Correios).
+
+A coleta **não fecha como "recebida"**. Fecha como `CONFERIDA` (tudo que
+era esperado chegou, e nada além) ou `DIVERGENTE` (faltou ou sobrou).
+Divergente exige observação, e cada diferença vira um token de
+regularização (A19) — faltante e inesperado, os dois.
+
+### Ciclo
+
+```
+AG_POSTAGEM_REV → EM_TRANSITO_REV → AG_CONFERENCIA_REV → EX_CONFERENCIA_REV
+   (loja)           (Correios)          (fila do CD)          (pessoa)
+                                                                   ↓
+                                                    CONFERIDA_REV | DIVERGENTE_REV
+```
+
+| Estado | Tipo no núcleo | Por quê |
+|---|---|---|
+| `AG_POSTAGEM_REV`, `EM_TRANSITO_REV` | `EXTERNO` | A bola está com a loja ou com os Correios |
+| `AG_CONFERENCIA_REV` | `FILA` | O pacote está no CD e ninguém abriu |
+| `EX_CONFERENCIA_REV` | `TRATATIVA` | Alguém está conferindo |
+
+Dois prazos, dois culpados diferentes: **postagem atrasada** é a loja
+(prazo acordado, em dias corridos, porque a loja não segue o expediente do
+CD); **conferência atrasada** é o CD (dias úteis a partir da chegada).
+
+### Custódia muda quando o recebedor confirma
+
+"Entregue" nos Correios leva a coleta para a fila de conferência — não
+fecha nada. Quem diz que chegou é o bipe de quem abriu a caixa, ou o
+**Recebimento (A01)**: `registrar_recebimento()` é chamado pelo
+`receipt_bulk_submit` e casa a série (ou etiqueta) recebida com o esperado
+de qualquer coleta aberta, marcando a origem como `RECEBIMENTO` e levando a
+coleta à fila de conferência. Recebimento avulso não abre coleta nem vira
+inesperado: é recebimento, não divergência de coleta nenhuma.
+
+Cancelar só vale enquanto nada chegou. Com equipamento recebido, cancelar
+apagaria a evidência — o caminho é concluir como divergente.
+
+### Verificação
+
+```
+python3 scripts/verificar_reversa.py
+```
+
+43 casos em banco temporário, com dublês no lugar do ServiceNow e dos
+Correios.
+
+---
+
 ## 3. Parâmetros
 
 **Parâmetros → Separação** (admin) reúne os dois módulos, porque hoje é a
@@ -261,7 +324,6 @@ parado para sempre, e foi exatamente o que aconteceu com `AG_CONFIGURACAO` e
 
 | Cód. | Processo | Situação |
 |---|---|---|
-| A17 | Logística reversa | falta o token Coleta e a comparação esperado × recebido |
 | A18 A19 | Inventário e regularização | não existe |
 | G01 a G14 | Bloco de gestão | só G02 (obsolescência de coletores) existe |
 | T3 | Ponte ServiceNow | leitura e escrita existem; falta fila de reprocessamento na falha |

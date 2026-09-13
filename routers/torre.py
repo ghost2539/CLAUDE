@@ -50,6 +50,14 @@ FRENTE_DA_ETAPA = {
     "AG_DESCARACTERIZACAO": "Destinação", "EX_DESCARACTERIZACAO": "Destinação",
     "AG_DEFINICAO_DESTINO": "Destinação", "AG_VENDA": "Destinação",
     "AG_DESCARTE": "Destinação", "AG_DOACAO": "Destinação",
+    # Projetos de loja (A16): o token é o item do projeto.
+    "AG_DEFINICAO": "Projetos", "AG_SEPARACAO_PROJ": "Projetos",
+    "EX_SEPARACAO_PROJ": "Projetos", "AG_ESTOQUE": "Projetos",
+    "AG_CONFIGURACAO_PROJ": "Projetos", "EX_CONFIGURACAO_PROJ": "Projetos",
+    "AG_REPARO_PROJ": "Projetos", "PRONTO_PROJ": "Projetos",
+    # Logística reversa (A17): o token é a coleta.
+    "AG_POSTAGEM_REV": "Reversa", "EM_TRANSITO_REV": "Reversa",
+    "AG_CONFERENCIA_REV": "Reversa", "EX_CONFERENCIA_REV": "Reversa",
 }
 
 # Estoque não é fila: o equipamento está lá porque ninguém pediu, e esse
@@ -104,7 +112,7 @@ def api_area(req: Request):
                    dbt.Movimentacao.estado_para.in_(
                        ("ENTREGUE", "VENDIDO", "DESCARTADO", "DOADO",
                         "DEVOLVIDO", "SUBSTITUIDO", "CONSUMIDO_EM_MONTAGEM",
-                        "ENVIADO_PROJ")))
+                        "ENVIADO_PROJ", "CONFERIDA_REV", "DIVERGENTE_REV")))
         ).scalar_one()
         entradas = s.execute(
             select(func.count(dbt.Ativo.id))

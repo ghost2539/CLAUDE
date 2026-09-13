@@ -1153,7 +1153,7 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'atendimento', 'separacao', 'projetos', 'bancada', 'preparacao',
+        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'bancada', 'preparacao',
         'destinacao', 'externo', 'torre', 'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
         'orcamento_spare', 'orcamento_manutencao'];
@@ -1560,6 +1560,8 @@ async function renderSeparacaoConfig(c, S) {
     // Separação continua inteira e só o cartão dele não aparece.
     var prj = null;
     try { prj = (await S.api('/projetos/config')).config; } catch (_) { prj = null; }
+    var rev = null;
+    try { rev = (await S.api('/reversa/config')).config; } catch (_) { rev = null; }
 
     c.innerHTML = '';
     c.appendChild(S.el('div', {
@@ -1654,6 +1656,24 @@ async function renderSeparacaoConfig(c, S) {
         c.appendChild(_sepCartao('Projetos de loja', projetos, largura));
     }
 
+    /* Logística reversa (A17) -------------------------------------- */
+    if (rev) {
+        var reversa = S.el('div', { className: 'card-body' });
+        reversa.innerHTML =
+            '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
+              'O prazo da loja é corrido: ela não segue o expediente do CD. ' +
+              'O de conferência conta em dias úteis a partir da chegada.</p>' +
+            '<div class="form-grid cols-2">' +
+              _sepCampo('Loja posta em (dias corridos)', 'sc-rev-post', rev.prazo_postagem_dias,
+                        'Usado quando quem abre não informa a data acordada.') +
+              _sepCampo('Conferir em (dias úteis)', 'sc-rev-conf', rev.prazo_conferencia_dias) +
+              _sepCampo('Prefixos de chamado aceitos', 'sc-rev-ch', rev.chamado_prefixos) +
+              _sepSelect('Divergência abre regularização', 'sc-rev-reg', rev.abrir_regularizacao,
+                         [['1', 'Sim'], ['0', 'Não']]) +
+            '</div>';
+        c.appendChild(_sepCartao('Logística reversa', reversa, largura));
+    }
+
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
@@ -1713,6 +1733,17 @@ async function renderSeparacaoConfig(c, S) {
                         folga_antes_abertura: v('sc-prj-folga'),
                         chamado_prefixos: v('sc-prj-ch'),
                         estado_reparo: v('sc-prj-rep')
+                    }
+                });
+            }
+            if (rev) {
+                await S.api('/reversa/config', {
+                    method: 'PUT',
+                    body: {
+                        prazo_postagem_dias: v('sc-rev-post'),
+                        prazo_conferencia_dias: v('sc-rev-conf'),
+                        chamado_prefixos: v('sc-rev-ch'),
+                        abrir_regularizacao: v('sc-rev-reg')
                     }
                 });
             }

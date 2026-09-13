@@ -200,6 +200,12 @@ class Settings:
         _sqlite("projetos"),
     )
 
+    # ── Logística reversa (A17) ─────────────────────────────────────────
+    REVERSA_DATABASE_URL: str = os.getenv(
+        "REVERSA_DATABASE_URL",
+        _sqlite("reversa"),
+    )
+
     # ── Atendimento a chamados (A20) ────────────────────────────────────
     ATENDIMENTO_DATABASE_URL: str = os.getenv(
         "ATENDIMENTO_DATABASE_URL",

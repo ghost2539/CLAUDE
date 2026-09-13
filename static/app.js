@@ -19,6 +19,7 @@
         preparacao:     'Preparação',
         separacao:      'Separação',
         projetos:       'Projetos de Loja',
+        reversa:        'Logística Reversa',
         externo:        'Assistência',
         destinacao:     'Destinação',
         rastreio:       'Correios',

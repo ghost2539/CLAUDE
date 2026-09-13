@@ -163,6 +163,14 @@ ROTULO_ESTADO = {
     "PRONTO_PROJ": "Pronto para envio",
     "ENVIADO_PROJ": "Enviado (projeto)",
     "CANCELADO_PROJ": "Cancelado (projeto)",
+    # Logística reversa (A17). O token é a coleta.
+    "AG_POSTAGEM_REV": "Aguardando postagem da loja",
+    "EM_TRANSITO_REV": "Em trânsito (Correios)",
+    "AG_CONFERENCIA_REV": "Aguardando conferência",
+    "EX_CONFERENCIA_REV": "Em conferência",
+    "CONFERIDA_REV": "Coleta conferida",
+    "DIVERGENTE_REV": "Coleta divergente",
+    "CANCELADA_REV": "Coleta cancelada",
 }
 
 

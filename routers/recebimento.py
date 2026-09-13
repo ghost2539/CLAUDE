@@ -367,6 +367,11 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     # não se desfaz porque o ServiceNow recusou.
     no_servicenow = _marcar_no_servicenow(entrando, req)
 
+    # Logística reversa (A17): série que bate com uma coleta em aberto
+    # entra como recebida nela — a caixa está no CD, quem confirmou foi
+    # quem recebeu. Aditivo e tolerante a falha, como os outros ganchos.
+    na_coleta = _casar_com_coleta(entrando, sd["username"])
+
     return {
         "ok": True,
         "criados": created,
@@ -374,6 +379,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
         "erros": errors,
         "na_trilha": na_trilha,
         "no_servicenow": no_servicenow,
+        "na_coleta": na_coleta,
     }
 
 
@@ -507,6 +513,19 @@ def _marcar_no_servicenow(itens: list[dict], req: Request) -> dict:
             "ServiceNow: %d ativo(s) recebidos sem marcação de estoque: %s",
             len(itens), exc)
     return resumo
+
+
+def _casar_com_coleta(itens: list[dict], usuario: str) -> dict:
+    """Avisa a Logística Reversa do que chegou. Sem ela no ar, segue."""
+    if not itens:
+        return {"casados": 0, "coletas": []}
+    try:
+        from routers.reversa import registrar_recebimento
+        return registrar_recebimento(itens, usuario)
+    except Exception as exc:  # noqa: BLE001 — módulo ausente ou fora do ar
+        logging.getLogger("recebimento").warning(
+            "Reversa: %d ativo(s) recebidos sem casar com coleta: %s", len(itens), exc)
+        return {"casados": 0, "coletas": [], "falha": str(exc)}
 
 
 @router.delete("/recebimentos/{cycle_id}")
