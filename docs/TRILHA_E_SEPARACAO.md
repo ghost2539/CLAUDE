@@ -7,7 +7,7 @@ núcleo — mede tempo. Os demais são processos montados em cima dela.
 |---|---|---|
 | A01 | Recebimento (entrada na trilha) | gancho em `routers/recebimento.py` |
 | A02 A03 A04 | Bancadas de triagem e reparo | `bancada` |
-| A05 A14 | Assistência externa e devolução | `externo` |
+| A05 A14 | Assistência externa e devolução | `externo` (a devolução nasce na Bancada, destino "Devolver ao terceiro") |
 | A06 A07 A08.2 | Configuração, montagem, internalização | `preparacao` |
 | A09 a A13 | Descaracterização, lote, venda, descarte, doação | `destinacao` |
 | A15 | Separação e expedição | `separacao` |

@@ -24,7 +24,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         ['APTO', 'Apto / reparado'],
         ['AGUARDANDO_PECAS', 'Aguardando peças'],
         ['ASSISTENCIA', 'Assistência externa'],
-        ['INVIAVEL', 'Reparo inviável']
+        ['INVIAVEL', 'Reparo inviável'],
+        ['DEVOLVER', 'Devolver ao terceiro']
     ];
 
     var vista = { bancada: 'FROTA', ativo: null, causas: [] };
