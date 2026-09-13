@@ -410,13 +410,53 @@ def credencial_mdm() -> tuple[str, str]:
     return cofre.obter(CHAVE_USUARIO), cofre.obter(CHAVE_SENHA)
 
 
+def _verificacao_tls():
+    """O que vai em `verify`: um CA próprio, ou a política geral (VERIFY_SSL).
+
+    O proxy corporativo intercepta o TLS e apresenta a cadeia dele; por isso
+    o ServiceNow roda com verificação desligada, e o MDM segue a mesma
+    política. MDM_CA_BUNDLE liga a verificação com a cadeia certa.
+    """
+    ca = (getattr(_cfg, "MDM_CA_BUNDLE", "") or "").strip()
+    if ca:
+        return ca
+    return bool(getattr(_cfg, "VERIFY_SSL", False))
+
+
 def _nova_sessao():
     import requests
     from routers.servicenow import SN_PROXY
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:  # noqa: BLE001 — só silencia o aviso; sem urllib3 o requests nem existiria
+        pass
     s = requests.Session()
+    s.verify = _verificacao_tls()
+    # Sem trust_env: REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE no ambiente passam por
+    # cima do verify da sessão, e https_proxy do ambiente entraria na frente
+    # do SN_PROXY. Aqui a política é a configurada, e só ela.
+    s.trust_env = False
     if SN_PROXY:
         s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
     return s
+
+
+def _erro_de_rede(exc: Exception, base: str) -> HTTPException:
+    """Rede e certificado viram 502 com a causa, nunca 500 mudo."""
+    import requests
+    if isinstance(exc, requests.exceptions.SSLError):
+        return HTTPException(
+            502, f"Falha de certificado ao conectar no MDM ({base}): {str(exc)[:200]}. "
+                 "Com proxy que intercepta o TLS, use VERIFY_SSL=false; para validar com a "
+                 "cadeia corporativa, aponte MDM_CA_BUNDLE para o arquivo .pem.")
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return HTTPException(502, f"Proxy recusou a conexão com o MDM ({base}): {str(exc)[:200]}")
+    if isinstance(exc, requests.exceptions.Timeout):
+        return HTTPException(504, f"O MDM ({base}) não respondeu a tempo.")
+    if isinstance(exc, requests.exceptions.RequestException):
+        return HTTPException(502, f"MDM inacessível ({base}): {str(exc)[:200]}")
+    return HTTPException(502, f"Falha ao falar com o MDM ({base}): {str(exc)[:200]}")
 
 
 def sessao_mdm(forcar: bool = False):
@@ -438,7 +478,13 @@ def sessao_mdm(forcar: bool = False):
                 503, "Credencial de serviço do MDM não configurada no cofre "
                      f"({CHAVE_USUARIO} / {CHAVE_SENHA}).")
         nova = _nova_sessao()
-        if not mdm.login(nova, usuario, senha, base):
+        try:
+            ok = mdm.login(nova, usuario, senha, base)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — rede/certificado, com a causa na tela
+            raise _erro_de_rede(exc, base) from exc
+        if not ok:
             raise HTTPException(502, "Login no MDM recusado. Confira a credencial "
                                      "de serviço no cofre.")
         _sessao_mdm = nova
@@ -548,10 +594,17 @@ def coletar(req: Request):
     base = getattr(_cfg, "MDM_BASE_URL", "")
     sessao = sessao_mdm()
     try:
-        varredura = mdm.varrer(sessao, base)
-    except mdm.SessaoExpirada:
-        # Uma segunda tentativa com login novo; se cair de novo, é problema real.
-        varredura = mdm.varrer(sessao_mdm(forcar=True), base)
+        try:
+            varredura = mdm.varrer(sessao, base)
+        except mdm.SessaoExpirada:
+            # Uma segunda tentativa com login novo; se cair de novo, é problema real.
+            varredura = mdm.varrer(sessao_mdm(forcar=True), base)
+    except HTTPException:
+        raise
+    except mdm.SessaoExpirada as exc:
+        raise HTTPException(502, f"O MDM não devolveu a grade: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _erro_de_rede(exc, base) from exc
 
     for c in varredura["coletores"]:
         c["tipo"] = _db.COLETOR

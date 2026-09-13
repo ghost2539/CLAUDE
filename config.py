@@ -188,6 +188,10 @@ class Settings:
     )
     # Console do MDM de Coletores (Workspace ONE / AirWatch).
     MDM_BASE_URL: str = os.getenv("MDM_BASE_URL", "https://cn258.awmdm.com")
+    # Certificado ao falar com o MDM: por padrão segue VERIFY_SSL (o proxy
+    # corporativo intercepta o TLS). Um caminho de CA aqui liga a
+    # verificação com essa cadeia.
+    MDM_CA_BUNDLE: str = os.getenv("MDM_CA_BUNDLE", "")
 
     # ── Trilha do Ativo (núcleo de rastreabilidade e relógios) ──────────
     # Banco próprio: é a espinha dos processos e não divide arquivo com
