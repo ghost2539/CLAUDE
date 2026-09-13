@@ -211,6 +211,46 @@ except HTTPException as e:
     checar(e.status_code == 409, "coleta simultânea é recusada (409)")
 ob._progresso["rodando"] = False
 
+print("\n[7] Só coletor de loja entra no parque")
+with db.SessionLocal.begin() as _s:
+    _s.query(db.Coletor).delete(); _s.query(db.Coleta).delete()
+db.gravar_config({"somente_coletores": "1", "modo_regra": "qualquer"})
+brutos2 = [
+  {"id": "c1", "usuario": "ljr001_coletor", "modelo": "Zebra TC21", "versao_os": "13", "visto_em": "", "tags": ["Manutenção"]},
+  {"id": "c2", "usuario": "cm0042_coletor", "modelo": "Zebra TC26", "versao_os": "13", "visto_em": "", "tags": []},
+  {"id": "c3", "usuario": "cd0001_coletor", "modelo": "Zebra TC21", "versao_os": "13", "visto_em": "", "tags": []},
+  {"id": "x1", "usuario": "joao.silva", "modelo": "Samsung A54", "versao_os": "14", "visto_em": "", "tags": ["Manutenção"]},
+  {"id": "x2", "usuario": "ljr001_celular", "modelo": "Samsung A54", "versao_os": "14", "visto_em": "", "tags": []},
+  {"id": "x3", "usuario": "xyz999_coletor", "modelo": "Tablet Teste", "versao_os": "12", "visto_em": "", "tags": []},
+  {"id": "x4", "usuario": "", "modelo": "Zebra TC21", "versao_os": "13", "visto_em": "", "tags": []},
+]
+r2 = ob.aplicar_coleta(brutos2, usuario="t", total_mdm=7, paginas=1)
+checar(r2["descartados"] == 4 and r2["coletores"] == 3, "4 descartados (celular, login solto, BU desconhecida, sem usuário)")
+checar(r2["novos"] == 3, "só os 3 coletores de loja foram gravados")
+with db.SessionLocal() as _s:
+    guardados = {c.mdm_id for c in _s.query(db.Coletor).all()}
+checar(guardados == {"c1", "c2", "c3"}, "base tem só os coletores")
+res2 = ob.resumo_parque()
+checar(all(m["modelo"] != "Samsung A54" for m in res2["por_modelo"]), "por modelo não traz celular")
+checar(all(m["modelo"] != "Tablet Teste" for m in res2["por_modelo"]), "por modelo não traz o de BU desconhecida")
+checar(sum(t["quantidade"] for t in res2["tags"]) == 1, "tags contam só o coletor (o celular tinha tag)")
+checar(res2["coleta"]["total_mdm"] == 7 and res2["coleta"]["descartados"] == 4,
+       "o resumo diz quantos vieram do MDM e quantos ficaram de fora")
+checar(res2["total"] == 3 and res2["em_lojas"] == 2 and res2["fora_de_loja"] == 1, "CD conta no parque, fora de loja")
+
+# O que já estava na base e não é coletor sai de vez, não vira "sumiu".
+with db.SessionLocal.begin() as _s:
+    _s.add(db.Coletor(mdm_id="velho", usuario="fulano.tal", modelo="Samsung A54", situacao=db.ATIVO))
+r3 = ob.aplicar_coleta(brutos2, usuario="t", total_mdm=7, paginas=1)
+with db.SessionLocal() as _s:
+    checar(_s.query(db.Coletor).filter_by(mdm_id="velho").count() == 0, "registro antigo fora do padrão é removido")
+    checar(_s.query(db.Coletor).filter_by(situacao=db.SUMIU).count() == 0, "…e não entra na fila de tratativa")
+
+db.gravar_config({"somente_coletores": "0"})
+r4 = ob.aplicar_coleta(brutos2, usuario="t", total_mdm=7, paginas=1)
+checar(r4["descartados"] == 0 and r4["coletores"] == 7, "filtro desligado pela configuração traz tudo")
+db.gravar_config({"somente_coletores": "1"})
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)

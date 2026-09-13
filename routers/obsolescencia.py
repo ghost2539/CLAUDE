@@ -732,8 +732,9 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
         limite_anos = LIMITE_ANOS
     agora = datetime.now(timezone.utc)
     dpis = _dpis_da_base()
+    so_coletores = str(cfg.get("somente_coletores", "1")).strip().lower() in ("1", "sim", "true")
 
-    novos = atualizados = 0
+    novos = atualizados = descartados = 0
     with _db.SessionLocal.begin() as s:
         coleta = _db.Coleta(usuario=usuario, total_mdm=total_mdm, paginas=paginas,
                             lidos=len(coletores), situacao="aberta")
@@ -741,12 +742,20 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
         s.flush()
 
         existentes = {c.mdm_id: c for c in s.execute(_select(_db.Coletor)).scalars()}
+        fora_do_padrao: set[str] = set()
 
         for bruto in coletores:
             mdm_id = _limpar(bruto.get("id"))
             if not mdm_id:
                 continue
             loja = identificar_loja(bruto.get("usuario"))
+            # Só entra o que é coletor de loja: o usuário tem de bater com
+            # <sigla><número>_coletor e a sigla tem de ser uma BU conhecida.
+            # Celular e tablet ficam de fora do parque, não viram "sumiu".
+            if so_coletores and not loja["reconhecido"]:
+                descartados += 1
+                fora_do_padrao.add(mdm_id)
+                continue
             tags = tags_relevantes(bruto.get("tags"))
             # Idade real: a DPIS (ativação) da base local do portal, casada
             # por série, imobilizado ou etiqueta. O MDM só tem a data de
@@ -797,6 +806,17 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
             linha.visto_na_coleta = coleta.id
             linha.atualizado_em = _db.localnow()
 
+        # Sai de vez o que não é coletor de loja: o descartado nesta rodada
+        # e o que ficou de coletas antigas, antes do filtro existir. Não é
+        # "sumiu" — nunca deveria ter entrado no parque.
+        removidos = 0
+        if so_coletores:
+            for mdm_id, linha in list(existentes.items()):
+                if mdm_id in fora_do_padrao or not identificar_loja(linha.usuario)["reconhecido"]:
+                    existentes.pop(mdm_id, None)
+                    s.delete(linha)
+                    removidos += 1
+
         # O que não apareceu nesta rodada vira tratativa.
         sumiram = 0
         for mdm_id, linha in existentes.items():
@@ -808,11 +828,14 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
         coleta.novos = novos
         coleta.atualizados = atualizados
         coleta.sumiram = sumiram
+        coleta.descartados = descartados
         coleta.fim = _db.localnow()
         coleta.situacao = "concluida"
         resultado = {"coleta_id": coleta.id, "lidos": len(coletores),
                      "novos": novos, "atualizados": atualizados,
-                     "sumiram": sumiram, "total_mdm": total_mdm}
+                     "sumiram": sumiram, "descartados": descartados,
+                     "removidos": removidos, "total_mdm": total_mdm,
+                     "coletores": len(coletores) - descartados}
     return resultado
 
 
@@ -954,6 +977,14 @@ def resumo_parque() -> dict:
         "limites": {"anos": cfg.get("limite_anos"), "versao_os_minima": cfg.get("versao_os_minima"),
                     "modelos_eol": cfg.get("modelos_eol")},
         "coletado_em": ultima.fim.isoformat() if ultima and ultima.fim else None,
+        "coleta": {
+            "total_mdm": ultima.total_mdm if ultima else 0,
+            "lidos": ultima.lidos if ultima else 0,
+            "paginas": ultima.paginas if ultima else 0,
+            "descartados": getattr(ultima, "descartados", 0) if ultima else 0,
+            "novos": ultima.novos if ultima else 0,
+            "atualizados": ultima.atualizados if ultima else 0,
+        },
         "total": len(ativos),
         "em_lojas": len(de_loja),
         "fora_de_loja": len(ativos) - len(de_loja),

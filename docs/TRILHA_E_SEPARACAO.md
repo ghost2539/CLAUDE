@@ -89,8 +89,16 @@ aberto, e ativo já encerrado.
 
 ### Ativos anteriores ao módulo
 
-Não entram. A contagem começa nos novos, sem retroativo — decisão da área.
-Processo que topa com um ativo fora da trilha segue normalmente, só não mede.
+São **adotados** no primeiro uso, em vez de travarem a tela. Bancada,
+preparação e destinação chamam `garantir_ativo()`: se a série não está na
+trilha, o ativo é criado na hora, com modelo e imobilizado buscados na
+base do portal, e o relógio começa **na adoção**. Não se inventa
+histórico: o que aconteceu antes não existe para a medição.
+
+A `origem` guarda de onde veio a adoção (bancada, preparação, destinação),
+então dá para separar depois o que nasceu no Recebimento do que foi
+adotado. `adotar_ativos = 0`, em Configuração → Ciclo do ativo, volta ao
+comportamento antigo de recusar.
 
 ### Reentrada
 

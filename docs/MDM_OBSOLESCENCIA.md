@@ -414,3 +414,17 @@ roda, a tela pergunta o andamento em
 de quantos, e a fase (conectando, lendo a grade, gravando). Duas coletas
 ao mesmo tempo são recusadas com 409, e uma falha encerra o progresso
 com o motivo, em vez de deixar a barra presa.
+
+## Só coletor de loja entra no parque
+
+O MDM devolve tudo que está inscrito: coletor, celular, tablet, aparelho
+de teste. Só entra no parque o que tem usuário no padrão
+`<sigla da loja><número>_coletor` com uma BU conhecida (LJR, CM, LAS, YC,
+LJRAR, LJRUY, CD). O resto é descartado na coleta — não vira linha, não
+entra em "por modelo", "por versão", tags nem "mais antigos", e não cai na
+fila de tratativa.
+
+O que já estava gravado fora desse padrão, de coletas antigas, é removido
+na próxima coleta. O resumo mostra `coleta.total_mdm`, `coleta.lidos` e
+`coleta.descartados`, para a pergunta "não trouxe tudo?" ter resposta na
+tela. `somente_coletores = 0` desliga o filtro.

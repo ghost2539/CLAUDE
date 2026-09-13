@@ -157,6 +157,7 @@ class Coleta(Base):
     novos: Mapped[int] = mapped_column(Integer, default=0)
     atualizados: Mapped[int] = mapped_column(Integer, default=0)
     sumiram: Mapped[int] = mapped_column(Integer, default=0)
+    descartados: Mapped[int] = mapped_column(Integer, default=0)
     erro: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -195,6 +196,11 @@ PADROES = {
     # fala com Segurança.
     "versao_os_minima": "11",
     "modelos_sem_update": "",
+    # O parque é de COLETOR de loja. O MDM devolve também celular, tablet
+    # e aparelho de teste; sem este filtro eles entram nas contagens por
+    # modelo, por versão e nas tags, e o número deixa de ser do parque.
+    # O usuário do coletor segue <sigla da loja><número>_coletor.
+    "somente_coletores": "1",
     # PDVs no ServiceNow. Deixado configurável porque o rótulo da tela
     # ("Origem da descoberta") pode não bater com o nome interno do campo.
     "pdv_tabela": "cmdb_ci_computer",

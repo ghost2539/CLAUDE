@@ -25,8 +25,10 @@ from db.preparacao import (
     CONFIGURACAO, MONTAGEM, INTERNALIZACAO,
 )
 from core.security import require_permission, check_rate_limit
-from routers.trilha import Calendario, duracao_util, mover, TrilhaInvalida, _utc
+from routers.trilha import (Calendario, duracao_util, mover, TrilhaInvalida,
+                            garantir_ativo, _utc)
 
+_ORIGEM_ADOCAO = "preparacao"
 _log = logging.getLogger("preparacao")
 
 router = APIRouter(prefix="/api/preparacao", tags=["Preparação"])
@@ -114,7 +116,11 @@ def api_bipar(body: BipeIn, req: Request):
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
         ).scalar_one_or_none()
         if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha.")
+            # Equipamento anterior ao módulo é adotado aqui; o relógio começa agora.
+            ativo = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
+        if ativo is None:
+            raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
+                                     "automática está desligada em Configuração → Ciclo do ativo.")
         if ativo.estado_fisico != FILA_DA_ESTACAO[estacao]:
             raise HTTPException(
                 409, f"A série {serial} não está na fila de "
@@ -169,7 +175,11 @@ def api_concluir(body: ConclusaoIn, req: Request):
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
         ).scalar_one_or_none()
         if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha.")
+            # Equipamento anterior ao módulo é adotado aqui; o relógio começa agora.
+            ativo = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
+        if ativo is None:
+            raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
+                                     "automática está desligada em Configuração → Ciclo do ativo.")
         if ativo.estado_fisico != TRATATIVA_DA_ESTACAO[estacao]:
             raise HTTPException(409, "Bipe o equipamento antes de concluir.")
         try:

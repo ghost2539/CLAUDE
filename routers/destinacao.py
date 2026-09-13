@@ -34,8 +34,10 @@ from db.destinacao import (
 )
 from config import get_settings
 from core.security import require_permission, check_rate_limit
-from routers.trilha import Calendario, duracao_util, mover, encerrar, TrilhaInvalida, _utc
+from routers.trilha import (Calendario, duracao_util, mover, encerrar, TrilhaInvalida,
+                            garantir_ativo, _utc)
 
+_ORIGEM_ADOCAO = "destinacao"
 _log = logging.getLogger("destinacao")
 _cfg = get_settings()
 
@@ -136,7 +138,11 @@ def api_bipar(body: BipeIn, req: Request):
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
         ).scalar_one_or_none()
         if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha.")
+            # Equipamento anterior ao módulo é adotado aqui; o relógio começa agora.
+            ativo = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
+        if ativo is None:
+            raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
+                                     "automática está desligada em Configuração → Ciclo do ativo.")
         if ativo.estado_fisico != AG_DESCARACTERIZACAO:
             raise HTTPException(
                 409, f"A série {serial} não está aguardando descaracterização "
@@ -192,7 +198,11 @@ async def api_descaracterizar(
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
         ).scalar_one_or_none()
         if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha.")
+            # Equipamento anterior ao módulo é adotado aqui; o relógio começa agora.
+            ativo = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
+        if ativo is None:
+            raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
+                                     "automática está desligada em Configuração → Ciclo do ativo.")
         if ativo.estado_fisico != EX_DESCARACTERIZACAO:
             raise HTTPException(409, "Bipe o equipamento antes de concluir.")
         ativo_id = ativo.id
@@ -338,7 +348,10 @@ def api_lote_criar(body: LoteIn, req: Request):
                 select(dbt.Ativo).where(dbt.Ativo.serial == serial)
             ).scalar_one_or_none()
             if a is None:
-                raise HTTPException(404, f"A série {serial} não está na trilha.")
+                a = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
+            if a is None:
+                raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
+                                         "automática está desligada em Configuração → Ciclo do ativo.")
             if a.estado_fisico != AG_DEFINICAO_DESTINO:
                 raise HTTPException(
                     409, f"A série {serial} não está aguardando destino — "

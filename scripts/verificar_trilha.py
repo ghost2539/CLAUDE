@@ -298,6 +298,44 @@ checar(devolta == antes, "voltar o calendário devolve o número anterior")
 
 # ── Resultado ──────────────────────────────────────────────────────
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
+# ── Adoção de ativo anterior ao módulo ─────────────────────────────
+print("\nAdoção de ativo que já existia na base")
+from routers.trilha import garantir_ativo, adocao_ligada, dados_da_base  # noqa: E402
+
+db.gravar_config({"adotar_ativos": "1"})
+checar(adocao_ligada(), "adoção ligada por padrão")
+with db.SessionLocal() as s:
+    novo_ativo = garantir_ativo(s, "antigo-001", usuario="tecnico", origem="bancada")
+    s.commit()
+    checar(novo_ativo is not None and novo_ativo.serial == "ANTIGO-001", "série desconhecida é adotada em maiúsculas")
+    checar(novo_ativo.origem == "bancada", "a origem registra de onde veio a adoção")
+with db.SessionLocal() as s:
+    de_novo = garantir_ativo(s, "ANTIGO-001", usuario="outro", origem="preparacao")
+    s.commit()
+    checar(de_novo.id == novo_ativo.id, "segunda chamada devolve o mesmo ativo, não duplica")
+    checar(s.query(db.Ativo).filter_by(serial="ANTIGO-001").count() == 1, "uma linha só na trilha")
+
+# Ativo encerrado volta pela adoção, como reentrada.
+with db.SessionLocal() as s:
+    a = abrir_ativo(s, serial="CICLO-9", usuario="u")
+    mover(s, a, estado="AG_TRIAGEM", tipo=FILA)
+    encerrar(s, a, estado="ENTREGUE")
+    s.commit()
+    checar(a.encerrado, "ativo encerrado")
+with db.SessionLocal() as s:
+    volta = garantir_ativo(s, "CICLO-9", usuario="tecnico", origem="bancada")
+    s.commit()
+    checar(volta is not None and not volta.encerrado, "encerrado é reaberto pela adoção, não recusado")
+
+db.gravar_config({"adotar_ativos": "0"})
+checar(not adocao_ligada(), "configuração desliga a adoção")
+with db.SessionLocal() as s:
+    checar(garantir_ativo(s, "NUNCA-VISTO", usuario="t") is None, "com a adoção desligada, não inventa ativo")
+    checar(garantir_ativo(s, "ANTIGO-001", usuario="t") is not None, "…mas quem já está na trilha continua respondendo")
+db.gravar_config({"adotar_ativos": "1"})
+checar(dados_da_base("NAO-EXISTE-EM-LUGAR-NENHUM") == {}, "base sem o serial devolve vazio, sem quebrar")
+
+
 if falhas:
     print("\nFalhas:")
     for f in falhas:
