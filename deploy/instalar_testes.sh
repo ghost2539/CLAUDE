@@ -246,13 +246,49 @@ else
                 || { echo "ERRO: pg_dump/pg_restore/psql não instalados (postgresql-client)."; exit 1; }
             DUMP="$STATE/portal_producao.dump"
             pg_dump -Fc --no-owner --no-acl --dbname="$PG_URL" -f "$DUMP" || { echo "ERRO no pg_dump da produção."; exit 1; }
-            # Derruba conexões do teste e recria o banco de teste (nunca o de produção).
-            psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c \
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$PG_TESTE' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
-            psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c "DROP DATABASE IF EXISTS \"$PG_TESTE\";" \
-                && psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE \"$PG_TESTE\";" || {
-                echo "ERRO: não consegui criar o banco $PG_TESTE. O usuário do Postgres precisa de CREATEDB."
-                echo "      Como postgres:  createdb -O <usuario_do_portal> $PG_TESTE   e rode de novo."; exit 1; }
+            # Usuário do portal no Postgres (dono do banco de testes).
+            PG_USUARIO="$(printf '%s' "$PG_BASE" | sed -E 's#^[a-z]+://([^:@/]+).*#\1#')"
+            # Cria o banco como o usuário `postgres` do sistema (entra sem senha
+            # pelo socket): o usuário do portal não tem CREATEDB e, pelo
+            # pg_hba, só entra com senha no banco de produção.
+            PSQL_ADMIN=""
+            if [ "$ROOT" -eq 1 ] && id postgres >/dev/null 2>&1 \
+               && su -s /bin/sh postgres -c "psql -tAc 'select 1'" >/dev/null 2>&1; then
+                PSQL_ADMIN="su -s /bin/sh postgres -c"
+            fi
+            if [ -n "$PSQL_ADMIN" ]; then
+                $PSQL_ADMIN "psql -v ON_ERROR_STOP=1 -q -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$PG_TESTE' AND pid<>pg_backend_pid();\"" >/dev/null 2>&1 || true
+                $PSQL_ADMIN "psql -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS \"$PG_TESTE\";' -c 'CREATE DATABASE \"$PG_TESTE\" OWNER \"$PG_USUARIO\";'" \
+                    || { echo "ERRO: não consegui criar o banco $PG_TESTE como postgres."; exit 1; }
+                # pg_hba: espelha para o banco de testes as regras que citam o
+                # banco de produção; senão o restore e o portal caem no ident.
+                HBA="$($PSQL_ADMIN "psql -tAc 'show hba_file'" 2>/dev/null | tr -d '[:space:]')"
+                if [ -n "$HBA" ] && [ -f "$HBA" ]; then
+                    if ! grep -Eq "^\s*(local|host|hostssl|hostnossl)\s+[^#]*\b$PG_TESTE\b" "$HBA"; then
+                        cp -p "$HBA" "$HBA.antes-testes.$(date +%Y%m%d%H%M%S)"
+                        NOVAS="$(grep -E "^\s*(local|host|hostssl|hostnossl)\s+" "$HBA" | grep -E "^\s*\S+\s+([^ \t]*,)?$PG_NOME(,[^ \t]*)?\s" | sed -E "s/(^\s*\S+\s+)([^ \t]*)/\1$PG_TESTE/")"
+                        if [ -n "$NOVAS" ]; then
+                            {
+                                echo "# Portal SPARE — ambiente de testes (gerado por instalar_testes.sh)"
+                                printf '%s\n' "$NOVAS"
+                            } > "$STATE/hba_testes.txt"
+                            # As regras novas entram ANTES das existentes: no pg_hba vale a primeira que casa.
+                            cat "$STATE/hba_testes.txt" "$HBA" > "$STATE/hba_novo.txt" && cat "$STATE/hba_novo.txt" > "$HBA"
+                            $PSQL_ADMIN "psql -tAc 'select pg_reload_conf()'" >/dev/null 2>&1
+                            echo "   pg_hba.conf: regra do banco de testes acrescentada (cópia da regra de $PG_NOME)"
+                        else
+                            echo "   AVISO: não achei em $HBA uma regra que cite $PG_NOME; se o restore falhar por autenticação, acrescente uma para $PG_TESTE."
+                        fi
+                    fi
+                fi
+            else
+                psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c \
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$PG_TESTE' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
+                psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c "DROP DATABASE IF EXISTS \"$PG_TESTE\";" \
+                    && psql --dbname="$PG_SERVIDOR/postgres" -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE \"$PG_TESTE\";" || {
+                    echo "ERRO: não consegui criar o banco $PG_TESTE com o usuário do portal (sem CREATEDB ou pg_hba)."
+                    echo "      Como root este script usa o usuário postgres do sistema; rode com sudo."; exit 1; }
+            fi
             pg_restore --no-owner --no-acl --dbname="$PG_SERVIDOR/$PG_TESTE" "$DUMP" 2>"$STATE/pg_restore.err" \
                 || { echo "AVISO: pg_restore terminou com avisos (veja $STATE/pg_restore.err)"; }
             rm -f "$DUMP"
