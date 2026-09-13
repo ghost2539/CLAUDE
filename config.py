@@ -188,6 +188,12 @@ class Settings:
         _sqlite("trilha"),
     )
 
+    # ── Separação e Expedição (A15) ─────────────────────────────────────
+    SEPARACAO_DATABASE_URL: str = os.getenv(
+        "SEPARACAO_DATABASE_URL",
+        _sqlite("separacao"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

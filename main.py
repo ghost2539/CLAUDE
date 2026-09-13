@@ -221,6 +221,21 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Separação e Expedição (A15) — banco próprio ─────────────────────
+    # Depende do núcleo da Trilha para registrar o tempo, mas carrega
+    # isolado: se a trilha não subir, a separação ainda funciona sem
+    # medir — operação não para por causa de indicador.
+    try:
+        import db.separacao as _db_sep
+        _db_sep.init_db()
+        from routers.separacao import router as separacao_router
+        app.include_router(separacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("separacao").error(
+            "Módulo Separação NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)
