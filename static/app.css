@@ -1068,3 +1068,8 @@ textarea:focus-visible, input[type="checkbox"]:focus-visible {
 .torre-coluna-pista { position: relative; flex: 1; display: flex; align-items: flex-end; }
 .torre-coluna-fita { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px 2px 0 0; min-height: 1px; }
 .torre-coluna-rotulo { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 9.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Consulta Times: escolha dos estoques vindos do ServiceNow */
+.ct-estoques { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .35rem .9rem;
+               max-height: 220px; overflow: auto; padding: .5rem; border: 1px solid var(--border); border-radius: 8px; }
+.ct-estoque { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }

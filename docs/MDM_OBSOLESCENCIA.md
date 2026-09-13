@@ -405,3 +405,12 @@ verificação com essa cadeia. A sessão ignora `REQUESTS_CA_BUNDLE` e
 
 Falha de certificado, proxy ou rede volta como **502** (ou **504** em
 tempo esgotado) com a causa e a orientação na mensagem, nunca como 500.
+
+## Progresso da coleta
+
+A varredura leva minutos e a requisição só volta no fim. Enquanto ela
+roda, a tela pergunta o andamento em
+`GET /api/obsolescencia/coleta/progresso`: página atual, coletores lidos
+de quantos, e a fase (conectando, lendo a grade, gravando). Duas coletas
+ao mesmo tempo são recusadas com 409, e uma falha encerra o progresso
+com o motivo, em vez de deixar a barra presa.
