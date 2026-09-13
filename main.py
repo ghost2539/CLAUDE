@@ -294,6 +294,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Assistência externa e devolução (A05, A14) — banco próprio ──────
+    try:
+        import db.externo as _db_ext
+        _db_ext.init_db()
+        from routers.externo import router as externo_router
+        app.include_router(externo_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("externo").error(
+            "Módulo Assistência/Devolução NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)

@@ -218,6 +218,12 @@ class Settings:
         _sqlite("destinacao"),
     )
 
+    # ── Assistência externa e devolução a terceiros (A05, A14) ──────────
+    EXTERNO_DATABASE_URL: str = os.getenv(
+        "EXTERNO_DATABASE_URL",
+        _sqlite("externo"),
+    )
+
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
     ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(

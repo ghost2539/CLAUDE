@@ -17,6 +17,7 @@
         bancada:        'Bancada',
         preparacao:     'Preparação',
         separacao:      'Separação',
+        externo:        'Assistência',
         destinacao:     'Destinação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
