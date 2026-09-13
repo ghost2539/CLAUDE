@@ -111,13 +111,61 @@ echo "   commit: $(git -C "$TEST_DIR" log --oneline -1)"
 
 # ── 2. Python ──────────────────────────────────────────────────────────────
 command -v python3 >/dev/null 2>&1 || { echo "ERRO: python3 não encontrado."; exit 1; }
-if [ ! -x "$TEST_DIR/venv/bin/python" ]; then
-    echo "-- Criando o venv"
-    python3 -m venv "$TEST_DIR/venv" || { echo "ERRO: falha ao criar o venv (python3-venv?)."; exit 1; }
+
+# Proxy: o pip não enxerga o do dnf/yum sozinho. Se não vier do ambiente,
+# usa o que o servidor já tem configurado para o dnf.
+if [ -z "${https_proxy:-}${HTTPS_PROXY:-}" ]; then
+    PROXY_DNF="$(grep -hE '^\s*proxy\s*=' /etc/dnf/dnf.conf /etc/yum.conf 2>/dev/null | head -1 | sed -E 's/^\s*proxy\s*=\s*//; s/\s+$//')"
+    if [ -n "$PROXY_DNF" ] && [ "$PROXY_DNF" != "_none_" ]; then
+        PU="$(grep -hE '^\s*proxy_username\s*=' /etc/dnf/dnf.conf /etc/yum.conf 2>/dev/null | head -1 | sed -E 's/^[^=]*=\s*//')"
+        PP="$(grep -hE '^\s*proxy_password\s*=' /etc/dnf/dnf.conf /etc/yum.conf 2>/dev/null | head -1 | sed -E 's/^[^=]*=\s*//')"
+        if [ -n "$PU" ]; then PROXY_DNF="$(printf '%s' "$PROXY_DNF" | sed -E "s#^(https?://)#\1$PU:$PP@#")"; fi
+        export https_proxy="$PROXY_DNF" http_proxy="$PROXY_DNF" HTTPS_PROXY="$PROXY_DNF" HTTP_PROXY="$PROXY_DNF"
+        echo "-- Proxy do dnf aplicado ao pip: $(printf '%s' "$PROXY_DNF" | sed -E 's#//[^@]*@#//***@#')"
+    fi
 fi
-"$TEST_DIR/venv/bin/pip" install -q --upgrade pip
-echo "-- Instalando dependências"
-"$TEST_DIR/venv/bin/pip" install -q -r "$TEST_DIR/requirements.txt" || { echo "ERRO ao instalar dependências."; exit 1; }
+
+mkdir -p "$STATE"
+PY_TESTE="$TEST_DIR/venv/bin/python"
+VENV_OK=0
+if [ -x "$PY_TESTE" ] && "$PY_TESTE" -c 'import fastapi, sqlalchemy, pandas, openpyxl, uvicorn' 2>/dev/null; then
+    VENV_OK=1
+fi
+
+if [ "$VENV_OK" -eq 0 ]; then
+    if [ ! -x "$PY_TESTE" ]; then
+        echo "-- Criando o venv"
+        python3 -m venv "$TEST_DIR/venv" || { echo "ERRO: falha ao criar o venv (dnf install python3-venv / python3-pip?)."; exit 1; }
+    fi
+    echo "-- Instalando dependências pelo pip (até 3 min; sem saída para o PyPI, cai para o venv da produção)"
+    if timeout 180 "$PY_TESTE" -m pip install -q --timeout 25 --retries 1 -r "$TEST_DIR/requirements.txt" 2>"$STATE/pip.err"; then
+        VENV_OK=1
+    else
+        echo "   pip falhou ($(tail -1 "$STATE/pip.err" 2>/dev/null | cut -c1-120))"
+    fi
+fi
+
+if [ "$VENV_OK" -eq 0 ]; then
+    PY_PROD="$PROD_DIR/venv/bin/python"
+    [ -x "$PY_PROD" ] || { echo "ERRO: sem rede para o pip e sem venv em $PROD_DIR/venv para copiar."; exit 1; }
+    echo "-- Copiando o venv da produção (mesmo Python, mesmo servidor)"
+    rm -rf "$TEST_DIR/venv"
+    cp -a "$PROD_DIR/venv" "$TEST_DIR/venv" || { echo "ERRO ao copiar o venv."; exit 1; }
+    # Os executáveis do venv trazem o caminho antigo no cabeçalho; um "pip"
+    # esquecido instalaria na produção. Reescreve tudo para a pasta nova.
+    for f in "$TEST_DIR"/venv/bin/*; do
+        [ -f "$f" ] && [ ! -L "$f" ] || continue
+        head -c 2 "$f" 2>/dev/null | grep -q '#!' || continue
+        sed -i "1s#^\#!.*/venv/bin/python[0-9.]*#\#!$TEST_DIR/venv/bin/python#" "$f"
+    done
+    grep -rlZ "$PROD_DIR/venv" "$TEST_DIR/venv/bin" 2>/dev/null | xargs -0 -r sed -i "s#$PROD_DIR/venv#$TEST_DIR/venv#g"
+    # Dependência nova que a produção ainda não tenha: tenta o pip; se não
+    # der, o módulo correspondente fica de fora e o portal sobe sem ele.
+    "$PY_TESTE" -m pip install -q --timeout 20 --retries 0 -r "$TEST_DIR/requirements.txt" 2>/dev/null \
+        || echo "   AVISO: requisitos novos não instalados (sem rede); módulos que dependam deles ficam de fora."
+    "$PY_TESTE" -c 'import fastapi, sqlalchemy, pandas, openpyxl, uvicorn' || { echo "ERRO: venv copiado não carrega as bibliotecas básicas."; exit 1; }
+fi
+echo "   Python do teste: $("$PY_TESTE" -c 'import sys; print(sys.version.split()[0])') em $TEST_DIR/venv"
 
 # ── 3. Bancos: cópia da produção ──────────────────────────────────────────
 mkdir -p "$TEST_DIR/data/db" "$TEST_DIR/data/uploads" "$STATE" "$TEST_ENVDIR"
