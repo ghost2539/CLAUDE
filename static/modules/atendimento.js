@@ -70,7 +70,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         })[0][1];
 
         c.innerHTML = '';
-        c.appendChild(cabecalho(nome, 'Chamados sob o relógio da área.',
+        c.appendChild(cabecalho(nome, '',
             [botao('Assumir chamado', 'btn-primary', assumirNovo)]));
 
         var n = d.contagem || {};
@@ -84,8 +84,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         var corpo = S.el('div', { className: 'card-body' });
         if (!d.chamados.length) {
             corpo.appendChild(S.el('p', { className: 'sep-vazio',
-                textContent: 'Nenhum chamado desta frente no portal ainda. ' +
-                             'Use "Assumir chamado" para trazer um do ServiceNow.' }));
+                textContent: 'Nenhum chamado nesta frente.' }));
         } else {
             corpo.appendChild(tabela(d.chamados, c));
         }
@@ -139,8 +138,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
               '<label for="atd-novo">Número do chamado</label>' +
               '<input id="atd-novo" class="form-control" ' +
                      'placeholder="INC0000000 ou RITM0000000" autocomplete="off">' +
-              '<span class="text-muted" style="font-size:11.5px">Os dados vêm ' +
-                'do ServiceNow. Assumir já inicia a contagem do atendimento.</span>' +
             '</div>';
         S.openModal('Assumir chamado', corpo, rodapeModal('Assumir',
             async function () {
@@ -239,8 +236,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (!d.vinculos.length) {
             vinc.appendChild(S.el('p', {
                 className: 'text-muted', style: 'font-size:12.5px;margin:0',
-                textContent: 'Nenhum vínculo. Sem série ligada, o histórico do ' +
-                             'equipamento não registra este atendimento.'
+                textContent: 'Nenhuma série vinculada.'
             }));
         } else {
             d.vinculos.forEach(function (v) {
@@ -286,9 +282,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     function pedirEquipamento(d, c) {
         var corpo = S.el('div');
         corpo.innerHTML =
-            '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
-              'A solicitação nasce deste chamado, e o seu relógio pausa até o ' +
-              'equipamento sair.</p>' +
             '<div class="form-group">' +
               '<label for="atd-tipo">Tipo de atendimento</label>' +
               '<select id="atd-tipo" class="form-control">' +

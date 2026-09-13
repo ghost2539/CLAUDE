@@ -15,7 +15,6 @@
     <main class="login-card">
         <div class="login-marca" aria-hidden="true">SP</div>
         <h1 class="login-title">Portal de Operações</h1>
-        <p class="login-subtitle">Ativos, reparos e orçamento da operação SPARE</p>
 
         <form id="login-form" class="login-form">
             <div class="campo">
@@ -36,8 +35,6 @@
             <span id="login-error-text"></span>
         </div>
 
-        <p class="login-nota">Sua conta é a mesma da rede Renner. Acesso liberado
-            previamente por um administrador do portal.</p>
     </main>
 </div>
 
@@ -146,6 +143,7 @@
 
     <!-- Top bar -->
     <header class="topbar">
+        <button id="menu-toggle" class="menu-toggle" type="button" aria-label="Menu">&#9776;</button>
         <div class="topbar-left">
             <span id="app-title" class="topbar-app-title">Portal de Operações - SPARE</span>
         </div>
@@ -178,7 +176,7 @@
 <div id="loading-overlay" class="loading-overlay" hidden>
     <div class="loading-spinner">
         <span class="spinner spinner-lg"></span>
-        <span class="loading-text">Processando...</span>
+        <span class="loading-text">Aguarde…</span>
     </div>
 </div>
 

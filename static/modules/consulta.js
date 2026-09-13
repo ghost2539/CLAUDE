@@ -13,7 +13,6 @@ window.SPARE_MODULES.consulta = {
             '<div class="card mb-3">' +
                 '<div class="card-header">Identificadores</div>' +
                 '<div class="card-body">' +
-                    '<p class="text-muted">Cole os identificadores (um por linha, separados por vírgula ou tabulação).</p>' +
                     '<textarea id="q-bg-input" class="form-control" rows="6" ' +
                         'placeholder="Um identificador por linha"></textarea>' +
                     '<div class="btn-row mt-2">' +

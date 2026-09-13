@@ -27,7 +27,6 @@ var _loteAssets = [];
 function _renderLote(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Gerar Lote</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">Operação integrada ao Recebimento.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Gerar Lote</div>' +
@@ -245,7 +244,6 @@ function _loteGenerate(S) {
 function _renderA4(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Identificação A4</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">Operação integrada ao Recebimento.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Identificação A4</div>' +
@@ -332,9 +330,6 @@ function _a4Body() {
 function _renderLivre(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Impressão Zebra Livre</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Operação integrada ao Recebimento. ' +
-            'Não consome sequência e não altera recebimentos.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Etiqueta Zebra livre</div>' +

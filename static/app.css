@@ -27,7 +27,7 @@
 
     --text-primary: #E8E8E8;
     --text-secondary: #A0A0A0;
-    --text-muted: #6C6C6C;
+    --text-muted: #8A8A8A;   /* 4,6:1 sobre o painel: legível em 12px */
 
     --border-subtle: rgba(255, 255, 255, .06);
     --border-light: rgba(255, 255, 255, .1);
@@ -998,3 +998,28 @@ select.form-control-inline { padding-right: 26px; }
 .inv-locais { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--text-secondary); }
 .inv-locais b { color: var(--text-primary); font-weight: 600; }
 .inv-local-ok { color: var(--color-teal); }
+
+
+/* ── Foco de teclado (global) ─────────────────────────────────── */
+.btn:focus-visible, .sub-tab:focus-visible, .sidebar-item:focus-visible,
+.toast-close:focus-visible, a:focus-visible, select:focus-visible,
+textarea:focus-visible, input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+}
+
+/* ── Menu no celular ───────────────────────────────────────────── */
+.menu-toggle {
+    display: none;
+    background: transparent; border: 0; color: var(--text-primary);
+    font-size: 20px; line-height: 1; padding: 6px 10px; margin-right: 6px;
+    border-radius: var(--radius); cursor: pointer;
+}
+@media (max-width: 767px) {
+    .menu-toggle { display: inline-flex; }
+    .sidebar:hover { width: 0; }
+    body.menu-aberto .sidebar { width: 220px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.55); }
+    body.menu-aberto .sidebar .sidebar-label { display: inline; }
+    .topbar-center { display: none; }
+    .topbar-title { display: none; }
+}

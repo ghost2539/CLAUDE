@@ -43,7 +43,6 @@ function _snLoginBarHtml() {
         '<div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">' +
             '<div style="font-size:.9rem">' +
                 '<strong>ServiceNow</strong>' +
-                '<span style="color:var(--text-secondary)"> — conectado automaticamente pelo login do portal (Logon AD).</span>' +
                 '<div id="sn-bar-status" style="font-size:.82rem;color:var(--text-secondary);margin-top:.25rem"></div>' +
             '</div>' +
             '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:10px;background:#dc262620;color:#dc2626;white-space:nowrap">Verificando…</span>' +
@@ -112,13 +111,11 @@ var _snData = [];
 function _snRenderUpload(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Entrada de Estoque</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Upload de ativos para alm_hardware via a sua sessão do ServiceNow.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Origem dos ativos</div>' +
             '<div class="card-body">' +
-                '<label>Como deseja subir os ativos?</label>' +
+                '<label>Origem</label>' +
                 '<select id="sn-origem" class="form-control" style="max-width:420px">' +
                     '<option value="status">Base de recebimentos (por status)</option>' +
                     '<option value="lista">Lista de ativos</option>' +
@@ -136,8 +133,6 @@ function _snRenderUpload(container, S) {
                         '<option value="">Selecione…</option></select>' +
                     '<button class="btn btn-primary" id="sn-status-load">Carregar</button>' +
                 '</div>' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
-                    'Carregue os ativos do status e selecione quais subir.</p>' +
             '</div>' +
         '</div>' +
 
@@ -168,8 +163,6 @@ function _snRenderUpload(container, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Configuração ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'Moeda padrão BRL para todos os ativos. A depreciação é sempre calculada após a inclusão.</p>' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
                         '<input id="sn-stockroom" class="form-control" value="SPARE - CD324"></div>' +
@@ -184,9 +177,6 @@ function _snRenderUpload(container, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Enviar ao ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'Carregue/consulte os ativos acima, selecione e clique em Subir. ' +
-                    'O envio usa a sua sessão do ServiceNow (login do portal).</p>' +
                 '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
                     'Subir selecionados</button>' +
                 '<div id="sn-login-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
@@ -585,8 +575,6 @@ function _snPollJob(S, jobId) {
 function _snRenderSaida(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Saída de Estoque</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Busca global e movimentação de ativos no ServiceNow.</p>' +
 
         _snLoginBarHtml() +
 
@@ -935,8 +923,6 @@ function _miStockroomSelectHtml(cls, val) {
 function _snRenderMovInterna(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Movimentação Interna</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Movimenta ativos entre estoques internos, espaços e corredores.</p>' +
 
         _snLoginBarHtml() +
 
@@ -1159,8 +1145,6 @@ function _miMoveAll(S) {
 function _snRenderCorreios(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Chamados Correios</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Incidentes com códigos de rastreio (campo correlation_display).</p>' +
 
         _snLoginBarHtml() +
 

@@ -81,7 +81,6 @@ function _pField(label, id, value, type) {
 function renderConfigModulos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Configuração Módulos</h1>' +
-        '<p class="text-muted">Configurações administrativas das bases dos módulos.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — Importar base histórica</div>' +
@@ -142,9 +141,6 @@ function renderConfigModulos(c, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Indicadores — filtros do ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p class="text-muted">Ajusta as consultas do painel de Indicadores. ' +
-                    'Estados do incident são numéricos: 1 Novo · 2 Em andamento · 3 Em espera · ' +
-                    '6 Resolvido · 7 Encerrado · 8 Cancelado.</p>' +
                 '<div id="cm-ind-form"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
             '</div>' +
         '</div>';
@@ -314,8 +310,6 @@ async function renderAutomacoes(c, S) {
     var ehAdmin = !!(usuario.is_admin || permAutom.can_admin);
     c.innerHTML =
         '<h1 class="page-title">Automações</h1>' +
-        '<p class="text-muted">Rotina que encerra ou encaminha chamados entregues, ' +
-            'com o seu usuário. Só age quando o último evento do rastreio é ENTREGUE.</p>' +
         '<div class="card mb-3"><div class="card-header">' +
             (ehAdmin ? 'Configuração da rotina' : 'Situação da rotina') + '</div>' +
             '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
@@ -353,8 +347,7 @@ async function renderAutomacoes(c, S) {
                         S.esc(cfg.ultima_execucao || '—') + '</div></div>' +
                 '</div>' +
                 '<div class="mt-2"><button id="au-run" class="btn btn-primary">Exec Now</button>' +
-                '<span class="text-muted" style="margin-left:10px">' +
-                'A configuração da rotina é do administrador.</span></div>';
+                '</div>';
             ligarBotaoRodar();
             return;
         }
@@ -548,8 +541,6 @@ async function renderAutomacoes(c, S) {
 async function renderMonitoramento(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Monitoramento</h1>' +
-        '<p class="text-muted">Saúde do servidor e dos serviços, e registro de falhas de API, ' +
-            'integrações e automações.</p>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Saúde</span>' +
             '<span><button id="mo-refresh" class="btn btn-sm btn-secondary">Atualizar</button> ' +
@@ -694,7 +685,6 @@ async function renderMonitoramento(c, S) {
 async function renderAcessos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Acessos &amp; Alertas</h1>' +
-        '<p class="text-muted">Tentativas de acesso negadas e envio de alertas por e-mail.</p>' +
 
         '<div class="card mb-3"><div class="card-header" ' +
             'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -830,8 +820,7 @@ async function renderAcessos(c, S) {
                     '<button id="al-test" class="btn btn-outline" style="margin-left:8px">Enviar e-mail de teste</button>' +
                 '</div>' +
                 '<div id="al-result" class="mt-2"></div>' +
-                '<p class="text-muted mt-2" style="font-size:.8rem">A senha é guardada cifrada no banco de ' +
-                    'monitoramento. Quando existir chave <b>SMTP_SENHA</b> no cofre, ela tem prioridade.</p>';
+                '';
 
             document.getElementById('al-save').onclick = async function () {
                 var limpar = document.getElementById('al-limpar');
@@ -1009,10 +998,6 @@ async function renderLocations(c, S) {
 async function renderClassifications(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Classificações</h1>' +
-        '<p class="text-muted">Regras de classificação automática de ativos por descrição EBS. ' +
-            'Salvar uma regra já reclassifica os ativos que casam com ela; use ' +
-            '<b>Aplicar em toda a base</b> para passar todas as regras de novo sobre ' +
-            'a base de recebimento inteira (inclusive o que está como NÃO CLASSIFICADA).</p>' +
         '<div class="btn-row mb-3">' +
             '<button id="pm-class-add2" class="btn btn-primary">Nova regra</button>' +
             '<button id="pm-class-apply" class="btn btn-secondary">Aplicar em toda a base</button>' +
@@ -1135,31 +1120,34 @@ async function _renderValorHora(S) {
 async function renderPermissions(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Usuários e Permissões</h1>' +
-        '<p class="text-muted">Usuários ServiceNow são registrados automaticamente no primeiro login. ' +
-            'Selecione Editar para definir acesso por módulo.</p>' +
         '<div class="card mb-3"><div class="card-header">Controle de Acesso Externo</div>' +
             '<div class="card-body">' +
                 '<label class="checkbox-label">' +
                     '<input id="pm-block-external" type="checkbox"> ' +
-                    'Bloquear acesso externo (somente usuários na lista de permitidos podem logar via ServiceNow)' +
+                    'Exigir liberação prévia para login' +
                 '</label>' +
                 '<button id="pm-save-ac" class="btn btn-sm btn-primary mt-2">Salvar</button>' +
             '</div>' +
         '</div>' +
-        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário (Local ou Rede/SSO)</button>' +
+        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário</button>' +
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
         'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'inventario', 'regularizacao', 'bancada', 'preparacao',
         'destinacao', 'externo', 'torre', 'trilha',
         'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
-        'orcamento_spare', 'orcamento_manutencao'];
+        'orcamento_spare', 'orcamento_manutencao', 'obsolescencia',
+        'automacoes', 'ebs_forms'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
         // permissão já existe nos usuários); só o nome no menu mudou.
         identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
         atendimento: 'Atendimento', separacao: 'Separação',
+        projetos: 'Projetos de Loja', reversa: 'Logística Reversa',
+        inventario: 'Inventário', regularizacao: 'Regularização',
+        obsolescencia: 'Obsolescência do parque', automacoes: 'Automações',
+        ebs_forms: 'EBS Forms',
         bancada: 'Bancada (triagem e reparo)',
         preparacao: 'Preparação (configuração e estoque)',
         destinacao: 'Destinação (baixa, venda, descarte, doação)',
@@ -1442,9 +1430,7 @@ async function renderDashboards(c, S) {
 
     var html =
         '<h1 class="page-title">Dashboards</h1>' +
-        '<p class="text-muted">Telas de TV do portal. Cada uma tem o seu endereço e ' +
-            'atualiza sozinha no intervalo abaixo. Desativada, a tela sai do ar sem ' +
-            'precisar mexer no servidor.</p>';
+        '';
 
     _DASHBOARDS.forEach(function (d) {
         var chave = d[0], nomePadrao = d[1], subPadrao = d[2];
@@ -1523,8 +1509,6 @@ function renderAccount(c, S) {
                         S.esc(u.display_name || '') + '"></div>' +
                 '</div>' +
                 '<button id="pm-nome-save" class="btn btn-primary mt-2">Salvar nome</button>' +
-                '<span class="text-muted" style="margin-left:10px">' +
-                'A senha é a da rede — alterada só no AD.</span>' +
             '</div>' +
         '</div>';
 
@@ -1581,8 +1565,7 @@ async function renderSeparacaoConfig(c, S) {
                       ['LIKE', 'Contém']]) +
           _sepCampo('Prefixo da reposição', 'sc-pref-rep', cfg.prefixo_reposicao) +
           _sepCampo('Prefixo da inauguração', 'sc-pref-in', cfg.prefixo_inauguracao) +
-          _sepCampo('Situação do ativo em estoque', 'sc-status', cfg.status_estoque,
-                    'Código de install_status. 6 é "In stock".') +
+          _sepCampo('Situação em estoque (install_status)', 'sc-status', cfg.status_estoque) +
         '</div>' +
         '<div class="table-wrapper mt-3"><table class="data-table"><thead><tr>' +
         '<th>Atendimento</th><th>Estoque</th><th>Consulta enviada ao ServiceNow</th>' +
@@ -1611,8 +1594,7 @@ async function renderSeparacaoConfig(c, S) {
           _sepCampo('Campo da reserva', 'sc-res-campo', cfg.reserva_campo) +
           _sepCampo('Valor quando reservado', 'sc-res-valor', cfg.reserva_valor) +
           _sepCampo('Valor quando livre', 'sc-res-livre', cfg.reserva_valor_livre) +
-          _sepCampo('Situação no envio', 'sc-envio-status', cfg.envio_status,
-                    'Código de install_status. 1 é "In use".') +
+          _sepCampo('Situação no envio (install_status)', 'sc-envio-status', cfg.envio_status) +
           _sepCampo('Campo do local no envio', 'sc-envio-local', cfg.envio_campo_local) +
         '</div>';
     c.appendChild(_sepCartao('Reserva e envio', reserva, largura));
@@ -1623,8 +1605,7 @@ async function renderSeparacaoConfig(c, S) {
         '<div class="form-grid cols-2">' +
           _sepCampo('Prefixos aceitos', 'sc-ch-pref', cfg.chamado_prefixos) +
           _sepCampo('Situações que bloqueiam', 'sc-ch-bloq',
-                    cfg.chamado_estados_bloqueados,
-                    'Códigos de state, separados por vírgula.') +
+                    cfg.chamado_estados_bloqueados) +
           _sepCampo('Prazo normal (dias úteis)', 'sc-prazo-n', cfg.prazo_normal) +
           _sepCampo('Prazo loja parada (dias úteis)', 'sc-prazo-lp', cfg.prazo_loja_parada) +
           _sepCampo('Prazo inauguração (dias úteis)', 'sc-prazo-in', cfg.prazo_inauguracao) +
@@ -1681,8 +1662,7 @@ async function renderSeparacaoConfig(c, S) {
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
         '<div class="form-grid cols-2">' +
-          _sepCampo('Dias de expediente', 'sc-cal-dias', cal.expediente_dias,
-                    '0 é segunda, 6 é domingo. Em branco, o relógio corre direto.') +
+          _sepCampo('Dias de expediente (0=seg … 6=dom)', 'sc-cal-dias', cal.expediente_dias) +
           _sepCampo('Fuso em relação ao UTC', 'sc-cal-fuso', cal.fuso_horas) +
           _sepCampo('Abre às', 'sc-cal-ini', cal.expediente_inicio) +
           _sepCampo('Fecha às', 'sc-cal-fim', cal.expediente_fim) +

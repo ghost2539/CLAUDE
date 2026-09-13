@@ -739,7 +739,6 @@ function renderLotes(c, S) {
 async function renderModelos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Cadastro de modelos</h1>' +
-        '<p class="text-muted">Ao salvar uma regra ativa, todos os ativos compatíveis são atualizados automaticamente.</p>' +
         '<button id="pm-class-add" class="btn btn-primary mb-3">Nova regra</button>' +
         '<button id="pm-class-import" class="btn btn-secondary mb-3" style="margin-left:8px">Importar planilha</button>' +
         '<div id="pm-class-list"></div>';

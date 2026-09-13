@@ -76,15 +76,7 @@ function _gaCarregarTelas() {
 function _gaRenderObsolescencia(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Obsolescência do Parque</h1>' +
-        '<p class="page-subtitle">Painel dedicado, em tela cheia, com a situação ' +
-            'de obsolescência dos coletores.</p>' +
         '<div class="card"><div class="card-body">' +
-            '<p style="margin:0 0 12px">O painel abre em uma aba separada, fora da ' +
-                'moldura do portal, para ser apresentado em reunião. O acesso continua ' +
-                'exigindo o login da rede.</p>' +
-            '<p style="margin:0 0 16px;color:var(--text-secondary);font-size:.9rem">' +
-                'Fonte dos dados: MDM de Coletores (Workspace ONE / AirWatch), coletado ' +
-                'em segundo plano pelo portal.</p>' +
             '<button id="ga-obs-abrir" class="btn btn-primary">Abrir painel de Obsolescência</button>' +
         '</div></div>';
 

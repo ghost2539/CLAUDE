@@ -45,9 +45,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         }
 
         c.innerHTML = '';
-        c.appendChild(cabecalho(d.rotulo, vista.especie === 'ASSISTENCIA'
-            ? 'O relógio de quem está fora não conta contra ninguém do SPARE.'
-            : 'Operadora, Lexmark e comodato. O que volta é a confirmação.'));
+        c.appendChild(cabecalho(d.rotulo, ''));
         c.appendChild(indicadores([
             ['Para enviar', d.aguardando.length, 'accent-gold'],
             ['Fora da área', d.fora.length, 'accent-teal'],

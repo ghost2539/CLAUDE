@@ -204,7 +204,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             var numero = campo.value.trim().toUpperCase();
             if (!numero || validando) return;
             validando = true;
-            info.innerHTML = '<span class="text-muted">Consultando o ServiceNow...</span>';
+            info.innerHTML = '<span class="text-muted">Consultando…</span>';
             try {
                 var ch = await S.api('/separacao/chamado/' + encodeURIComponent(numero));
                 vista.chamado = ch;
