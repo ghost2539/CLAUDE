@@ -237,7 +237,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         esquerda.appendChild(cartao('O que é', corpo));
 
         var hist = S.el('div', { className: 'card-body' });
-        hist.appendChild(S.el('pre', { className: 'reg-historico', textContent: d.historico || '—' }));
+        hist.appendChild(linhaDoTempo(d.historico));
         esquerda.appendChild(cartao('Histórico', hist));
 
         var info = S.el('div', { className: 'card-body' });
@@ -250,6 +250,32 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                 (d.resolucao_detalhe ? '<p class="text-muted mt-2" style="font-size:12.5px;margin:0">' + S.esc(d.resolucao_detalhe) + '</p>' : '') : '') +
             '<div class="sep-total mt-2"><span>Aberta por</span><b>' + S.esc(d.aberta_por) + ' · ' + S.esc(data(d.aberta_em)) + '</b></div>';
         lateral.appendChild(cartao('Resumo', info));
+    }
+
+    /* O histórico é gravado como "[aaaa-mm-dd hh:mm login] texto", uma
+       linha por evento. Aqui vira linha do tempo: data · quem · o quê. */
+    function linhaDoTempo(texto) {
+        var caixa = S.el('div', { className: 'reg-tempo' });
+        var linhas = String(texto || '').split('\n').filter(function (l) { return l.trim(); });
+        if (!linhas.length) {
+            caixa.appendChild(S.el('p', { className: 'sep-vazio', textContent: 'Sem eventos.' }));
+            return caixa;
+        }
+        linhas.forEach(function (l) {
+            var m = l.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) ([^\]]*)\]\s*(.*)$/);
+            var item = S.el('div', { className: 'reg-tempo-item' });
+            if (m) {
+                var dt = new Date(m[1] + 'T' + m[2] + ':00');
+                item.innerHTML = '<div class="reg-tempo-quando">' +
+                    S.esc(dt.toLocaleDateString('pt-BR')) + ' <span>' + S.esc(m[2]) + '</span></div>' +
+                    '<div class="reg-tempo-quem">' + S.esc(m[3]) + '</div>' +
+                    '<div class="reg-tempo-oque">' + S.esc(m[4]) + '</div>';
+            } else {
+                item.innerHTML = '<div></div><div></div><div class="reg-tempo-oque">' + S.esc(l) + '</div>';
+            }
+            caixa.appendChild(item);
+        });
+        return caixa;
     }
 
     function campo(rot, val) {

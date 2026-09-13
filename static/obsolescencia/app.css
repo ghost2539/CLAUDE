@@ -240,3 +240,6 @@
     font-size: .88rem;
 }
 .obs-campos input:focus { outline: none; border-color: var(--color-primary); }
+
+.obs-kpi--botao { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.obs-kpi--botao:hover, .obs-kpi--botao:focus-visible { outline: 2px solid var(--status-alerta, #C79105); outline-offset: 2px; }

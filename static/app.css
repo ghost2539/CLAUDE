@@ -1023,3 +1023,15 @@ textarea:focus-visible, input[type="checkbox"]:focus-visible {
     .topbar-center { display: none; }
     .topbar-title { display: none; }
 }
+
+/* ── Linha do tempo da divergência ─────────────────────────────── */
+.reg-tempo { display: grid; grid-template-columns: auto auto 1fr; column-gap: 14px; row-gap: 8px; font-size: 12.5px; }
+.reg-tempo-item { display: contents; }
+.reg-tempo-quando { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.reg-tempo-quando span { color: var(--text-muted); margin-left: 4px; }
+.reg-tempo-quem { color: var(--color-teal); white-space: nowrap; }
+.reg-tempo-oque { color: var(--text-primary); }
+@media (max-width: 767px) { .reg-tempo { grid-template-columns: 1fr; row-gap: 2px; } .reg-tempo-item + .reg-tempo-item { margin-top: 10px; } }
+
+.torre-barra-pista { position: relative; }
+.torre-barra-marca { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #C79105; opacity: .9; }

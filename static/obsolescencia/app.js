@@ -75,7 +75,7 @@
             return barra(x[campoNome], x[campoValor] || 0, x[campoCritico] || 0, maximo);
         }).join('');
         return '<div class="obs-card"><h2>' + esc(titulo) + '</h2>' +
-            '<p class="obs-sub-card">' + esc(sub) + '</p>' +
+            (sub ? '<p class="obs-sub-card">' + esc(sub) + '</p>' : '') +
             '<div class="obs-barras">' + linhas + '</div>' +
             '<div class="obs-legenda">' +
                 '<span><i style="background:var(--barra-fundo)"></i>No parque</span>' +
@@ -93,16 +93,14 @@
             return barra(t.tag + ' · ' + t.grupo, t.quantidade, 0, maximo);
         }).join('');
         return '<div class="obs-card"><h2>Coletores por tag</h2>' +
-            '<p class="obs-sub-card">Só aparecem as tags que têm coletor atribuído.</p>' +
+
             '<div class="obs-barras">' + linhas + '</div></div>';
     }
 
     function cardAntigos(lista, idadeDesconhecida) {
         if (!lista || !lista.length) {
             return '<div class="obs-card"><h2>Coletores mais antigos</h2>' +
-                '<p class="obs-sub-card">Nenhum coletor com idade conhecida. A data de ' +
-                'aquisição vem do EBS; sem ela a idade não é estimada, para não ' +
-                'inventar número.</p></div>';
+                '<p class="obs-sub-card">Nenhum coletor com idade conhecida.</p></div>';
         }
         var linhas = lista.slice(0, 20).map(function (c) {
             return '<tr><td>' + esc(c.nome || c.mdm_id) + '</td>' +
@@ -119,6 +117,63 @@
             '<th>Coletor</th><th>BU</th><th>Loja</th><th>Modelo</th><th>Android</th>' +
             '<th class="obs-num">Anos</th></tr></thead><tbody>' + linhas +
             '</tbody></table></div></div>';
+    }
+
+    var NOME_CRITERIO = { idade_5_anos: 'Idade acima do limite', android_travado: 'Android sem atualização', modelo_eol: 'Modelo em fim de vida' };
+
+    /* Por critério: responde "por quê" — quantos atendem cada regra. */
+    function cardCriterios(crit, total, limites) {
+        if (!crit) return '';
+        var chaves = Object.keys(crit);
+        var maximo = Math.max.apply(null, chaves.map(function (k) { return crit[k] || 0; }).concat([1]));
+        var linhas = chaves.map(function (k) {
+            return barra(NOME_CRITERIO[k] || k, crit[k] || 0, crit[k] || 0, Math.max(maximo, total || 1));
+        }).join('');
+        var lim = limites || {};
+        return '<div class="obs-card"><h2>Por critério</h2>' +
+            '<p class="obs-sub-card">' + esc((lim.anos || '?') + ' anos · Android < ' + (lim.versao_os_minima || '?') +
+                ' · EOL: ' + (lim.modelos_eol || '—')) + '</p>' +
+            '<div class="obs-barras">' + linhas + '</div></div>';
+    }
+
+    /* Por modelo: responde "quais trocar primeiro". */
+    function cardModelos(modelos) {
+        if (!modelos || !modelos.length) return '';
+        var linhas = modelos.slice(0, 20).map(function (m) {
+            return '<tr><td>' + esc(m.modelo) + '</td>' +
+                '<td class="obs-num">' + num(m.coletores) + '</td>' +
+                '<td class="obs-num">' + (m.obsoletos ? '<span class="obs-etq obs-etq--critico">' + num(m.obsoletos) + '</span>' : '—') + '</td>' +
+                '<td class="obs-num">' + (m.idade_media != null ? m.idade_media.toFixed(1) : '—') + '</td></tr>';
+        }).join('');
+        return '<div class="obs-card"><h2>Por modelo</h2>' +
+            '<div class="obs-tabela-wrap"><table class="obs-tabela"><thead><tr>' +
+            '<th>Modelo</th><th class="obs-num">Coletores</th><th class="obs-num">Obsoletos</th>' +
+            '<th class="obs-num">Idade média</th></tr></thead><tbody>' + linhas + '</tbody></table></div></div>';
+    }
+
+    function cardVersoes(versoes) {
+        if (!versoes || !versoes.length) return '';
+        var maximo = Math.max.apply(null, versoes.map(function (v) { return v.coletores; }));
+        var linhas = versoes.map(function (v) {
+            return barra('Android ' + v.versao, v.coletores, 0, maximo);
+        }).join('');
+        return '<div class="obs-card"><h2>Por versão de Android</h2>' +
+            '<div class="obs-barras">' + linhas + '</div></div>';
+    }
+
+    /* Sumiram do MDM: lista carregada ao clicar no KPI. */
+    function carregarTratativa(alvoLista) {
+        alvoLista.innerHTML = '<p class="obs-sub-card">Carregando…</p>';
+        fetch('/api/obsolescencia/tratativa', { credentials: 'include' }).then(resposta).then(function (d) {
+            if (!d.coletores || !d.coletores.length) { alvoLista.innerHTML = '<p class="obs-sub-card">Nenhum.</p>'; return; }
+            alvoLista.innerHTML = '<div class="obs-tabela-wrap"><table class="obs-tabela"><thead><tr>' +
+                '<th>Coletor</th><th>BU</th><th>Loja</th><th>Modelo</th><th>Desde</th></tr></thead><tbody>' +
+                d.coletores.map(function (c) {
+                    return '<tr><td>' + esc(c.nome || c.mdm_id) + '</td><td>' + esc(c.bu || '—') + '</td>' +
+                        '<td>' + esc(c.loja || '—') + '</td><td>' + esc(c.modelo || '—') + '</td>' +
+                        '<td>' + esc(quando(c.desde)) + '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+        }).catch(function (e) { alvoLista.innerHTML = '<p class="obs-sub-card">' + esc(e.message) + '</p>'; });
     }
 
     function cardLojas(lojas) {
@@ -241,21 +296,39 @@
                 kpi(num(d.total), 'Coletores no parque',
                     d.fora_de_loja ? num(d.fora_de_loja) + ' fora de loja (CD)' : '') +
                 kpi(num(d.obsoletos), 'Obsoletos',
-                    'Regra: ' + (d.modo_regra === 'qualquer' ? 'qualquer critério' : 'os três critérios'),
-                    'critico') +
+                    d.modo_regra === 'qualquer' ? 'Qualquer critério' : 'Todos os critérios', 'critico') +
+                kpi(num(d.em_risco || 0), 'Em risco', '2 de 3 critérios', 'alerta') +
                 kpi(num(semVer.quantidade), 'Sem comunicar',
                     'Há mais de ' + (semVer.limite_dias || 30) + ' dias', 'alerta') +
-                kpi(num(d.em_tratativa), 'Em tratativa', 'Sumiram do MDM') +
+                '<button type="button" class="obs-kpi obs-kpi--botao" id="obs-kpi-tratativa">' +
+                    '<div class="obs-kpi-valor">' + num(d.em_tratativa) + '</div>' +
+                    '<div class="obs-kpi-rotulo">Sumiram do MDM</div>' +
+                    '<div class="obs-kpi-nota">Ver lista</div></button>' +
+            '</div>' +
+            '<div id="obs-tratativa"></div>' +
+            '<div class="obs-grid2">' +
+                cardCriterios(d.criterios, d.total, d.limites) +
+                cardModelos(d.por_modelo) +
             '</div>' +
             '<div class="obs-grid2">' +
-                cardBarras('Parque por BU', 'Coletores em loja, com a parcela obsoleta destacada.',
-                           d.por_bu, 'bu_nome', 'coletores', 'obsoletos') +
-                cardTags(d.tags) +
+                cardBarras('Parque por BU', '', d.por_bu, 'bu_nome', 'coletores', 'obsoletos') +
+                cardVersoes(d.por_versao_os) +
             '</div>' +
             '<div class="obs-grid2">' +
                 cardLojas(d.por_loja) +
                 cardAntigos(d.mais_antigos, d.idade_desconhecida) +
-            '</div>';
+            '</div>' +
+            '<div class="obs-grid2">' + cardTags(d.tags) + '</div>';
+        var kt = document.getElementById('obs-kpi-tratativa');
+        if (kt) kt.addEventListener('click', function () {
+            var alvoLista = document.getElementById('obs-tratativa');
+            if (alvoLista.innerHTML) { alvoLista.innerHTML = ''; return; }
+            alvoLista.innerHTML = '';
+            var card = document.createElement('div'); card.className = 'obs-card';
+            card.innerHTML = '<h2>Sumiram do MDM</h2><div class="obs-lista"></div>';
+            alvoLista.appendChild(card);
+            carregarTratativa(card.querySelector('.obs-lista'));
+        });
         ligarBotao();
     }
 
