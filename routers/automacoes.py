@@ -604,6 +604,12 @@ def start_scheduler() -> None:
     global _scheduler_started
     if _scheduler_started:
         return
+    if getattr(_cfg, "TESTES", False):
+        # Ambiente de testes com cópia da configuração de produção: o
+        # agendador rodaria a rotina dos Correios em dobro no ServiceNow.
+        _log.warning("Automações: agendador DESLIGADO (AMBIENTE=testes). O botão manual continua.")
+        _scheduler_started = True
+        return
     _scheduler_started = True
     th = threading.Thread(target=_scheduler_loop, daemon=True, name="automacoes-scheduler")
     th.start()

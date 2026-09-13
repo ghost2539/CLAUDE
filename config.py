@@ -44,6 +44,12 @@ class Settings:
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "40"))
     CREDENTIALS_DIRECTORY: str = os.getenv("CREDENTIALS_DIRECTORY", "")
 
+    # AMBIENTE=testes numa instância que roda ao lado da produção com cópia
+    # dos bancos: desliga o que age no mundo sozinho (agendador de
+    # automações, e-mails de alerta) e marca o nome da aplicação.
+    AMBIENTE: str = os.getenv("AMBIENTE", "producao").strip().lower()
+    TESTES: bool = AMBIENTE in ("testes", "teste", "homologacao", "homolog")
+
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8901"))
     # A tela Consulta de Ativos — Times atendia em :8502 no aplicativo antigo.
