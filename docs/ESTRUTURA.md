@@ -79,6 +79,20 @@ docs/                    Documentação
 | Monitoramento | `data/db/monitoramento.db` | `MONITORAMENTO_DATABASE_URL` |
 | Controle de Orçamento — CAPEX | `data/db/controle_orcamento_exec.db` | `ORCAMENTO_EXEC_DATABASE_URL` |
 | Orçamento do SPARE | `data/db/orcamento_spare.db` | `ORCAMENTO_SPARE_DATABASE_URL` |
+| Orçamento de Manutenção | `data/db/orcamento_manutencao.db` | `ORCAMENTO_MANUTENCAO_DATABASE_URL` |
+| Obsolescência do parque (MDM) | `data/db/obsolescencia.db` | `OBSOLESCENCIA_DATABASE_URL` |
+| EBS Forms | `data/db/ebs_forms.db` | `EBS_FORMS_DATABASE_URL` |
+| **Ciclo do ativo** — núcleo (Trilha) | `data/db/trilha.db` | `TRILHA_DATABASE_URL` |
+| Separação (A15) | `data/db/separacao.db` | `SEPARACAO_DATABASE_URL` |
+| Atendimento (A20) | `data/db/atendimento.db` | `ATENDIMENTO_DATABASE_URL` |
+| Bancada (A02–A04) | `data/db/bancada.db` | `BANCADA_DATABASE_URL` |
+| Preparação (A06–A08) | `data/db/preparacao.db` | `PREPARACAO_DATABASE_URL` |
+| Destinação (A09–A13) | `data/db/destinacao.db` | `DESTINACAO_DATABASE_URL` |
+| Assistência externa (A05/A14) | `data/db/externo.db` | `EXTERNO_DATABASE_URL` |
+| Projetos de loja (A16) | `data/db/projetos.db` | `PROJETOS_DATABASE_URL` |
+| Logística reversa (A17) | `data/db/reversa.db` | `REVERSA_DATABASE_URL` |
+| Inventário (A18) | `data/db/inventario.db` | `INVENTARIO_DATABASE_URL` |
+| Regularização (A19) | `data/db/regularizacao.db` | `REGULARIZACAO_DATABASE_URL` |
 
 Nenhum módulo isolado escreve no banco do portal, e vice-versa. Toda URL sai
 de `config.py`; nenhum módulo monta caminho por conta própria.
@@ -108,6 +122,19 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/parametros` | parametros | `/api/public-assets` | public_assets |
 | `/api/lotes` `/api/dashboard` | helpers | `/api/controle-orcamento-exec` | controle_orcamento_exec |
 | `/api/orcamento-spare` | orcamento_spare | `/api/cockpit` | cockpit (público) |
+| `/api/orcamento-manutencao` | orcamento_manutencao | `/api/obsolescencia` | obsolescencia |
+| `/api/trilha` | trilha (núcleo) | `/api/torre` | torre |
+| `/api/separacao` | separacao | `/api/atendimento` | atendimento |
+| `/api/bancada` | bancada | `/api/preparacao` | preparacao |
+| `/api/destinacao` | destinacao | `/api/externo` | externo |
+| `/api/projetos` | projetos | `/api/reversa` | reversa |
+| `/api/inventario` | inventario | `/api/regularizacao` | regularizacao |
+| `/api/ebs-forms` | ebs_forms | `/api/servicenow/correios` | correios |
+
+O contrato dos módulos do ciclo do ativo (estados, o que cada um escreve
+no ServiceNow, verificação) está em `docs/TRILHA_E_SEPARACAO.md`. Esquema:
+`create_all` cria o que falta e `db/_esquema.py` acrescenta coluna nova em
+tabela existente, no `init_db` de cada módulo.
 
 As páginas que não são API (`/`, `/indicadores`, `/controle-orcamento`) são
 servidas pelos seus próprios routers, com o HTML em `static/`.
