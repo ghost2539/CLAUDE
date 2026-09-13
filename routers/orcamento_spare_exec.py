@@ -87,7 +87,12 @@ _rt._page = _pagina
 @router.get(f"{ROTA}/app.js", include_in_schema=False)
 def bundle(req: Request):
     js = (_DIR / "app.js").read_text(encoding="utf-8")
-    js = js.replace("/api/controle-orcamento-exec", API).replace("controle-orcamento-exec", "orcamento-spare-exec")
+    js = (js.replace("/api/controle-orcamento-exec", API)
+            .replace("controle-orcamento-exec", "orcamento-spare-exec")
+            .replace("instancia:csc", "instancia:spare")
+            # O esbuild grava o "ç" como \xE7 no bundle.
+            .replace('"Controle de Orçamento"', f'"{TITULO}"')
+            .replace('"Controle de Or\\xE7amento"', f'"{TITULO}"'))
     return Response(js, media_type="application/javascript",
                     headers={"Cache-Control": "public, max-age=3600"})
 

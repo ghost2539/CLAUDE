@@ -150,6 +150,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # Planejamento de compras: aba do Orçamento Spare, banco próprio.
+    try:
+        import db.planejamento as _db_pln
+        _db_pln.init_db()
+        from routers.planejamento import router as planejamento_router
+        app.include_router(planejamento_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("planejamento").error(
+            "Módulo Planejamento NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Orçamento de Manutenção (reparo de coletores e SLEDs) — banco próprio
     # Acesso pelo módulo de permissão "orcamento_manutencao".
     try:

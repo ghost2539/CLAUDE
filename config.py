@@ -221,6 +221,12 @@ class Settings:
         _sqlite("regularizacao"),
     )
 
+    # ── Planejamento de compras (Orçamento Spare) ───────────────────────
+    PLANEJAMENTO_DATABASE_URL: str = os.getenv(
+        "PLANEJAMENTO_DATABASE_URL",
+        _sqlite("planejamento_spare"),
+    )
+
     # ── Consulta Times (acesso específico) ──────────────────────────────
     CONSULTA_TIMES_DATABASE_URL: str = os.getenv(
         "CONSULTA_TIMES_DATABASE_URL",

@@ -198,3 +198,30 @@ troca vale para o portal, obsolescência, orçamentos, cockpit e formulários
 sem reiniciar nada. Só o **admin geral** altera: o login em
 `ADMIN_GERAL_LOGIN` (em branco, o `INITIAL_ADMIN_LOGIN`). A tela fica em
 Configuração → Visual.
+
+### Planejamento de compras (Orçamento Spare)
+
+Aba **Planejamento** do Orçamento Spare (só nessa instância). Banco
+próprio `data/db/planejamento_spare.db` (`pln_item`, `pln_historico`,
+`pln_config`), API em `/api/planejamento`, permissão pelos níveis do
+próprio Orçamento Spare (view lê; edit e admin alteram).
+
+- **Consumo real** vem da Separação: solicitações enviadas cujo tipo de
+  atendimento consome o estoque de reposição (inauguração e reforma não
+  entram), por mês de envio e modelo; a quantidade é o número de unidades
+  bipadas, ou a quantidade pedida quando não há unidade.
+- **Consumo imputado**: meses anteriores à data de início do sistema
+  (configurável; em branco, o primeiro mês com envio), digitados na grade
+  ou importados por CSV/XLSX (item, mês, quantidade).
+- **Previsão** (`core/previsao.py`, funções puras): média simples com
+  menos de 3 meses; média móvel ponderada + tendência amortecida de 3 a
+  23; com 24 ou mais, vezes o índice sazonal do mês. P90 = P50 + 1,28 ×
+  desvio do backtest. A tela informa o método.
+- **Necessidade**: consumo previsto + segurança (dias × consumo médio) −
+  estoque − pedidos em aberto; mês de ruptura e data-limite do pedido
+  (ruptura − lead time); valor pelo custo unitário.
+- **Estoque atual**: manual, ou contagem no ServiceNow dos modelos do
+  item no estoque de reposição (consulta da Separação, como o usuário
+  logado).
+
+Verificação: `python3 scripts/verificar_planejamento.py`.

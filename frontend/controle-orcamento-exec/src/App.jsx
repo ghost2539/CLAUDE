@@ -3,6 +3,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line, Tooltip, LabelList, ResponsiveContainer,
 } from "recharts";
+import PlanejamentoView from "./Planejamento.jsx";
 
 /* ════════════════════════════════════════════════════════════════
    Domínio: opções, cores e dados iniciais
@@ -19,6 +20,9 @@ const corSugerida = (categorias) => {
   return PALETA_CATEGORIAS.find((c) => !usadas.has(c)) || PALETA_CATEGORIAS[categorias.length % PALETA_CATEGORIAS.length];
 };
 const API_BASE = "/api/controle-orcamento-exec";
+/* Instância servida: "csc" (Infra CSC) ou "spare" (Orçamento Spare). O
+   literal abaixo é trocado ao servir o bundle da instância Spare. */
+const INSTANCIA = "instancia:csc".split(":")[1];
 const API_CATEGORIAS = API_BASE + "/categorias";
 
 const ESTAGIOS = ["Planejamento", "Aprovação", "Em Execução", "Concluído"];
@@ -279,6 +283,11 @@ const Icon = {
       <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
     </svg>
   ),
+  plan: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M3 17l6-6 4 4 8-8" /><path d="M14 7h7v7" />
+    </svg>
+  ),
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -516,6 +525,7 @@ const NAV = [
   { view: "geral", label: "Visão Geral", icon: Icon.home },
   { view: "portfolio", label: "CAPEX", icon: Icon.grid },
   { view: "opex", label: "OPEX", icon: Icon.list },
+  ...(INSTANCIA === "spare" ? [{ view: "planejamento", label: "Planejamento", icon: Icon.plan }] : []),
   { view: "relatorios", label: "Relatórios", icon: Icon.report },
   { view: "config", label: "Configurações", icon: Icon.gear },
 ];
@@ -1564,6 +1574,10 @@ export default function App() {
         )}
 
         {/* ── OPEX ────────────────────────────────────────────────── */}
+        {view === "planejamento" && INSTANCIA === "spare" && (
+          <PlanejamentoView podeEditar={podeEditar} />
+        )}
+
         {view === "opex" && (
           <OpexView podeEditar={podeEditar} onResumo={setOpexResumo} />
         )}
