@@ -76,6 +76,7 @@ function Msg({ texto, tipo }) {
 function Itens({ podeEditar, aoMudar }) {
   const [itens, setItens] = useState([]);
   const [modelos, setModelos] = useState([]);
+  const [acordosEbs, setAcordosEbs] = useState([]);
   const [msg, setMsg] = useState({});
   const [novo, setNovo] = useState({ nome: "", modelos: [] });
   const [busy, setBusy] = useState(0);
@@ -83,8 +84,10 @@ function Itens({ podeEditar, aoMudar }) {
 
   const carregar = useCallback(async () => {
     try {
-      const [a, b] = await Promise.all([api(API + "/itens"), api(API + "/modelos")]);
+      const [a, b, c] = await Promise.all([api(API + "/itens"), api(API + "/modelos"), api(API + "/acordos").catch(() => ({ acordos: [] }))]);
       setItens(a.itens); setModelos(b.modelos);
+      const vistos = {};
+      setAcordosEbs((c.acordos || []).filter((x) => (vistos[x.item_ebs] ? false : (vistos[x.item_ebs] = true))));
     } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
   }, []);
   useEffect(() => { carregar(); }, [carregar]);
@@ -145,6 +148,7 @@ function Itens({ podeEditar, aoMudar }) {
       )}
 
       <Card title={`Itens (${itens.length})`}>
+        <datalist id="pln-itens-ebs">{acordosEbs.map((a) => <option key={a.item_ebs} value={a.item_ebs}>{a.descricao}</option>)}</datalist>
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead className="text-[11px] text-gray-500 border-b border-gray-200">
@@ -153,12 +157,12 @@ function Itens({ podeEditar, aoMudar }) {
                 <th className="th text-right">Estoque</th><th className="th">Atualizado</th>
                 <th className="th text-right">Pedidos abertos</th><th className="th text-right">Lead time (dias)</th>
                 <th className="th text-right">Segurança (dias)</th><th className="th text-right">Custo unit. (R$)</th>
-                <th className="th">Ativo</th><th className="th"></th>
+                <th className="th">Item EBS</th><th className="th">Ativo</th><th className="th"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {itens.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">Nenhum item. {podeEditar ? "Inclua o primeiro acima." : ""}</td></tr>
+                <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-500">Nenhum item. {podeEditar ? "Inclua o primeiro acima." : ""}</td></tr>
               )}
               {itens.map((i) => (
                 <tr key={i.id} className={i.ativo ? "" : "opacity-50"}>
@@ -184,6 +188,10 @@ function Itens({ podeEditar, aoMudar }) {
                     <input type="number" min="0" step="0.01" className="cell-input num w-[96px]" disabled={!podeEditar}
                            value={i.custo_unitario ?? 0} onChange={(e) => patch(i.id, { custo_unitario: Number(e.target.value || 0) })} />
                   </td>
+                  <td className="td">
+                    <input list="pln-itens-ebs" className="cell-input w-[110px]" disabled={!podeEditar} value={i.item_ebs || ""} placeholder="—"
+                           onChange={(e) => patch(i.id, { item_ebs: e.target.value })} title="Item do EBS: liga o item ao acordo de compra" />
+                  </td>
                   <td className="td"><input type="checkbox" disabled={!podeEditar} checked={!!i.ativo} onChange={(e) => patch(i.id, { ativo: e.target.checked })} /></td>
                   <td className="td">{podeEditar && <button onClick={() => excluir(i)} className="text-[11px] text-red-600 hover:underline">excluir</button>}</td>
                 </tr>
@@ -207,7 +215,7 @@ function ModelosPicker({ modelos, selecionados, onToggle, compacto, disabled }) 
   return (
     <div className="relative">
       <button type="button" disabled={disabled} onClick={() => setAberto((a) => !a)}
-              className={"text-left border border-gray-300 rounded-md px-2 py-1 text-xs bg-white hover:bg-gray-50 disabled:bg-transparent disabled:border-transparent " + (compacto ? "max-w-[300px] truncate" : "min-w-[260px]")}>
+              className={"text-left border border-gray-300 rounded-md px-2 py-1 text-xs bg-white hover:bg-gray-50 disabled:bg-transparent disabled:border-transparent " + (compacto ? "max-w-[220px] truncate" : "min-w-[260px]")}>
         {selecionados && selecionados.length ? selecionados.join(", ") : <span className="text-gray-400">escolher modelos…</span>}
       </button>
       {aberto && !disabled && (
@@ -418,11 +426,11 @@ function Previsao({ versao }) {
                 <th className="th">Item</th><th className="th text-right">Estoque</th><th className="th text-right">Pedidos</th>
                 <th className="th text-right">Consumo previsto</th><th className="th text-right">Segurança</th>
                 <th className="th text-right">Cobertura</th><th className="th">Ruptura</th><th className="th">Pedir até</th>
-                <th className="th text-right">Comprar</th><th className="th text-right">P90</th><th className="th text-right">Valor</th><th className="th">Método</th>
+                <th className="th text-right">Comprar</th><th className="th text-right">P90</th><th className="th text-right">Valor</th><th className="th">Acordo</th><th className="th">Método</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {itens.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-500">Cadastre itens na aba Itens.</td></tr>}
+              {itens.length === 0 && <tr><td colSpan={13} className="px-4 py-8 text-center text-gray-500">Cadastre itens na aba Itens.</td></tr>}
               {itens.map((x) => {
                 const n = x.necessidade, i = x.item;
                 return (
@@ -438,6 +446,7 @@ function Previsao({ versao }) {
                     <td className="td text-right tabular-nums font-semibold">{n.necessidade ? fmtNum(n.necessidade) : <span className="text-gray-400">0</span>}</td>
                     <td className="td text-right tabular-nums text-gray-500">{fmtNum(n.necessidade_p90)}</td>
                     <td className="td text-right tabular-nums">{n.valor ? fmtBRL(n.valor) : <span className="text-gray-400">—</span>}</td>
+                    <td className="td"><AcordoBadge a={x.acordo} /></td>
                     <td className="td text-gray-500 whitespace-normal max-w-[220px]">{x.previsao.metodo}</td>
                   </FragmentLinha>
                 );
@@ -456,7 +465,7 @@ function FragmentLinha({ aberto, onToggle, x, children }) {
     <>
       <tr onClick={onToggle} className={"cursor-pointer hover:bg-gray-50 " + (aberto ? "bg-gray-50" : "")}>{children}</tr>
       {aberto && (
-        <tr><td colSpan={12} className="px-2 pb-3">
+        <tr><td colSpan={13} className="px-2 pb-3">
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-gray-600 mb-1 px-2">
             <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-2 bg-blue-600 rounded-sm" />Real</span>
             <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-2 bg-slate-300 rounded-sm" />Imputado</span>
@@ -481,15 +490,17 @@ function Configuracao({ podeEditar, aoMudar }) {
     try {
       const r = await api(API + "/config", { method: "PUT", body: JSON.stringify({
         data_inicio_sistema: cfg.data_inicio_configurada ? cfg.data_inicio_sistema : "",
-        horizonte_meses: Number(cfg.horizonte_meses), meses_historico: Number(cfg.meses_historico) }) });
+        horizonte_meses: Number(cfg.horizonte_meses), meses_historico: Number(cfg.meses_historico),
+        acordo_alerta_dias: Number(cfg.acordo_alerta_dias) }) });
       setCfg(r); setMsg({ texto: "Configuração salva.", tipo: "ok" }); aoMudar && aoMudar();
     } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
   };
   const campo = "border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50";
   return (
+    <>
     <Card title="Configuração do planejamento">
       <Msg {...msg} />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-gray-700">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-gray-700">
         <label className="block">
           <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Início do sistema (mês)</span>
           <div className="flex items-center gap-2">
@@ -513,9 +524,267 @@ function Configuracao({ podeEditar, aoMudar }) {
           <input type="number" min="6" max="60" disabled={!podeEditar} value={cfg.meses_historico} className={campo + " w-[100px]"}
                  onChange={(e) => setCfg({ ...cfg, meses_historico: e.target.value })} />
         </label>
+        <label className="block">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Alerta de acordo (dias antes do vencimento)</span>
+          <input type="number" min="0" max="365" disabled={!podeEditar} value={cfg.acordo_alerta_dias} className={campo + " w-[100px]"}
+                 onChange={(e) => setCfg({ ...cfg, acordo_alerta_dias: e.target.value })} />
+        </label>
       </div>
       {podeEditar && <div className="mt-4"><button onClick={salvar} className={btnPrim}>Salvar</button></div>}
     </Card>
+    <Acordos podeEditar={podeEditar} aoMudar={aoMudar} />
+    </>
+  );
+}
+
+/* ── Acordos de compra ─────────────────────────────────────────── */
+const SIT_ACORDO = {
+  vigente:         { txt: "vigente",        bg: "#dcfce7", fg: "#166534" },
+  vence_em_breve:  { txt: "vence em breve", bg: "#fef3c7", fg: "#b45309" },
+  vencido:         { txt: "vencido",        bg: "#fee2e2", fg: "#b91c1c" },
+  sem_vencimento:  { txt: "sem vencimento", bg: "#f3f4f6", fg: "#6b7280" },
+};
+function SitBadge({ s }) {
+  const e = SIT_ACORDO[s] || SIT_ACORDO.sem_vencimento;
+  return <span className="badge" style={{ background: e.bg, color: e.fg }}>{e.txt}</span>;
+}
+function AcordoBadge({ a }) {
+  if (!a) return <span className="text-gray-400 text-[11px]">sem acordo</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={`Item ${a.item_ebs} · ${fmtBRL(a.valor)}${a.vencimento ? " · vence " + fmtData(a.vencimento) : ""}`}>
+      <span className="text-[11px] text-gray-700">{a.fornecedor || a.item_ebs}</span><SitBadge s={a.situacao} />
+    </span>
+  );
+}
+
+function Acordos({ podeEditar, aoMudar }) {
+  const [dados, setDados] = useState({ acordos: [], resumo: {} });
+  const [msg, setMsg] = useState({});
+  const [novo, setNovo] = useState({ item_ebs: "", descricao: "", valor: "", fornecedor: "", vencimento: "" });
+  const [busy, setBusy] = useState(false);
+  const timers = useRef({});
+  const arquivo = useRef(null);
+
+  const carregar = useCallback(async () => {
+    try { setDados(await api(API + "/acordos")); } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
+  }, []);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const patch = (id, campos) => {
+    setDados((prev) => ({ ...prev, acordos: prev.acordos.map((a) => (a.id === id ? { ...a, ...campos } : a)) }));
+    clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(async () => {
+      try { const r = await api(API + "/acordos/" + id, { method: "PATCH", body: JSON.stringify(campos) });
+        setDados((prev) => ({ ...prev, acordos: prev.acordos.map((a) => (a.id === id ? r : a)) })); aoMudar && aoMudar(); }
+      catch (e) { setMsg({ texto: "Falha ao salvar: " + e.message, tipo: "erro" }); carregar(); }
+    }, 600);
+  };
+  const criar = async () => {
+    if (!novo.item_ebs.trim()) { setMsg({ texto: "Informe o item do EBS.", tipo: "erro" }); return; }
+    setBusy(true);
+    try {
+      await api(API + "/acordos", { method: "POST", body: JSON.stringify({ ...novo, valor: Number(String(novo.valor).replace(",", ".") || 0) }) });
+      setNovo({ item_ebs: "", descricao: "", valor: "", fornecedor: "", vencimento: "" }); setMsg({}); await carregar(); aoMudar && aoMudar();
+    } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
+    finally { setBusy(false); }
+  };
+  const excluir = async (a) => {
+    if (!window.confirm(`Excluir o acordo do item ${a.item_ebs} com ${a.fornecedor || "o fornecedor"}?`)) return;
+    try { await api(API + "/acordos/" + a.id, { method: "DELETE" }); await carregar(); aoMudar && aoMudar(); }
+    catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
+  };
+  const importar = async () => {
+    const f = arquivo.current?.files?.[0];
+    if (!f) { setMsg({ texto: "Escolha um arquivo CSV ou XLSX.", tipo: "erro" }); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData(); fd.append("arquivo", f);
+      const r = await api(API + "/acordos/importar", { method: "POST", body: fd });
+      let t = `${r.lidas} linha(s) lida(s): ${r.novos} novo(s), ${r.atualizados} atualizado(s).`;
+      if (r.recusados.length) t += ` Recusadas: ${r.recusados.map((x) => x.item_ebs + " (" + x.motivo + ")").join("; ")}.`;
+      setMsg({ texto: t, tipo: r.novos + r.atualizados ? "ok" : "erro" });
+      arquivo.current.value = ""; await carregar(); aoMudar && aoMudar();
+    } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
+    finally { setBusy(false); }
+  };
+  const campo = "border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+  const r = dados.resumo || {};
+  const titulo = `Acordos de compra (${r.total || 0})` + (r.vencidos ? ` · ${r.vencidos} vencido(s)` : "") + (r.vencem_em_breve ? ` · ${r.vencem_em_breve} vence(m) em breve` : "");
+
+  return (
+    <Card title={titulo} className="mt-4" right={podeEditar && (
+      <><input ref={arquivo} type="file" accept=".csv,.xlsx,.xls" className="text-[11px]" /><button onClick={importar} disabled={busy} className={btnSec}>Importar planilha</button></>)}>
+      <Msg {...msg} />
+      {podeEditar && (
+        <div className="flex flex-wrap items-end gap-2 mb-3 pb-3 border-b border-gray-100">
+          {[["item_ebs", "Item EBS", "w-[110px]"], ["descricao", "Descrição do item", "w-[240px]"], ["valor", "Valor (R$)", "w-[100px]"],
+            ["fornecedor", "Fornecedor (ex.: 3729 - AIDC)", "w-[200px]"]].map(([k, l, w]) => (
+            <label key={k} className="text-xs text-gray-600">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">{l}</span>
+              <input value={novo[k]} onChange={(e) => setNovo({ ...novo, [k]: e.target.value })} className={campo + " " + w} />
+            </label>
+          ))}
+          <label className="text-xs text-gray-600">
+            <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Vencimento</span>
+            <input type="date" value={novo.vencimento} onChange={(e) => setNovo({ ...novo, vencimento: e.target.value })} className={campo} />
+          </label>
+          <button onClick={criar} disabled={busy} className={btnPrim}>Incluir</button>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs text-left">
+          <thead className="text-[11px] text-gray-500 border-b border-gray-200">
+            <tr><th className="th">Item EBS</th><th className="th">Descrição</th><th className="th text-right">Valor (R$)</th>
+                <th className="th">Cód. fornecedor</th><th className="th">Fornecedor</th><th className="th">Vencimento</th><th className="th">Situação</th><th className="th">Ativo</th><th className="th"></th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {dados.acordos.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-center text-gray-500">Nenhum acordo. {podeEditar ? "Inclua acima ou importe a planilha (item, descrição, valor, código fornecedor, fornecedor, vencimento)." : ""}</td></tr>}
+            {dados.acordos.map((a) => (
+              <tr key={a.id} className={a.ativo ? "" : "opacity-50"}>
+                <td className="td"><input className="cell-input w-[100px] font-medium" disabled={!podeEditar} value={a.item_ebs} onChange={(e) => patch(a.id, { item_ebs: e.target.value })} /></td>
+                <td className="td"><input className="cell-input min-w-[220px]" disabled={!podeEditar} value={a.descricao} onChange={(e) => patch(a.id, { descricao: e.target.value })} /></td>
+                <td className="td text-right"><input type="number" min="0" step="0.01" className="cell-input num w-[100px]" disabled={!podeEditar} value={a.valor} onChange={(e) => patch(a.id, { valor: Number(e.target.value || 0) })} /></td>
+                <td className="td"><input className="cell-input w-[80px]" disabled={!podeEditar} value={a.fornecedor_codigo} onChange={(e) => patch(a.id, { fornecedor_codigo: e.target.value, fornecedor_nome: a.fornecedor_nome })} /></td>
+                <td className="td"><input className="cell-input min-w-[140px]" disabled={!podeEditar} value={a.fornecedor_nome} onChange={(e) => patch(a.id, { fornecedor_codigo: a.fornecedor_codigo, fornecedor_nome: e.target.value })} /></td>
+                <td className="td"><input type="date" className="cell-input w-[130px]" disabled={!podeEditar} value={a.vencimento || ""} onChange={(e) => patch(a.id, { vencimento: e.target.value })} /></td>
+                <td className="td"><SitBadge s={a.situacao} />{a.dias_para_vencer != null && a.situacao !== "vencido" && <span className="text-[10px] text-gray-500 ml-1">{a.dias_para_vencer} d</span>}</td>
+                <td className="td"><input type="checkbox" disabled={!podeEditar} checked={!!a.ativo} onChange={(e) => patch(a.id, { ativo: e.target.checked })} /></td>
+                <td className="td">{podeEditar && <button onClick={() => excluir(a)} className="text-[11px] text-red-600 hover:underline">excluir</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11px] text-gray-500 mt-2">O item de planejamento sem custo digitado usa o valor do acordo vigente do seu Item EBS. Alerta de vencimento: {dados.alerta_dias} dias antes.</div>
+    </Card>
+  );
+}
+
+/* ── Obsolescência: substituição do parque por BU ───────────────── */
+function Obsolescencia({ podeEditar, versao }) {
+  const [dados, setDados] = useState(null);
+  const [itens, setItens] = useState([]);
+  const [msg, setMsg] = useState({});
+  const timers = useRef({});
+
+  const carregar = useCallback(async () => {
+    try {
+      const [d, i] = await Promise.all([api(API + "/obsolescencia"), api(API + "/itens")]);
+      setDados(d); setItens(i.itens.filter((x) => x.ativo));
+    } catch (e) { setMsg({ texto: e.message, tipo: "erro" }); }
+  }, []);
+  useEffect(() => { carregar(); }, [carregar, versao]);
+
+  const plano = (modelo, campos) => {
+    setDados((prev) => ({ ...prev, linhas: prev.linhas.map((l) => (l.modelo === modelo ? { ...l, plano: { ...l.plano, ...campos } } : l)) }));
+    clearTimeout(timers.current[modelo]);
+    timers.current[modelo] = setTimeout(async () => {
+      try { setDados(await api(API + "/obsolescencia/plano", { method: "PUT", body: JSON.stringify([{ modelo_obsoleto: modelo, ...campos }]) })); setMsg({}); }
+      catch (e) { setMsg({ texto: "Falha ao salvar: " + e.message, tipo: "erro" }); }
+    }, 600);
+  };
+
+  if (!dados) return <div className="text-xs text-gray-500">Carregando…</div>;
+  const r = dados.resumo, bus = dados.bus;
+  const maxMes = Math.max(1, ...dados.por_mes.map((m) => m.valor));
+  const maxBu = Math.max(1, ...dados.por_bu.map((b) => b.valor));
+
+  return (
+    <>
+      <Msg {...msg} />
+      <div className="text-[11px] text-gray-500 mb-3">
+        {dados.ultima_coleta ? <>Parque obsoleto da última coleta do MDM ({fmtData(dados.ultima_coleta)}).</> : "Sem coleta do MDM ainda: rode a coleta na tela de Obsolescência."}
+        {" "}Critérios de obsolescência são os configurados naquela tela.
+      </div>
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <Kpi label="Aparelhos obsoletos" value={fmtNum(r.aparelhos)} sub={`${r.modelos} modelo(s)`} color="#dc2626" />
+        <Kpi label="Unidades a comprar" value={fmtNum(r.unidades)} sub="conforme o percentual do plano" color="#f59e0b" />
+        <Kpi label="Valor previsto" value={fmtBRL(r.valor)} sub={r.sem_custo ? `${r.sem_custo} modelo(s) sem custo` : "todos os modelos com custo"} color={r.sem_custo ? "#dc2626" : "#16a34a"} />
+        <Kpi label="Sem mês definido" value={fmtNum(r.sem_mes)} sub="modelos a planejar" color={r.sem_mes ? "#f59e0b" : "#2563eb"} />
+      </section>
+
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+        <Card title="Valor por BU">
+          {dados.por_bu.length === 0 && <div className="text-xs text-gray-500">Nenhum aparelho obsoleto.</div>}
+          <div className="space-y-1.5">
+            {dados.por_bu.map((b) => (
+              <div key={b.bu} className="flex items-center gap-2 text-xs">
+                <span className="w-[150px] truncate text-gray-700" title={b.nome}>{b.nome}</span>
+                <div className="flex-1 h-4 bg-gray-100 rounded-sm overflow-hidden"><div className="h-full bg-blue-600" style={{ width: Math.max(2, 100 * b.valor / maxBu) + "%" }} /></div>
+                <span className="w-[92px] text-right tabular-nums font-medium">{fmtBRL(b.valor)}</span>
+                <span className="w-[110px] text-right tabular-nums text-gray-500">{fmtNum(b.unidades)} / {fmtNum(b.aparelhos)} un.</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card title="Calendário de compra">
+          {dados.por_mes.length === 0 && <div className="text-xs text-gray-500">Defina o mês alvo de cada modelo na tabela abaixo.</div>}
+          <div className="space-y-1.5">
+            {dados.por_mes.map((m) => (
+              <div key={m.mes} className="flex items-center gap-2 text-xs">
+                <span className={"w-[150px] " + (m.mes === "sem_mes" ? "text-amber-700" : "text-gray-700")}>{m.mes === "sem_mes" ? "Sem mês definido" : fmtMes(m.mes)}</span>
+                <div className="flex-1 h-4 bg-gray-100 rounded-sm overflow-hidden"><div className={"h-full " + (m.mes === "sem_mes" ? "bg-amber-400" : "bg-green-600")} style={{ width: Math.max(2, 100 * m.valor / maxMes) + "%" }} /></div>
+                <span className="w-[92px] text-right tabular-nums font-medium">{fmtBRL(m.valor)}</span>
+                <span className="w-[110px] text-right tabular-nums text-gray-500">{fmtNum(m.unidades)} un.</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </section>
+
+      <Card title="Plano de substituição por modelo">
+        <div className="overflow-x-auto">
+          <table className="text-xs text-left w-full">
+            <thead className="text-[11px] text-gray-500 border-b border-gray-200">
+              <tr>
+                <th className="th">Modelo obsoleto</th>
+                {bus.map((b) => <th key={b.bu} className="th text-right" title={b.nome}>{b.bu}</th>)}
+                <th className="th text-right">Total</th><th className="th">Substituir por</th><th className="th text-right">Custo (R$)</th>
+                <th className="th text-right">%</th><th className="th">Mês alvo</th><th className="th text-right">Unidades</th><th className="th text-right">Valor</th><th className="th">Acordo</th><th className="th">Ativo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {dados.linhas.length === 0 && <tr><td colSpan={bus.length + 10} className="px-4 py-8 text-center text-gray-500">Nenhum aparelho obsoleto na última coleta.</td></tr>}
+              {dados.linhas.map((l) => (
+                <tr key={l.modelo} className={l.plano.ativo ? "" : "opacity-50"}>
+                  <td className="td font-medium">{l.modelo}</td>
+                  {bus.map((b) => <td key={b.bu} className="td text-right tabular-nums">{l.por_bu[b.bu] ? <span title={`${l.unidades_por_bu[b.bu] || 0} a comprar`}>{l.por_bu[b.bu]}</span> : <span className="text-gray-300">·</span>}</td>)}
+                  <td className="td text-right tabular-nums font-semibold">{l.aparelhos}</td>
+                  <td className="td">
+                    <div className="select-wrap inline-block">
+                      <select className="cell-input min-w-[160px]" disabled={!podeEditar} value={l.plano.item_id || 0} onChange={(e) => plano(l.modelo, { item_id: Number(e.target.value) })}>
+                        <option value={0}>— informar custo —</option>
+                        {itens.map((i) => <option key={i.id} value={i.id}>{i.nome}</option>)}
+                      </select>
+                    </div>
+                  </td>
+                  <td className="td text-right">
+                    <input type="number" min="0" step="0.01" className={"cell-input num w-[96px] " + (l.sem_custo ? "bg-red-50" : "")} disabled={!podeEditar}
+                           value={l.plano.custo_unitario || ""} placeholder={l.item ? fmtNum(l.custo, 2) : "0"} title={l.item ? "Em branco, usa o custo do item substituto" : ""}
+                           onChange={(e) => plano(l.modelo, { custo_unitario: Number(e.target.value || 0) })} />
+                  </td>
+                  <td className="td text-right"><input type="number" min="0" max="100" className="cell-input num w-[56px]" disabled={!podeEditar} value={l.plano.percentual} onChange={(e) => plano(l.modelo, { percentual: Number(e.target.value || 0) })} /></td>
+                  <td className="td"><input type="month" className={"cell-input w-[130px] " + (!l.plano.mes_alvo && l.unidades ? "bg-amber-50" : "")} disabled={!podeEditar} value={l.plano.mes_alvo || ""} onChange={(e) => plano(l.modelo, { mes_alvo: e.target.value })} /></td>
+                  <td className="td text-right tabular-nums">{fmtNum(l.unidades)}</td>
+                  <td className="td text-right tabular-nums font-semibold">{l.valor ? fmtBRL(l.valor) : <span className="text-gray-400">—</span>}</td>
+                  <td className="td"><AcordoBadge a={l.acordo} /></td>
+                  <td className="td"><input type="checkbox" disabled={!podeEditar} checked={!!l.plano.ativo} onChange={(e) => plano(l.modelo, { ativo: e.target.checked })} /></td>
+                </tr>
+              ))}
+            </tbody>
+            {dados.linhas.length > 0 && (
+              <tfoot className="border-t border-gray-200 text-[11px] font-semibold">
+                <tr><td className="td">Total</td>
+                  {bus.map((b) => <td key={b.bu} className="td text-right tabular-nums">{dados.por_bu.find((x) => x.bu === b.bu)?.aparelhos || 0}</td>)}
+                  <td className="td text-right tabular-nums">{fmtNum(r.aparelhos)}</td><td colSpan={4}></td>
+                  <td className="td text-right tabular-nums">{fmtNum(r.unidades)}</td><td className="td text-right tabular-nums">{fmtBRL(r.valor)}</td><td colSpan={2}></td></tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+        <div className="text-[11px] text-gray-500 mt-2">Unidades = aparelhos obsoletos × percentual, arredondado para cima por BU. Custo: o digitado; em branco, o do item substituto (ou o acordo dele).</div>
+      </Card>
+    </>
   );
 }
 
@@ -529,15 +798,16 @@ export default function PlanejamentoView({ podeEditar }) {
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="min-w-0">
           <h1 className="text-xl font-bold leading-tight text-gray-900">Planejamento de compras</h1>
-          <p className="text-xs text-gray-500">Estoque de reposição · histórico, previsão e necessidade por item</p>
+          <p className="text-xs text-gray-500">Reposição: histórico, previsão e necessidade por item · Obsolescência: substituição do parque por BU</p>
         </div>
         <div className="ml-auto flex items-center gap-1">
-          {[["previsao", "Previsão"], ["historico", "Histórico"], ["itens", "Itens"], ["config", "Configuração"]].map(([v, l]) => (
+          {[["previsao", "Previsão"], ["obsolescencia", "Obsolescência"], ["historico", "Histórico"], ["itens", "Itens"], ["config", "Configuração"]].map(([v, l]) => (
             <button key={v} onClick={() => setAba(v)} className={btn(aba === v)}>{l}</button>
           ))}
         </div>
       </div>
       {aba === "previsao" && <Previsao versao={versao} />}
+      {aba === "obsolescencia" && <Obsolescencia podeEditar={podeEditar} versao={versao} />}
       {aba === "historico" && <Historico podeEditar={podeEditar} versao={versao} />}
       {aba === "itens" && <Itens podeEditar={podeEditar} aoMudar={bump} />}
       {aba === "config" && <Configuracao podeEditar={podeEditar} aoMudar={bump} />}

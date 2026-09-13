@@ -87,6 +87,9 @@ class Item(Base):
     custo_unitario: Mapped[float] = mapped_column(Float, default=0.0)
     observacao: Mapped[str] = mapped_column(Text, default="")
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Item do EBS: liga o item a um acordo de compra (fornecedor, valor,
+    # vencimento). Em branco, o custo é só o digitado.
+    item_ebs: Mapped[str] = mapped_column(String(60), default="", index=True)
 
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
@@ -112,6 +115,48 @@ class Historico(Base):
     )
 
 
+class Acordo(Base):
+    """Acordo de compra vigente com um fornecedor para um item do EBS."""
+    __tablename__ = "pln_acordo"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_ebs: Mapped[str] = mapped_column(String(60), index=True)
+    descricao: Mapped[str] = mapped_column(String(240), default="")
+    valor: Mapped[float] = mapped_column(Float, default=0.0)
+    fornecedor_codigo: Mapped[str] = mapped_column(String(30), default="", index=True)
+    fornecedor_nome: Mapped[str] = mapped_column(String(160), default="")
+    vencimento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    numero: Mapped[str] = mapped_column(String(60), default="")      # nº do acordo/contrato, se houver
+    observacao: Mapped[str] = mapped_column(Text, default="")
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    atualizado_por: Mapped[str] = mapped_column(String(80), default="")
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_pln_acordo_item_fornecedor", "item_ebs", "fornecedor_codigo", unique=True),
+    )
+
+
+class Substituicao(Base):
+    """Plano de substituição de um modelo obsoleto: com o quê, por quanto e quando."""
+    __tablename__ = "pln_substituicao"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    modelo_obsoleto: Mapped[str] = mapped_column(String(160), unique=True)
+    # Item de planejamento que substitui (dá o custo e o acordo). Opcional.
+    item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pln_item.id", ondelete="SET NULL"), default=None, index=True)
+    custo_unitario: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = usar o do item
+    mes_alvo: Mapped[str] = mapped_column(String(7), default="")       # AAAA-MM da compra
+    percentual: Mapped[int] = mapped_column(Integer, default=100)       # quanto do parque trocar
+    observacao: Mapped[str] = mapped_column(Text, default="")
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    atualizado_por: Mapped[str] = mapped_column(String(80), default="")
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Config(Base):
     __tablename__ = "pln_config"
 
@@ -127,6 +172,8 @@ PADROES = {
     "horizonte_meses": "12",
     # Quantos meses de histórico a tela mostra na grade.
     "meses_historico": "24",
+    # Acordo "vence em breve" a partir de quantos dias antes do vencimento.
+    "acordo_alerta_dias": "60",
 }
 
 

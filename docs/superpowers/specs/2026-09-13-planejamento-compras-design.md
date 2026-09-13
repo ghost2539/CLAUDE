@@ -72,6 +72,24 @@ Por item:
   visível só na instância Spare (literal trocado ao servir o bundle).
 - Verificação: `scripts/verificar_planejamento.py`.
 
+## Obsolescência (acrescentado)
+
+Sub-aba com a previsão de compra para substituir o parque obsoleto por BU.
+Fonte: aparelhos ativos marcados como obsoletos na última coleta do
+módulo de Obsolescência, agrupados por modelo × BU (CD incluído). Por
+modelo, um plano: item substituto (custo e acordo vêm dele) ou custo
+digitado, percentual do parque a trocar, mês alvo. Saídas: unidades e
+valor por BU, calendário de compra por mês, alertas de modelo sem custo
+ou sem mês.
+
+## Acordos de compra (acrescentado)
+
+Em Configuração: item EBS, descrição, valor, código e nome do fornecedor,
+vencimento, número. Inclusão na tela ou por planilha. Situação por
+vencimento com prazo de alerta configurável. Item de planejamento com
+Item EBS e sem custo usa o valor do acordo vigente de vencimento mais
+distante.
+
 ## Fora de escopo
 
 Estoque de inauguração, integração com pedidos de compra do EBS,
