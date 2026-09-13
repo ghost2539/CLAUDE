@@ -89,6 +89,26 @@ fi
 # Sem proxy no git (rede corporativa quebra o fetch por ele).
 git_sem_proxy() { env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY git "$@"; }
 
+# Lê um arquivo de ambiente no formato do systemd (KEY=VALUE, aspas
+# opcionais) e devolve "export KEY='VALUE'" por linha. Não se usa `source`:
+# uma senha com | ; & ou $ viraria comando no bash e a variável sumiria.
+env_exports() {
+    python3 - "$1" <<'PY'
+import shlex, sys
+for linha in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    linha = linha.strip()
+    if not linha or linha.startswith("#") or "=" not in linha:
+        continue
+    k, _, v = linha.partition("=")
+    k = k.strip().removeprefix("export ").strip()
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+        v = v[1:-1]
+    if k.replace("_", "").isalnum():
+        print(f"export {k}={shlex.quote(v)}")
+PY
+}
+
 # ── 1. Código ──────────────────────────────────────────────────────────────
 if [ -z "$TEST_REPO" ]; then
     TEST_REPO="$(git -C "$PROD_DIR" remote get-url origin 2>/dev/null || true)"
@@ -120,7 +140,7 @@ if [ "$ROOT" -eq 1 ] && command -v dnf >/dev/null 2>&1; then
     python3 -c 'import venv, ensurepip' 2>/dev/null || FALTAM="$FALTAM python3-pip"
     command -v sqlite3 >/dev/null 2>&1 || FALTAM="$FALTAM sqlite"
     command -v git >/dev/null 2>&1 || FALTAM="$FALTAM git"
-    case "$(set -a; . "$PROD_ENVFILE" >/dev/null 2>&1; set +a; printf '%s' "${DATABASE_URL:-}")" in
+    case "$(eval "$(env_exports "$PROD_ENVFILE")"; printf '%s' "${DATABASE_URL:-}")" in
         postgres*) command -v pg_dump >/dev/null 2>&1 || FALTAM="$FALTAM postgresql" ;;
     esac
     if [ -n "$FALTAM" ]; then
@@ -147,6 +167,7 @@ if [ -z "${https_proxy:-}${HTTPS_PROXY:-}" ]; then
 fi
 
 mkdir -p "$STATE"
+PROD_DATABASE_URL_CEDO="$(eval "$(env_exports "$PROD_ENVFILE")"; printf '%s' "${DATABASE_URL:-}")"
 PY_TESTE="$TEST_DIR/venv/bin/python"
 VENV_OK=0
 if [ -x "$PY_TESTE" ] && "$PY_TESTE" -c 'import fastapi, sqlalchemy, pandas, openpyxl, uvicorn' 2>/dev/null; then
@@ -164,6 +185,19 @@ if [ "$VENV_OK" -eq 0 ]; then
     else
         echo "   pip falhou ($(tail -1 "$STATE/pip.err" 2>/dev/null | cut -c1-120))"
     fi
+fi
+
+# O driver que a URL da produção pede tem de existir no venv do teste.
+DRIVER_PG=""
+case "$PROD_DATABASE_URL_CEDO" in
+    postgresql+psycopg2://*|postgres://*|postgresql://*) DRIVER_PG=psycopg2 ;;
+    postgresql+psycopg://*) DRIVER_PG=psycopg ;;
+esac
+if [ "$VENV_OK" -eq 1 ] && [ -n "$DRIVER_PG" ] && ! "$PY_TESTE" -c "import $DRIVER_PG" 2>/dev/null; then
+    echo "-- Driver $DRIVER_PG ausente no venv; instalando"
+    PACOTE="$DRIVER_PG"; [ "$DRIVER_PG" = "psycopg2" ] && PACOTE="psycopg2-binary"; [ "$DRIVER_PG" = "psycopg" ] && PACOTE="psycopg[binary]"
+    timeout 120 "$PY_TESTE" -m pip install -q --timeout 25 --retries 1 "$PACOTE" 2>/dev/null \
+        && "$PY_TESTE" -c "import $DRIVER_PG" 2>/dev/null || { echo "   não deu pelo pip; usando o venv da produção"; VENV_OK=0; }
 fi
 
 if [ "$VENV_OK" -eq 0 ]; then
@@ -197,6 +231,9 @@ PY
 )"
     [ -n "$FALTANDO" ] && echo "   AVISO: sem rede, não instalados (a produção não os tem): $FALTANDO"
     "$PY_TESTE" -c 'import fastapi, sqlalchemy, pandas, openpyxl, uvicorn' || { echo "ERRO: venv copiado não carrega as bibliotecas básicas."; exit 1; }
+    if [ -n "$DRIVER_PG" ] && ! "$PY_TESTE" -c "import $DRIVER_PG" 2>/dev/null; then
+        echo "ERRO: o venv da produção não tem o driver $DRIVER_PG que a URL do banco pede."; exit 1
+    fi
 fi
 echo "   Python do teste: $("$PY_TESTE" -c 'import sys; print(sys.version.split()[0])') em $TEST_DIR/venv"
 
@@ -205,7 +242,7 @@ mkdir -p "$TEST_DIR/data/db" "$TEST_DIR/data/uploads" "$STATE" "$TEST_ENVDIR"
 chmod 700 "$TEST_ENVDIR"
 
 # Lê a produção num subshell: nada vaza para o ambiente do teste.
-PROD_DATABASE_URL="$(set -a; . "$PROD_ENVFILE" >/dev/null 2>&1; set +a; printf '%s' "${DATABASE_URL:-}")"
+PROD_DATABASE_URL="$(eval "$(env_exports "$PROD_ENVFILE")"; printf '%s' "${DATABASE_URL:-}")"
 
 BANCOS_JA_COPIADOS=0
 [ -s "$TEST_DIR/data/db/.copiado_de_producao" ] && BANCOS_JA_COPIADOS=1
@@ -234,8 +271,10 @@ cred, host, banco, query = partes(u)
 teste = banco + "_testes"
 novo = f"{cred}@{host}/{teste}" + (f"?{query}" if query else "")
 credp, hostp, _, _ = partes(pg)
+usuario = cred.split("://", 1)[-1].split(":", 1)[0]
 print("PG_NOME=" + shlex.quote(banco))
 print("PG_TESTE=" + shlex.quote(teste))
+print("PG_USUARIO=" + shlex.quote(usuario))
 print("PG_SERVIDOR=" + shlex.quote(f"{credp}@{hostp}"))
 print("TEST_DATABASE_URL=" + shlex.quote(novo))
 PY
@@ -243,7 +282,7 @@ PY
     *)
         echo "ERRO: DATABASE_URL da produção não reconhecido: ${PROD_DATABASE_URL:-(vazio)}"; exit 1 ;;
 esac
-mascarar() { printf '%s' "$1" | sed -E 's#(://[^:/@]+):[^@]*@#\1:***@#'; }
+mascarar() { printf '%s' "$1" | sed -E 's#(://[^:/@]+):.*@#\1:***@#'; }
 if [ -z "$TEST_DATABASE_URL" ]; then
     echo "ERRO: não consegui derivar a URL do banco de teste a partir de $(mascarar "$PROD_DATABASE_URL")."; exit 1
 fi
@@ -266,8 +305,6 @@ else
                 || { echo "ERRO: pg_dump/pg_restore/psql não instalados (postgresql-client)."; exit 1; }
             DUMP="$STATE/portal_producao.dump"
             pg_dump -Fc --no-owner --no-acl --dbname="$PG_URL" -f "$DUMP" || { echo "ERRO no pg_dump da produção."; exit 1; }
-            # Usuário do portal no Postgres (dono do banco de testes).
-            PG_USUARIO="$(printf '%s' "$PG_BASE" | sed -E 's#^[a-z]+://([^:@/]+).*#\1#')"
             # Cria o banco como o usuário `postgres` do sistema (entra sem senha
             # pelo socket): o usuário do portal não tem CREATEDB e, pelo
             # pg_hba, só entra com senha no banco de produção.
@@ -365,7 +402,7 @@ SEGREDO="$("$TEST_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_u
 chmod 600 "$TEST_ENVFILE"
 
 # Marca o nome da aplicação para ninguém confundir a tela.
-( set -a; . "$TEST_ENVFILE"; set +a; cd "$TEST_DIR" && "$TEST_DIR/venv/bin/python" - <<'PY'
+( eval "$(env_exports "$TEST_ENVFILE")"; cd "$TEST_DIR" && "$TEST_DIR/venv/bin/python" - <<'PY'
 import logging; logging.disable(logging.CRITICAL)
 try:
     from db.portal import SessionLocal, Setting, init_db
@@ -387,7 +424,7 @@ PY
 
 # ── 5. Conferência ────────────────────────────────────────────────────────
 echo "-- Conferindo se o teste carrega"
-( set -a; . "$TEST_ENVFILE"; set +a; cd "$TEST_DIR" && "$TEST_DIR/venv/bin/python" - <<'PY'
+( eval "$(env_exports "$TEST_ENVFILE")"; cd "$TEST_DIR" && "$TEST_DIR/venv/bin/python" - <<'PY'
 import logging, sys
 logging.basicConfig(level=logging.ERROR)
 try:
