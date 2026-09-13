@@ -9,6 +9,7 @@
 
     var ROUTES = {
         bemvindo:       'Bem-vindo',
+        torre:          'Torre de Controle',
         consulta:       'Consulta',
         recebimento:    'Recebimento',
         identificacao:  'Identificação',

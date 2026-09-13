@@ -306,6 +306,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Torre de Controle (T2) — sem banco próprio ──────────────────────
+    # Não grava nada: tudo é derivado dos intervalos do núcleo. Por isso
+    # o painel muda sozinho quando o calendário muda.
+    try:
+        from routers.torre import router as torre_router
+        app.include_router(torre_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("torre").error(
+            "Torre de Controle NÃO carregada (portal segue sem ela): %s",
+            exc, exc_info=True,
+        )
+
     try:
         from routers.obsolescencia import router as obsolescencia_router
         app.include_router(obsolescencia_router)
