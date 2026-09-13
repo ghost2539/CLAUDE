@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Portal de Operações - SPARE</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/app.css">
+    <script defer src="/static/app.js"></script>
+</head>
+<body>
+
+<!-- ── Login screen ─────────────────────────────────────────── -->
+<div id="login-screen" class="login-screen">
+    <main class="login-card">
+        <div class="login-marca" aria-hidden="true">SP</div>
+        <h1 class="login-title">Portal de Operações</h1>
+        <p class="login-subtitle">Ativos, reparos e orçamento da operação SPARE</p>
+
+        <form id="login-form" class="login-form">
+            <div class="campo">
+                <label for="login-username">Usuário da rede</label>
+                <input id="login-username" name="username" class="form-control"
+                       autocomplete="username" autocapitalize="none" spellcheck="false"
+                       autofocus required>
+            </div>
+            <div class="campo">
+                <label for="login-password">Senha</label>
+                <input id="login-password" name="password" type="password" class="form-control"
+                       autocomplete="current-password" required>
+            </div>
+            <button id="login-submit" class="login-submit-btn" type="submit">Entrar</button>
+        </form>
+
+        <div id="login-error" class="login-error" role="alert" aria-live="polite" hidden>
+            <span id="login-error-text"></span>
+        </div>
+
+        <p class="login-nota">Sua conta é a mesma da rede Renner. Acesso liberado
+            previamente por um administrador do portal.</p>
+    </main>
+</div>
+
+<!-- ── App wrapper ──────────────────────────────────────────── -->
+<div id="app-wrapper" class="app-wrapper" hidden>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand-icon">SP</div>
+            <div class="sidebar-brand-text">SPARE</div>
+        </div>
+        <nav class="sidebar-menu">
+            <a class="sidebar-item" data-route="bemvindo">
+                <span class="sidebar-icon">&#x2302;</span>
+                <span class="sidebar-label">Bem-vindo</span>
+            </a>
+            <a class="sidebar-item" data-route="torre" data-perm="torre">
+                <span class="sidebar-icon">&#x25F3;</span>
+                <span class="sidebar-label">Torre de Controle</span>
+            </a>
+            <a class="sidebar-item" data-route="consulta">
+                <span class="sidebar-icon">&#x2315;</span>
+                <span class="sidebar-label">Consulta</span>
+            </a>
+            <a class="sidebar-item" data-route="recebimento">
+                <span class="sidebar-icon">&#x25A3;</span>
+                <span class="sidebar-label">Recebimento</span>
+            </a>
+            <a class="sidebar-item" data-route="identificacao">
+                <span class="sidebar-icon">&#x2399;</span>
+                <span class="sidebar-label">Identificação</span>
+            </a>
+            <a class="sidebar-item" data-route="gestao_ativos" data-perm="servicenow">
+                <span class="sidebar-icon">&#x21C4;</span>
+                <span class="sidebar-label">Gestão de Ativos</span>
+            </a>
+            <a class="sidebar-item" data-route="atendimento" data-perm="atendimento">
+                <span class="sidebar-icon">&#x260E;</span>
+                <span class="sidebar-label">Atendimento</span>
+            </a>
+            <a class="sidebar-item" data-route="bancada" data-perm="bancada">
+                <span class="sidebar-icon">&#x2692;</span>
+                <span class="sidebar-label">Bancada</span>
+            </a>
+            <a class="sidebar-item" data-route="preparacao" data-perm="preparacao">
+                <span class="sidebar-icon">&#x2699;</span>
+                <span class="sidebar-label">Preparação</span>
+            </a>
+            <a class="sidebar-item" data-route="separacao" data-perm="separacao">
+                <span class="sidebar-icon">&#x1F4E4;</span>
+                <span class="sidebar-label">Separação</span>
+            </a>
+            <a class="sidebar-item" data-route="projetos" data-perm="projetos">
+                <span class="sidebar-icon">&#x1F3EC;</span>
+                <span class="sidebar-label">Projetos de Loja</span>
+            </a>
+            <a class="sidebar-item" data-route="reversa" data-perm="reversa">
+                <span class="sidebar-icon">&#x1F4E5;</span>
+                <span class="sidebar-label">Logística Reversa</span>
+            </a>
+            <a class="sidebar-item" data-route="inventario" data-perm="inventario">
+                <span class="sidebar-icon">&#x1F4CB;</span>
+                <span class="sidebar-label">Inventário</span>
+            </a>
+            <a class="sidebar-item" data-route="regularizacao" data-perm="regularizacao">
+                <span class="sidebar-icon">&#x2696;</span>
+                <span class="sidebar-label">Regularização</span>
+            </a>
+            <a class="sidebar-item" data-route="externo" data-perm="externo">
+                <span class="sidebar-icon">&#x21BB;</span>
+                <span class="sidebar-label">Assistência</span>
+            </a>
+            <a class="sidebar-item" data-route="destinacao" data-perm="destinacao">
+                <span class="sidebar-icon">&#x267B;</span>
+                <span class="sidebar-label">Destinação</span>
+            </a>
+            <a class="sidebar-item" data-route="rastreio">
+                <span class="sidebar-icon">&#x1F4E6;</span>
+                <span class="sidebar-label">Correios</span>
+            </a>
+            <a class="sidebar-item" data-route="reparos">
+                <span class="sidebar-icon">&#x2692;</span>
+                <span class="sidebar-label">Central de Reparos</span>
+            </a>
+            <a class="sidebar-item" data-route="orcamento_manutencao">
+                <span class="sidebar-icon">&#x1F4B0;</span>
+                <span class="sidebar-label">Orçamento</span>
+            </a>
+            <a class="sidebar-item" data-route="status">
+                <span class="sidebar-icon">&#x2301;</span>
+                <span class="sidebar-label">Status</span>
+            </a>
+            <a class="sidebar-item" data-route="parametros">
+                <span class="sidebar-icon">&#x2699;</span>
+                <span class="sidebar-label">Parâmetros</span>
+            </a>
+        </nav>
+        <div class="sidebar-bottom">
+            <button id="logout-btn" class="sidebar-logout-btn">
+                <span>&#x21AA;</span>
+                <span class="sidebar-label">Sair</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Top bar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <span id="app-title" class="topbar-app-title">Portal de Operações - SPARE</span>
+        </div>
+        <div class="topbar-center">
+            <div class="topbar-search">
+                <span class="topbar-search-icon">&#x2315;</span>
+                <input id="global-search" class="topbar-search-input"
+                       placeholder="Buscar ativo, etiqueta ou série">
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span id="topbar-user-name" class="topbar-user-name"></span>
+            <span id="topbar-user-avatar" class="topbar-user-avatar">U</span>
+        </div>
+    </header>
+
+    <!-- Main content area -->
+    <main class="main-content">
+        <div id="sub-tabs" class="sub-tabs" hidden></div>
+        <section id="page-content" class="page-content"></section>
+        <footer id="portal-footer" class="login-footer">SPARE - Portal de Operações</footer>
+    </main>
+
+</div>
+
+<!-- ── Toast container ──────────────────────────────────────── -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- ── Loading overlay ──────────────────────────────────────── -->
+<div id="loading-overlay" class="loading-overlay" hidden>
+    <div class="loading-spinner">
+        <span class="spinner spinner-lg"></span>
+        <span class="loading-text">Processando...</span>
+    </div>
+</div>
+
+<!-- ── Modal overlay ────────────────────────────────────────── -->
+<div id="modal-overlay" class="modal-overlay" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="modal-title" class="modal-title"></h3>
+            <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div id="modal-footer" class="modal-footer"></div>
+    </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+sqlalchemy>=2.0,<3
+psycopg[binary]>=3.1,<4
+# Driver MySQL (servidor novo). PyMySQL é puro-Python (fácil de instalar);
+# 'cryptography' é exigido pelo auth caching_sha2_password do MySQL 8.
+PyMySQL>=1.1,<2
+cryptography>=42
+# Driver Oracle (EBS) — usado só pelo módulo ebs_oracle.py (leitura no BASE_REMOVIDA).
+# Modo thick usa o Instant Client (ORACLE_CLIENT_LIB_DIR); sem ele cai para thin.
+oracledb>=2.0,<4
+python-multipart>=0.0.9
+requests>=2.31
+pandas>=2.2
+openpyxl>=3.1
+itsdangerous>=2.2
+pydantic>=2.7,<3
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+slowapi>=0.1.9
