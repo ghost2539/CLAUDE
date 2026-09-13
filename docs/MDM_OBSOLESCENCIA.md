@@ -394,3 +394,14 @@ atendem cada critério), `em_risco` (2 de 3), `por_modelo` e
 Continua pendente a idade real via EBS (o parser da grade não traz a
 série; `idade_desconhecida` fica verdadeira até isso existir) e a coleta
 de PDVs por rota.
+
+## Certificado e proxy na conexão com o console
+
+A sessão com o console segue a política geral do portal: `VERIFY_SSL=false`
+desliga a verificação de certificado (o proxy corporativo intercepta o TLS
+e apresenta a cadeia dele); `MDM_CA_BUNDLE=/caminho/ca.pem` liga a
+verificação com essa cadeia. A sessão ignora `REQUESTS_CA_BUNDLE` e
+`https_proxy` do ambiente: só valem `SN_PROXY` e as variáveis acima.
+
+Falha de certificado, proxy ou rede volta como **502** (ou **504** em
+tempo esgotado) com a causa e a orientação na mensagem, nunca como 500.

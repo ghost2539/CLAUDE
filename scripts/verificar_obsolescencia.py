@@ -67,6 +67,99 @@ checar(res["sem_ver"]["quantidade"] == 1, "1 sem comunicar acima do limite")
 checar(any(m["modelo"] == "Zebra TC21" and m["coletores"] == 2 for m in res["por_modelo"]), "por modelo")
 checar(any(v["versao"] == "13" for v in res["por_versao_os"]), "por versão de Android")
 
+print("\n[5] Sessão do MDM: certificado, proxy e erros de rede viram 502/504, nunca 500")
+import requests, ssl, subprocess, threading, http.server
+from types import SimpleNamespace
+from integracoes import mdm_airwatch as mdm
+from fastapi import HTTPException
+
+ob._cfg.VERIFY_SSL = False; ob._cfg.MDM_CA_BUNDLE = ""
+checar(ob._nova_sessao().verify is False, "VERIFY_SSL=false → sessão do MDM sem verificação (como o ServiceNow)")
+ob._cfg.MDM_CA_BUNDLE = "/tmp/ca-corporativa.pem"
+checar(ob._nova_sessao().verify == "/tmp/ca-corporativa.pem", "MDM_CA_BUNDLE → verifica com a cadeia informada")
+ob._cfg.MDM_CA_BUNDLE = ""; ob._cfg.VERIFY_SSL = True
+checar(ob._nova_sessao().verify is True, "VERIFY_SSL=true sem CA própria → verificação padrão")
+ob._cfg.VERIFY_SSL = False
+
+def _status(fn):
+    try:
+        fn(); return None
+    except HTTPException as e:
+        return e.status_code, e.detail
+ob.credencial_mdm = lambda: ("renner\\svc", "segredo")
+_login_original = mdm.login
+def _login_erro(exc):
+    def f(sessao, u, s_, base=""):
+        raise exc
+    return f
+mdm.login = _login_erro(requests.exceptions.SSLError("certificate verify failed"))
+st = _status(lambda: ob.sessao_mdm(forcar=True))
+checar(st and st[0] == 502 and "certificado" in st[1] and "MDM_CA_BUNDLE" in st[1], "SSLError no login → 502 com orientação (VERIFY_SSL / MDM_CA_BUNDLE)")
+mdm.login = _login_erro(requests.exceptions.ProxyError("407"))
+checar(_status(lambda: ob.sessao_mdm(forcar=True))[0] == 502, "ProxyError → 502")
+mdm.login = _login_erro(requests.exceptions.ConnectTimeout("t"))
+checar(_status(lambda: ob.sessao_mdm(forcar=True))[0] == 504, "Timeout → 504")
+mdm.login = _login_erro(requests.exceptions.ConnectionError("refused"))
+checar(_status(lambda: ob.sessao_mdm(forcar=True))[0] == 502, "ConnectionError → 502")
+mdm.login = lambda sessao, u, s_, base="": False
+st = _status(lambda: ob.sessao_mdm(forcar=True))
+checar(st[0] == 502 and "recusado" in st[1], "login recusado → 502")
+mdm.login = _login_original
+
+ob._exigir_admin = lambda req: {"username": "t"}
+ob.sessao_mdm = lambda forcar=False: object()
+_varrer_original = mdm.varrer
+mdm.varrer = lambda sessao, base="", **k: (_ for _ in ()).throw(requests.exceptions.SSLError("handshake"))
+st = _status(lambda: ob.coletar(SimpleNamespace(cookies={}, headers={}, client=None)))
+checar(st and st[0] == 502 and "certificado" in st[1], "SSLError na varredura → 502, não 500")
+def _expira(sessao, base="", **k):
+    raise mdm.SessaoExpirada("fragmento")
+mdm.varrer = _expira
+st = _status(lambda: ob.coletar(SimpleNamespace(cookies={}, headers={}, client=None)))
+checar(st and st[0] == 502 and "grade" in st[1], "sessão expirada duas vezes → 502 explicando")
+mdm.varrer = _varrer_original
+
+# Servidor HTTPS local com certificado autoassinado: o caso real do proxy
+# que apresenta uma cadeia que o sistema não conhece.
+try:
+    cert = os.path.join(_T, "cert.pem"); key = os.path.join(_T, "key.pem")
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert,
+                    "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"],
+                   check=True, capture_output=True)
+    class _H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
+            self.wfile.write(b"<html><form action='/AirWatch/Login' method='post'><input name='username'><input name='password'></form></html>")
+        def do_POST(self):
+            self.do_GET()
+        def log_message(self, *a): pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(cert, key)
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"https://127.0.0.1:{srv.server_address[1]}"
+    import routers.servicenow as _sn
+    _sn.SN_PROXY = ""   # sem proxy para o servidor local
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1"   # o ambiente pode ter proxy global
+    ultimo_erro = {}
+    def _tenta():
+        s_ = ob._nova_sessao()
+        try:
+            mdm.login(s_, "u", "p", base); return "ok"
+        except Exception as exc:  # noqa: BLE001
+            ultimo_erro["exc"] = repr(exc)[:160]
+            return ob._erro_de_rede(exc, base).status_code
+    ob._cfg.VERIFY_SSL = True; ob._cfg.MDM_CA_BUNDLE = ""
+    checar(_tenta() == 502, "certificado desconhecido com verificação ligada → 502 (era o 500)")
+    ob._cfg.VERIFY_SSL = False
+    r_ = _tenta(); checar(r_ == "ok", "VERIFY_SSL=false → conecta" + ("" if r_ == "ok" else f" ({ultimo_erro.get('exc')})"))
+    ob._cfg.VERIFY_SSL = True; ob._cfg.MDM_CA_BUNDLE = cert
+    r_ = _tenta(); checar(r_ == "ok", "MDM_CA_BUNDLE com a cadeia certa → conecta verificando" + ("" if r_ == "ok" else f" ({ultimo_erro.get('exc')})"))
+    ob._cfg.VERIFY_SSL = False; ob._cfg.MDM_CA_BUNDLE = ""
+    srv.shutdown()
+except FileNotFoundError:
+    print("  (openssl ausente: teste com servidor HTTPS local pulado)")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)
