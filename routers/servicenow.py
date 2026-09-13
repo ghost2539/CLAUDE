@@ -5,15 +5,16 @@ import os
 import re
 import threading
 import time
+import unicodedata
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
 from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
-from core.security import require_permission, get_session
+from core.security import require_permission, get_session, check_rate_limit
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -1434,20 +1435,165 @@ def entrada_preview(body: EntradaPreviewIn, req: Request):
     else:
         raise HTTPException(400, "Origem inválida.")
 
-    # Marca quais já existem no ServiceNow (por asset_tag/serial).
+    _marcar_existe_sn(session, rows)
+    return {"rows": rows, "total": len(rows)}
+
+
+def _marcar_existe_sn(session, rows: list[dict]) -> None:
+    """Marca quais linhas já existem no ServiceNow (por asset_tag/serial)."""
     from types import SimpleNamespace
     itens = [SimpleNamespace(asset_tag=r.get("tag_number", ""), serial_number=r.get("serial_number", ""))
              for r in rows if r.get("encontrado")]
     tags_ok, ser_ok = set(), set()
     try:
         tags_ok, ser_ok = _hardware_existentes(session, itens)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — sem o ServiceNow a conferência some, a tela não
         pass
     for r in rows:
         t = str(r.get("tag_number") or "").strip().upper()
         s2 = str(r.get("serial_number") or "").strip().upper()
         r["existe_sn"] = bool((t and t in tags_ok) or (s2 and s2 in ser_ok))
 
+
+# ── Origem por planilha ───────────────────────────────────────────
+# As colunas são as que sobem para o ServiceNow. O modelo para baixar e o
+# arquivo enviado falam a mesma língua: quem preenche vê exatamente o que
+# vai gravar.
+COLUNAS_PLANILHA_ENTRADA: list[tuple[str, str, bool]] = [
+    ("tag_number", "Asset Tag", True),
+    ("serial_number", "Número de Série", True),
+    ("asset_number", "Imobilizado", False),
+    ("model", "Modelo", True),
+    ("category", "Categoria", False),
+    ("company", "Empresa", False),
+    ("description", "Descrição", False),
+    ("cost", "Custo", False),
+    ("dpis", "DPIS (AAAA-MM-DD)", False),
+    ("acquisition_date", "Data de aquisição (AAAA-MM-DD)", False),
+]
+
+
+@router.get("/entrada/planilha-modelo")
+def entrada_planilha_modelo(req: Request):
+    """Planilha modelo com as colunas que sobem para o ServiceNow."""
+    require_permission(req, "servicenow", "view")
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from fastapi.responses import StreamingResponse
+    import io as _io
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ativos"
+    cabecalho = Font(bold=True, color="FFFFFF")
+    fundo = PatternFill("solid", fgColor="C06010")
+    for col, (_chave, rotulo, obrig) in enumerate(COLUNAS_PLANILHA_ENTRADA, start=1):
+        cel = ws.cell(row=1, column=col, value=rotulo + (" *" if obrig else ""))
+        cel.font = cabecalho
+        cel.fill = fundo
+        ws.column_dimensions[cel.column_letter].width = max(16, len(cel.value) + 4)
+    ws.cell(row=2, column=1, value="RN000123")
+    ws.cell(row=2, column=2, value="SN123456789")
+    ws.cell(row=2, column=4, value="PDV Dell 3050")
+    ws.freeze_panes = "A2"
+    aba = wb.create_sheet("Instruções")
+    for i, linha in enumerate([
+        "Uma linha por ativo. A primeira linha é o cabeçalho e não deve ser apagada.",
+        "Colunas com * são obrigatórias: Asset Tag, Número de Série e Modelo.",
+        "Datas em AAAA-MM-DD. Custo apenas com números.",
+        "A linha 2 é um exemplo: apague-a antes de enviar.",
+        "Depois de enviar, confira a pré-visualização e selecione o que vai subir.",
+    ], start=1):
+        aba.cell(row=i, column=1, value=linha)
+    aba.column_dimensions["A"].width = 90
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="modelo_entrada_ativos.xlsx"'})
+
+
+def ler_planilha_entrada(nome: str, conteudo: bytes) -> list[dict]:
+    """Lê a planilha enviada e devolve as linhas no formato da pré-visualização.
+
+    Aceita XLSX e CSV. O cabeçalho é casado pelo rótulo do modelo ou pelo
+    nome técnico da coluna, sem diferenciar acento nem caixa.
+    """
+    import pandas as pd
+    import io as _io
+
+    nome = (nome or "").lower()
+    if nome.endswith((".xlsx", ".xlsm", ".xls")):
+        df = pd.read_excel(_io.BytesIO(conteudo), dtype=str)
+    else:
+        texto = conteudo.decode("utf-8-sig", errors="replace")
+        sep = ";" if texto.count(";") > texto.count(",") else ","
+        df = pd.read_csv(_io.StringIO(texto), sep=sep, dtype=str)
+
+    def limpar(t: str) -> str:
+        t = unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode()
+        return t.strip().lower().rstrip("*").strip()
+
+    colunas = {limpar(c): c for c in df.columns}
+    mapa: dict[str, str] = {}
+    for chave, rotulo, _obrig in COLUNAS_PLANILHA_ENTRADA:
+        for candidato in (rotulo, chave):
+            if limpar(candidato) in colunas:
+                mapa[chave] = colunas[limpar(candidato)]
+                break
+    faltando = [r for c, r, obrig in COLUNAS_PLANILHA_ENTRADA if obrig and c not in mapa]
+    if faltando:
+        raise HTTPException(400, "Planilha sem a(s) coluna(s): " + ", ".join(faltando) +
+                                 ". Baixe o modelo e use o cabeçalho dele.")
+
+    linhas: list[dict] = []
+    for _, r in df.iterrows():
+        def pega(chave: str) -> str:
+            if chave not in mapa:
+                return ""
+            v = r[mapa[chave]]
+            if v is None or (isinstance(v, float) and v != v):   # NaN
+                return ""
+            return str(v).strip()
+
+        tag, serie, modelo = pega("tag_number"), pega("serial_number"), pega("model")
+        if not (tag or serie or modelo):
+            continue                      # linha em branco no meio da planilha
+        falta = [rot for chave, rot in (("tag_number", "Asset Tag"), ("serial_number", "Número de Série"),
+                                        ("model", "Modelo")) if not pega(chave)]
+        linhas.append({
+            "encontrado": not falta,
+            "origem_planilha": True,
+            "tag_number": tag, "serial_number": serie, "model": modelo,
+            "asset_number": pega("asset_number"),
+            "category": pega("category"),
+            "company": _normaliza_company(pega("company")),
+            "description": pega("description"),
+            "cost": pega("cost"),
+            "dpis": pega("dpis"),
+            "acquisition_date": pega("acquisition_date"),
+            "erro": ("Faltando: " + ", ".join(falta)) if falta else "",
+        })
+    if not linhas:
+        raise HTTPException(400, "A planilha não tem nenhuma linha preenchida.")
+    return linhas
+
+
+@router.post("/entrada/planilha")
+async def entrada_planilha(req: Request, arquivo: UploadFile = File(...)):
+    """Recebe a planilha preenchida e devolve as linhas para conferência."""
+    require_permission(req, "servicenow", "view")
+    check_rate_limit(req)
+    conteudo = await arquivo.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(conteudo) > 10 * 1024 * 1024:
+        raise HTTPException(400, "Arquivo acima de 10 MB.")
+    rows = ler_planilha_entrada(arquivo.filename or "", conteudo)
+    session = _sn_session_from_portal(req)
+    _marcar_existe_sn(session, rows)
     return {"rows": rows, "total": len(rows)}
 
 

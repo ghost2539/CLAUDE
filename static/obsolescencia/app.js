@@ -198,7 +198,11 @@
         return '<div class="obs-acoes">' +
             '<button id="obs-coletar" class="obs-btn">Atualizar do MDM</button>' +
             '<button id="obs-cred" class="obs-btn obs-btn--secundario">Credencial do MDM</button>' +
-            '<span id="obs-msg" class="obs-msg">' + esc(msg || '') + '</span></div>';
+            '<span id="obs-msg" class="obs-msg">' + esc(msg || '') + '</span>' +
+            '<div id="obs-prog" class="obs-prog" hidden>' +
+                '<div class="obs-prog-barra"><div id="obs-prog-cheio"></div></div>' +
+                '<span id="obs-prog-txt" class="obs-msg"></span>' +
+            '</div></div>';
     }
 
     /* Formulário da credencial de serviço. Fica aqui, e não só no CLI do
@@ -349,6 +353,41 @@
         ligarBotao();
     }
 
+    /* A varredura leva minutos e a requisição só volta no fim. Enquanto
+       isso a tela pergunta o andamento ao servidor: páginas lidas de
+       quantas, e o que está acontecendo agora. */
+    function acompanharProgresso() {
+        var caixa = document.getElementById('obs-prog');
+        var cheio = document.getElementById('obs-prog-cheio');
+        var txt = document.getElementById('obs-prog-txt');
+        if (caixa) caixa.hidden = false;
+        if (cheio) cheio.style.width = '0%';
+        if (txt) txt.textContent = 'Conectando no MDM…';
+
+        function pintar(pct, fase, lidos, total) {
+            if (cheio) cheio.style.width = Math.max(2, pct) + '%';
+            if (!txt) return;
+            var detalhe = total ? num(lidos) + ' de ' + num(total) + ' coletores' :
+                (lidos ? num(lidos) + ' coletores' : '');
+            txt.textContent = [fase, detalhe].filter(Boolean).join(' · ');
+        }
+        var timer = setInterval(function () {
+            fetch('/api/obsolescencia/coleta/progresso', { credentials: 'include' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (p) {
+                    if (!p || !p.rodando) return;
+                    pintar(p.percentual || 0, p.fase || '', p.lidos || 0, p.total || 0);
+                })
+                .catch(function () {});
+        }, 2000);
+
+        return function encerrar(pct, fase) {
+            clearInterval(timer);
+            if (pct) { pintar(pct, fase, 0, 0); setTimeout(function () { if (caixa) caixa.hidden = true; }, 1500); }
+            else if (caixa) caixa.hidden = true;
+        };
+    }
+
     function ligarBotao() {
         var c = document.getElementById('obs-cred');
         if (c) c.addEventListener('click', abrirCredencial);
@@ -357,15 +396,18 @@
         b.addEventListener('click', function () {
             var m = document.getElementById('obs-msg');
             b.disabled = true;
-            if (m) m.textContent = 'Lendo o parque no MDM… isso leva alguns minutos.';
+            if (m) m.textContent = 'Lendo o parque no MDM…';
+            var parar = acompanharProgresso();
             fetch('/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
                 .then(resposta)
                 .then(function (j) {
+                    parar(100, 'Concluída');
                     if (m) m.textContent = 'Coleta concluída: ' + num(j.lidos) + ' lidos, ' +
                         num(j.novos) + ' novos, ' + num(j.sumiram) + ' sumiram.';
                     carregar();
                 })
                 .catch(function (e) {
+                    parar(0, '');
                     b.disabled = false;
                     if (m) m.textContent = e.message;
                     // Falta credencial? Abre o formulário em vez de só reclamar.

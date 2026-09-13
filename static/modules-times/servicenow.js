@@ -1,3 +1,12 @@
+/* ════════════════════════════════════════════════════════════════
+   ESPAÇO CONSULTA TIMES — cópia INDEPENDENTE do módulo do portal.
+
+   Este arquivo é servido só em /consulta-times. Mexer aqui não muda
+   nada no portal, e mexer no portal (static/modules/) não muda nada
+   aqui. A independência é intencional: os dois espaços têm donos e
+   ritmos diferentes. O preço é que uma correção que valha para os
+   dois precisa ser aplicada nos dois arquivos.
+   ════════════════════════════════════════════════════════════════ */
 /* ================================================================
    Module: ServiceNow (4 sub-tabs)
    ================================================================ */
@@ -183,7 +192,7 @@ function _snRenderUpload(container, S) {
             '<div class="card-body">' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
-                        '<select id="sn-stockroom" class="form-control"><option>SPARE - CD324</option></select></div>' +
+                        '<select id="sn-stockroom" class="form-control"><option value="">Selecione…</option></select></div>' +
                     '<div><label>Espaço e Corredor <span style="color:#dc2626">*</span></label>' +
                         '<input id="sn-aisle" class="form-control" list="ga-corredores" placeholder="Obrigatório" autocomplete="off">' +
                         '<datalist id="ga-corredores"></datalist></div>' +
@@ -959,12 +968,12 @@ function _saMoveAll(S) {
    SUB-TAB 3: Movimentação Interna (entre estoques/espaços)
    ================================================================ */
 
-var _miStockrooms = ['SPARE - CD324', 'SPARE-ADM15', 'SPARE-CD504'];
+var _miStockrooms = [];   // vêm da configuração do espaço (alm_stockroom, sem SPARE)
 var _gaCorredores = [];
 var _gaAnotacoes = [];
 /* Estoques, corredores e anotações vêm de Configuração; aplicados na hora. */
 function _gaCarregarConfig(S) {
-    return S.api('/servicenow/gestao-ativos/config').then(function (c) {
+    return S.api('/consulta-times/gestao-ativos').then(function (c) {
         if (c.estoques && c.estoques.length) _miStockrooms = c.estoques;
         _gaCorredores = c.corredores || [];
         _gaAnotacoes = c.anotacoes || [];
@@ -1012,7 +1021,7 @@ function _snRenderMovInterna(container, S) {
                     'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                         '<div><label>Estoque destino <span style="color:#dc2626">*</span></label>' +
-                            _miStockroomSelectHtml('mi-stockroom', 'SPARE - CD324') + '</div>' +
+                            _miStockroomSelectHtml('mi-stockroom', '') + '</div>' +
                         '<div><label>BU</label>' +
                             '<select id="mi-bu" class="form-control">' +
                                 '<option value="">Selecione...</option>' +
@@ -1085,7 +1094,7 @@ function _miSearch(S) {
 
 function _miRenderList(S, assets, naoEncontrados, solicitados) {
     var applyAll = document.getElementById('mi-apply-all').checked;
-    var defStock = applyAll ? document.querySelector('.mi-stockroom').value : 'SPARE - CD324';
+    var defStock = applyAll ? document.querySelector('.mi-stockroom').value : '';
     var defStatus = applyAll ? document.getElementById('mi-new-status').value : 'In stock';
     var defAisle = applyAll ? document.getElementById('mi-aisle').value.trim() : '';
     var defNotes = applyAll ? document.getElementById('mi-notes').value.trim() : '';

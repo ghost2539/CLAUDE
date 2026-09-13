@@ -433,7 +433,10 @@
 
         _loadingModules[name] = new Promise(function (resolve, reject) {
             var script = document.createElement('script');
-            script.src = '/static/modules/' + name + '.js?v=' + Date.now();
+            // O espaço Times tem os módulos dele, em pasta própria: mexer
+            // num lado não muda o outro.
+            var base = ESPACO === 'times' ? '/static/modules-times/' : '/static/modules/';
+            script.src = base + name + '.js?v=' + Date.now();
             script.onload = function () {
                 delete _loadingModules[name];
                 resolve();

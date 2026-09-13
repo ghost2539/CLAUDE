@@ -189,28 +189,36 @@ class ListasIn(BaseModel):
 
 @router.get("/api/consulta-times/gestao-ativos")
 def listas_ler(req: Request):
+    """Listas do espaço Times, do banco DELE — o portal não entra aqui."""
     _exigir(req, "view")
-    from routers.servicenow import config_gestao_ativos
-    return config_gestao_ativos()
+    return dbct.ler_listas()
 
 
 @router.put("/api/consulta-times/gestao-ativos")
 def listas_gravar(body: ListasIn, req: Request):
-    """A mesma configuração que o portal usa (chave gestao_ativos): o
-    administrador do espaço muda daqui, sem precisar do portal inteiro."""
+    """Configuração exclusiva do espaço: gravar aqui não mexe no portal."""
     sd = _exigir(req, "admin")
-    from db.portal import Setting
-    with SessionLocal.begin() as s:
-        row = s.get(Setting, "gestao_ativos")
-        if row is None:
-            row = Setting(key="gestao_ativos")
-            s.add(row)
-        row.value = {"estoques": [x.strip() for x in body.estoques if x.strip()],
-                     "corredores": [x.strip() for x in body.corredores if x.strip()],
-                     "anotacoes": [x.strip() for x in body.anotacoes if x.strip()]}
-        row.updated_by = sd.get("username", "")
+    dbct.gravar_listas({"estoques": body.estoques, "corredores": body.corredores,
+                        "anotacoes": body.anotacoes})
     dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "configurar", "listas do ServiceNow")
     return listas_ler(req)
+
+
+@router.get("/api/consulta-times/stockrooms")
+def stockrooms(req: Request):
+    """Estoques do ServiceNow (alm_stockroom) para o espaço Times.
+
+    Os estoques do SPARE ficam de fora: são da nossa área, e este espaço é
+    dos outros times. O filtro é por nome, sem distinguir maiúsculas.
+    """
+    _exigir(req, "view")
+    from routers.servicenow import _sn_session_from_portal, _sn_query_all
+    sessao = _sn_session_from_portal(req)
+    linhas = _sn_query_all(sessao, "alm_stockroom", "", "name", page_size=500, max_records=5000)
+    nomes = sorted({(r.get("name") or "").strip() for r in linhas if (r.get("name") or "").strip()})
+    fora = [n for n in nomes if "spare" in n.lower()]
+    return {"estoques": [n for n in nomes if "spare" not in n.lower()],
+            "excluidos": len(fora), "total": len(nomes)}
 
 
 @router.get("/api/consulta-times/acessos")

@@ -579,6 +579,35 @@ def credencial_gravar(req: Request, corpo: CredencialMDM):
     return {"ok": True, "configurada": True, "usuario": usuario}
 
 
+# ── Progresso da coleta ───────────────────────────────────────────
+# A varredura do MDM leva minutos. Sem isto o botão parece não fazer
+# nada: a tela pergunta o andamento enquanto a requisição não volta.
+_progresso: dict = {"rodando": False, "pagina": 0, "lidos": 0, "total": 0,
+                    "fase": "", "usuario": "", "iniciada_em": None,
+                    "terminada_em": None, "erro": "", "resultado": None}
+_trava_progresso = threading.Lock()
+
+
+def _prog(**campos) -> None:
+    with _trava_progresso:
+        _progresso.update(campos)
+
+
+@router.get("/api/obsolescencia/coleta/progresso")
+def coleta_progresso(req: Request):
+    """Andamento da varredura em curso (ou da última). Qualquer login lê."""
+    get_session(req)
+    with _trava_progresso:
+        p = dict(_progresso)
+    if p["total"] and p["lidos"]:
+        p["percentual"] = min(99, int(100 * p["lidos"] / p["total"]))
+    else:
+        p["percentual"] = 0
+    if not p["rodando"] and p["terminada_em"] and not p["erro"]:
+        p["percentual"] = 100
+    return p
+
+
 @router.post("/api/obsolescencia/coletar")
 def coletar(req: Request):
     """Varre o parque de coletores e grava. Sob demanda, por botão.
@@ -592,25 +621,49 @@ def coletar(req: Request):
     _db.init_db()
 
     base = getattr(_cfg, "MDM_BASE_URL", "")
-    sessao = sessao_mdm()
+    agora = lambda: _db.localnow().isoformat()   # noqa: E731
+    with _trava_progresso:
+        if _progresso["rodando"]:
+            raise HTTPException(409, "Já existe uma coleta em andamento.")
+        _progresso.update({"rodando": True, "pagina": 0, "lidos": 0, "total": 0,
+                           "fase": "Conectando no MDM", "usuario": sd.get("username", ""),
+                           "iniciada_em": agora(), "terminada_em": None,
+                           "erro": "", "resultado": None})
+
+    def _andamento(pagina, faixa, lidos):
+        _prog(pagina=pagina + 1, lidos=lidos,
+              total=int((faixa or {}).get("total") or 0),
+              fase=f"Lendo a grade — página {pagina + 1}")
+
     try:
+        sessao = sessao_mdm()
+        _prog(fase="Lendo a grade — página 1")
         try:
-            varredura = mdm.varrer(sessao, base)
+            varredura = mdm.varrer(sessao, base, progresso=_andamento)
         except mdm.SessaoExpirada:
             # Uma segunda tentativa com login novo; se cair de novo, é problema real.
-            varredura = mdm.varrer(sessao_mdm(forcar=True), base)
-    except HTTPException:
+            _prog(fase="A sessão expirou; entrando de novo")
+            varredura = mdm.varrer(sessao_mdm(forcar=True), base, progresso=_andamento)
+
+        for c in varredura["coletores"]:
+            c["tipo"] = _db.COLETOR
+        _prog(fase=f"Gravando {len(varredura['coletores'])} coletores",
+              lidos=len(varredura["coletores"]))
+        resultado = aplicar_coleta(
+            varredura["coletores"], usuario=sd.get("username", ""),
+            total_mdm=varredura["total"], paginas=varredura["paginas"])
+    except HTTPException as exc:
+        _prog(rodando=False, erro=str(exc.detail), fase="Falhou", terminada_em=agora())
         raise
     except mdm.SessaoExpirada as exc:
+        _prog(rodando=False, erro=str(exc), fase="Falhou", terminada_em=agora())
         raise HTTPException(502, f"O MDM não devolveu a grade: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
-        raise _erro_de_rede(exc, base) from exc
+        falha = _erro_de_rede(exc, base)
+        _prog(rodando=False, erro=str(falha.detail), fase="Falhou", terminada_em=agora())
+        raise falha from exc
 
-    for c in varredura["coletores"]:
-        c["tipo"] = _db.COLETOR
-    resultado = aplicar_coleta(
-        varredura["coletores"], usuario=sd.get("username", ""),
-        total_mdm=varredura["total"], paginas=varredura["paginas"])
+    _prog(rodando=False, fase="Concluída", terminada_em=agora(), resultado=resultado)
     _log.info("Coleta do MDM por %s: %s", sd.get("username", ""), resultado)
     return {"ok": True, **resultado}
 

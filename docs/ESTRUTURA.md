@@ -236,3 +236,33 @@ próprio Orçamento Spare (view lê; edit e admin alteram).
   sem custo digitado usa o valor do acordo vigente.
 
 Verificação: `python3 scripts/verificar_planejamento.py`.
+
+### Consulta Times: espaço com módulos próprios
+
+O espaço em `/consulta-times` é independente do portal, por decisão da
+área: mexer num lado não muda o outro.
+
+- **Telas**: `static/modules-times/` (consulta, gestao_ativos, servicenow,
+  consulta_times). São cópias independentes das de `static/modules/`, não
+  wrappers. `app.js` carrega dessa pasta quando `body[data-espaco=times]`.
+  O preço da independência é que uma correção válida para os dois espaços
+  precisa ser aplicada nos dois arquivos.
+- **Configuração**: estoques, corredores e anotações ficam em `ct_config`,
+  no banco do próprio espaço. A chave `gestao_ativos` do portal não é
+  lida nem escrita aqui.
+- **Estoques**: escolhidos numa lista vinda do ServiceNow
+  (`GET /api/consulta-times/stockrooms`, tabela `alm_stockroom`), sem os
+  que têm "Spare" no nome — esses são da área SPARE.
+- **Sem Obsolescência**: a aba não existe em Gestão de Ativos no espaço.
+
+### Entrada de Ativos: origem por planilha
+
+Além da base por status e da lista digitada, a Entrada aceita planilha.
+`GET /api/servicenow/entrada/planilha-modelo` devolve o XLSX modelo com as
+colunas que sobem para o ServiceNow (Asset Tag, Número de Série e Modelo
+são obrigatórios) e uma aba de instruções;
+`POST /api/servicenow/entrada/planilha` recebe o arquivo preenchido
+(XLSX ou CSV) e devolve as linhas na mesma pré-visualização das outras
+origens, marcando as incompletas com o motivo.
+
+Verificação: `python3 scripts/verificar_consulta_times.py`.

@@ -160,6 +160,57 @@ try:
 except FileNotFoundError:
     print("  (openssl ausente: teste com servidor HTTPS local pulado)")
 
+print("\n[6] Progresso da coleta")
+from types import SimpleNamespace as _NS
+ob.get_session = lambda req, required=True: {"username": "t"}
+ob._exigir_admin = lambda req: {"username": "t"}
+REQ = _NS(cookies={}, headers={}, client=None)
+
+ob._progresso.update({"rodando": False, "pagina": 0, "lidos": 0, "total": 0, "fase": "",
+                      "usuario": "", "iniciada_em": None, "terminada_em": None,
+                      "erro": "", "resultado": None})
+p0 = ob.coleta_progresso(REQ)
+checar(p0["rodando"] is False and p0["percentual"] == 0, "sem coleta: parado, 0%")
+
+# Varredura falsa que reporta páginas; guarda o que a tela veria em cada uma.
+vistos = []
+def _varrer_com_progresso(sessao, base="", progresso=None, **k):
+    for pag, (ate, total) in enumerate([(500, 1200), (1000, 1200), (1200, 1200)]):
+        progresso(pag, {"de": ate - 499, "ate": ate, "total": total}, ate)
+        vistos.append(ob.coleta_progresso(REQ))
+    return {"coletores": [{"id": "1", "usuario": "ljr001_coletor", "modelo": "Zebra TC21",
+                           "versao_os": "13", "visto_em": "13/09/2026 09:00", "tags": []}],
+            "total": 1200, "paginas": 3}
+mdm.varrer = _varrer_com_progresso
+ob.sessao_mdm = lambda forcar=False: object()
+r = ob.coletar(REQ)
+checar(r["ok"] is True, "coleta conclui")
+checar([v["pagina"] for v in vistos] == [1, 2, 3], "página informada a cada passo")
+checar([v["percentual"] for v in vistos] == [41, 83, 99], "percentual sobe e não passa de 99 antes do fim")
+checar(all(v["rodando"] for v in vistos), "durante a varredura, rodando=True")
+checar(vistos[0]["total"] == 1200 and vistos[0]["fase"].startswith("Lendo a grade"), "total e fase visíveis")
+fim_ = ob.coleta_progresso(REQ)
+checar(not fim_["rodando"] and fim_["percentual"] == 100 and fim_["fase"] == "Concluída", "no fim: 100% e concluída")
+checar(fim_["resultado"] and fim_["terminada_em"], "resultado e horário guardados")
+
+# Falha precisa desligar o "rodando", senão a tela fica presa e o botão trava.
+import requests as _rq
+mdm.varrer = lambda sessao, base="", progresso=None, **k: (_ for _ in ()).throw(_rq.exceptions.SSLError("x"))
+try:
+    ob.coletar(REQ)
+except HTTPException as e:
+    pass
+f = ob.coleta_progresso(REQ)
+checar(not f["rodando"] and f["fase"] == "Falhou" and "certificado" in f["erro"], "falha encerra o progresso com o motivo")
+
+# Duas coletas ao mesmo tempo não podem existir.
+ob._progresso["rodando"] = True
+try:
+    ob.coletar(REQ); checar(False, "coleta simultânea é recusada")
+except HTTPException as e:
+    checar(e.status_code == 409, "coleta simultânea é recusada (409)")
+ob._progresso["rodando"] = False
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)

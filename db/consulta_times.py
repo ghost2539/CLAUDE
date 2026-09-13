@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Integer, DateTime, create_engine, event, select
+from sqlalchemy import String, Text, Integer, DateTime, create_engine, event, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -91,6 +91,55 @@ class Acesso(Base):
     acao: Mapped[str] = mapped_column(String(40), index=True)
     detalhe: Mapped[str] = mapped_column(String(400), default="")
     quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class Config(Base):
+    """Configuração do espaço Times, no banco DELE.
+
+    Não compartilha a chave `gestao_ativos` do portal de propósito: mexer
+    aqui não pode mudar as telas do portal, e o contrário também não.
+    """
+    __tablename__ = "ct_config"
+    chave: Mapped[str] = mapped_column(String(60), primary_key=True)
+    valor: Mapped[str] = mapped_column(Text, default="")
+
+
+# Listas do espaço Times. Começam vazias: os estoques dos outros times não
+# são os do SPARE, e quem administra o espaço escolhe os dele.
+PADROES = {"estoques": [], "corredores": [], "anotacoes": []}
+
+
+def ler_listas() -> dict:
+    import json
+    with SessionLocal() as s:
+        atual = {c.chave: c.valor for c in s.execute(select(Config)).scalars()}
+    saida = {}
+    for chave, padrao in PADROES.items():
+        bruto = atual.get(chave)
+        if not bruto:
+            saida[chave] = list(padrao)
+            continue
+        try:
+            valor = json.loads(bruto)
+        except (TypeError, ValueError):
+            valor = []
+        saida[chave] = [str(x).strip() for x in valor if str(x).strip()] if isinstance(valor, list) else list(padrao)
+    return saida
+
+
+def gravar_listas(pares: dict) -> None:
+    import json
+    with SessionLocal() as s:
+        for chave, valor in pares.items():
+            if chave not in PADROES:
+                continue
+            texto = json.dumps([str(x).strip() for x in (valor or []) if str(x).strip()])
+            linha = s.get(Config, chave)
+            if linha is None:
+                s.add(Config(chave=chave, valor=texto))
+            else:
+                linha.valor = texto
+        s.commit()
 
 
 def init_db() -> None:
