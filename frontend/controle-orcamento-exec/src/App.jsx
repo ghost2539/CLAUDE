@@ -1626,7 +1626,7 @@ export default function App() {
                   <label className="block">
                     <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Login (rede)</span>
                     <input value={novoAc.login} onChange={(e) => setNovoAc({ ...novoAc, login: e.target.value })}
-                           placeholder="ex.: 001200660"
+                           placeholder="ex.: 000123456"
                            className="w-[150px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
                   </label>
                   <label className="block">

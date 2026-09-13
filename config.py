@@ -55,6 +55,9 @@ class Settings:
     DEFAULT_HOURLY_RATE: float = float(os.getenv("DEFAULT_VALOR_HORA", "150"))
     INITIAL_ADMIN_LOGIN: str = os.getenv("INITIAL_ADMIN_LOGIN", "")
     INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+    # Admin geral: o único que altera identidade do portal (ícone). Em
+    # branco, vale o INITIAL_ADMIN_LOGIN.
+    ADMIN_GERAL_LOGIN: str = os.getenv("ADMIN_GERAL_LOGIN", "")
     UPLOAD_MAX_MB: int = int(os.getenv("UPLOAD_MAX_MB", "50"))
 
     RATE_LIMIT_LOGIN: str = os.getenv("RATE_LIMIT_LOGIN", "5/minute")
@@ -155,7 +158,7 @@ class Settings:
     SMTP_SEGURANCA: str = os.getenv("SMTP_SEGURANCA", "none")  # none|starttls|ssl
     SMTP_USUARIO: str = os.getenv("SMTP_USUARIO", "")
     SMTP_REMETENTE: str = os.getenv("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
-    ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "raphael.steilein@lojasrenner.com.br")
+    ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "")
 
     # ── Orçamento do SPARE (CAPEX da área) — módulo isolado ─────────────
     # Banco PRÓPRIO, separado do /controle-orcamento e do portal.

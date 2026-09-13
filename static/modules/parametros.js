@@ -1083,6 +1083,65 @@ async function renderVisual(c, S) {
     btnRow.appendChild(saveBtn);
     btnRow.appendChild(resetBtn);
     c.appendChild(btnRow);
+    c.appendChild(await _cardIcone(S));
+}
+
+/* Ícone do portal (favicon). Só o admin geral altera; os demais só veem. */
+async function _cardIcone(S) {
+    var info = {};
+    try { info = await S.api('/parametros/favicon'); } catch (e) { info = {}; }
+    var card = S.el('div', { className: 'card mt-3' });
+    card.appendChild(S.el('div', { className: 'card-header', textContent: 'Ícone do portal' }));
+    var body = S.el('div', { className: 'card-body' });
+    var linha = S.el('div', { style: 'display:flex;align-items:center;gap:16px;flex-wrap:wrap' });
+    var img = S.el('img', { src: '/favicon.ico?v=' + (info.versao || 0), alt: '',
+        style: 'width:48px;height:48px;border-radius:8px;background:var(--panel-2,#1c1f26);padding:4px' });
+    linha.appendChild(img);
+    var txt = S.el('div');
+    txt.appendChild(S.el('div', { textContent: info.personalizado ? 'Ícone personalizado' : 'Ícone padrão' }));
+    if (info.personalizado && info.atualizado_por) {
+        txt.appendChild(S.el('div', { className: 'text-muted', style: 'font-size:12px',
+            textContent: 'Alterado por ' + info.atualizado_por + (info.atualizado_em ? ' em ' + info.atualizado_em.split('-').reverse().join('/') : '') }));
+    }
+    linha.appendChild(txt);
+    body.appendChild(linha);
+
+    if (info.pode_alterar) {
+        var acoes = S.el('div', { className: 'btn-row mt-2', style: 'align-items:center;gap:8px' });
+        var arq = S.el('input', { type: 'file', accept: '.svg,.png,.ico,image/svg+xml,image/png,image/x-icon' });
+        var enviar = S.el('button', { className: 'btn btn-primary btn-sm', textContent: 'Enviar' });
+        enviar.onclick = async function () {
+            if (!arq.files || !arq.files[0]) { S.toast('Escolha um arquivo SVG, PNG ou ICO.', 'error'); return; }
+            var fd = new FormData(); fd.append('arquivo', arq.files[0]);
+            try {
+                var r = await S.api('/parametros/favicon', { method: 'POST', body: fd });
+                _aplicarIcone(r.versao); S.toast('Ícone atualizado.', 'success');
+                card.replaceWith(await _cardIcone(S));
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        acoes.appendChild(arq); acoes.appendChild(enviar);
+        if (info.personalizado) {
+            var restaurar = S.el('button', { className: 'btn btn-outline btn-sm', textContent: 'Restaurar padrão' });
+            restaurar.onclick = async function () {
+                try {
+                    await S.api('/parametros/favicon', { method: 'DELETE' });
+                    _aplicarIcone(Date.now()); S.toast('Ícone padrão restaurado.', 'success');
+                    card.replaceWith(await _cardIcone(S));
+                } catch (e) { S.toast(e.message, 'error'); }
+            };
+            acoes.appendChild(restaurar);
+        }
+        body.appendChild(acoes);
+        body.appendChild(S.el('div', { className: 'text-muted mt-1', style: 'font-size:12px',
+            textContent: 'SVG, PNG ou ICO, até 256 KB. Vale para todas as páginas do portal.' }));
+    }
+    card.appendChild(body);
+    return card;
+}
+
+function _aplicarIcone(versao) {
+    var link = document.querySelector('link[rel="icon"]');
+    if (link) link.href = '/favicon.ico?v=' + versao;
 }
 
 /* ── Locais ─────────────────────────────────────────────────────── */
