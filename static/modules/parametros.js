@@ -17,6 +17,7 @@ window.SPARE_MODULES.parametros = {
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
+            ['separacao',       'Separação'],
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
@@ -28,7 +29,7 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'monitoramento', 'acessos', 'dashboards'];
+                         'separacao', 'monitoramento', 'acessos', 'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -46,6 +47,7 @@ window.SPARE_MODULES.parametros = {
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
             'config-modulos': renderConfigModulos,
+            separacao:      renderSeparacaoConfig,
             automacoes:     renderAutomacoes,
             monitoramento:  renderMonitoramento,
             acessos:        renderAcessos,
@@ -1088,14 +1090,17 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'separacao', 'rastreio', 'reparos', 'status', 'parametros',
-        'orcamento', 'orcamento_spare', 'orcamento_manutencao'];
+        'servicenow', 'separacao', 'trilha', 'rastreio', 'reparos', 'status',
+        'parametros', 'orcamento', 'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
         // permissão já existe nos usuários); só o nome no menu mudou.
         identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
-        separacao: 'Separação', rastreio: 'Correios',
+        separacao: 'Separação',
+        // Sem tela própria ainda: dá acesso à trilha de um ativo e ao
+        // painel de filas, que outros módulos consultam.
+        trilha: 'Trilha do Ativo', rastreio: 'Correios',
         reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
@@ -1470,4 +1475,195 @@ function renderAccount(c, S) {
             S.toast(e.message, 'error');
         }
     };
+}
+
+/* ── Separação (admin) ──────────────────────────────────────────────
+   Duas coisas moram aqui: como ler o estoque no ServiceNow e o
+   calendário de expediente. O calendário é do núcleo e vale para todos
+   os módulos — está nesta aba porque hoje é a Separação que o usa. */
+async function renderSeparacaoConfig(c, S) {
+    var d = await S.api('/separacao/config');
+    var cal = await S.api('/trilha/config');
+    var cfg = d.config;
+
+    c.innerHTML = '';
+    c.appendChild(S.el('div', {
+        style: 'display:flex;justify-content:flex-end;margin-bottom:16px'
+    }, S.el('button', { id: 'sep-cfg-salvar', className: 'btn btn-primary',
+                        textContent: 'Salvar' })));
+
+    var largura = 'max-width:900px';
+
+    /* Estoque ------------------------------------------------------ */
+    var estoque = S.el('div', { className: 'card-body' });
+    estoque.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Campo do espaço e corredor', 'sc-campo', cfg.campo_local,
+                    'No ServiceNow aparece como "Aisle and Space".') +
+          _sepSelect('Comparação', 'sc-comp', cfg.comparacao,
+                     [['STARTSWITH', 'Começa com'], ['=', 'É igual a'],
+                      ['LIKE', 'Contém']]) +
+          _sepCampo('Prefixo da reposição', 'sc-pref-rep', cfg.prefixo_reposicao) +
+          _sepCampo('Prefixo da inauguração', 'sc-pref-in', cfg.prefixo_inauguracao) +
+          _sepCampo('Situação do ativo em estoque', 'sc-status', cfg.status_estoque,
+                    'Código de install_status. 6 é "In stock".') +
+        '</div>' +
+        '<div class="table-wrapper mt-3"><table class="data-table"><thead><tr>' +
+        '<th>Atendimento</th><th>Estoque</th><th>Consulta enviada ao ServiceNow</th>' +
+        '</tr></thead><tbody>' +
+        _sepLinhaTipo('Frente e Retaguarda', 'sc-est-fr',
+                      cfg.estoque_FRENTE_RETAGUARDA, d.filtros.FRENTE_RETAGUARDA) +
+        _sepLinhaTipo('Mobilidade', 'sc-est-mob',
+                      cfg.estoque_MOBILIDADE, d.filtros.MOBILIDADE) +
+        _sepLinhaTipo('Inauguração e Reforma', 'sc-est-inau',
+                      cfg.estoque_INAUGURACAO_REFORMA, d.filtros.INAUGURACAO_REFORMA) +
+        '</tbody></table></div>' +
+        '<div class="form-group mt-3">' +
+          '<label for="sc-manual">Sobrescrever a consulta (opcional)</label>' +
+          '<input id="sc-manual" class="form-control" value="' +
+            S.esc(cfg.filtro_manual) + '" ' +
+            'placeholder="em branco, vale a consulta montada acima">' +
+          '<span class="text-muted" style="font-size:11.5px">Aceita encoded query ' +
+            'inteira. Use $campo, $comparacao e $prefixo.</span>' +
+        '</div>';
+    c.appendChild(_sepCartao('Estoque', estoque, largura));
+
+    /* Reserva e envio ---------------------------------------------- */
+    var reserva = S.el('div', { className: 'card-body' });
+    reserva.innerHTML =
+        '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
+          'Ao bipar, o equipamento sai do saldo disponível na hora. É o que ' +
+          'impede duas pessoas separarem a mesma unidade.</p>' +
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Campo da reserva', 'sc-res-campo', cfg.reserva_campo) +
+          _sepCampo('Valor quando reservado', 'sc-res-valor', cfg.reserva_valor) +
+          _sepCampo('Valor quando livre', 'sc-res-livre', cfg.reserva_valor_livre,
+                    'Usado ao cancelar uma solicitação.') +
+          _sepCampo('Situação no envio', 'sc-envio-status', cfg.envio_status,
+                    'Código de install_status. 1 é "In use".') +
+          _sepCampo('Campo do local no envio', 'sc-envio-local', cfg.envio_campo_local) +
+        '</div>';
+    c.appendChild(_sepCartao('Reserva e envio', reserva, largura));
+
+    /* Chamado e prazos --------------------------------------------- */
+    var chamado = S.el('div', { className: 'card-body' });
+    chamado.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Prefixos aceitos', 'sc-ch-pref', cfg.chamado_prefixos) +
+          _sepCampo('Situações que bloqueiam', 'sc-ch-bloq',
+                    cfg.chamado_estados_bloqueados,
+                    'Códigos de state, separados por vírgula.') +
+          _sepCampo('Prazo normal (dias úteis)', 'sc-prazo-n', cfg.prazo_normal) +
+          _sepCampo('Prazo loja parada (dias úteis)', 'sc-prazo-lp', cfg.prazo_loja_parada) +
+          _sepCampo('Prazo inauguração (dias úteis)', 'sc-prazo-in', cfg.prazo_inauguracao) +
+        '</div>';
+    c.appendChild(_sepCartao('Chamado de origem e prazos', chamado, largura));
+
+    /* Calendário (núcleo) ------------------------------------------ */
+    var expediente = S.el('div', { className: 'card-body' });
+    expediente.innerHTML =
+        '<p class="text-muted" style="font-size:13px;margin:0 0 14px">' +
+          'Vale para todos os módulos: é o que define o que conta como tempo ' +
+          'de fila e de bancada. Como os horários são gravados crus, mudar ' +
+          'aqui recalcula o histórico inteiro.</p>' +
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Dias de expediente', 'sc-cal-dias', cal.expediente_dias,
+                    '0 é segunda, 6 é domingo. Em branco, o relógio corre direto.') +
+          _sepCampo('Fuso em relação ao UTC', 'sc-cal-fuso', cal.fuso_horas) +
+          _sepCampo('Abre às', 'sc-cal-ini', cal.expediente_inicio) +
+          _sepCampo('Fecha às', 'sc-cal-fim', cal.expediente_fim) +
+        '</div>' +
+        '<div class="form-group mt-3">' +
+          '<label for="sc-cal-fer">Feriados</label>' +
+          '<textarea id="sc-cal-fer" class="form-control" rows="2" ' +
+            'placeholder="2026-12-25, 2027-01-01">' + S.esc(cal.feriados) + '</textarea>' +
+        '</div>';
+    c.appendChild(_sepCartao('Calendário de expediente', expediente, largura));
+
+    /* Salvar -------------------------------------------------------- */
+    document.getElementById('sep-cfg-salvar').onclick = async function () {
+        var v = function (id) { return document.getElementById(id).value.trim(); };
+        try {
+            S.loading(true);
+            await S.api('/separacao/config', {
+                method: 'PUT',
+                body: {
+                    campo_local: v('sc-campo'), comparacao: v('sc-comp'),
+                    prefixo_reposicao: v('sc-pref-rep'),
+                    prefixo_inauguracao: v('sc-pref-in'),
+                    status_estoque: v('sc-status'),
+                    estoque_FRENTE_RETAGUARDA: v('sc-est-fr'),
+                    estoque_MOBILIDADE: v('sc-est-mob'),
+                    estoque_INAUGURACAO_REFORMA: v('sc-est-inau'),
+                    filtro_manual: v('sc-manual'),
+                    reserva_campo: v('sc-res-campo'),
+                    reserva_valor: v('sc-res-valor'),
+                    reserva_valor_livre: v('sc-res-livre'),
+                    envio_status: v('sc-envio-status'),
+                    envio_campo_local: v('sc-envio-local'),
+                    chamado_prefixos: v('sc-ch-pref'),
+                    chamado_estados_bloqueados: v('sc-ch-bloq'),
+                    prazo_normal: v('sc-prazo-n'),
+                    prazo_loja_parada: v('sc-prazo-lp'),
+                    prazo_inauguracao: v('sc-prazo-in')
+                }
+            });
+            await S.api('/trilha/config', {
+                method: 'PUT',
+                body: {
+                    expediente_dias: v('sc-cal-dias'),
+                    expediente_inicio: v('sc-cal-ini'),
+                    expediente_fim: v('sc-cal-fim'),
+                    feriados: v('sc-cal-fer'),
+                    fuso_horas: v('sc-cal-fuso')
+                }
+            });
+            S.toast('Parâmetros salvos.', 'success');
+            renderSeparacaoConfig(c, S);
+        } catch (e) {
+            S.toast(e.message, 'danger');
+        } finally {
+            S.loading(false);
+        }
+    };
+}
+
+function _sepCartao(titulo, corpo, estilo) {
+    var S = window.SPARE;
+    var card = S.el('div', { className: 'card mb-3', style: estilo || '' });
+    card.appendChild(S.el('div', { className: 'card-header', textContent: titulo }));
+    card.appendChild(corpo);
+    return card;
+}
+
+function _sepCampo(rotulo, id, valor, ajuda) {
+    var S = window.SPARE;
+    return '<div class="form-group"><label for="' + id + '">' + S.esc(rotulo) +
+        '</label><input id="' + id + '" class="form-control" value="' +
+        S.esc(valor == null ? '' : valor) + '">' +
+        (ajuda ? '<span class="text-muted" style="font-size:11.5px">' +
+                 S.esc(ajuda) + '</span>' : '') + '</div>';
+}
+
+function _sepSelect(rotulo, id, valor, opcoes) {
+    var S = window.SPARE;
+    return '<div class="form-group"><label for="' + id + '">' + S.esc(rotulo) +
+        '</label><select id="' + id + '" class="form-control">' +
+        opcoes.map(function (o) {
+            return '<option value="' + S.esc(o[0]) + '"' +
+                (o[0] === valor ? ' selected' : '') + '>' + S.esc(o[1]) + '</option>';
+        }).join('') + '</select></div>';
+}
+
+function _sepLinhaTipo(rotulo, id, valor, consulta) {
+    var S = window.SPARE;
+    return '<tr><td>' + S.esc(rotulo) + '</td>' +
+        '<td><select id="' + id + '" class="form-control form-control-inline">' +
+          '<option value="reposicao"' + (valor === 'reposicao' ? ' selected' : '') +
+            '>Reposição</option>' +
+          '<option value="inauguracao"' + (valor === 'inauguracao' ? ' selected' : '') +
+            '>Inauguração</option>' +
+        '</select></td>' +
+        '<td class="text-muted" style="font-size:11.5px;word-break:break-all">' +
+        S.esc(consulta) + '</td></tr>';
 }
