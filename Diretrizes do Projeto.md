@@ -42,6 +42,16 @@ normativo.
 8. **Um processo só, uma porta só (8901).** Sem root no servidor, cada
    serviço a mais é um problema a mais: tela nova é router do portal, nunca
    aplicativo com systemd próprio.
+9. **Módulo novo entra em `config.py: MODULES`.** `require_permission` só
+   libera não-admin para módulo dessa lista, porque é dela que a tela de
+   permissões grava a linha. Módulo fora da lista funciona para admin e
+   nega 403 para todo o resto — e ninguém percebe até o primeiro operador
+   tentar.
+10. **Valor do usuário em consulta ao ServiceNow passa por `termo_sn()`.**
+   Série, etiqueta, chamado: tudo que entra numa encoded query por
+   concatenação é sanitizado antes (`routers/servicenow.py`). `^ = , !`
+   mudam o significado da consulta, e uma reserva no `sys_id` errado é o
+   custo.
 
 ## Segurança
 
