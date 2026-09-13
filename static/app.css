@@ -818,3 +818,96 @@ select.form-control-inline { padding-right: 26px; }
     .stats-grid { grid-template-columns: 1fr; }
     .topbar-user-name { display: none; }
 }
+
+/* ── Separação (A15) ────────────────────────────────────────────── */
+/* Ficha de equipamento: o objeto é o conteúdo, o filete faz o
+   contorno. Sem sombra — profundidade aqui vira ruído numa grade de
+   vinte fichas iguais. */
+.sep-grade {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+}
+.sep-ficha {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+}
+.sep-ficha:hover { border-color: var(--border-light); }
+.sep-ficha:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sep-ficha[aria-pressed="true"] {
+    border-color: var(--color-primary);
+    background: rgba(171, 72, 7, .07);
+}
+.sep-ficha-obj {
+    height: 86px;
+    display: grid;
+    place-items: center;
+    background: var(--bg-panel-alt);
+    color: var(--text-secondary);
+    font-size: 26px;
+}
+.sep-ficha-nome {
+    padding: 9px 12px 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+.sep-ficha-saldo {
+    padding: 4px 12px 10px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+.sep-ficha-saldo b { color: var(--text-primary); }
+.sep-ficha-saldo .pouco { color: #E8B94A; }
+
+/* Coluna do pedido */
+.sep-layout { display: grid; grid-template-columns: 1fr 330px; gap: 16px; align-items: start; }
+.sep-linha {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.sep-linha:last-of-type { border-bottom: 0; }
+.sep-qtd { display: inline-flex; align-items: center; gap: 0; }
+.sep-qtd button {
+    width: 26px; height: 26px;
+    border: 1px solid var(--border-light);
+    background: transparent; color: var(--text-secondary); cursor: pointer;
+    line-height: 1;
+}
+.sep-qtd button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.sep-qtd button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.sep-qtd span {
+    width: 34px; height: 26px; line-height: 24px; text-align: center;
+    font-size: 12px; border-top: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
+}
+.sep-total {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--text-secondary);
+}
+.sep-total b { color: var(--text-primary); }
+.sep-vazio { color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px 0; }
+
+/* Progresso da bipagem */
+.sep-trilho { height: 4px; background: var(--bg-panel-alt); border-radius: 2px; overflow: hidden; }
+.sep-fita { height: 100%; background: var(--color-teal); transition: width .25s; }
+.sep-serie { font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+.sep-pendente { color: var(--text-muted); }
+
+@media (max-width: 900px) {
+    .sep-layout { grid-template-columns: 1fr; }
+}

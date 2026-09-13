@@ -1088,13 +1088,14 @@ async function renderPermissions(c, S) {
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
-        'orcamento_spare', 'orcamento_manutencao'];
+        'servicenow', 'separacao', 'rastreio', 'reparos', 'status', 'parametros',
+        'orcamento', 'orcamento_spare', 'orcamento_manutencao'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
         // permissão já existe nos usuários); só o nome no menu mudou.
-        identificacao: 'Identificação', servicenow: 'Gestão de Ativos', rastreio: 'Correios',
+        identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
+        separacao: 'Separação', rastreio: 'Correios',
         reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento

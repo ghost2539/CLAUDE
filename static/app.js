@@ -13,6 +13,7 @@
         recebimento:    'Recebimento',
         identificacao:  'Identificação',
         gestao_ativos:  'Gestão de Ativos',
+        separacao:      'Separação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
