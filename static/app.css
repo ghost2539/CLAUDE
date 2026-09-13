@@ -911,3 +911,24 @@ select.form-control-inline { padding-right: 26px; }
 @media (max-width: 900px) {
     .sep-layout { grid-template-columns: 1fr; }
 }
+
+/* ── Linha do tempo do atendimento ──────────────────────────────── */
+.atd-tl { list-style: none; margin: 0; padding: 0 0 0 18px; border-left: 1px solid var(--border-subtle); }
+.atd-tl li { position: relative; padding: 0 0 16px 16px; }
+.atd-tl li:last-child { padding-bottom: 0; }
+.atd-tl li::before {
+    content: '';
+    position: absolute;
+    left: -22px;
+    top: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--bg-panel);
+    border: 1px solid var(--text-muted);
+}
+.atd-tl li.ok::before { background: var(--color-teal); border-color: var(--color-teal); }
+.atd-tl li.atual::before { background: var(--color-primary); border-color: var(--color-primary); }
+.atd-tl-quando { font-size: 11.5px; color: var(--text-muted); }
+.atd-tl-que { font-size: 13px; color: var(--text-primary); }
+.atd-tl-quem { font-size: 12px; color: var(--text-secondary); }
