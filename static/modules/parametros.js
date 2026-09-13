@@ -17,7 +17,7 @@ window.SPARE_MODULES.parametros = {
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
-            ['separacao',       'Separação'],
+            ['separacao',       'Ciclo do ativo'],
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
@@ -444,7 +444,7 @@ async function renderAutomacoes(c, S) {
             { key: 'a', label: '', render: function (_, r) {
                 var w = S.el('div', { className: 'btn-row' });
                 var e = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
-                var x = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                var x = S.el('button', { className: 'btn btn-sm btn-outline-danger', textContent: 'Excluir' });
                 e.onclick = function () { editRegra(r); };
                 x.onclick = function () {
                     if (!confirm('Excluir a regra "' + (r.nome || '') + '"?')) return;
@@ -1197,7 +1197,7 @@ async function renderPermissions(c, S) {
                     var b = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
                     b.onclick = function () { editUser(u); };
                     wrap.appendChild(b);
-                    var del = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                    var del = S.el('button', { className: 'btn btn-sm btn-outline-danger', textContent: 'Excluir' });
                     del.onclick = function () { deleteUser(u); };
                     wrap.appendChild(del);
                     return wrap;
@@ -1546,12 +1546,18 @@ async function renderSeparacaoConfig(c, S) {
     var inv = null, reg = null;
     try { inv = (await S.api('/inventario/config')).config; } catch (_) { inv = null; }
     try { reg = (await S.api('/regularizacao/config')).config; } catch (_) { reg = null; }
+    var mods = {};
+    for (var nomeMod of ['bancada', 'preparacao', 'destinacao', 'externo', 'atendimento']) {
+        try { var rc = await S.api('/' + nomeMod + '/config'); mods[nomeMod] = rc.config || rc; } catch (_) { mods[nomeMod] = null; }
+    }
+    var obs = null;
+    try { obs = await S.api('/obsolescencia/config'); } catch (_) { obs = null; }
 
     c.innerHTML = '';
-    c.appendChild(S.el('div', {
-        style: 'display:flex;justify-content:flex-end;margin-bottom:16px'
-    }, S.el('button', { id: 'sep-cfg-salvar', className: 'btn btn-primary',
-                        textContent: 'Salvar' })));
+    var topo = S.el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px' });
+    topo.appendChild(S.el('h1', { className: 'page-title', style: 'margin:0', textContent: 'Ciclo do ativo' }));
+    topo.appendChild(S.el('button', { id: 'sep-cfg-salvar', className: 'btn btn-primary', textContent: 'Salvar' }));
+    c.appendChild(topo);
 
     var largura = 'max-width:900px';
 
@@ -1658,6 +1664,41 @@ async function renderSeparacaoConfig(c, S) {
         c.appendChild(_sepCartao('Inventário e regularização', ctrl, largura));
     }
 
+    /* Bancada, preparação, destinação, assistência, atendimento ------ */
+    var b = mods.bancada, pr = mods.preparacao, ds = mods.destinacao, ex = mods.externo, at = mods.atendimento;
+    if (b || pr || ds || ex || at) {
+        var ofi = S.el('div', { className: 'card-body' });
+        ofi.innerHTML = '<div class="form-grid cols-2">' +
+            (b ? _sepCampo('Bancada: janela de reincidência (dias)', 'sc-bnc-reinc', b.janela_reincidencia) +
+                 _sepCampo('Bancada: alerta de peça parada (dias)', 'sc-bnc-pecas', b.alerta_pecas_dias) : '') +
+            (pr ? _sepSelect('Internalização grava corredor no ServiceNow', 'sc-prp-sn', pr.escrever_no_servicenow,
+                             [['sim', 'Sim'], ['nao', 'Não']]) +
+                  _sepCampo('Internalização: situação em estoque (install_status)', 'sc-prp-status', pr.status_disponivel) : '') +
+            (ds ? _sepCampo('Destinação: extensões de anexo', 'sc-dst-ext', ds.anexo_extensoes) +
+                  _sepCampo('Destinação: tamanho máximo do anexo (MB)', 'sc-dst-mb', ds.anexo_tamanho_mb) +
+                  _sepCampo('Destinação: alerta sem destino (dias úteis)', 'sc-dst-alerta', ds.alerta_sem_destino_dias) : '') +
+            (ex ? _sepCampo('Assistência: alerta de atraso (dias)', 'sc-ext-alerta', ex.alerta_atraso_dias) : '') +
+            (at ? _sepCampo('Atendimento: categorias de frota', 'sc-atd-frota', at.categorias_frota) +
+                  _sepCampo('Atendimento: prazo loja (dias úteis)', 'sc-atd-loja', at.prazo_loja) +
+                  _sepCampo('Atendimento: prazo frota (dias úteis)', 'sc-atd-frt', at.prazo_frota) : '') +
+            '</div>';
+        c.appendChild(_sepCartao('Bancada, preparação, destinação, assistência e atendimento', ofi, largura));
+    }
+
+    /* Obsolescência do parque ---------------------------------------- */
+    if (obs) {
+        var ob = S.el('div', { className: 'card-body' });
+        ob.innerHTML = '<div class="form-grid cols-2">' +
+            _sepSelect('Regra', 'sc-obs-modo', obs.modo_regra, [['todos', 'Todos os critérios (E)'], ['qualquer', 'Qualquer critério (OU)']]) +
+            _sepCampo('Idade limite (anos)', 'sc-obs-anos', obs.limite_anos) +
+            _sepCampo('Sem comunicar há (dias)', 'sc-obs-semver', obs.limite_sem_ver) +
+            _sepCampo('Modelos em fim de vida', 'sc-obs-eol', obs.modelos_eol) +
+            _sepCampo('Android mínimo suportado', 'sc-obs-android', obs.versao_os_minima) +
+            _sepCampo('Modelos sem atualização', 'sc-obs-semupd', obs.modelos_sem_update) +
+            '</div>';
+        c.appendChild(_sepCartao('Obsolescência do parque', ob, largura));
+    }
+
     /* Calendário (núcleo) ------------------------------------------ */
     var expediente = S.el('div', { className: 'card-body' });
     expediente.innerHTML =
@@ -1735,6 +1776,18 @@ async function renderSeparacaoConfig(c, S) {
                 await S.api('/regularizacao/config', { method: 'PUT', body: {
                     prazo_padrao_dias: v('sc-reg-prazo'), alerta_sem_dono_dias: v('sc-reg-alerta') } });
             }
+            if (mods.bancada) await S.api('/bancada/config', { method: 'PUT', body: {
+                janela_reincidencia: v('sc-bnc-reinc'), alerta_pecas_dias: v('sc-bnc-pecas') } });
+            if (mods.preparacao) await S.api('/preparacao/config', { method: 'PUT', body: {
+                escrever_no_servicenow: v('sc-prp-sn'), status_disponivel: v('sc-prp-status') } });
+            if (mods.destinacao) await S.api('/destinacao/config', { method: 'PUT', body: {
+                anexo_extensoes: v('sc-dst-ext'), anexo_tamanho_mb: v('sc-dst-mb'), alerta_sem_destino_dias: v('sc-dst-alerta') } });
+            if (mods.externo) await S.api('/externo/config', { method: 'PUT', body: { alerta_atraso_dias: v('sc-ext-alerta') } });
+            if (mods.atendimento) await S.api('/atendimento/config', { method: 'PUT', body: {
+                categorias_frota: v('sc-atd-frota'), prazo_loja: v('sc-atd-loja'), prazo_frota: v('sc-atd-frt') } });
+            if (obs) await S.api('/obsolescencia/config', { method: 'PUT', body: {
+                modo_regra: v('sc-obs-modo'), limite_anos: v('sc-obs-anos'), limite_sem_ver: v('sc-obs-semver'),
+                modelos_eol: v('sc-obs-eol'), versao_os_minima: v('sc-obs-android'), modelos_sem_update: v('sc-obs-semupd') } });
             await S.api('/trilha/config', {
                 method: 'PUT',
                 body: {

@@ -91,10 +91,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             }, function (f) {
                 return f.em_alerta > 0 ? COR_ALERTA : COR_BARRA;
             }));
-            g1.appendChild(S.el('p', {
-                className: 'text-muted mt-2', style: 'font-size:11.5px;margin-bottom:0',
-                textContent: 'Alerta acima de ' + duracao(d.limite_alerta)
-            }));
         }
         c.appendChild(cartao('Quantos ativos em cada etapa', g1));
 
@@ -108,6 +104,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             }, function (f) {
                 return f.maior > d.limite_alerta * 2 ? COR_GRAVE
                      : (f.maior > d.limite_alerta ? COR_ALERTA : COR_BARRA);
+            }, d.limite_alerta));
+            g2.appendChild(S.el('p', {
+                className: 'text-muted mt-2', style: 'font-size:11.5px;margin-bottom:0',
+                textContent: 'Limite: ' + duracao(d.limite_alerta)
             }));
             c.appendChild(cartao('Há quanto tempo o mais antigo de cada etapa espera', g2));
         }
@@ -131,12 +131,12 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                                       textContent: 'Nada parado.' }));
         } else {
             var tab = S.el('table', { className: 'data-table' });
-            tab.innerHTML = '<thead><tr><th>Série</th><th>Modelo</th>' +
+            tab.innerHTML = '<thead><tr><th>Item</th><th>Modelo</th>' +
                 '<th>Etapa</th><th>Com</th><th>Parado há</th></tr></thead><tbody>' +
                 d.parados.map(function (p) {
                     return '<tr class="torre-clicavel" data-serial="' +
                         S.esc(p.serial) + '"><td class="sep-serie">' +
-                        S.esc(p.serial) + '</td>' +
+                        S.esc(p.serial) + (p.token ? ' <span class="badge badge-default">' + S.esc(tipoToken(p.serial)) + '</span>' : '') + '</td>' +
                         '<td>' + S.esc(p.modelo || '—') + '</td>' +
                         '<td>' + S.esc(p.rotulo) + '</td>' +
                         '<td>' + S.esc(p.usuario || '—') + '</td>' +
@@ -386,10 +386,11 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
        Sem eixo: numa lista ordenada o eixo não acrescenta nada que o
        número no fim da barra já não diga.
        ============================================================ */
-    function barras(linhas, chave, texto, cor) {
+    function barras(linhas, chave, texto, cor, marca) {
         var maximo = Math.max.apply(null, linhas.map(function (l) {
             return l[chave] || 0;
-        }).concat([1]));
+        }).concat([1, marca || 0]));
+        var pctMarca = marca ? Math.min(100, (marca / maximo) * 100) : 0;
 
         var caixa = S.el('div', { className: 'torre-barras' });
         linhas.forEach(function (l) {
@@ -401,11 +402,19 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                     S.esc(l.rotulo) + '</div>' +
                 '<div class="torre-barra-pista">' +
                     '<div class="torre-barra-fita" style="width:' + pct.toFixed(1) +
-                    '%;background:' + cor(l) + '"></div></div>' +
+                    '%;background:' + cor(l) + '"></div>' +
+                    (pctMarca ? '<div class="torre-barra-marca" style="left:' + pctMarca.toFixed(1) + '%"></div>' : '') +
+                '</div>' +
                 '<div class="torre-barra-valor">' + S.esc(texto(l)) + '</div>';
             caixa.appendChild(linha);
         });
         return caixa;
+    }
+
+    /* Token sintético: o prefixo diz que espécie de item é. */
+    function tipoToken(serial) {
+        var p = String(serial || '').slice(0, 3);
+        return ({ PRJ: 'item de projeto', COL: 'coleta', INV: 'inventário', REG: 'divergência' })[p] || 'token';
     }
 
     function corta(t, n) {
