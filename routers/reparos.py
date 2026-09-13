@@ -54,75 +54,8 @@ class RepairIn(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────
 
-@router.post("/reparos")
-def repair_add(body: RepairIn, req: Request):
-    sd = require_permission(req, "reparos", "create")
-    check_rate_limit(req)
-
-    result_status = RESULT_STATUS.get(body.resultado)
-
-    with SessionLocal.begin() as s:
-        rdata = {
-            "asset_id": body.imobilizado,
-            "asset_number": body.imobilizado,
-            "ativo": body.imobilizado,
-            "tag_number": body.etiqueta,
-            "etiqueta": body.etiqueta,
-            "serial_number": body.numero_serie,
-            "numero_serie": body.numero_serie,
-        }
-        a = find_asset(s, rdata)
-        if not a:
-            raise HTTPException(404, "Ativo não encontrado na base de recebimentos.")
-
-        c = s.scalar(
-            select(ReceiptCycle)
-            .where(
-                ReceiptCycle.asset_id == a.id,
-                ReceiptCycle.open == True,  # noqa: E712
-            )
-            .order_by(ReceiptCycle.id.desc())
-        )
-        if not c:
-            raise HTTPException(404, "Ativo sem ciclo de recebimento aberto.")
-
-        vals = [body.triagem_min, body.reparo_min, body.pesquisa_min, body.higienizacao_min]
-        total = sum(vals)
-
-        rate_row = s.get(Setting, "hourly_rate")
-        rate = float((rate_row.value if rate_row else {}).get("value", 150))
-        saving = round(total / 60 * rate, 2)
-
-        s.add(Repair(
-            asset_id=a.id,
-            cycle_id=c.id,
-            triage_min=vals[0],
-            repair_min=vals[1],
-            research_min=vals[2],
-            hygiene_min=vals[3],
-            total_min=total,
-            hourly_rate=Decimal(str(rate)),
-            saving=Decimal(str(saving)),
-            result=body.resultado,
-            technician=body.tecnico,
-            note=body.observacao,
-            created_by=sd["username"],
-        ))
-
-        if result_status:
-            old = c.status
-            c.status = result_status
-            c.open = result_status not in CLOSED
-            s.add(Movement(
-                asset_id=a.id,
-                cycle_id=c.id,
-                old_status=old,
-                new_status=result_status,
-                origin="REPARO",
-                username=sd["username"],
-            ))
-
-    return {"ok": True, "total_min": total, "saving": saving, "status": result_status}
+# O registro manual de reparo saiu: o tempo agora é medido pela trilha
+# (Central de Reparos). O dashboard abaixo fica só para o histórico.
 
 
 @router.get("/reparos/dashboard")

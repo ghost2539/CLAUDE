@@ -84,8 +84,8 @@ CONECTIVIDADE = "CONECTIVIDADE"  # A04 — AP, switch, roteador
 BANCADAS = (FROTA, LOJA, CONECTIVIDADE)
 
 ROTULO_BANCADA = {
-    FROTA: "Frota móvel",
-    LOJA: "Equipamento de loja",
+    FROTA: "Mobilidade",
+    LOJA: "Frente e Retaguarda",
     CONECTIVIDADE: "Conectividade",
 }
 

@@ -22,20 +22,16 @@ _cfg = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # A tela Consulta de Ativos — Times também responde na porta antiga
-    # (:8502). É o mesmo processo: um listener a mais, serviço nenhum.
     try:
-        from routers.consulta_times import iniciar_espelho
-        logging.getLogger("consulta_times").info("espelho: %s", await iniciar_espelho())
-    except Exception as exc:  # noqa: BLE001 — espelho é acessório
-        logging.getLogger("consulta_times").error(
-            "espelho na porta antiga NÃO subiu (portal segue normal): %s", exc)
+        from db.portal import migrar_permissoes
+        n = migrar_permissoes({"bancada": "reparos"})
+        if n:
+            logging.getLogger("portal").info("permissões migradas bancada→reparos: %d", n)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("portal").warning("migração de permissões: %s", exc)
+    # A Consulta Times deixou de ter porta própria (:8502): agora exige o
+    # login do portal e vive em /consulta-times, na mesma porta.
     yield
-    try:
-        from routers.consulta_times import parar_espelho
-        await parar_espelho()
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def create_app() -> FastAPI:
@@ -79,6 +75,8 @@ def create_app() -> FastAPI:
     from routers.identificacao import router as identificacao_router
     from routers.servicenow import router as servicenow_router
     from routers.correios import router as correios_router
+    import db.consulta_times as _db_ct
+    _db_ct.init_db()
     from routers.consulta_times import router as consulta_times_router
     from routers.encerramento import router as encerramento_router
 
@@ -134,16 +132,16 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── Orçamento do SPARE (CAPEX da área) — banco próprio ──────────────
-    # Acesso pelo módulo de permissão "orcamento_spare".
+    # ── Orçamento Spare — a tela do Infra CSC com banco e permissão próprios
+    # (permissão "orcamento_spare", liberação por login na própria tela).
+    # O módulo antigo orcamento_spare (API sem tela) foi aposentado.
     try:
-        import db.orcamento_spare as _db_orc_spare
-        _db_orc_spare.init_db()
-        from routers.orcamento_spare import router as orcamento_spare_router
+        from routers.orcamento_spare_exec import router as orcamento_spare_router, init_db as _init_osp
+        _init_osp()
         app.include_router(orcamento_spare_router)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("orcamento_spare").error(
-            "Módulo Orçamento SPARE NÃO carregado (portal segue sem ele): %s",
+        logging.getLogger("orcamento_spare_exec").error(
+            "Módulo Orçamento Spare NÃO carregado (portal segue sem ele): %s",
             exc, exc_info=True,
         )
 

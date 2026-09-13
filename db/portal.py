@@ -299,6 +299,26 @@ class LoadHistory(Base):
 
 # ── Database init ───────────────────────────────────────────────
 
+def migrar_permissoes(renomes: dict[str, str]) -> int:
+    """Copia a permissão de um módulo aposentado para o que o substituiu.
+
+    Idempotente: só cria a linha nova quando ela ainda não existe. A
+    linha antiga fica — não custa e evita surpresa num rollback.
+    """
+    feitos = 0
+    with SessionLocal.begin() as s:
+        for velho, novo in renomes.items():
+            for p in s.scalars(select(Permission).where(Permission.module == velho)).all():
+                ja = s.scalar(select(Permission).where(Permission.user_id == p.user_id,
+                                                       Permission.module == novo))
+                if ja is None:
+                    s.add(Permission(user_id=p.user_id, module=novo, can_view=p.can_view,
+                                     can_create=p.can_create, can_edit=p.can_edit,
+                                     can_export=p.can_export, can_admin=p.can_admin))
+                    feitos += 1
+    return feitos
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
 
