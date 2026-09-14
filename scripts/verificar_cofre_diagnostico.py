@@ -444,6 +444,53 @@ checar(amb2.get("existe") is False and amb2.get("erro"),
        "sem arquivo, diz isso em vez de ficar mudo")
 os.environ.pop("PORTAL_ENV_FILE", None)
 
+print("\n[3o] Falso positivo: o loader devolvendo a variável de ambiente")
+# O loader do time resolve cofre -> os.environ -> default. Com a variável no
+# arquivo de ambiente, s() responde mesmo com o cofre inacessível. Dar isso
+# como "veio do cofre" apaga justamente o problema que se quer enxergar.
+mod4 = types.ModuleType("vcreports_secrets")
+# Cofre inacessível: o loader só sabe repetir o que está no ambiente.
+mod4.s = lambda n: os.environ.get(n, "")
+cofre._modulo, cofre._modulo_via = mod4, "import direto (loader que só ecoa o ambiente)"
+
+# A prova do topo usa CORREIOS_USUARIO, e no servidor ela está no ambiente —
+# que é exatamente a condição que produzia o falso positivo.
+os.environ["CORREIOS_USUARIO"] = "conta-de-servico"
+os.environ["ORACLE_EBS_USER"] = "inframon"
+d22 = cliente.get("/api/cofre/diagnostico").json()
+ebs = {c["chave"]: c for g in d22["grupos"] if g["nome"] == "Base EBS (Oracle)"
+       for c in g["chaves"]}["ORACLE_EBS_USER"]
+checar(ebs["resolvida"] is True, "a chave resolve, e isso continua sendo verdade")
+checar(ebs["no_corporativo"] is False,
+       "mas NÃO é contabilizada como vinda do cofre")
+checar(ebs["indistinguivel"] is True, "e é marcada como indistinguível")
+checar(ebs["fonte"] == "ambiente (pelo loader)", "a fonte diz de onde ela realmente veio")
+checar(ebs["sombreado"] is False,
+       "e não inventa duas fontes para o que é uma só")
+
+checar(d22["corporativo_ok"] is False,
+       "a faixa do topo também deixa de dizer que o cofre está disponível")
+checar("idêntico ao da variável de ambiente" in d22["corporativo_detalhe"],
+       "explicando por quê")
+checar("COFRE_CHAVE_TESTE" in d22["corporativo_detalhe"],
+       "e como provar de verdade, com uma chave fora do ambiente")
+
+# Cofre de verdade: valor diferente do ambiente, aí sim é do cofre.
+mod5 = types.ModuleType("vcreports_secrets")
+mod5.s = lambda n: "valor-que-so-o-cofre-tem" if n == "ORACLE_EBS_USER" else ""
+cofre._modulo, cofre._modulo_via = mod5, "import direto (cofre de verdade)"
+d23 = cliente.get("/api/cofre/diagnostico").json()
+ebs2 = {c["chave"]: c for g in d23["grupos"] if g["nome"] == "Base EBS (Oracle)"
+        for c in g["chaves"]}["ORACLE_EBS_USER"]
+checar(ebs2["no_corporativo"] is True and ebs2["indistinguivel"] is False,
+       "valor diferente do ambiente é reconhecido como do cofre")
+checar(ebs2["divergente"] is True,
+       "e a divergência entre cofre e ambiente aparece")
+
+os.environ.pop("ORACLE_EBS_USER", None)
+os.environ.pop("CORREIOS_USUARIO", None)
+cofre._modulo, cofre._modulo_via = None, ""
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -495,6 +542,8 @@ checar("/cofre/sondar-varios" in js and "cf-nomes" in js,
        "a tela tem a caixa de sondagem por nome")
 checar("/cofre/testar-php" in js and "cf-php-loader" in js,
        "e o teste do PHP, feito pelo serviço")
+checar("pode ser só o ambiente" in js,
+       "a tela avisa quando não dá para distinguir cofre de ambiente")
 checar("ambienteHtml" in js and "marcador do cofre" in js,
        "a tela mostra o arquivo de ambiente e separa marcador de valor direto")
 checar("/cofre/tudo" in js and "cf-filtro" in js,

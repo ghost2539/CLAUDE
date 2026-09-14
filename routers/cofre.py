@@ -87,15 +87,24 @@ def _sondar(nome: str) -> dict:
     import os
     ambiente = os.environ.get(nome, "")
     valor = corp or local or ambiente
+    # O loader do time resolve cofre -> os.environ -> default. Ou seja: com a
+    # variável definida no arquivo de ambiente, s() devolve valor mesmo com o
+    # cofre inacessível — e contabilizar isso como "veio do cofre" esconde
+    # exatamente o que se quer enxergar. Quando os dois valores são iguais,
+    # não há como distinguir, e a tela precisa dizer isso em vez de escolher.
+    indistinguivel = bool(corp and ambiente and corp == ambiente)
+    do_cofre = bool(corp) and not indistinguivel
     item = {
         "chave": nome,
         "resolvida": bool(valor),
-        "fonte": ("cofre corporativo" if corp else
+        "fonte": ("cofre corporativo" if do_cofre else
+                  "ambiente (pelo loader)" if indistinguivel else
                   "cofre local" if local else
                   "ambiente" if ambiente else "não definido"),
-        "no_corporativo": bool(corp),
+        "no_corporativo": do_cofre,
         "no_local": bool(local),
         "no_ambiente": bool(ambiente),
+        "indistinguivel": indistinguivel,
         "tamanho": len(valor),
     }
     # Quem tem a chave, e todos concordam? Comparar não revela nada, e é o
@@ -103,7 +112,8 @@ def _sondar(nome: str) -> dict:
     # A ordem é corporativo → local → ambiente: o local ganha do ambiente,
     # então um valor velho esquecido ali derruba a variável nova em silêncio.
     tem = [(rotulo, v) for rotulo, v in
-           (("cofre corporativo", corp), ("cofre local", local), ("ambiente", ambiente))
+           (("cofre corporativo", corp if do_cofre else ""),
+            ("cofre local", local), ("ambiente", ambiente))
            if v]
     item["fontes_com_valor"] = [rotulo for rotulo, _ in tem]
     item["divergente"] = len({v for _, v in tem}) > 1
