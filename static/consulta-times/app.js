@@ -4,7 +4,15 @@
 (function () {
     'use strict';
 
-    var API = '/api/consulta-times';
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Vazio na raiz do domínio.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+
+
+    var API = BASE + '/api/consulta-times';
 
     // ── DOM helpers ────────────────────────────────────────────────
     function $(sel) { return document.querySelector(sel); }

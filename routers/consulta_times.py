@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from config import get_settings
+from core.prefixo import com_prefixo, prefixo
 from core.security import check_rate_limit
 from db.portal import SessionLocal
 from routers.helpers import apply_class, xlsx_response
@@ -49,18 +50,19 @@ class ConsultaIn(BaseModel):
 
 
 # ── Página ──────────────────────────────────────────────────────────────
-def _pagina() -> HTMLResponse:
-    return HTMLResponse((_DIR / "index.html").read_text(encoding="utf-8"))
+def _pagina(req=None) -> HTMLResponse:
+    html = (_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 @router.get("/consulta-times", response_class=HTMLResponse)
-def pagina():
-    return _pagina()
+def pagina(req: Request):
+    return _pagina(req)
 
 
 @router.get("/consulta-times/", response_class=HTMLResponse)
-def pagina_barra():
-    return _pagina()
+def pagina_barra(req: Request):
+    return _pagina(req)
 
 
 # ── API ─────────────────────────────────────────────────────────────────

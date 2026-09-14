@@ -7,6 +7,14 @@
 (function () {
     'use strict';
 
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Vazio na raiz do domínio.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+
+
     var alvo = document.getElementById('obs-conteudo');
     var ehAdmin = false;
 
@@ -192,7 +200,7 @@
     }
 
     function abrirCredencial() {
-        fetch('/api/obsolescencia/credencial', { credentials: 'include' })
+        fetch(BASE + '/api/obsolescencia/credencial', { credentials: 'include' })
             .then(resposta)
             .catch(function () { return {}; })
             .then(function (estado) {
@@ -218,7 +226,7 @@
         if (!u || !p) { m.textContent = 'Informe usuário e senha.'; return; }
         b.disabled = true;
         m.textContent = 'Guardando no cofre…';
-        fetch('/api/obsolescencia/credencial', {
+        fetch(BASE + '/api/obsolescencia/credencial', {
             method: 'POST', credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: u, senha: p })
@@ -285,7 +293,7 @@
             var m = document.getElementById('obs-msg');
             b.disabled = true;
             if (m) m.textContent = 'Lendo o parque no MDM… isso leva alguns minutos.';
-            fetch('/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
+            fetch(BASE + '/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
                 .then(resposta)
                 .then(function (j) {
                     if (m) m.textContent = 'Coleta concluída: ' + num(j.lidos) + ' lidos, ' +
@@ -302,7 +310,7 @@
     }
 
     function carregar() {
-        fetch('/api/obsolescencia/resumo', { credentials: 'include' })
+        fetch(BASE + '/api/obsolescencia/resumo', { credentials: 'include' })
             .then(function (r) {
                 if (r.status === 401) { location.href = '/?next=/obsolescencia'; return null; }
                 return resposta(r);
@@ -321,7 +329,7 @@
     }
 
     // Só admin vê o botão de coletar; o painel em si é de quem tem login.
-    fetch('/api/auth/me', { credentials: 'include' })
+    fetch(BASE + '/api/auth/me', { credentials: 'include' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (u) { ehAdmin = !!(u && u.is_admin); })
         .catch(function () {})

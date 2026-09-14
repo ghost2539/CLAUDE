@@ -7,7 +7,15 @@
 (function () {
     "use strict";
 
-    var API = "/api/ebs-forms";
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Vazio na raiz do domínio.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+
+
+    var API = BASE + "/api/ebs-forms";
     var MODULO = "ebs_forms";
     var INTERVALO_POLL = 3000;
 
@@ -110,7 +118,7 @@
 
     // ── sessão / permissões ────────────────────────────────────────────
     function carregarSessao() {
-        return fetch("/api/auth/me", { credentials: "same-origin" })
+        return fetch(BASE + "/api/auth/me", { credentials: "same-origin" })
             .then(function (r) { if (!r.ok) throw new Error("sem sessão"); return r.json(); })
             .then(function (me) {
                 var mapa = (me.permission_map || {})[MODULO] || {};
