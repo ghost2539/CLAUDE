@@ -7,7 +7,9 @@
         --grupo "SPARE - Equipamentos" --saida analise.xlsx
 
 Roda FORA do portal, no servidor, com a conta de serviço do ServiceNow
-(SN_API_USER / SN_API_PASS / SN_API_BASE — as mesmas do portal).
+(SN_API_USER / SN_API_PASS / SN_API_BASE — as mesmas do portal). Como não
+roda dentro do serviço, ele lê o arquivo de ambiente do serviço sozinho;
+use --env-file se o seu estiver em outro lugar.
 
 Para cada chamado da planilha ele responde:
 
@@ -41,17 +43,99 @@ PAGINA = 1000
 
 
 # ── ServiceNow (conta de serviço, leitura) ────────────────────────
-def _cfg():
-    from config import get_settings
-    c = get_settings()
+# Onde o ambiente do serviço costuma estar. O script é de linha de
+# comando: ele não roda dentro do serviço e, portanto, não herda essas
+# variáveis — lê o arquivo, como o systemd faria.
+ENVS_CONHECIDOS = (
+    "/etc/portal_operacoes_spare_testes/environment",
+    "/etc/portal_operacoes_spare/environment",
+    "~/.config/portal-spare-testes/environment",
+    "~/.config/portal-spare/environment",
+)
+
+_CHAVES = ("SN_API_BASE", "SN_API_USER", "SN_API_PASS", "SN_API_PROXY", "VERIFY_SSL")
+
+
+class Conta:
+    """Só o que o script precisa. Não depende do config do portal, que
+    exige banco — aqui não há banco nenhum."""
+
+    def __init__(self, valores: dict):
+        self.SN_API_BASE = (valores.get("SN_API_BASE") or "").rstrip("/")
+        self.SN_API_USER = valores.get("SN_API_USER") or ""
+        self.SN_API_PASS = valores.get("SN_API_PASS") or ""
+        self.SN_API_PROXY = valores.get("SN_API_PROXY") or ""
+        v = str(valores.get("VERIFY_SSL", "1")).strip().lower()
+        self.VERIFY_SSL = v not in ("0", "nao", "não", "false", "no")
+
+
+def ler_env(caminho: Path) -> dict:
+    """KEY=VALUE de um arquivo de ambiente, com aspas e comentários."""
+    valores: dict[str, str] = {}
+    try:
+        texto = caminho.expanduser().read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return valores
+    for linha in texto.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" not in linha:
+            continue
+        chave, valor = linha.split("=", 1)
+        chave = chave.strip().removeprefix("export ").strip()
+        valor = valor.strip().strip('"').strip("'")
+        if chave:
+            valores[chave] = valor
+    return valores
+
+
+_CONTA: Conta | None = None
+
+
+def preparar_conta(env_file: Path | None = None) -> Conta:
+    """Monta a conta a partir do ambiente, do arquivo indicado ou dos conhecidos."""
+    global _CONTA
+    import os
+    valores = {k: os.environ[k] for k in _CHAVES if os.environ.get(k)}
+    origens = ["ambiente"] if valores.get("SN_API_USER") else []
+
+    candidatos = [env_file] if env_file else [Path(p) for p in ENVS_CONHECIDOS]
+    for caminho in candidatos:
+        if not caminho:
+            continue
+        if valores.get("SN_API_USER") and valores.get("SN_API_PASS") and valores.get("SN_API_BASE"):
+            break
+        do_arquivo = ler_env(Path(caminho))
+        if not do_arquivo:
+            continue
+        achou = False
+        for k in _CHAVES:
+            if not valores.get(k) and do_arquivo.get(k):
+                valores[k] = do_arquivo[k]
+                achou = True
+        if achou:
+            origens.append(str(Path(caminho).expanduser()))
+
     faltando = [n for n in ("SN_API_BASE", "SN_API_USER", "SN_API_PASS")
-                if not getattr(c, n, "")]
+                if not valores.get(n)]
     if faltando:
         raise SystemExit(
-            "Conta de serviço do ServiceNow não configurada: falta "
-            + ", ".join(faltando) + ".\nDefina no ambiente do serviço "
-            "(ou no cofre) antes de rodar.")
-    return c
+            "Conta de serviço do ServiceNow não encontrada: falta "
+            + ", ".join(faltando) + ".\n"
+            "Passe --env-file com o arquivo de ambiente do serviço, ou exporte "
+            "as variáveis antes de rodar. Procurei em:\n  "
+            + "\n  ".join(str(Path(p).expanduser()) for p in candidatos if p))
+    if valores.get("SN_API_PASS", "").startswith("@cofre:"):
+        raise SystemExit(
+            "A senha está guardada no cofre (@cofre:…). Rode com as variáveis "
+            "já resolvidas — por exemplo, exportando-as a partir do serviço.")
+    print(f"  conta de serviço: {valores['SN_API_USER']} @ {valores['SN_API_BASE']}"
+          f" (de {', '.join(origens) or 'ambiente'})")
+    _CONTA = Conta(valores)
+    return _CONTA
+
+
+def _cfg() -> Conta:
+    return _CONTA or preparar_conta()
 
 
 def consultar(tabela: str, query: str, campos: str, *, display=True,
@@ -274,7 +358,12 @@ def main() -> int:
                     help="processa só os N primeiros — use para conferir o critério antes")
     ap.add_argument("--modelos", type=Path,
                     help="arquivo com um modelo por linha, para somar aos conhecidos")
+    ap.add_argument("--env-file", type=Path, dest="env_file",
+                    help="arquivo de ambiente com SN_API_BASE/USER/PASS "
+                         "(por padrão procura o do serviço)")
     args = ap.parse_args()
+
+    preparar_conta(args.env_file)
 
     modelos = MODELOS_PADRAO
     if args.modelos and args.modelos.exists():
