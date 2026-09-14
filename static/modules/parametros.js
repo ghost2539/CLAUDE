@@ -19,6 +19,7 @@ window.SPARE_MODULES.parametros = {
             ['config-modulos',  'Configuração Módulos'],
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
+            ['ebs-oracle',      'Base EBS (Oracle)'],
             ['acessos',         'Acessos & Alertas'],
             ['dashboards',      'Dashboards'],
             ['conta',           'Minha conta']
@@ -28,7 +29,7 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'monitoramento', 'acessos', 'dashboards'];
+                         'monitoramento', 'ebs-oracle', 'acessos', 'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -48,6 +49,7 @@ window.SPARE_MODULES.parametros = {
             'config-modulos': renderConfigModulos,
             automacoes:     renderAutomacoes,
             monitoramento:  renderMonitoramento,
+            'ebs-oracle':   renderEbsOracle,
             acessos:        renderAcessos,
             dashboards:     renderDashboards,
             conta:          renderAccount
@@ -483,6 +485,121 @@ async function renderAutomacoes(c, S) {
 }
 
 /* ── Monitoramento (saúde e falhas) ─────────────────────────────── */
+/* Base EBS (Oracle) — provar o acesso antes de qualquer consulta.
+   Nenhuma senha é digitada aqui: a credencial vem por referência do cofre,
+   e a tela mostra só de onde cada valor foi resolvido. */
+async function renderEbsOracle(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Base EBS (Oracle)</h1>' +
+        '<p class="text-muted">Leitura direta do BASE_REMOVIDA, só para consulta. A credencial é ' +
+            'resolvida por referência no cofre — nada é digitado nesta tela.</p>' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<span>Situação</span>' +
+            '<span><button id="eo-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
+            '<button id="eo-testar" class="btn btn-sm btn-primary" style="margin-left:6px">Testar conexão</button></span>' +
+            '</div><div class="card-body" id="eo-situacao">' +
+            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+        '<div class="card mb-3" id="eo-teste-card" style="display:none">' +
+            '<div class="card-header">Resultado do teste</div>' +
+            '<div class="card-body" id="eo-teste"></div></div>' +
+        '<div class="card"><div class="card-header">Procurar objeto</div><div class="card-body">' +
+            '<p class="text-muted" style="margin-top:0">Lista tabelas e views que a conta enxerga. ' +
+            'Só catálogo — nenhum dado de negócio é lido aqui.</p>' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="eo-prefixo">Prefixo (mín. 3 letras)</label>' +
+                    '<input id="eo-prefixo" class="form-control" placeholder="ex.: CSI_ITEM"></div>' +
+                '<div class="form-group"><label for="eo-owner">Owner</label>' +
+                    '<input id="eo-owner" class="form-control" value="APPS"></div>' +
+            '</div>' +
+            '<div class="btn-row mt-2"><button id="eo-buscar" class="btn btn-primary btn-sm">Procurar</button></div>' +
+            '<div id="eo-objetos" class="mt-3"></div>' +
+        '</div></div>';
+
+    function linhaChave(k) {
+        var marca = k.resolvida
+            ? '<span class="badge badge-success">resolvida</span>'
+            : '<span class="badge badge-danger">faltando</span>';
+        return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + marca + '</td>' +
+            '<td>' + e(k.fonte || '—') + '</td>' +
+            '<td>' + (k.valor ? e(k.valor) : '<span class="text-muted">—</span>') + '</td></tr>';
+    }
+
+    async function carregar() {
+        var host = document.getElementById('eo-situacao');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/situacao');
+            var drv = d.driver || {};
+            host.innerHTML =
+                '<p><b>Cofre corporativo:</b> ' +
+                    (d.cofre_corporativo ? '<span class="badge badge-success">disponível</span>'
+                                         : '<span class="badge badge-danger">indisponível</span>') +
+                    ' <span class="text-muted">' + e(d.cofre_detalhe || '') + '</span></p>' +
+                '<p><b>Driver Oracle:</b> ' +
+                    (drv.instalado ? '<span class="badge badge-success">instalado</span> ' + e(drv.versao || '')
+                                   : '<span class="badge badge-danger">ausente</span> ' + e(drv.detalhe || '')) + '</p>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                '</tr></thead><tbody>' + (d.chaves || []).map(linhaChave).join('') +
+                '</tbody></table></div>' +
+                '<p class="text-muted" style="margin-bottom:0">A senha nunca aparece: dela só se ' +
+                'mostra se foi resolvida e de onde.</p>';
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('eo-atualizar').onclick = carregar;
+
+    document.getElementById('eo-testar').onclick = async function () {
+        var card = document.getElementById('eo-teste-card');
+        var host = document.getElementById('eo-teste');
+        card.style.display = '';
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Conectando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/testar', { method: 'POST' });
+            var a = d.acesso || {};
+            host.innerHTML = '<div class="alert alert-success">Conexão estabelecida.</div>' +
+                '<div class="table-wrapper"><table class="data-table"><tbody>' +
+                Object.keys(a).map(function (k) {
+                    return '<tr><td><b>' + e(k) + '</b></td><td>' + e(a[k]) + '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+            S.toast('BASE_REMOVIDA respondeu.', 'success');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('eo-buscar').onclick = async function () {
+        var host = document.getElementById('eo-objetos');
+        var prefixo = document.getElementById('eo-prefixo').value.trim();
+        var owner = document.getElementById('eo-owner').value.trim() || 'APPS';
+        if (prefixo.length < 3) { S.toast('Informe ao menos 3 letras.', 'warning'); return; }
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Procurando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/objetos?prefixo=' + encodeURIComponent(prefixo) +
+                                '&owner=' + encodeURIComponent(owner));
+            var itens = d.itens || [];
+            if (!itens.length) { host.innerHTML = '<p class="text-muted">Nada encontrado.</p>'; return; }
+            var colunas = Object.keys(itens[0]);
+            host.innerHTML = '<p class="text-muted">' + d.total + ' objeto(s).</p>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                colunas.map(function (k) { return '<th>' + e(k) + '</th>'; }).join('') +
+                '</tr></thead><tbody>' + itens.map(function (r) {
+                    return '<tr>' + colunas.map(function (k) {
+                        return '<td>' + e(r[k] == null ? '' : r[k]) + '</td>';
+                    }).join('') + '</tr>';
+                }).join('') + '</tbody></table></div>';
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    carregar();
+}
+
 async function renderMonitoramento(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Monitoramento</h1>' +
