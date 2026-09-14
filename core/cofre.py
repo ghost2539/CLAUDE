@@ -185,6 +185,17 @@ def diagnostico_corporativo(chave_teste: str = "") -> tuple[bool, str]:
         except Exception as exc:  # noqa: BLE001
             return False, f"{_modulo_via}, mas {fn.__name__}('{chave}') falhou: {exc}"
         if valor:
+            # O loader resolve cofre -> os.environ -> default. Se o valor que
+            # ele devolveu é igual ao da variável de ambiente, ele pode ter
+            # vindo do ambiente e não do cofre — e dar isso como "cofre
+            # disponível" é justamente o falso positivo que apaga o problema.
+            if os.environ.get(chave, "") == valor:
+                return False, (
+                    f"{_modulo_via}, função {fn.__name__}() devolveu valor para "
+                    f"'{chave}', mas idêntico ao da variável de ambiente. O loader "
+                    f"resolve cofre → ambiente, então isto NÃO prova que o cofre "
+                    f"respondeu. Para provar, use uma chave que não esteja no "
+                    f"ambiente: COFRE_CHAVE_TESTE=NOME")
             return True, (f"{_modulo_via}, função {fn.__name__}() — leitura "
                           f"confirmada com a chave '{chave}'")
         return False, (

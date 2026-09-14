@@ -557,6 +557,10 @@ async function renderCofre(c, S) {
             e((k.fontes_com_valor || []).join(' e ')) +
             ' têm esta chave. Vale a primeira da ordem: corporativo, local, ambiente.">' +
             'em ' + (k.fontes_com_valor || []).length + ' fontes</span>';
+        if (k.indistinguivel) aviso += ' <span class="badge badge-warning" ' +
+            'title="O loader resolve cofre → ambiente. Ele devolveu o mesmo valor que ' +
+            'está na variável de ambiente, então não dá para saber se o cofre respondeu.">' +
+            'pode ser só o ambiente</span>';
         if (k.divergente) aviso += ' <span class="badge badge-danger" ' +
             'title="As fontes têm valores diferentes para esta chave.">' +
             'valores diferentes</span>';
