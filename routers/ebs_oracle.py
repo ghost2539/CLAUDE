@@ -30,6 +30,17 @@ CHAVES = ("ORACLE_EBS_USER", "ORACLE_EBS_PASS", "ORACLE_EBS_DSN",
           "ORACLE_CLIENT_LIB_DIR")
 SIGILOSAS = {"ORACLE_EBS_PASS"}
 
+# Padrões que `integracoes/ebs_oracle.py::_config()` usa quando o cofre não
+# tem a chave. Repetidos aqui porque aquele módulo importa o driver Oracle no
+# topo, e a tela precisa responder mesmo sem o driver instalado. Sem isto, a
+# tela diria "faltando" para valor que na prática funciona — e mandaria
+# alguém caçar um problema que não existe.
+PADROES = {
+    "ORACLE_EBS_USER": "USUARIO_REMOVIDO",
+    "ORACLE_EBS_DSN": "BANCO_REMOVIDO:1521/BASE_REMOVIDA",
+    "ORACLE_CLIENT_LIB_DIR": "/usr/lib/oracle/21/client64/lib",
+}
+
 
 def _exigir(req: Request) -> dict:
     return require_permission(req, MODULO, "admin")
@@ -45,10 +56,21 @@ def _situacao_das_chaves() -> list[dict]:
             origem = cofre.fonte(nome) if valor else ""
         except Exception as exc:  # noqa: BLE001
             valor, origem = "", f"erro ao consultar o cofre: {exc}"
-        item = {"chave": nome, "resolvida": bool(valor), "fonte": origem}
+        padrao = PADROES.get(nome, "")
+        # Três situações diferentes, e a tela precisa separá-las: veio do
+        # cofre, vai usar o padrão do código, ou não há valor nenhum.
+        if valor:
+            situacao = "cofre"
+        elif padrao:
+            situacao, origem = "padrao", "padrão do código"
+        else:
+            situacao = "ausente"
+        item = {"chave": nome, "situacao": situacao,
+                "resolvida": situacao != "ausente", "fonte": origem}
         # Só o que não é segredo aparece; a senha fica no sim/não.
-        if valor and nome not in SIGILOSAS:
-            item["valor"] = valor
+        efetivo = valor or padrao
+        if efetivo and nome not in SIGILOSAS:
+            item["valor"] = efetivo
         saida.append(item)
     return saida
 
