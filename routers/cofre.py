@@ -14,6 +14,7 @@ Tudo é `admin`.
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -88,6 +89,11 @@ def _sondar(nome: str) -> dict:
         "no_ambiente": bool(ambiente),
         "tamanho": len(valor),
     }
+    # Os dois cofres têm a chave com valores diferentes? Comparar não revela
+    # nada, e é exatamente o que faltava enxergar quando o cofre local
+    # sombreou o corporativo com a credencial errada.
+    if corp and local:
+        item["divergente"] = corp != local
     # Só o que não é segredo aparece — usuário e DSN ajudam a conferir se o
     # valor é o esperado; senha e chave, nunca.
     if valor and not _e_segredo(nome):
@@ -108,6 +114,56 @@ def _arquivo(caminho: str) -> dict:
         # Sem permissão de entrar na pasta, nem se sabe que o arquivo existe.
         "pasta_acessivel": os.access(p.parent, os.X_OK) if p.parent.exists() else False,
     }
+
+
+# Formatos em que um cofre guarda par nome=valor. Só o NOME é capturado —
+# o grupo de captura nunca alcança o valor, por construção.
+_PADROES_NOME = (
+    re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]{0,63})\s*=", re.M),
+    re.compile(r"""define\(\s*['"]([A-Za-z_][A-Za-z0-9_.-]{0,63})['"]"""),
+    re.compile(r"""['"]([A-Za-z_][A-Za-z0-9_.-]{0,63})['"]\s*=>"""),
+    re.compile(r'"([A-Za-z_][A-Za-z0-9_.-]{0,63})"\s*:'),
+)
+# Um cofre é pequeno. Se o arquivo for enorme, não é o cofre — e ler tudo
+# na memória do portal por engano seria o pior jeito de descobrir isso.
+_TETO_LEITURA = 2 * 1024 * 1024
+
+
+def _nomes_no_arquivo(caminho: str) -> dict:
+    """Todos os nomes de chave que o arquivo contém. Nenhum valor.
+
+    É o que responde de uma vez "o serviço enxerga o cofre?": se a lista
+    vem cheia, enxerga; se vem o erro de permissão, não enxerga; se vem
+    vazia, o arquivo não é o cofre.
+    """
+    import os
+    info = {"caminho": caminho, "legivel": False, "total": 0,
+            "nomes": [], "erro": "", "bytes": 0}
+    try:
+        tamanho = os.path.getsize(caminho)
+    except OSError as exc:
+        info["erro"] = str(exc)
+        return info
+    info["bytes"] = tamanho
+    if tamanho > _TETO_LEITURA:
+        info["erro"] = f"arquivo grande demais para ser um cofre ({tamanho} bytes)"
+        return info
+    try:
+        with open(caminho, "r", encoding="utf-8", errors="replace") as f:
+            texto = f.read()
+    except PermissionError:
+        info["erro"] = "sem permissão de leitura para o usuário do serviço"
+        return info
+    except OSError as exc:
+        info["erro"] = str(exc)
+        return info
+    info["legivel"] = True
+    nomes: set[str] = set()
+    for padrao in _PADROES_NOME:
+        nomes.update(padrao.findall(texto))
+    info["nomes"] = sorted(nomes)[:400]
+    info["total"] = len(nomes)
+    return info
 
 
 def _inventario_corporativo() -> dict:
@@ -170,6 +226,18 @@ def _inventario_corporativo() -> dict:
             vistos.add(valor)
             arquivos.append(dict(_arquivo(valor), atributo=atributo))
 
+    # Os nomes que estão DENTRO dos arquivos do cofre. Vale mesmo quando o
+    # módulo não sabe se listar: é a resposta direta para "ele enxerga?".
+    conteudo = [_nomes_no_arquivo(cofre.CAMINHO_ARQUIVO)]
+    for a in arquivos:
+        if a.get("existe"):
+            conteudo.append(_nomes_no_arquivo(a["caminho"]))
+    for c in conteudo:
+        if c["nomes"]:
+            nomes.update(c["nomes"])
+            if f"conteúdo de {c['caminho']}" not in fontes:
+                fontes.append(f"conteúdo de {c['caminho']}")
+
     funcao = ""
     if mod is not None:
         fn = cofre._funcao_do_modulo(mod)
@@ -182,6 +250,7 @@ def _inventario_corporativo() -> dict:
         "fontes": fontes,
         "nomes": sorted(nomes),
         "arquivos_do_modulo": arquivos,
+        "conteudo": conteudo,
         "pastas": [_pasta(d) for d in ("/usr/local/lib/vcreports", "/etc/vcreports")],
     }
 
