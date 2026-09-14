@@ -95,6 +95,63 @@ for campo in ("modulo_corporativo", "arquivo_corporativo"):
 checar(isinstance(d.get("permissoes_corporativo"), dict),
        "traz dono/grupo/modo do arquivo — é onde a falha de permissão aparece")
 
+print("\n[3b] De onde o cofre lê, e se o nome pode ser outro")
+inv = d.get("inventario") or {}
+checar(isinstance(inv, dict) and "modulo_carregado" in inv,
+       "diz se o módulo do cofre carregou")
+checar("sabe_listar" in inv and isinstance(inv.get("nomes"), list),
+       "diz se o cofre sabe listar as próprias chaves")
+checar(isinstance(inv.get("arquivos_do_modulo"), list),
+       "lista os arquivos que o próprio módulo aponta")
+pastas = {p["caminho"]: p for p in inv.get("pastas", [])}
+checar("/usr/local/lib/vcreports" in pastas and "/etc/vcreports" in pastas,
+       "olha as duas pastas do cofre corporativo")
+checar(all(set(("existe", "listavel", "itens")) <= set(v) for v in pastas.values()),
+       "de cada pasta diz se existe, se lista e o que há dentro")
+alt = d.get("alternativas") or []
+checar(len(alt) == 3, "sonda os apelidos de usuário, senha e endereço do EBS")
+nomes_alt = [c["chave"] for g in alt for c in g["chaves"]]
+checar("ORACLE_EBS_PASS" in nomes_alt and "ORACLE_EBS_PASSWORD" in nomes_alt,
+       "inclui o nome atual e as variantes")
+checar(all(not c.get("resolvida") for g in alt for c in g["chaves"]),
+       "sem cofre, nenhum apelido resolve — e nenhum valor é inventado")
+
+print("\n[3c] Com um cofre corporativo de mentira, o inventário aparece")
+# O caminho que importa no servidor: o módulo IMPORTA. Sem simular isso, o
+# inventário nunca é exercitado — e é justamente ele que separa "não alcança
+# o cofre" de "a chave tem outro nome".
+import types  # noqa: E402
+
+FALSO = _TMP / "backing.env"
+FALSO.write_text("nada aqui\n", encoding="utf-8")
+mod = types.ModuleType("vcreports_secrets")
+mod.SECRETS = {"CORREIOS_USUARIO": "conta-de-servico",
+               "ORACLE_EBS_SENHA": "senha-simulada-que-nao-pode-sair"}
+mod.CAMINHO_DOS_SEGREDOS = str(FALSO)
+mod.s = lambda nome: mod.SECRETS.get(nome, "")
+cofre._modulo, cofre._modulo_via = mod, "import direto (simulado)"
+
+r6 = cliente.get("/api/cofre/diagnostico")
+d6 = r6.json()
+inv6 = d6.get("inventario") or {}
+checar(inv6.get("modulo_carregado") is True, "o módulo aparece como carregado")
+checar(inv6.get("funcao") == "<lambda>" or inv6.get("funcao"),
+       "diz qual função do módulo é usada")
+checar(inv6.get("sabe_listar") is True and "ORACLE_EBS_SENHA" in inv6.get("nomes", []),
+       "lista os nomes que o cofre expõe")
+checar("senha-simulada-que-nao-pode-sair" not in r6.text,
+       "e a senha do cofre corporativo não sai na resposta")
+apontados = {a["caminho"]: a for a in inv6.get("arquivos_do_modulo", [])}
+checar(str(FALSO) in apontados and apontados[str(FALSO)]["legivel"] is True,
+       "aponta o arquivo que o próprio módulo lê, e se dá para ler")
+alt6 = {c["chave"]: c for g in d6.get("alternativas", []) for c in g["chaves"]}
+checar(alt6["ORACLE_EBS_PASS"]["resolvida"] is False,
+       "o nome de hoje continua sem resolver")
+checar(alt6["ORACLE_EBS_SENHA"]["resolvida"] is True
+       and alt6["ORACLE_EBS_SENHA"]["no_corporativo"] is True,
+       "e o apelido certo aparece resolvido, no cofre corporativo")
+cofre._modulo, cofre._modulo_via = None, ""
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -135,6 +192,8 @@ checar("['cofre',           'Cofre de segredos']" in js, "a aba está na lista")
 checar("cofre:          renderCofre" in js, "e ligada ao renderizador")
 checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")
 checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
+checar("inventarioHtml" in js and "alternativasHtml" in js,
+       "a tela mostra de onde o cofre lê e os apelidos sondados")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

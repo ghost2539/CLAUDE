@@ -545,6 +545,64 @@ async function renderCofre(c, S) {
                '<td>' + estado + pasta + '</td></tr>';
     }
 
+    // O módulo do cofre importa, mas nada resolve? Então o problema não é o
+    // módulo: é o arquivo que ELE lê, ou o nome da chave. Estas duas seções
+    // respondem as duas perguntas sem precisar de acesso ao servidor.
+    function inventarioHtml(inv) {
+        if (!inv) return '';
+        var cab = '<h3 class="mt-3">De onde o cofre corporativo lê</h3>' +
+            '<p><b>Módulo:</b> ' +
+            (inv.modulo_carregado
+                ? '<span class="badge badge-success">carregado</span> <span class="text-muted">' +
+                  e(inv.modulo_via || '') + '</span>' +
+                  (inv.funcao ? ' <span class="text-muted">— função ' + e(inv.funcao) + '()</span>' : '')
+                : '<span class="badge badge-danger">não carregado</span>') + '</p>';
+
+        var arqs = (inv.arquivos_do_modulo || []).length
+            ? '<div class="table-wrapper mb-2"><table class="data-table"><thead><tr>' +
+              '<th>Atributo</th><th>Caminho</th><th>Leitura</th></tr></thead><tbody>' +
+              inv.arquivos_do_modulo.map(function (a) {
+                  return '<tr><td class="om-mono">' + e(a.atributo) + '</td>' +
+                      '<td class="om-mono">' + e(a.caminho) + '</td><td>' +
+                      (!a.existe ? '<span class="badge badge-danger">não existe</span>'
+                                 : (a.legivel ? '<span class="badge badge-success">legível</span>'
+                                              : '<span class="badge badge-danger">sem permissão</span>')) +
+                      '</td></tr>';
+              }).join('') + '</tbody></table></div>'
+            : '';
+
+        var pastas = (inv.pastas || []).map(function (p) {
+            if (!p.existe) return '<p class="text-muted om-mono">' + e(p.caminho) + ' — não existe</p>';
+            if (!p.listavel) return '<p class="om-mono">' + e(p.caminho) +
+                ' — <span class="badge badge-danger">' + e(p.erro || 'sem permissão') + '</span></p>';
+            return '<p class="om-mono">' + e(p.caminho) + ' — ' +
+                (p.itens || []).map(function (i) {
+                    return e(i.nome) + (i.legivel ? '' : ' <span class="badge badge-danger">sem leitura</span>');
+                }).join(', ') + '</p>';
+        }).join('');
+
+        var nomes = inv.sabe_listar
+            ? '<p><b>Chaves que o cofre expõe:</b> <span class="om-mono">' +
+              e((inv.nomes || []).join(', ')) + '</span></p>'
+            : '<p class="text-muted">Este cofre não sabe se listar — só responde chave por chave. ' +
+              'Por isso a sondagem de nomes abaixo.</p>';
+
+        return cab + arqs + pastas + nomes;
+    }
+
+    function alternativasHtml(lista) {
+        if (!lista || !lista.length) return '';
+        return '<h3 class="mt-3">O nome da chave é outro?</h3>' +
+            '<p class="text-muted">Apelidos plausíveis da credencial do EBS, sondados de uma vez. ' +
+            'Se nenhum resolve, o problema não é o nome.</p>' +
+            lista.map(function (g) {
+                return '<div class="table-wrapper mb-2"><table class="data-table"><thead><tr>' +
+                    '<th>' + e(g.nome) + '</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                    '</tr></thead><tbody>' + (g.chaves || []).map(linha).join('') +
+                    '</tbody></table></div>';
+            }).join('');
+    }
+
     async function carregar() {
         var host = document.getElementById('cf-situacao');
         host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
@@ -571,14 +629,14 @@ async function renderCofre(c, S) {
                         ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
                           e(d.algoritmo || '') + '</span>'
                         : '<span class="text-muted">não existe</span>') + '</td></tr>' +
-                '</tbody></table></div>' + dono +
+                '</tbody></table></div>' + dono + inventarioHtml(d.inventario) +
                 (d.grupos || []).map(function (g) {
                     return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
                         '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
                         '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
                         '</tr></thead><tbody>' + (g.chaves || []).map(linha).join('') +
                         '</tbody></table></div>';
-                }).join('');
+                }).join('') + alternativasHtml(d.alternativas);
         } catch (x) {
             host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
         }
