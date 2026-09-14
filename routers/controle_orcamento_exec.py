@@ -14,6 +14,10 @@ valores financeiros:
   saldo_dia                → A Realizar
   (empresa, devolucoes, pct_exec, nome_projeto: NÃO são puxados)
 
+"Em andamento" é digitado na tela e NÃO vem do EBS: é o que ainda não está
+comprometido lá, mas já está em curso — uma PO aguardando aprovação, por
+exemplo. Sincronizar com o EBS não o altera.
+
 ACESSO CONTROLADO: exige sessão do portal e permissão do módulo
 ``orcamento`` — liberada usuário a usuário em Parâmetros → Usuários e
 Permissões. Leitura pede ``view``; inclusão, ``create``; alteração, exclusão
@@ -257,7 +261,12 @@ def _data(v: Any) -> Optional[date]:
 
 
 class ProjetoIn(BaseModel):
-    """Campos editáveis pela tabela. a_realizar NÃO entra aqui: vem do EBS."""
+    """Campos editáveis pela tabela.
+
+    `a_realizar` NÃO entra aqui: vem do EBS. `em_andamento` entra — é
+    justamente o que o EBS não tem, o que ainda não está comprometido mas já
+    está em curso (uma PO aguardando aprovação, por exemplo).
+    """
     model_config = ConfigDict(extra="forbid")
 
     codigo: Optional[str] = None
@@ -270,6 +279,7 @@ class ProjetoIn(BaseModel):
     orcamento: Optional[Decimal] = None
     comprometido: Optional[Decimal] = None
     realizado: Optional[Decimal] = None
+    em_andamento: Optional[Decimal] = None
     bloqueado: Optional[bool] = None
     vencimento: Optional[date] = None
 
@@ -308,7 +318,8 @@ class ProjetoIn(BaseModel):
     def _v_prioridade(cls, v):
         return None if v is None else _opcao(v, PRIORIDADES, "Prioridade")
 
-    @field_validator("orcamento", "comprometido", "realizado", mode="before")
+    @field_validator("orcamento", "comprometido", "realizado", "em_andamento",
+                     mode="before")
     @classmethod
     def _v_valor(cls, v):
         return None if v is None else _valor(v)
@@ -363,13 +374,15 @@ _CAMPOS = {
     "area": "area", "estagio": "stage", "prioridade": "priority",
     "orcamento": "approved_budget", "comprometido": "committed",
     "realizado": "realized", "bloqueado": "locked", "vencimento": "due_date",
+    "em_andamento": "em_andamento",
 }
 
 _PADRAO = {
     "codigo": "", "nome": "Novo projeto", "tipo": "CAPEX", "categoria": "Outros",
     "area": "", "estagio": "Planejamento", "prioridade": "Média",
     "orcamento": Decimal("0"), "comprometido": Decimal("0"),
-    "realizado": Decimal("0"), "bloqueado": False, "vencimento": None,
+    "realizado": Decimal("0"), "em_andamento": Decimal("0"),
+    "bloqueado": False, "vencimento": None,
 }
 
 
@@ -387,6 +400,7 @@ def _dict(p: BudgetProject) -> dict:
         "comprometido": float(p.committed or 0),
         "realizado": float(p.realized or 0),
         "a_realizar": float(p.a_realizar or 0),
+        "em_andamento": float(p.em_andamento or 0),
         "bloqueado": bool(p.locked),
         "vencimento": p.due_date.isoformat() if p.due_date else "",
         "ordem": p.sort_order,

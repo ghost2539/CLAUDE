@@ -118,7 +118,7 @@ O painel `/tv` (e `/api/tv/dashboard`) e o Controle de Orçamento de portfólio
 
 ### 5.3 `/controle-orcamento` — Execução de CAPEX
 Banco próprio (`db/orcamento_exec.py`, tabela `budget_projects` com as colunas
-`a_realizar` e `locked`). **Acesso controlado**: exige login do portal e o
+`a_realizar`, `em_andamento` e `locked`). **Acesso controlado**: exige login do portal e o
 módulo `orcamento` liberado para o usuário; toda abertura e toda gravação
 ficam na trilha `budget_acessos`.
 - **Barra de inclusão** no topo: Número (ID que puxa do EBS), Tipo (CAPEX/OPEX),
@@ -127,6 +127,12 @@ ficam na trilha `budget_acessos`.
   `saldo_inicial`→Orçamento Aprovado, `comprometido`+`reservados`→Comprometido,
   `realizado`→Realizado, `saldo_dia`→A Realizar. (`empresa`, `devoluções`,
   `pct_exec`, `nome_projeto` **não** são puxados.)
+- **Em Andamento** (`em_andamento`): o que ainda **não** está comprometido no
+  EBS mas já está em curso — uma PO aguardando aprovação, por exemplo. É
+  digitado na tela e **não** vem do EBS: sincronizar não o altera. Não se
+  confunde com "A Realizar", que é o saldo do dia. A tela mostra ainda
+  **Disponível** = A Realizar − Em Andamento, que é o que sobra de fato, e o
+  gráfico "Situação do Orçamento" separa as quatro parcelas.
 - **Conversão de moeda**: projetos com `empresa` Argentina (ARS) ou Uruguai (UYU)
   têm valores convertidos para BRL (cotação fixa por env ou ao vivo).
 - **Cadeado por projeto** (`locked`): projeto travado **não** é alterado no
@@ -185,7 +191,7 @@ a configurar. Doc: `docs/EBS_ORACLE_BASE.md`.
 `printers`.
 
 **Bancos isolados (separados do portal):**
-- `db/orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`locked`,`synced_at`), `budget_categories`.
+- `db/orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`em_andamento`,`locked`,`synced_at`), `budget_categories`.
 - `database_indicadores.py` (/indicadores): `indicador_snapshot`.
 
 ---

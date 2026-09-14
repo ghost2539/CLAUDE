@@ -8,7 +8,8 @@ Por padrão os dados ficam em ``data/controle_orcamento_exec.db`` (SQLite). Para
 outro banco (ex.: MySQL no servidor novo), defina ``ORCAMENTO_EXEC_DATABASE_URL``.
 
 O modelo tem a coluna ``a_realizar`` (recebe o
-``saldo_dia`` vindo da API de CAPEX do EBS).
+``saldo_dia`` vindo da API de CAPEX do EBS) e a coluna ``em_andamento``, que
+é digitada na tela: o que ainda não está comprometido mas já está em curso.
 
 Regra de isolamento: nada é criado em tempo de import — engine, conexão e
 criação de tabela só acontecem na primeira requisição ao módulo.
@@ -151,6 +152,10 @@ class BudgetProject(Base):
     committed: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)         # comprometido + reservados
     realized: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)          # realizado
     a_realizar: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)        # saldo_dia (pode ser negativo)
+    # Em andamento: o que ainda NÃO está comprometido no EBS mas já está em
+    # curso — uma PO aguardando aprovação, por exemplo. É digitado na tela; o
+    # EBS não sabe disso e nunca sobrescreve.
+    em_andamento: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     locked: Mapped[bool] = mapped_column(Boolean, default=False)                  # se True, "Atualizar (EBS)" NÃO altera
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -417,6 +422,9 @@ def _ensure_coluna_a_realizar() -> None:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN synced_at TIMESTAMP NULL"))
         if "locked" not in cols:
             conn.execute(sa_text("ALTER TABLE budget_projects ADD COLUMN locked BOOLEAN DEFAULT 0"))
+        if "em_andamento" not in cols:
+            conn.execute(sa_text("ALTER TABLE budget_projects "
+                                 "ADD COLUMN em_andamento NUMERIC(18,2) DEFAULT 0"))
     # OPEX: duas séries mensais (orçado e realizado). Bancos que subiram com a
     # coluna única `meses` ganham as duas novas, e o orçado herda o que existia.
     if "opex_itens" in insp.get_table_names():
