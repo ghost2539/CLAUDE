@@ -446,6 +446,7 @@ function renderNovo(c, S) {
             else if (mdm.pendentes) msg += ' ' + mdm.pendentes + ' remoção(ões) do MDM pendente(s): ' + (mdm.motivo || (mdm.falhas || [])[0] || '');
             else if (mdm.nao_encontrados) msg += ' ' + mdm.nao_encontrados + ' não localizado(s) no MDM.';
             S.toast(msg, (d.erros && d.erros.length) || (sn.falhas && sn.falhas.length) ? 'warning' : 'success');
+            mostrarDesfecho(d);
             sessionItems = sessionItems.filter(function (x) { return !x._selected; });
             drawSession();
         } catch (x) {
@@ -454,6 +455,44 @@ function renderNovo(c, S) {
             S.loading(false);
         }
     };
+
+    /* O que aconteceu com CADA série, sem ninguém precisar perguntar: a
+       leitura já tem o serial, então a tela responde por ele. */
+    function mostrarDesfecho(d) {
+        var sn = d.no_servicenow || {};
+        var mdm = d.mdm || {};
+        var porItem = sn.por_item || [];
+        var porSerie = mdm.por_serie || {};
+        var seriais = porItem.map(function (x) { return x.serial; });
+        Object.keys(porSerie).forEach(function (s) {
+            if (seriais.indexOf(s) < 0) { seriais.push(s); porItem.push({ serial: s }); }
+        });
+        if (!porItem.length) return;
+
+        var linhas = porItem.map(function (x) {
+            var m = porSerie[(x.serial || '').toUpperCase()] || null;
+            var sn_txt = x.acao || '—';
+            if (x.motivo) sn_txt += ' · ' + x.motivo;
+            var dep = x.depreciacao || (x.acao ? '—' : '');
+            var mdm_txt = '—';
+            if (m) mdm_txt = m.ok ? 'removido do MDM' : ('pendente · ' + (m.detalhe || ''));
+            return '<tr><td class="sep-serie">' + S.esc(x.serial || x.etiqueta || '—') + '</td>' +
+                '<td>' + S.esc(sn_txt) + '</td>' +
+                '<td>' + S.esc(dep) + '</td>' +
+                '<td>' + S.esc(mdm_txt) + '</td></tr>';
+        }).join('');
+
+        var alvo = document.getElementById('rec-desfecho');
+        if (!alvo) {
+            alvo = S.el('div', { id: 'rec-desfecho', className: 'card mb-3' });
+            var lista = document.getElementById('session-list');
+            lista.parentNode.parentNode.insertBefore(alvo, lista.parentNode);
+        }
+        alvo.innerHTML = '<div class="card-header">O que aconteceu com cada ativo</div>' +
+            '<div class="card-body"><div class="table-wrapper"><table class="data-table">' +
+            '<thead><tr><th>Série</th><th>ServiceNow</th><th>Depreciação</th>' +
+            '<th>MDM</th></tr></thead><tbody>' + linhas + '</tbody></table></div></div>';
+    }
 
     S.api('/recebimento/subcategorias').then(function (d) {
         subcategorias = d.subcategorias || [];
