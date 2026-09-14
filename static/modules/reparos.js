@@ -21,7 +21,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     var SUB = { FROTA: 'frota', LOJA: 'loja', CONECTIVIDADE: 'conectividade' };
 
     var DESTINOS = [
-        ['APTO', 'Apto / reparado'],
+        ['INTERNALIZACAO', 'Internalização'],
         ['AGUARDANDO_PECAS', 'Aguardando peças'],
         ['ASSISTENCIA', 'Assistência externa'],
         ['INVIAVEL', 'Reparo inviável'],
@@ -65,12 +65,13 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         c.innerHTML = '';
         c.appendChild(cabecalho(d.rotulo, ''));
 
-        c.appendChild(indicadores([
-            ['Na fila', d.aguardando.length, 'accent-gold'],
-            ['Em bancada', d.em_curso.length, 'accent-teal'],
+        var cartoes = [
+            ['No backlog', d.aguardando.length, 'accent-gold'],
             ['Aguardando peça', d.aguardando_pecas.length, 'accent-orange'],
             ['Peça atrasada', d.envelhecidos, 'accent-orange']
-        ]));
+        ];
+        if (d.em_curso.length) cartoes.splice(1, 0, ['Fluxo antigo', d.em_curso.length, 'accent-teal']);
+        c.appendChild(indicadores(cartoes));
 
         c.appendChild(barraBipe(c));
 
@@ -82,10 +83,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         layout.appendChild(esq);
         layout.appendChild(dir);
 
-        esq.appendChild(cartao('Aguardando triagem',
-            listaFila(d.aguardando, c, 'Nenhum equipamento na fila.')));
+        esq.appendChild(cartao('Backlog da bancada',
+            listaFila(d.aguardando, c, 'Nenhum equipamento no backlog.')));
         if (d.em_curso.length) {
-            esq.appendChild(cartao('Em bancada agora',
+            esq.appendChild(cartao('Assumidos no fluxo antigo',
                 listaFila(d.em_curso, c, '')));
         }
         dir.appendChild(cartao('Aguardando peça',
@@ -102,10 +103,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         });
         var linha = S.el('div', { className: 'form-row-inline' });
         linha.appendChild(campo);
-        // Secundário de propósito: com equipamento na bancada, a ação
-        // principal é registrar o reparo. Dois botões em cobre na mesma
-        // tela disputam a atenção e nenhum dos dois ganha.
-        linha.appendChild(botao('Assumir', 'btn-secondary', function () {
+        // Secundário de propósito: o bipe só traz o equipamento à tela.
+        // A ação que vale é registrar o que foi feito, e é ela que despacha
+        // o ativo — dois botões em cobre disputariam a atenção.
+        linha.appendChild(botao('Bipar', 'btn-secondary', function () {
             bipar(c, campo);
         }));
         corpo.appendChild(linha);
@@ -113,7 +114,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             if (e.key === 'Enter') { e.preventDefault(); bipar(c, campo); }
         });
         setTimeout(function () { campo.focus(); }, 60);
-        return cartao('Assumir equipamento', corpo);
+        return cartao('Bipar equipamento', corpo);
     }
 
     async function bipar(c, campo) {
@@ -121,11 +122,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (!serie) return;
         try {
             S.loading(true);
-            vista.ativo = await S.api('/bancada/bipar', {
-                method: 'POST',
-                body: { serial: serie, bancada: vista.bancada }
-            });
-            S.toast('Série ' + vista.ativo.serial + ' assumida.', 'success');
+            vista.ativo = await S.api('/bancada/ativo/' + encodeURIComponent(serie) +
+                                      '?bancada=' + vista.bancada);
             desenhar(c);
         } catch (e) {
             S.toast(e.message, 'danger');
@@ -178,7 +176,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         }
 
         corpo.appendChild(formulario(c));
-        return cartao('Equipamento em bancada · ' + a.serial, corpo);
+        return cartao('Equipamento na mão · ' + a.serial, corpo);
     }
 
     function formulario(c) {
@@ -230,10 +228,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                         '<div class="form-group"><label for="bnc-fornec">' +
                         'Fornecedor</label><input id="bnc-fornec" class="form-control">' +
                         '</div>';
-                } else if (v === 'INVIAVEL') {
+                } else if (v === 'VENDA') {
                     extra.innerHTML =
                         '<div class="form-group"><label for="bnc-just">' +
-                        'Por que o reparo é inviável</label>' +
+                        'Por que o equipamento vai para venda</label>' +
                         '<textarea id="bnc-just" class="form-control" rows="2"></textarea></div>';
                 } else {
                     extra.innerHTML = '';
@@ -392,7 +390,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     }
 
     /* ============================================================
-       Dashboard — tempo medido pelo núcleo, saving pelo valor-hora
+       Dashboard — tempo parado pelo núcleo e volume por pessoa
        ============================================================ */
     async function telaDashboard(c) {
         c.innerHTML = '';
@@ -414,15 +412,17 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             } catch (e) { alvo.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
             alvo.innerHTML = '';
             alvo.appendChild(indicadores([
-                ['Reparos fechados', d.total, 'accent-teal'],
-                ['Horas de bancada', (d.segundos / 3600).toFixed(1), 'accent-gold'],
-                ['Saving', S.money(d.saving), 'accent-green'],
-                ['Valor-hora', S.money(d.valor_hora), 'accent-orange']
+                ['Equipamentos despachados', d.total, 'accent-teal'],
+                ['Tempo parado médio', duracao(d.medio_parado), 'accent-gold'],
+                ['Dias com movimento', d.por_dia.length, 'accent-green'],
+                ['Meses no período', d.por_mes.length, 'accent-orange']
             ]));
             var grade = S.el('div', { className: 'form-grid cols-2' });
             grade.appendChild(cartaoLista('Por bancada', d.por_bancada));
-            grade.appendChild(cartaoLista('Por técnico', d.por_tecnico));
+            grade.appendChild(cartaoVolume('Por pessoa', d.por_tecnico));
             grade.appendChild(cartaoLista('Por destino', d.por_destino));
+            grade.appendChild(cartaoSerie('Volume por dia', d.por_dia, 'dia'));
+            grade.appendChild(cartaoSerie('Volume por mês', d.por_mes, 'mes'));
             alvo.appendChild(grade);
             var corpo = S.el('div', { className: 'card-body' });
             corpo.appendChild(S.table([
@@ -430,10 +430,9 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                 { key: 'serial', label: 'Série' }, { key: 'modelo', label: 'Modelo' },
                 { key: 'bancada_rotulo', label: 'Bancada' }, { key: 'tecnico', label: 'Técnico' },
                 { key: 'causa', label: 'Causa' }, { key: 'destino_rotulo', label: 'Destino' },
-                { key: 'segundos', label: 'Tempo', render: function (v) { return duracao(v); } },
-                { key: 'saving', label: 'Saving', render: function (v) { return S.money(v); } }
+                { key: 'segundos', label: 'Parado', render: function (v) { return duracao(v); } }
             ], d.registros));
-            alvo.appendChild(cartao('Reparos do período', corpo));
+            alvo.appendChild(cartao('Equipamentos despachados no período', corpo));
         }
         document.getElementById('rd-ok').onclick = carregar;
         carregar();
@@ -444,7 +443,36 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (!linhas.length) corpo.appendChild(S.el('p', { className: 'sep-vazio', textContent: 'Nada no período.' }));
         linhas.forEach(function (l) {
             var x = S.el('div', { className: 'sep-total mt-1' });
-            x.innerHTML = '<span>' + S.esc(l.rotulo) + '</span><b>' + l.quantidade + ' · ' + S.esc(duracao(l.segundos)) + ' · ' + S.money(l.saving) + '</b>';
+            x.innerHTML = '<span>' + S.esc(l.rotulo) + '</span><b>' + l.quantidade +
+                ' · ' + S.esc(duracao(l.segundos)) + '</b>';
+            corpo.appendChild(x);
+        });
+        return cartao(titulo, corpo);
+    }
+
+    /* Volume por pessoa: quantos equipamentos despachou e a média por dia
+       em que trabalhou — é o que a área pediu para acompanhar. */
+    function cartaoVolume(titulo, linhas) {
+        var corpo = S.el('div', { className: 'card-body' });
+        if (!linhas.length) corpo.appendChild(S.el('p', { className: 'sep-vazio', textContent: 'Nada no período.' }));
+        linhas.forEach(function (l) {
+            var x = S.el('div', { className: 'sep-total mt-1' });
+            x.innerHTML = '<span>' + S.esc(l.rotulo) + '</span><b>' + l.quantidade +
+                ' · ' + l.por_dia + '/dia em ' + l.dias + ' dia(s)</b>';
+            corpo.appendChild(x);
+        });
+        return cartao(titulo, corpo);
+    }
+
+    function cartaoSerie(titulo, linhas, campo) {
+        var corpo = S.el('div', { className: 'card-body' });
+        if (!linhas.length) corpo.appendChild(S.el('p', { className: 'sep-vazio', textContent: 'Nada no período.' }));
+        linhas.slice(-31).forEach(function (l) {
+            var x = S.el('div', { className: 'sep-total mt-1' });
+            var rot = campo === 'dia'
+                ? l.dia.slice(8) + '/' + l.dia.slice(5, 7)
+                : l.mes.slice(5) + '/' + l.mes.slice(0, 4);
+            x.innerHTML = '<span>' + S.esc(rot) + '</span><b>' + l.quantidade + '</b>';
             corpo.appendChild(x);
         });
         return cartao(titulo, corpo);

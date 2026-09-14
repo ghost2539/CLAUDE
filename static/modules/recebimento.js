@@ -64,6 +64,11 @@ function renderNovo(c, S) {
 
     var CACHE_KEY = 'spare_recebimento_session';
 
+    // Destino de entrada por ativo: o Recebimento é a porta do Spare e é
+    // aqui que se decide venda direta ou triagem. A subcategoria manda o
+    // ativo para o backlog da bancada certa, por isso vem de lista.
+    var subcategorias = [];
+
     function saveCache() {
         try { localStorage.setItem(CACHE_KEY, JSON.stringify(sessionItems)); } catch (_) {}
     }
@@ -109,6 +114,31 @@ function renderNovo(c, S) {
                 return S.esc(v);
             }},
             { key: 'modelo',      label: 'Modelo' },
+            { key: 'destino_entrada', label: 'Destino', render: function (_, r) {
+                var sel = S.el('select', { className: 'form-control form-control-sm' });
+                sel.innerHTML = '<option value="TRIAGEM">Triagem</option>' +
+                                '<option value="VENDA">Venda direta</option>';
+                sel.value = r.destino_entrada || 'TRIAGEM';
+                sel.onchange = function () {
+                    r.destino_entrada = sel.value;
+                    if (sel.value === 'VENDA') r.subcategoria = '';
+                    drawSession();
+                };
+                return sel;
+            }},
+            { key: 'subcategoria', label: 'Subcategoria', render: function (_, r) {
+                if ((r.destino_entrada || 'TRIAGEM') === 'VENDA') {
+                    return S.el('span', { className: 'text-muted', textContent: '—' });
+                }
+                var sel = S.el('select', { className: 'form-control form-control-sm' });
+                sel.innerHTML = '<option value="">Selecione…</option>' +
+                    subcategorias.map(function (x) {
+                        return '<option value="' + S.esc(x.nome) + '">' + S.esc(x.nome) + '</option>';
+                    }).join('');
+                sel.value = r.subcategoria || '';
+                sel.onchange = function () { r.subcategoria = sel.value; saveCache(); };
+                return sel;
+            }},
             { key: 'situacao',    label: 'Situação', html: true, render: function (v, row) {
                 var out = situacaoBadge(v);
                 if (row._duplicadoLocal) {
@@ -366,6 +396,14 @@ function renderNovo(c, S) {
             if (campoEspaco) campoEspaco.focus();
             return;
         }
+        var semSub = selected.filter(function (x) {
+            return (x.destino_entrada || 'TRIAGEM') !== 'VENDA' && !x.subcategoria;
+        });
+        if (semSub.length) {
+            S.toast('Informe a subcategoria dos ' + semSub.length +
+                    ' ativo(s) que vão para triagem.', 'warning');
+            return;
+        }
         try {
             S.loading(true);
             var payload = selected.map(function (x) {
@@ -380,7 +418,9 @@ function renderNovo(c, S) {
                     modelo: x.modelo || '',
                     custo_asset: x.custo_asset || null,
                     dpis: x.dpis || null,
-                    fonte: x.fonte || 'EBS'
+                    fonte: x.fonte || 'EBS',
+                    destino_entrada: x.destino_entrada || 'TRIAGEM',
+                    subcategoria: x.subcategoria || ''
                 };
             });
             var d = await S.api('/recebimento/bulk-submit', {
@@ -410,6 +450,11 @@ function renderNovo(c, S) {
             S.loading(false);
         }
     };
+
+    S.api('/recebimento/subcategorias').then(function (d) {
+        subcategorias = d.subcategorias || [];
+        drawSession();
+    }).catch(function () {});
 
     S.api('/servicenow/gestao-ativos/config').then(function (cfg) {
         var dl = document.getElementById('rec-corredores');
