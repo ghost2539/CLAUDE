@@ -385,7 +385,10 @@
     /* ── Painel ───────────────────────────────────────────────────── */
     // Cores fixas por entidade (nunca por posição).
     var TIPO_COLOR = { CONTRATO: '#4C8DFF', AVULSA: '#C79105' };
-    var CAT_COLOR = { 'Coletor': '#F28C38', 'Coletor HF550X': '#C79105', 'Sled RFID': '#2FA39A', 'Sled RFR901': '#4C8DFF' };
+    // Categoria é só Coletor ou SLED; os nomes antigos ficam para o histórico
+    // que ainda não passou pelo recálculo.
+    var CAT_COLOR = { 'Coletor': '#F28C38', 'SLED': '#2FA39A',
+                      'Coletor HF550X': '#C79105', 'Sled RFID': '#2FA39A', 'Sled RFR901': '#4C8DFF' };
     var CAT_OTHER = '#8A8F98';
     var EST_COLOR = { ok: '#2FB56B', ok2: '#7BD3A0', bad: '#E5484D', pend: '#FFC107', orc: '#4C8DFF' };
     var TIPO_NOME = { CONTRATO: 'Contrato', AVULSA: 'Avulso' };
@@ -403,6 +406,18 @@
     ];
     var DET_FOCUS = {};
     function catColor(nome) { return CAT_COLOR[nome] || CAT_OTHER; }
+
+    /* Categoria com a família ao lado — só quando a família diz algo que a
+       categoria já não disse. Hoje categoria é Coletor ou SLED, então repetir
+       "Coletor (Coletor)" seria ruído; a base antiga ainda tem categoria com
+       modelo no nome, e aí a família ajuda. */
+    function catComFamilia(categoria, familia) {
+        var e = S.esc;
+        var rotulo = FAMILIA_LABEL[familia] || familia || '';
+        var txt = e(categoria || '—');
+        if (!rotulo || rotulo.toLowerCase() === String(categoria || '').toLowerCase()) return txt;
+        return txt + ' <span class="text-muted">(' + e(rotulo) + ')</span>';
+    }
 
     async function renderPainel(c, p, preset) {
         var anoSel = (preset && preset.ano) ? String(preset.ano) : '';
@@ -1081,6 +1096,7 @@
             '<div class="om-g32">' + consumoChart(d) + categoriaChart(d) + '</div>' +
             '<div class="om-g3">' + qtdeChart(d) + resultadoChart(d) + devolucaoChart(d) + '</div>' +
             detalhamentoHtml(d) +
+            modelosHtml(d) +
             '<div class="om-cards2">' + aprovacaoHtml(d) + devolucaoHtml(d) + '</div>' +
             '</div>';
     }
@@ -1137,13 +1153,74 @@
         return h + '</tbody></table>';
     }
 
+    /* Consumo por categoria e por modelo, no período filtrado.
+       Uma linha por modelo, agrupada pela categoria, com a barra mostrando a
+       fatia do consumo — é a leitura que a área pede para decidir compra. */
+    function modelosHtml(d) {
+        var e = S.esc;
+        var lista = (d.modelos || []).slice();
+        var totalConsumo = lista.reduce(function (a, m) { return a + Number(m.consumo || 0); }, 0);
+        var head = '<div class="card"><div class="om-card-head">' +
+            '<span>Consumo por categoria e modelo' + e(d.mes ? sufEscopo(d) : ' no ano') + '</span></div>';
+        if (!lista.length) {
+            return head + '<div class="card-body">' +
+                emptyHtml('Sem reparos ' + noEscopo(d) + '.') + '</div></div>';
+        }
+        // Agrupa por categoria mantendo a ordem de maior consumo.
+        var ordem = [], grupos = {};
+        lista.forEach(function (m) {
+            var cat = m.categoria || '—';
+            if (!grupos[cat]) { grupos[cat] = []; ordem.push(cat); }
+            grupos[cat].push(m);
+        });
+        ordem.sort(function (a, b) {
+            function soma(c) {
+                return grupos[c].reduce(function (x, m) { return x + Number(m.consumo || 0); }, 0);
+            }
+            return soma(b) - soma(a);
+        });
+        var maior = lista.reduce(function (a, m) { return Math.max(a, Number(m.consumo || 0)); }, 0);
+        var linhas = '';
+        ordem.forEach(function (cat) {
+            var itens = grupos[cat];
+            var somaCat = itens.reduce(function (a, m) { return a + Number(m.consumo || 0); }, 0);
+            var qtdeCat = itens.reduce(function (a, m) { return a + Number(m.reparados || 0); }, 0);
+            linhas += '<tr class="om-total"><td colspan="2"><b>' + e(cat) + '</b></td>' +
+                '<td class="om-num"><b>' + fmtInt(qtdeCat) + '</b></td>' +
+                '<td class="om-num"><b>' + money(somaCat) + '</b></td>' +
+                '<td class="om-num"><b>' + (totalConsumo ? fmtPct(somaCat / totalConsumo) : '—') + '</b></td>' +
+                '<td></td></tr>';
+            itens.forEach(function (m) {
+                var v = Number(m.consumo || 0);
+                var largura = maior > 0 ? (v / maior * 100).toFixed(2) : '0';
+                linhas += '<tr>' +
+                    '<td></td>' +
+                    '<td>' + e(m.modelo || '—') + '</td>' +
+                    '<td class="om-num">' + fmtInt(m.reparados) + '</td>' +
+                    '<td class="om-num">' + money(v) + '</td>' +
+                    '<td class="om-num">' + (m.participacao == null ? '—' : fmtPct(m.participacao)) + '</td>' +
+                    '<td><span class="om-hb-bar"><span class="om-hb-seg" style="width:' + largura +
+                        '%;background:' + catColor(m.categoria) + '"></span></span></td>' +
+                    '</tr>';
+            });
+        });
+        return head +
+            '<div class="table-wrapper" style="border:0"><table class="data-table"><thead><tr>' +
+            '<th>Categoria</th><th>Modelo</th><th class="om-num">Reparados</th>' +
+            '<th class="om-num">Consumo</th><th class="om-num">% do consumo</th><th>&nbsp;</th>' +
+            '</tr></thead><tbody>' + linhas +
+            '<tr class="om-total"><td colspan="3"><b>TOTAL</b></td>' +
+            '<td class="om-num"><b>' + money(totalConsumo) + '</b></td>' +
+            '<td class="om-num"><b>' + (totalConsumo ? '100,0 %' : '—') + '</b></td><td></td></tr>' +
+            '</tbody></table></div></div>';
+    }
+
     function aprovacaoHtml(d) {
         var list = d.aguardando_aprovacao || [];
         var tq = 0, tv = 0;
         var rows = list.map(function (r) {
             tq += Number(r.qtde || 0); tv += Number(r.valor || 0);
-            return '<tr><td>' + S.esc(r.categoria || '—') +
-                (r.familia ? ' <span class="text-muted">(' + S.esc(FAMILIA_LABEL[r.familia] || r.familia) + ')</span>' : '') + '</td>' +
+            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
                 '<td class="om-num">' + fmtInt(r.qtde) + '</td>' +
                 '<td class="om-num">' + money(r.valor) + '</td></tr>';
         }).join('');
@@ -1163,8 +1240,7 @@
         var cols = ['total', 'ag_manutencao', 'ag_orcamento', 'ag_aprovacao', 'reprovado'];
         var rows = list.map(function (r) {
             cols.forEach(function (k) { t[k] += Number(r[k] || 0); });
-            return '<tr><td>' + S.esc(r.categoria || '—') +
-                (r.familia ? ' <span class="text-muted">(' + S.esc(FAMILIA_LABEL[r.familia] || r.familia) + ')</span>' : '') + '</td>' +
+            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
                 cols.map(function (k) { return '<td class="om-num">' + fmtInt(r[k]) + '</td>'; }).join('') + '</tr>';
         }).join('');
         if (!rows) rows = '<tr><td colspan="6" class="empty-row">Nenhum equipamento em manutenção.</td></tr>';
@@ -1180,8 +1256,8 @@
 
     /* ── Reparos ──────────────────────────────────────────────────── */
     async function renderReparos(c, p, preset) {
-        var FILTROS = ['lote', 'mes', 'familia', 'categoria', 'status', 'status_retorno',
-                       'empresa', 'tipo_manutencao', 'min_reparos', 'q'];
+        var FILTROS = ['lote', 'mes', 'familia', 'categoria', 'modelo', 'status',
+                       'status_retorno', 'empresa', 'tipo_manutencao', 'min_reparos', 'q'];
         var filtros = {};
         FILTROS.forEach(function (k) { filtros[k] = preset && preset[k] != null ? preset[k] : ''; });
         var offset = 0, total = 0, itens = [], opcoes = {};
@@ -1233,6 +1309,7 @@
                 '<div class="form-group"><label>Mês</label><input id="om-fl-mes" type="month" class="form-control" value="' + e(filtros.mes) + '"></div>' +
                 selectHtml('om-fl-familia', 'Família', opts(opcoes, 'familias', FAMILIA_LABEL), filtros.familia, 'Todas') +
                 selectHtml('om-fl-categoria', 'Categoria', opts(opcoes, 'categorias'), filtros.categoria, 'Todas') +
+                selectHtml('om-fl-modelo', 'Modelo', opts(opcoes, 'modelos'), filtros.modelo, 'Todos') +
                 selectHtml('om-fl-status', 'Status', opts(opcoes, 'status', STATUS_LABEL), filtros.status, 'Todos') +
                 selectHtml('om-fl-status_retorno', 'Status de retorno', opts(opcoes, 'status_retorno', RETORNO_LABEL), filtros.status_retorno, 'Todos') +
                 selectHtml('om-fl-empresa', 'Empresa', opts(opcoes, 'empresas'), filtros.empresa, 'Todas') +
@@ -1391,13 +1468,13 @@
         var acoes = p.edit || p.admin;
         var h = '<div class="table-wrapper om-tw"><table class="data-table"><thead><tr>' +
             '<th>RMA</th><th>Série</th><th class="om-num">Reparos da série</th><th class="om-num">Custo acumulado</th>' +
-            '<th class="om-num">Loja</th><th>Categoria</th><th>Empresa</th>' +
+            '<th class="om-num">Loja</th><th>Categoria</th><th>Modelo</th><th>Empresa</th>' +
             '<th class="om-num">Orçamento</th><th class="om-num">Valor compra</th><th class="om-num">%</th>' +
             '<th>Status</th><th>Retorno</th><th>Data devolução</th><th>Mês</th><th>Tipo</th><th>Lote</th>' +
             (acoes ? '<th>Ações</th>' : '') +
             '</tr></thead><tbody>';
         if (!itens.length) {
-            h += '<tr><td colspan="' + (acoes ? 17 : 16) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
+            h += '<tr><td colspan="' + (acoes ? 18 : 17) + '" class="empty-row">Nenhum registro encontrado.</td></tr>';
         } else {
             itens.forEach(function (r, i) { h += rowHtml(r, i, p); });
         }
@@ -1433,8 +1510,8 @@
             '<td class="om-num">' + reincHtml(r) + '</td>' +
             '<td class="om-num">' + (r.serie_custo == null ? '<span class="text-muted">—</span>' : money(r.serie_custo)) + '</td>' +
             '<td class="om-num">' + (r.loja == null ? '' : e(r.loja)) + '</td>' +
-            '<td>' + e(r.categoria) +
-                (r.familia ? ' <span class="text-muted">(' + e(FAMILIA_LABEL[r.familia] || r.familia) + ')</span>' : '') + '</td>' +
+            '<td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
+            '<td>' + (r.modelo ? e(r.modelo) : '<span class="text-muted">—</span>') + '</td>' +
             '<td>' + e(r.empresa || '—') + '</td>' +
             '<td class="om-num">' + orc + '</td>' +
             '<td class="om-num">' + vc + '</td>' +
@@ -2056,6 +2133,20 @@
             if (aba) fd.append('aba', aba);
             fd.append('substituir', subst ? 'true' : 'false');
             if (dry) fd.append('dry_run', 'true');
+            if (!dry) {
+                // O lote é digitado na prévia, não antes dela.
+                var geral = document.getElementById('om-imp-lote');
+                if (geral && geral.value.trim()) fd.append('lote', geral.value.trim());
+                var porLinha = {};
+                Array.prototype.forEach.call(
+                    document.querySelectorAll('.om-imp-lote-linha'), function (el) {
+                        var v = String(el.value || '').trim();
+                        if (v && v !== String(el.dataset.original || '')) {
+                            porLinha[el.dataset.rma] = v;
+                        }
+                    });
+                if (Object.keys(porLinha).length) fd.append('lotes', JSON.stringify(porLinha));
+            }
             return { fd: fd, nome: file.name, subst: subst };
         }
 
@@ -2086,6 +2177,17 @@
                 if (okBtn) okBtn.onclick = enviarBase;
                 var cancel = document.getElementById('om-imp-cancel');
                 if (cancel) cancel.onclick = function () { out.innerHTML = ''; };
+                var aplicar = document.getElementById('om-imp-lote-aplicar');
+                if (aplicar) aplicar.onclick = function () {
+                    var valor = String((document.getElementById('om-imp-lote') || {}).value || '').trim();
+                    if (!valor) { S.toast('Informe o lote de reparo.', 'warning'); return; }
+                    var n = 0;
+                    Array.prototype.forEach.call(
+                        document.querySelectorAll('.om-imp-lote-linha'), function (el) {
+                            el.value = valor; n += 1;
+                        });
+                    S.toast(valor + ' aplicado a ' + fmtInt(n) + ' linha(s).', 'success');
+                };
             } catch (e) {
                 out.innerHTML = alertHtml(e.message); S.toast(e.message, 'error');
             }
@@ -2140,7 +2242,7 @@
             (r.abas_disponiveis && r.abas_disponiveis.length ? ' · Abas: ' + e(r.abas_disponiveis.join(', ')) : '') + '</p>';
         if (linhas.length) {
             h += '<div class="om-scroll"><table class="om-mtable"><thead><tr>' +
-                '<th>Ação</th><th>RMA</th><th>Série</th><th>Categoria</th><th>Lote</th>' +
+                '<th>Ação</th><th>RMA</th><th>Série</th><th>Categoria</th><th>Modelo</th><th>Lote de reparo</th>' +
                 '<th>Status</th><th>Tipo</th><th>Mês</th><th class="om-num">Orçamento</th></tr></thead><tbody>' +
                 linhas.map(function (x) {
                     return '<tr><td>' + (x.acao === 'incluir'
@@ -2149,7 +2251,10 @@
                         '<td class="om-mono">' + e(x.rma) + '</td>' +
                         '<td>' + e(x.serie) + '</td>' +
                         '<td>' + e(x.categoria) + '</td>' +
-                        '<td>' + (x.lote_prime ? e(x.lote_prime) : '<span class="text-muted">—</span>') + '</td>' +
+                        '<td>' + (x.modelo ? e(x.modelo) : '<span class="text-muted">—</span>') + '</td>' +
+                        '<td><input class="form-control form-control-sm om-imp-lote-linha" ' +
+                            'data-rma="' + e(x.rma) + '" data-original="' + e(x.lote_prime || '') + '" ' +
+                            'value="' + e(x.lote_prime || '') + '" placeholder="lote"></td>' +
                         '<td>' + e(STATUS_LABEL[x.status] || x.status || '') + '</td>' +
                         '<td>' + e(TIPO_LABEL[x.tipo_manutencao] || x.tipo_manutencao || '') + '</td>' +
                         '<td>' + (x.mes_referencia ? e(x.mes_referencia) : '<span class="text-muted">—</span>') + '</td>' +
@@ -2165,6 +2270,13 @@
                 det.map(function (x) { return '<tr><td class="om-num">' + e(x.linha) + '</td><td>' + e(x.motivo) + '</td></tr>'; }).join('') +
                 '</tbody></table></div>';
         }
+        h += '<div class="om-imp-row mt-3" style="align-items:end">' +
+            '<div class="form-group" style="min-width:260px"><label for="om-imp-lote">Lote de reparo</label>' +
+                '<input id="om-imp-lote" class="form-control" placeholder="ex.: LOTE 03/2026" autocomplete="off"></div>' +
+            '<button id="om-imp-lote-aplicar" class="btn btn-outline">Aplicar a todas as linhas</button>' +
+            '</div>' +
+            '<p class="om-hint">O lote preenchido aqui vale para as linhas que a planilha não trouxe com lote. ' +
+            'Dá para corrigir linha a linha na coluna “Lote de reparo”.</p>';
         h += '<div class="btn-row mt-3">' +
             '<button id="om-imp-confirm" class="btn btn-primary">Enviar para a base</button>' +
             '<button id="om-imp-cancel" class="btn btn-outline">Cancelar</button>' +

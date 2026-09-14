@@ -88,6 +88,10 @@ STATUS_PENDENTES = ("AGUARDANDO_APROVACAO", "AGUARDANDO_ORCAMENTO", "VALIDANDO_O
 TIPOS_ROTULOS = {"CONTRATO": "Contrato", "AVULSA": "Avulsa"}
 RETORNO_ROTULOS = {"DEVOLVIDO": "Devolvido", "EM_MANUTENCAO": "Em Manutenção"}
 FAMILIAS = ("COLETOR", "SLED")
+# Categoria é só isto: Coletor ou SLED. O que distingue os aparelhos é o
+# modelo, deduzido da série.
+CATEGORIA_DA_FAMILIA = {"COLETOR": "Coletor", "SLED": "SLED"}
+MODELOS = ("EF500", "EF501", "HF550", "S70", "SLED RFR900", "SLED RFR901")
 EMPRESAS = ("RENNER", "CAMICADO", "YOUCOM")
 FONTES_VALOR = ("EBS", "PLANILHA", "PADRAO", "MANUAL")
 
@@ -124,6 +128,9 @@ class Reparo(Base):
     serie: Mapped[str] = mapped_column(String(60), default="", index=True)
     loja: Mapped[int | None] = mapped_column(Integer, nullable=True)
     categoria: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # Modelo do aparelho, deduzido do prefixo da série (EF500, EF501, HF550,
+    # S70, SLED RFR900, SLED RFR901). A categoria diz só se é Coletor ou SLED.
+    modelo: Mapped[str] = mapped_column(String(20), default="", index=True)
     familia: Mapped[str] = mapped_column(String(10), default="", index=True)
     empresa: Mapped[str] = mapped_column(String(20), default="")
     # 8.1 — vêm da planilha do fornecedor (lote de reparo).
@@ -168,7 +175,8 @@ class Reparo(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id, "rma": self.rma, "serie": self.serie, "loja": self.loja,
-            "categoria": self.categoria, "familia": self.familia, "empresa": self.empresa,
+            "categoria": self.categoria, "modelo": self.modelo or "",
+            "familia": self.familia, "empresa": self.empresa,
             "origem_equipamento": self.origem_equipamento or "",
             "disponibilizacao": _dt(self.disponibilizacao),
             "orcamento": float(self.orcamento or 0), "garantia": bool(self.garantia),
@@ -238,7 +246,7 @@ _ready = False
 # `create_all` só cria tabela nova: em banco antigo elas entram por ALTER.
 COLUNAS_MIGRAVEIS: dict[str, tuple[str, ...]] = {
     "manut_reparo": ("origem_equipamento", "disponibilizacao", "devolvido_em",
-                     "devolvido_por", "po"),
+                     "devolvido_por", "po", "modelo"),
 }
 
 
