@@ -64,7 +64,7 @@
         var headers = { 'Content-Type': 'application/json' };
         var body = opts.body;
         if (body && typeof body === 'object') body = JSON.stringify(body);
-        var url = path.indexOf('http') === 0 ? path : API + path;
+        var url = path.indexOf('http') === 0 ? path : comBarra(API + path);
         var r = await fetch(url, Object.assign({}, opts, {
             body: body,
             headers: Object.assign(headers, opts.headers || {})
