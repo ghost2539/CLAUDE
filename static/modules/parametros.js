@@ -517,9 +517,14 @@ async function renderEbsOracle(c, S) {
         '</div></div>';
 
     function linhaChave(k) {
-        var marca = k.resolvida
+        var marcas = {
+            cofre:   '<span class="badge badge-success">do cofre</span>',
+            padrao:  '<span class="badge badge-info">padrão do código</span>',
+            ausente: '<span class="badge badge-danger">faltando</span>'
+        };
+        var marca = marcas[k.situacao] || (k.resolvida
             ? '<span class="badge badge-success">resolvida</span>'
-            : '<span class="badge badge-danger">faltando</span>';
+            : '<span class="badge badge-danger">faltando</span>');
         return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + marca + '</td>' +
             '<td>' + e(k.fonte || '—') + '</td>' +
             '<td>' + (k.valor ? e(k.valor) : '<span class="text-muted">—</span>') + '</td></tr>';
