@@ -544,8 +544,24 @@ async function renderCofre(c, S) {
                          : '<span class="badge badge-danger">sem permissão de leitura</span>');
         var pasta = a.pasta_acessivel ? '' :
             ' <span class="badge badge-warning">pasta inacessível</span>';
+        var quem = (a.dono || a.grupo || a.modo)
+            ? ' <span class="text-muted">' + e(a.dono || '?') + ':' + e(a.grupo || '?') +
+              ' ' + e(a.modo || '?') + '</span>'
+            : (a.pasta && a.pasta.grupo
+                ? ' <span class="text-muted">(pasta: ' + e(a.pasta.dono || '?') + ':' +
+                  e(a.pasta.grupo) + ' ' + e(a.pasta.modo || '?') + ')</span>' : '');
         return '<tr><td><b>' + e(rotulo) + '</b></td><td class="om-mono">' + e(a.caminho) + '</td>' +
-               '<td>' + estado + pasta + '</td></tr>';
+               '<td>' + estado + pasta + quem + '</td></tr>';
+    }
+
+    // Falta de permissão tem conserto conhecido. Escrever o comando com o
+    // grupo e o usuário certos poupa o vaivém com quem administra o cofre.
+    function remedioHtml(r) {
+        if (!r || !r.necessario) return '';
+        return '<div class="alert alert-warning"><b>Falta permissão de leitura.</b> ' +
+            e(r.motivo) + '<br>Peça a quem administra o cofre (precisa de root):' +
+            '<pre class="om-mono" style="white-space:pre-wrap;margin:6px 0 0">' +
+            e((r.comandos || []).join('\n')) + '</pre></div>';
     }
 
     // O módulo do cofre importa, mas nada resolve? Então o problema não é o
@@ -635,6 +651,7 @@ async function renderCofre(c, S) {
                 '<p><b>Cofre corporativo:</b> ' +
                     badge(d.corporativo_ok, 'disponível', 'indisponível') +
                     ' <span class="text-muted">' + e(d.corporativo_detalhe || '') + '</span></p>' +
+                remedioHtml(d.remedio) +
                 '<div class="table-wrapper mb-3"><table class="data-table"><tbody>' +
                     arquivo('Módulo', d.modulo_corporativo) +
                     arquivo('Arquivo', d.arquivo_corporativo) +

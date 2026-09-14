@@ -101,19 +101,48 @@ def _sondar(nome: str) -> dict:
     return item
 
 
+def _dono(caminho) -> dict:
+    """Dono, grupo e modo. É o que o admin do cofre precisa saber para liberar."""
+    import grp
+    import os
+    import pwd
+    import stat as _st
+    saida = {"dono": "", "grupo": "", "modo": ""}
+    try:
+        st = os.stat(caminho)
+    except OSError:
+        return saida
+    saida["modo"] = oct(_st.S_IMODE(st.st_mode))[2:]
+    try:
+        saida["dono"] = pwd.getpwuid(st.st_uid).pw_name
+    except Exception:  # noqa: BLE001
+        saida["dono"] = str(st.st_uid)
+    try:
+        saida["grupo"] = grp.getgrgid(st.st_gid).gr_name
+    except Exception:  # noqa: BLE001
+        saida["grupo"] = str(st.st_gid)
+    return saida
+
+
 def _arquivo(caminho: str) -> dict:
     """Existe? O usuário do serviço consegue ler? Sem abrir o conteúdo."""
     import os
     from pathlib import Path as _P
     p = _P(caminho)
     existe = p.exists()
-    return {
+    item = {
         "caminho": str(caminho),
         "existe": existe,
         "legivel": bool(existe and os.access(p, os.R_OK)),
         # Sem permissão de entrar na pasta, nem se sabe que o arquivo existe.
         "pasta_acessivel": os.access(p.parent, os.X_OK) if p.parent.exists() else False,
     }
+    item.update(_dono(p))
+    # Quando nem o arquivo se deixa consultar, o dono da PASTA já diz em qual
+    # grupo o usuário do serviço precisa entrar — é o dado que falta na hora
+    # de pedir a liberação.
+    item["pasta"] = dict(_dono(p.parent), caminho=str(p.parent))
+    return item
 
 
 # Formatos em que um cofre guarda par nome=valor. Só o NOME é capturado —
@@ -275,6 +304,31 @@ def _pasta(caminho: str) -> dict:
     return info
 
 
+def _remedio(arq: dict, usuario: str) -> dict:
+    """O pedido pronto para quem administra o cofre.
+
+    Quando o arquivo existe e não é legível, a conversa com a equipe do
+    cofre é sempre a mesma. Deixar o comando escrito aqui evita o vaivém
+    de "qual grupo?" — a tela já sabe, porque acabou de olhar.
+    """
+    if not arq.get("existe") and not arq.get("pasta_acessivel"):
+        return {"necessario": True, "motivo":
+                "O serviço não consegue nem entrar na pasta do cofre, então "
+                "não dá para saber se o arquivo está lá.",
+                "comandos": [f"setfacl -m u:{usuario}:x {arq.get('pasta', {}).get('caminho', '')}",
+                             f"setfacl -m u:{usuario}:r {arq.get('caminho', '')}"]}
+    if arq.get("existe") and not arq.get("legivel"):
+        grupo = arq.get("grupo") or arq.get("pasta", {}).get("grupo") or "<grupo do cofre>"
+        return {"necessario": True, "motivo":
+                f"O arquivo existe, mas só o dono ({arq.get('dono') or '?'}) e o "
+                f"grupo {grupo} leem — e o serviço roda como {usuario}.",
+                "comandos": [f"usermod -aG {grupo} {usuario}",
+                             f"chmod g+r {arq.get('caminho', '')}",
+                             f"chmod g+x {arq.get('pasta', {}).get('caminho', '')}",
+                             "systemctl restart portal-spare"]}
+    return {"necessario": False, "motivo": "", "comandos": []}
+
+
 @router.get("/diagnostico")
 def diagnostico(req: Request):
     """O retrato completo, do ponto de vista do processo do portal."""
@@ -311,6 +365,7 @@ def diagnostico(req: Request):
         # Nomes que o cofre expõe e apelidos plausíveis da credencial do
         # EBS: responde "a chave tem outro nome?" sem chutar um por vez.
         "inventario": _inventario_corporativo(),
+        "remedio": _remedio(_arquivo(cofre.CAMINHO_ARQUIVO), quem),
         "alternativas": [{"nome": rotulo, "chaves": [_sondar(k) for k in chaves]}
                          for rotulo, chaves in ALTERNATIVAS],
     }
