@@ -590,6 +590,20 @@ async function renderCofre(c, S) {
     // O módulo do cofre importa, mas nada resolve? Então o problema não é o
     // módulo: é o arquivo que ELE lê, ou o nome da chave. Estas duas seções
     // respondem as duas perguntas sem precisar de acesso ao servidor.
+    // O prefixo também vem do ambiente. Sem ele o navegador busca CSS e JS
+    // no lugar errado e a tela aparece crua — sintoma que não parece ter
+    // nada a ver com a causa, e por isso mora aqui.
+    function prefixoHtml(pf) {
+        if (!pf) return '';
+        return '<p><b>Prefixo do portal:</b> ' +
+            (pf.em_uso
+                ? '<span class="om-mono">' + e(pf.em_uso) + '</span> <span class="text-muted">(' +
+                  e(pf.origem) + ')</span>'
+                : '<span class="badge badge-danger">nenhum</span> <span class="text-muted">— ' +
+                  'atrás de um proxy em subcaminho, CSS e JS vão ser buscados no lugar errado ' +
+                  'e a tela abre sem estilo</span>') + '</p>';
+    }
+
     // Se uma credencial funciona sem estar no cofre nem na unit, ela veio
     // daqui — e é aqui que se acrescenta a próxima, sem mexer na unit.
     function ambienteHtml(a) {
@@ -606,13 +620,20 @@ async function renderCofre(c, S) {
                 ? '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
                   '<th>Variável</th><th>Como está definida</th></tr></thead><tbody>' +
                   chaves.map(function (k) {
+                      // O caso que derruba a tela: está no arquivo e não
+                      // chegou ao processo — o systemd não leu a linha.
+                      var perdida = k.chegou_ao_processo === false
+                          ? ' <span class="badge badge-danger" title="O systemd não carregou ' +
+                            'esta linha. Valor com espaço, aspas abertas ou cifrão sem escape ' +
+                            'derruba a variável — e às vezes as seguintes junto.">' +
+                            'não chegou ao processo</span>' : '';
                       var como = k.marcador
                           ? '<span class="badge badge-info">marcador do cofre</span> ' +
                             '<span class="om-mono">@cofre:' + e(k.aponta_para) + '@</span>' +
                             ' <span class="text-muted">— só resolve se o cofre responder</span>'
                           : (k.vazio ? '<span class="badge badge-warning">vazia</span>'
                                      : '<span class="badge badge-success">valor direto</span>');
-                      return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + como + '</td></tr>';
+                      return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + como + perdida + '</td></tr>';
                   }).join('') + '</tbody></table></div>'
                 : '') +
             '<p class="text-muted">Valores nunca aparecem — só o nome e se é valor direto ou ' +
@@ -671,7 +692,8 @@ async function renderCofre(c, S) {
                         ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
                           e(d.algoritmo || '') + '</span>'
                         : '<span class="text-muted">não existe</span>') + '</td></tr>' +
-                '</tbody></table></div>' + ambienteHtml(d.ambiente_do_servico) +
+                '</tbody></table></div>' + prefixoHtml(d.prefixo) +
+                ambienteHtml(d.ambiente_do_servico) +
                 inventarioHtml(d.inventario) +
                 (d.grupos || []).map(function (g) {
                     return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
