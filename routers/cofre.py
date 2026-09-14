@@ -89,11 +89,19 @@ def _sondar(nome: str) -> dict:
         "no_ambiente": bool(ambiente),
         "tamanho": len(valor),
     }
-    # Os dois cofres têm a chave com valores diferentes? Comparar não revela
-    # nada, e é exatamente o que faltava enxergar quando o cofre local
-    # sombreou o corporativo com a credencial errada.
-    if corp and local:
-        item["divergente"] = corp != local
+    # Quem tem a chave, e todos concordam? Comparar não revela nada, e é o
+    # que faltava enxergar quando o cofre local sombreou a credencial certa.
+    # A ordem é corporativo → local → ambiente: o local ganha do ambiente,
+    # então um valor velho esquecido ali derruba a variável nova em silêncio.
+    tem = [(rotulo, v) for rotulo, v in
+           (("cofre corporativo", corp), ("cofre local", local), ("ambiente", ambiente))
+           if v]
+    item["fontes_com_valor"] = [rotulo for rotulo, _ in tem]
+    item["divergente"] = len({v for _, v in tem}) > 1
+    # Sombreamento: mais de uma fonte tem a chave e a que vence não é a
+    # última a ser configurada. Vale avisar mesmo quando os valores batem —
+    # no dia em que uma mudar, a outra continua mandando.
+    item["sombreado"] = len(tem) > 1
     # Só o que não é segredo aparece — usuário e DSN ajudam a conferir se o
     # valor é o esperado; senha e chave, nunca.
     if valor and not _e_segredo(nome):
