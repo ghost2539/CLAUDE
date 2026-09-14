@@ -608,6 +608,12 @@ def coleta_progresso(req: Request):
     return p
 
 
+@router.get("/api/obsolescencia/mdm/diagnostico/{serie_no_caminho}")
+def mdm_diagnostico_caminho(serie_no_caminho: str, req: Request, etiqueta: str = ""):
+    """Mesma coisa, com a série no caminho — query string se perde."""
+    return mdm_diagnostico(req, serie=serie_no_caminho, etiqueta=etiqueta)
+
+
 @router.get("/api/obsolescencia/mdm/diagnostico")
 def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
     """Por que a remoção do coletor no MDM não aconteceu — sem apagar nada.
@@ -627,6 +633,10 @@ def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
     ligado = str(cfg.get("remover_do_mdm_no_recebimento", "1")).strip().lower() in ("1", "sim", "true")
     endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
     saida = {
+        # O que o servidor recebeu, para não discutir se o dado chegou.
+        "recebido": {"serie": (serie or "").strip(),
+                     "etiqueta": (etiqueta or "").strip(),
+                     "url": str(getattr(req, "url", ""))},
         "remocao_ligada": ligado,
         "endpoint": endpoint,
         "metodo": cfg.get("mdm_remocao_metodo", "POST"),
@@ -706,7 +716,10 @@ def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
             saida["conclusao"] = ("A busca devolve mais de um aparelho e por isso "
                                   "nada é apagado. Informe uma série exata.")
         elif not chaves:
-            saida["conclusao"] = "Informe a série (e a etiqueta, se houver) para diagnosticar."
+            saida["conclusao"] = ("o servidor recebeu a consulta SEM série e SEM "
+                                  "etiqueta. Se você informou, o dado se perdeu no "
+                                  "caminho — use a tela em Status → Diagnóstico de "
+                                  "ativo, que envia direto.")
         else:
             saida["conclusao"] = ("Nem o parque nem a busca do console acham este "
                                   "aparelho. Confira se a série do recebimento é a "

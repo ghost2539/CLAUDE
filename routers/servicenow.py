@@ -1608,6 +1608,17 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
     return resumo
 
 
+@router.get("/diagnostico/depreciacao/{serie_no_caminho}")
+def diagnostico_depreciacao_caminho(serie_no_caminho: str, req: Request,
+                                    etiqueta: str = ""):
+    """Mesma coisa, com a série no caminho.
+
+    Existe porque query string se perde: proxy que a corta, endereço
+    colado pela metade, série com "#". No caminho ela chega inteira.
+    """
+    return diagnostico_depreciacao(req, serie=serie_no_caminho, etiqueta=etiqueta)
+
+
 @router.get("/diagnostico/depreciacao")
 def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
     """Por que a depreciação não foi calculada — sem executar nada.
@@ -1618,22 +1629,27 @@ def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
     require_permission(req, "servicenow", "view")
     serie = (serie or "").strip()
     etiqueta = (etiqueta or "").strip()
+    # O que o servidor REALMENTE recebeu. Sem este eco, "informei a série"
+    # e "a série não chegou" viram discussão em vez de diagnóstico.
+    recebido = {"serie": serie, "etiqueta": etiqueta,
+                "url": str(getattr(req, "url", ""))}
     if not serie and not etiqueta:
-        # Dizer "não encontrado" quando ninguém informou o que procurar
-        # manda o diagnóstico para o lado errado. Já mandou.
-        return {"encontrado": False, "informado": False,
-                "motivo": "informe a série (ou a etiqueta) do equipamento "
-                          "para diagnosticar."}
+        return {"encontrado": False, "informado": False, "recebido": recebido,
+                "motivo": "o servidor recebeu a consulta SEM série e SEM "
+                          "etiqueta. Se você informou, o dado se perdeu no "
+                          "caminho — use a tela em Status → Diagnóstico de "
+                          "ativo, que envia direto."}
     session = _sn_session_from_portal(req)
     _req, BS = _get_http()
     achado = _registro_individual(session, etiqueta, serie)
     if not achado or not achado.get("sys_id"):
-        return {"encontrado": False, "informado": True,
+        return {"encontrado": False, "informado": True, "recebido": recebido,
                 "motivo": f"o ativo não foi encontrado no ServiceNow por "
                           f"série \"{serie or '—'}\" / etiqueta \"{etiqueta or '—'}\" "
                           "— sem ativo no cadastro não há o que depreciar."}
     saida = _depreciacao_passos(session, achado["sys_id"], BS, executar=False)
     saida["encontrado"] = True
+    saida["recebido"] = recebido
     saida["asset_tag"] = achado.get("asset_tag", "")
     saida["serial_number"] = achado.get("serial_number", "")
     return saida
