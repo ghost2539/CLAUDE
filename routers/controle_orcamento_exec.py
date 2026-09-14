@@ -11,12 +11,20 @@ valores financeiros:
   saldo_inicial            → Orçamento Aprovado
   comprometido+reservados  → Comprometido
   realizado                → Realizado (Acum.)
-  saldo_dia                → A Realizar
+  saldo_dia                → a_realizar (gravado, não exibido)
   (empresa, devolucoes, pct_exec, nome_projeto: NÃO são puxados)
 
 "Em andamento" é digitado na tela e NÃO vem do EBS: é o que ainda não está
 comprometido lá, mas já está em curso — uma PO aguardando aprovação, por
 exemplo. Sincronizar com o EBS não o altera.
+
+O saldo da tela é um só, "Disponível":
+
+  Orçamento Aprovado − Comprometido − Em Andamento − Realizado
+
+As três parcelas descontam dele. A coluna "A Realizar" saiu da tela; o
+campo `a_realizar` continua recebendo o saldo do dia do EBS, mas não é
+mostrado — dois saldos concorrentes confundiam a leitura.
 
 ACESSO CONTROLADO: exige sessão do portal e permissão do módulo
 ``orcamento`` — liberada usuário a usuário em Parâmetros → Usuários e
