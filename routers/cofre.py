@@ -53,10 +53,19 @@ ALTERNATIVAS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-# Nomes cujo valor nunca aparece, nem parcialmente.
+# Nomes cujo valor nunca aparece, nem parcialmente. A lista é deliberadamente
+# larga: aqui o erro de sobrar um nome custa uma coluna com "—", e o erro de
+# faltar um custa um segredo publicado numa tela.
+_MARCAS_DE_SEGREDO = (
+    "PASS", "PWD", "SENHA", "CHAVE", "KEY", "SECRET", "SEGREDO", "TOKEN",
+    "CREDENCIAL", "CREDENTIAL", "AUTH", "COOKIE", "SESSION",
+    # URL e DSN carregam senha embutida com frequência (user:senha@host).
+    "URL", "URI", "DSN", "CONN",
+)
+
+
 def _e_segredo(nome: str) -> bool:
-    return any(p in nome.upper() for p in
-               ("PASS", "SENHA", "CHAVE", "SECRET", "TOKEN"))
+    return any(p in nome.upper() for p in _MARCAS_DE_SEGREDO)
 
 
 def _exigir(req: Request) -> dict:
@@ -337,6 +346,20 @@ def _remedio(arq: dict, usuario: str) -> dict:
     return {"necessario": False, "motivo": "", "comandos": []}
 
 
+def _seguro(rotulo: str, fn, padrao):
+    """Roda um pedaço do diagnóstico sem deixar que ele derrube o resto.
+
+    Esta tela existe para explicar falhas. Se ela própria devolver
+    "internal server error", não sobra nada para diagnosticar — então cada
+    parte responde por si, e a que quebrar aparece como erro no lugar dela.
+    """
+    try:
+        return fn(), ""
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Diagnóstico do cofre: '%s' falhou: %s", rotulo, exc, exc_info=True)
+        return padrao, f"{type(exc).__name__}: {exc}"
+
+
 @router.get("/diagnostico")
 def diagnostico(req: Request):
     """O retrato completo, do ponto de vista do processo do portal."""
@@ -344,39 +367,64 @@ def diagnostico(req: Request):
     from core import cofre
     import getpass
     import os
-    # Prova o cofre com uma chave dos Correios: é a que o time de segurança
-    # já usa, então serve de referência quando as outras falham.
-    ok, detalhe = cofre.diagnostico_corporativo("CORREIOS_USUARIO")
-    grupos = [{"nome": nome, "chaves": [_sondar(k) for k in chaves]}
-              for nome, chaves in GRUPOS]
+
+    erros: dict[str, str] = {}
+
+    def parte(rotulo, fn, padrao):
+        valor, erro = _seguro(rotulo, fn, padrao)
+        if erro:
+            erros[rotulo] = erro
+        return valor
+
     try:
         quem = getpass.getuser()
     except Exception:  # noqa: BLE001
         quem = str(os.getuid())
-    return {
+
+    # Prova o cofre com uma chave dos Correios: é a que o time de segurança
+    # já usa, então serve de referência quando as outras falham.
+    ok, detalhe = parte("prova do cofre corporativo",
+                        lambda: cofre.diagnostico_corporativo("CORREIOS_USUARIO"),
+                        (False, ""))
+    if not detalhe and "prova do cofre corporativo" in erros:
+        detalhe = erros["prova do cofre corporativo"]
+
+    arq_corp = parte("arquivo do cofre", lambda: _arquivo(cofre.CAMINHO_ARQUIVO), {})
+
+    resposta = {
         # Quem o portal É no servidor: é isso que decide o que ele lê.
         "usuario_do_servico": quem,
         "corporativo_ok": ok,
         "corporativo_detalhe": detalhe,
         # O que mais importa quando falha: o serviço CONSEGUE LER o arquivo
         # do cofre corporativo? Permissão é a causa número um.
-        "modulo_corporativo": _arquivo(cofre.CAMINHO_MODULO),
-        "arquivo_corporativo": _arquivo(cofre.CAMINHO_ARQUIVO),
+        "modulo_corporativo": parte("módulo do cofre",
+                                    lambda: _arquivo(cofre.CAMINHO_MODULO), {}),
+        "arquivo_corporativo": arq_corp,
         # Dono, grupo e modo do arquivo do cofre: quando falta permissão, é
         # aqui que se vê em qual grupo o usuário do serviço precisa entrar.
-        "permissoes_corporativo": cofre.acesso_ao_arquivo(),
-        "onde_procura": cofre.onde_procura(),
+        "permissoes_corporativo": parte("permissões do arquivo",
+                                        cofre.acesso_ao_arquivo, {}),
+        "onde_procura": parte("caminhos de busca", cofre.onde_procura, []),
         "cofre_local": str(cofre.ARQ_COFRE),
-        "cofre_local_existe": cofre.ARQ_COFRE.exists(),
-        "algoritmo": cofre.algoritmo(),
-        "grupos": grupos,
+        "cofre_local_existe": parte("cofre local", cofre.ARQ_COFRE.exists, False),
+        "algoritmo": parte("algoritmo do cofre local", cofre.algoritmo, ""),
+        "grupos": parte("chaves por assunto",
+                        lambda: [{"nome": nome, "chaves": [_sondar(k) for k in chaves]}
+                                 for nome, chaves in GRUPOS], []),
         # Nomes que o cofre expõe e apelidos plausíveis da credencial do
         # EBS: responde "a chave tem outro nome?" sem chutar um por vez.
-        "inventario": _inventario_corporativo(),
-        "remedio": _remedio(_arquivo(cofre.CAMINHO_ARQUIVO), quem),
-        "alternativas": [{"nome": rotulo, "chaves": [_sondar(k) for k in chaves]}
-                         for rotulo, chaves in ALTERNATIVAS],
+        "inventario": parte("inventário do cofre", _inventario_corporativo, {}),
+        "remedio": parte("pedido de permissão", lambda: _remedio(arq_corp, quem),
+                         {"necessario": False}),
+        "alternativas": parte("apelidos do EBS",
+                              lambda: [{"nome": rotulo,
+                                        "chaves": [_sondar(k) for k in chaves]}
+                                       for rotulo, chaves in ALTERNATIVAS], []),
     }
+    # Nada some em silêncio: o que falhou vai nomeado para a tela.
+    resposta["erros"] = erros
+    return resposta
 
 
 @router.get("/sondar/{nome}")
@@ -416,3 +464,47 @@ def testar_correios(req: Request):
     # O token é credencial: só o tamanho sai daqui.
     return {"ok": True, "etapa": "api", "chaves": chaves,
             "detalhe": f"Autenticado nos Correios — token de {len(token)} caracteres."}
+
+
+@router.get("/tudo")
+def tudo(req: Request):
+    """Tudo o que o serviço enxerga, das três fontes, em uma lista só.
+
+    Serve para conferir de uma vez o que está disponível — e, principalmente,
+    para achar a chave que existe com um nome que ninguém adivinharia.
+    Nomes sempre; valor só quando o nome não denuncia um segredo.
+    """
+    _exigir(req)
+    import os
+    from core import cofre
+
+    erros: dict[str, str] = {}
+    nomes: set[str] = set()
+    inv, erro = _seguro("inventário do cofre", _inventario_corporativo, {})
+    if erro:
+        erros["inventário do cofre"] = erro
+    nomes.update(inv.get("nomes", []))
+    locais, erro = _seguro("cofre local", cofre.listar, [])
+    if erro:
+        erros["cofre local"] = erro
+    nomes.update(locais)
+    nomes.update(os.environ)
+
+    itens = []
+    for n in sorted(nomes):
+        item, erro = _seguro(f"chave {n}", lambda n=n: _sondar(n),
+                             {"chave": n, "resolvida": False, "fonte": "erro",
+                              "tamanho": 0})
+        if erro:
+            erros[f"chave {n}"] = erro
+        itens.append(item)
+    return {
+        "total": len(itens),
+        # Quantas vêm de cada fonte: é o número que diz se o cofre respondeu.
+        "por_fonte": {
+            rotulo: sum(1 for i in itens if i["fonte"] == rotulo)
+            for rotulo in ("cofre corporativo", "cofre local", "ambiente")
+        },
+        "itens": itens,
+        "erros": erros,
+    }

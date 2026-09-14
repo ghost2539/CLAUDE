@@ -503,9 +503,13 @@ async function renderCofre(c, S) {
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
             '<span>Situação</span>' +
             '<span><button id="cf-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
+            '<button id="cf-tudo" class="btn btn-sm btn-secondary" style="margin-left:6px">Ver tudo</button> ' +
             '<button id="cf-correios" class="btn btn-sm btn-primary" style="margin-left:6px">Testar Correios</button></span>' +
             '</div><div class="card-body" id="cf-situacao">' +
             '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+        '<div class="card mb-3" id="cf-tudo-card" style="display:none">' +
+            '<div class="card-header">Tudo o que o serviço enxerga</div>' +
+            '<div class="card-body" id="cf-tudo-corpo"></div></div>' +
         '<div class="card" id="cf-teste-card" style="display:none">' +
             '<div class="card-header">Teste dos Correios</div>' +
             '<div class="card-body" id="cf-teste"></div></div>';
@@ -561,6 +565,17 @@ async function renderCofre(c, S) {
                   e(a.pasta.grupo) + ' ' + e(a.pasta.modo || '?') + ')</span>' : '');
         return '<tr><td><b>' + e(rotulo) + '</b></td><td class="om-mono">' + e(a.caminho) + '</td>' +
                '<td>' + estado + pasta + quem + '</td></tr>';
+    }
+
+    // Cada parte do diagnóstico responde por si. Quando uma falha, ela
+    // aparece nomeada — some da tela é o que não pode.
+    function errosHtml(erros) {
+        var nomes = Object.keys(erros || {});
+        if (!nomes.length) return '';
+        return '<div class="alert alert-danger"><b>Parte do diagnóstico falhou.</b>' +
+            '<ul style="margin:6px 0 0">' + nomes.map(function (n) {
+                return '<li>' + e(n) + ': <span class="om-mono">' + e(erros[n]) + '</span></li>';
+            }).join('') + '</ul></div>';
     }
 
     // Falta de permissão tem conserto conhecido. Escrever o comando com o
@@ -660,7 +675,7 @@ async function renderCofre(c, S) {
                 '<p><b>Cofre corporativo:</b> ' +
                     badge(d.corporativo_ok, 'disponível', 'indisponível') +
                     ' <span class="text-muted">' + e(d.corporativo_detalhe || '') + '</span></p>' +
-                remedioHtml(d.remedio) +
+                errosHtml(d.erros) + remedioHtml(d.remedio) +
                 '<div class="table-wrapper mb-3"><table class="data-table"><tbody>' +
                     arquivo('Módulo', d.modulo_corporativo) +
                     arquivo('Arquivo', d.arquivo_corporativo) +
@@ -683,6 +698,42 @@ async function renderCofre(c, S) {
     }
 
     document.getElementById('cf-atualizar').onclick = carregar;
+
+    document.getElementById('cf-tudo').onclick = async function () {
+        var card = document.getElementById('cf-tudo-card');
+        var host = document.getElementById('cf-tudo-corpo');
+        card.style.display = '';
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Lendo…</div>';
+        try {
+            var d = await S.api('/cofre/tudo');
+            var f = d.por_fonte || {};
+            host.innerHTML =
+                '<p><b>' + d.total + '</b> chave(s) — ' +
+                    (f['cofre corporativo'] || 0) + ' do cofre corporativo, ' +
+                    (f['cofre local'] || 0) + ' do cofre local, ' +
+                    (f['ambiente'] || 0) + ' do ambiente.</p>' +
+                '<div class="form-group"><input id="cf-filtro" class="form-control" ' +
+                    'placeholder="filtrar por nome (ex.: ORACLE, CORREIOS)"></div>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                '</tr></thead><tbody id="cf-tudo-linhas">' +
+                (d.itens || []).map(linha).join('') + '</tbody></table></div>' +
+                '<p class="text-muted" style="margin-bottom:0">O ambiente do processo tem muito ' +
+                'mais que credencial. Valor só aparece quando o nome não denuncia um segredo.</p>';
+            // Filtro no cliente: a lista já está toda aqui, e ir ao servidor
+            // a cada tecla só serviria para deixar a tela lenta.
+            var campo = document.getElementById('cf-filtro');
+            campo.oninput = function () {
+                var termo = campo.value.trim().toUpperCase();
+                document.getElementById('cf-tudo-linhas').innerHTML =
+                    (d.itens || []).filter(function (i) {
+                        return !termo || i.chave.indexOf(termo) !== -1;
+                    }).map(linha).join('');
+            };
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
 
     document.getElementById('cf-correios').onclick = async function () {
         var card = document.getElementById('cf-teste-card');
