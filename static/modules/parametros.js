@@ -850,6 +850,8 @@ async function renderEbsOracle(c, S) {
             '<p class="text-muted" style="margin-top:0">Só leitura: a sessão é aberta como ' +
             'READ ONLY e a consulta precisa começar por SELECT ou WITH. A credencial vem do ' +
             'cofre pelo loader, como no resto do portal.</p>' +
+            '<div class="form-group"><label for="eo-nome">Consulta pronta (as mesmas do Gestão de Compras)</label>' +
+                '<select id="eo-nome" class="form-control"><option value="">— escrever o SQL —</option></select></div>' +
             '<div class="form-group"><label for="eo-sql">SQL</label>' +
                 '<textarea id="eo-sql" class="form-control om-mono" rows="5" ' +
                 'placeholder="select * from apps.csi_item_instances where instance_number = :serie"></textarea></div>' +
@@ -863,6 +865,38 @@ async function renderEbsOracle(c, S) {
             '</div>' +
             '<div class="btn-row mt-2"><button id="eo-rodar" class="btn btn-primary btn-sm">Executar</button></div>' +
             '<div id="eo-resultado" class="mt-3"></div>' +
+        '</div></div>' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<span>PO e projetos via Gestão de Compras (API)</span>' +
+            '<span><button id="gc-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
+            '<button id="gc-testar" class="btn btn-sm btn-primary" style="margin-left:6px">Testar login</button></span>' +
+            '</div><div class="card-body">' +
+            '<p class="text-muted" style="margin-top:0">O serviço do portal não lê o cofre corporativo. ' +
+            'O módulo /gestao_compras (Apache) lê, e já expõe as consultas de PO e projetos por HTTP. ' +
+            'Aqui o portal chama esse módulo como cliente — o cofre fica onde está.</p>' +
+            '<div id="gc-situacao"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+            '<div id="gc-teste" class="mt-2"></div>' +
+            '<hr>' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="gc-acao">Ação</label>' +
+                    '<select id="gc-acao" class="form-control"></select></div>' +
+                '<div class="form-group" data-gc="project"><label for="gc-project">Projeto (segment1)</label>' +
+                    '<input id="gc-project" class="form-control" placeholder="ex.: 26.0123"></div>' +
+                '<div class="form-group" data-gc="po"><label for="gc-po">Número da PO</label>' +
+                    '<input id="gc-po" class="form-control"></div>' +
+                '<div class="form-group" data-gc="line"><label for="gc-line">Linha (opcional)</label>' +
+                    '<input id="gc-line" class="form-control" type="number" min="1"></div>' +
+                '<div class="form-group" data-gc="vendor"><label for="gc-vendor">Fornecedor</label>' +
+                    '<input id="gc-vendor" class="form-control"></div>' +
+                '<div class="form-group" data-gc="days"><label for="gc-days">Dias até vencer</label>' +
+                    '<input id="gc-days" class="form-control" type="number" value="90" min="1"></div>' +
+                '<div class="form-group" data-gc="org"><label for="gc-org">Unidade (opcional)</label>' +
+                    '<input id="gc-org" class="form-control"></div>' +
+                '<div class="form-group" data-gc="projects"><label for="gc-projects">Projetos (vírgula)</label>' +
+                    '<input id="gc-projects" class="form-control"></div>' +
+            '</div>' +
+            '<div class="btn-row mt-2"><button id="gc-consultar" class="btn btn-primary btn-sm">Consultar</button></div>' +
+            '<div id="gc-resultado" class="mt-3"></div>' +
         '</div></div>' +
         '<div class="card"><div class="card-header">Procurar objeto</div><div class="card-body">' +
             '<p class="text-muted" style="margin-top:0">Lista tabelas e views que a conta enxerga. ' +
@@ -946,6 +980,30 @@ async function renderEbsOracle(c, S) {
         }
     };
 
+    // As consultas nomeadas vêm do servidor: escolher uma preenche o SQL e
+    // mostra os binds esperados, para o parâmetro não sair errado.
+    (async function () {
+        try {
+            var d = await S.api('/ebs-oracle/consultas');
+            var sel = document.getElementById('eo-nome');
+            var mapa = {};
+            (d.consultas || []).forEach(function (q) {
+                mapa[q.nome] = q;
+                var o = document.createElement('option');
+                o.value = q.nome; o.textContent = q.nome + (q.binds.length ? '  (' + q.binds.join(', ') + ')' : '');
+                sel.appendChild(o);
+            });
+            sel.onchange = function () {
+                var q = mapa[sel.value];
+                if (!q) return;
+                document.getElementById('eo-sql').value = q.sql.trim();
+                document.getElementById('eo-binds').value = q.binds.length
+                    ? JSON.stringify(q.binds.reduce(function (acc, b) { acc[b] = ''; return acc; }, {}))
+                    : '';
+            };
+        } catch (x) { /* sem lista, a caixa de SQL continua servindo */ }
+    })();
+
     document.getElementById('eo-rodar').onclick = async function () {
         var host = document.getElementById('eo-resultado');
         var sql = document.getElementById('eo-sql').value;
@@ -985,6 +1043,103 @@ async function renderEbsOracle(c, S) {
             S.toast(x.message, 'error');
         }
     };
+
+    // Tabela genérica: colunas na ordem em que apareceram, valor nulo em branco.
+    function tabelaHtml(colunas, linhas) {
+        return '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+            colunas.map(function (c) { return '<th>' + e(c) + '</th>'; }).join('') +
+            '</tr></thead><tbody>' + linhas.map(function (r) {
+                return '<tr>' + colunas.map(function (c) {
+                    return '<td>' + e(r[c] == null ? '' : r[c]) + '</td>';
+                }).join('') + '</tr>';
+            }).join('') + '</tbody></table></div>';
+    }
+
+    var gcAcoes = {};
+
+    // Cada ação tem os próprios parâmetros; os campos que não servem somem,
+    // em vez de ficarem lá convidando a preencher o que o módulo vai ignorar.
+    function gcMostrarCampos() {
+        var acao = document.getElementById('gc-acao').value;
+        var usados = gcAcoes[acao] || [];
+        Array.prototype.forEach.call(c.querySelectorAll('[data-gc]'), function (el) {
+            el.style.display = usados.indexOf(el.getAttribute('data-gc')) === -1 ? 'none' : '';
+        });
+    }
+
+    async function gcCarregar() {
+        var host = document.getElementById('gc-situacao');
+        try {
+            var d = await S.api('/gestao-compras/situacao');
+            var cr = d.credenciais || {};
+            gcAcoes = d.acoes || {};
+            var sel = document.getElementById('gc-acao');
+            sel.innerHTML = Object.keys(gcAcoes).map(function (a) {
+                return '<option value="' + e(a) + '">' + e(a) + '</option>';
+            }).join('');
+            sel.onchange = gcMostrarCampos;
+            gcMostrarCampos();
+            host.innerHTML =
+                '<p><b>Módulo:</b> <span class="om-mono">' + e(d.url) + '</span>' +
+                    ' <span class="text-muted">— timeout ' + e(d.timeout) + ' s, TLS ' +
+                    (d.verify_ssl ? 'verificado' : 'sem verificação') +
+                    (d.proxy ? ', proxy ' + e(d.proxy) : ', saída direta') + '</span></p>' +
+                '<p><b>Usuário:</b> ' + (cr.usuario
+                    ? '<span class="om-mono">' + e(cr.usuario) + '</span> <span class="text-muted">(' +
+                      e(cr.usuario_chave) + ', ' + e(cr.usuario_fonte) + ')</span>'
+                    : '<span class="badge badge-danger">não definido</span>') +
+                ' &nbsp; <b>Senha:</b> ' + (cr.senha_definida
+                    ? '<span class="badge badge-success">definida</span> <span class="text-muted">(' +
+                      e(cr.senha_chave) + ', ' + e(cr.senha_fonte) + ')</span>'
+                    : '<span class="badge badge-danger">não definida</span>') + '</p>' +
+                (cr.usuario && cr.senha_definida ? '' :
+                    '<p class="text-muted">Grave no cofre: <span class="om-mono">python3 scripts/cofre.py ' +
+                    'definir GESTAO_COMPRAS_USER</span> e <span class="om-mono">GESTAO_COMPRAS_PASS</span>. ' +
+                    'Sem elas vale a conta de serviço do EBS público (EBS_PUBLIC_USER / EBS_PUBLIC_PASS).</p>');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('gc-atualizar').onclick = gcCarregar;
+
+    document.getElementById('gc-testar').onclick = async function () {
+        var host = document.getElementById('gc-teste');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Entrando no módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/testar', { method: 'POST' });
+            var u = d.usuario || {};
+            host.innerHTML = '<div class="alert alert-success">Sessão aberta no Gestão de Compras como <b>' +
+                e(u.username || '?') + '</b>' + (u.role ? ' (' + e(u.role) + ')' : '') + '.</div>';
+            S.toast('O módulo aceitou a credencial.', 'success');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('gc-consultar').onclick = async function () {
+        var host = document.getElementById('gc-resultado');
+        var acao = document.getElementById('gc-acao').value;
+        var q = { acao: acao };
+        (gcAcoes[acao] || []).forEach(function (nome) {
+            var v = (document.getElementById('gc-' + nome) || {}).value;
+            if (v !== undefined && String(v).trim() !== '') q[nome] = String(v).trim();
+        });
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando pelo módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/consultar?' + new URLSearchParams(q).toString());
+            host.innerHTML = d.total
+                ? '<p>' + d.total + ' linha(s) em ' + d.ms + ' ms, pela API do módulo.</p>' +
+                  tabelaHtml(d.colunas, d.linhas)
+                : '<p class="text-muted">Nenhuma linha (' + d.ms + ' ms).</p>';
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    gcCarregar();
 
     document.getElementById('eo-buscar').onclick = async function () {
         var host = document.getElementById('eo-objetos');
