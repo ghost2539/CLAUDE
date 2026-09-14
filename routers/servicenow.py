@@ -1414,7 +1414,7 @@ def _registro_individual(session, tag: str, serie: str) -> dict | None:
 
 
 def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
-               tag: str = "", serie: str = "") -> None:
+               tag: str = "", serie: str = "", linha: dict | None = None) -> None:
     """Roda o cálculo de depreciação do ativo recém-escrito.
 
     Nunca silencia: sem sys_id o registro é reprocurado pelos
@@ -1429,15 +1429,23 @@ def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
                 f"{rotulo}: subiu, mas o ServiceNow não devolveu o sys_id — "
                 "depreciação não calculada")
             resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+            if linha is not None:
+                linha["depreciacao"] = "não calculada (sem sys_id)"
             return
+        if linha is not None:
+            linha["sys_id"] = sys_id
     try:
         if _calculate_depreciation(session, sys_id, BS):
             resumo["depreciados"] = resumo.get("depreciados", 0) + 1
+            if linha is not None:
+                linha["depreciacao"] = "calculada"
             return
     except Exception as exc:  # noqa: BLE001 — o ativo já subiu; isto é aviso
         _log.error("servicenow: depreciação de %s falhou: %s", rotulo, exc)
         resumo["falhas"].append(f"{rotulo}: cálculo da depreciação falhou — {exc}")
         resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+        if linha is not None:
+            linha["depreciacao"] = f"falhou: {str(exc)[:120]}"
         return
     _log.error("servicenow: o ServiceNow não calculou a depreciação de %s "
                "(sys_id %s)", rotulo, sys_id)
@@ -1445,6 +1453,8 @@ def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
         f"{rotulo}: o ServiceNow não calculou a depreciação (sys_id {sys_id}). "
         "Verifique se a sessão do portal ainda abre o formulário do ativo.")
     resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+    if linha is not None:
+        linha["depreciacao"] = "não calculada"
 
 
 def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
@@ -1474,9 +1484,12 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
     quem está logado — no ServiceNow o registro sai no nome de quem
     recebeu.
     """
+    # `por_item` é o que a tela mostra: uma linha por série, dizendo o que
+    # o ServiceNow fez com ela. Contador agregado não responde "e o MEU
+    # coletor?", que é a pergunta que sempre aparece.
     resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
               "nao_encontrados": 0, "incompletos": 0, "depreciados": 0,
-              "sem_depreciacao": 0, "falhas": []}
+              "sem_depreciacao": 0, "falhas": [], "por_item": []}
     if not itens:
         return resumo
 
@@ -1525,6 +1538,9 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
         modelo = _campo_item(item, "modelo", "model")
         categoria = _campo_item(item, "categoria", "category")
         rotulo = tag or serie or "(sem identificador)"
+        linha = {"serial": serie, "etiqueta": tag, "acao": "", "motivo": "",
+                 "sys_id": "", "depreciacao": ""}
+        resumo["por_item"].append(linha)
 
         custo = _campo_item(item, "custo", "custo_asset", "cost")
         aquisicao = _campo_item(item, "dpis", "data_aquisicao", "acquisition_date",
@@ -1548,6 +1564,8 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
             faltando.append("data de aquisição (DPIS)")
         if faltando:
             resumo["incompletos"] += 1
+            linha["acao"] = "não subiu"
+            linha["motivo"] = f"falta {' e '.join(faltando)}"
             resumo["falhas"].append(
                 f"{rotulo}: não subiu porque falta {' e '.join(faltando)}. "
                 "Custo e depreciação são obrigatórios.")
@@ -1578,9 +1596,13 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                     alteracao["serial_number"] = serie
                 if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
                     resumo["atualizados"] += 1
+                    linha["acao"] = "atualizado"
+                    linha["sys_id"] = existente["sys_id"]
                     _depreciar(session, existente["sys_id"], BS, rotulo, resumo,
-                               tag, serie)
+                               tag, serie, linha)
                 else:
+                    linha["acao"] = "falhou"
+                    linha["motivo"] = "o ServiceNow não confirmou a atualização"
                     resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
             elif criar:
                 if not (tag or serie):
@@ -1594,15 +1616,22 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                 ok, novo_sys_id, detalhe = _insert_record(session, registro)
                 if ok:
                     resumo["criados"] += 1
+                    linha["acao"] = "criado"
+                    linha["sys_id"] = novo_sys_id
                     _depreciar(session, novo_sys_id, BS, rotulo, resumo,
-                               tag, serie)
+                               tag, serie, linha)
                 else:
+                    linha["acao"] = "falhou"
+                    linha["motivo"] = detalhe
                     resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
             else:
                 resumo["nao_encontrados"] += 1
+                linha["acao"] = "não encontrado"
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 — um item ruim não derruba o lote
+            linha["acao"] = "falhou"
+            linha["motivo"] = str(exc)[:200]
             resumo["falhas"].append(f"{rotulo}: {exc}")
 
     return resumo

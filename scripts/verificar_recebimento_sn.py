@@ -504,6 +504,32 @@ d = sn.diagnostico_depreciacao(REQ_DIAG, serie="SN-QUE-NAO-EXISTE")
 checar(d.get("informado") is True and "SN-QUE-NAO-EXISTE" in d["motivo"],
        "com série informada, o motivo repete o que foi procurado")
 
+print("\n[17] O resultado diz o que aconteceu com CADA série")
+limpar()
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    DEPRECIADOS.append(sys_id) or True)
+sem_custo = dict(ITEM_NOVO); sem_custo["custo"] = ""; sem_custo["serial"] = "SN-SEM-CUSTO"
+EXISTENTES.append({"sys_id": "sys-30", "asset_tag": "RN-VELHO-1",
+                   "serial_number": "SN-VELHO-1"})
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO, ITEM_EXISTE, sem_custo],
+                                   aisle_space="A-1")
+por = {x["serial"]: x for x in r["por_item"]}
+checar(len(r["por_item"]) == 3, f"uma linha por ativo lido ({len(r['por_item'])})")
+checar(por["SN-NOVO-1"]["acao"] == "criado" and por["SN-NOVO-1"]["depreciacao"] == "calculada",
+       f"o criado diz que depreciou ({por['SN-NOVO-1']})")
+checar(por["SN-VELHO-1"]["acao"] == "atualizado" and por["SN-VELHO-1"]["sys_id"] == "sys-30",
+       "o atualizado traz o sys_id do registro")
+checar(por["SN-SEM-CUSTO"]["acao"] == "não subiu" and "custo" in por["SN-SEM-CUSTO"]["motivo"],
+       f"o incompleto diz por que ficou de fora ({por['SN-SEM-CUSTO']['motivo']})")
+
+limpar()
+sn._calculate_depreciation = lambda sessao, sys_id, BS: False
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(r["por_item"][0]["depreciacao"] == "não calculada",
+       "depreciação que não roda aparece na linha do ativo")
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    DEPRECIADOS.append(sys_id) or True)
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)
