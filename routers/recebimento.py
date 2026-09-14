@@ -32,6 +32,14 @@ CLOSED = _cfg.CLOSED_STATUSES
 DUPLICATE_PREFIXES = ["CM", "YC"]
 router = APIRouter(prefix="/api", tags=["Recebimento"])
 
+# ── Destino de entrada: o Recebimento é a porta do Spare ───────────
+# Só há dois caminhos a partir daqui. Venda direta sai do fluxo de
+# reparo e vai esperar o ciclo trimestral; triagem entra no backlog de
+# uma das bancadas, escolhida pela subcategoria do ativo.
+VENDA_DIRETA = "VENDA"
+TRIAGEM = "TRIAGEM"
+DESTINOS_ENTRADA = (VENDA_DIRETA, TRIAGEM)
+
 
 # ── Pydantic models ───────────────────────────────────────────────
 
@@ -74,6 +82,11 @@ class BulkSubmitItem(BaseModel):
     custo_asset: float | None = None
     dpis: str | None = None
     fonte: str = "EBS"
+    # O Recebimento é a porta de entrada e define o próximo destino:
+    # venda direta, ou triagem para uma das bancadas. Em triagem, a
+    # subcategoria é obrigatória — é ela que diz qual bancada recebe.
+    destino_entrada: str = TRIAGEM
+    subcategoria: str = ""
 
 
 class BulkSubmitIn(BaseModel):
@@ -289,13 +302,37 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     if not body.items:
         raise HTTPException(400, "Nenhum ativo para enviar.")
 
+    # Destino de entrada de cada ativo, decidido aqui e não adivinhado
+    # depois. Em triagem, a subcategoria tem de estar na lista: é ela que
+    # diz qual bancada recebe o equipamento.
+    rota: dict[int, tuple[str, str, str]] = {}   # índice → (destino, sub, família)
+    for pos, item in enumerate(body.items):
+        destino = (item.destino_entrada or TRIAGEM).strip().upper()
+        if destino not in DESTINOS_ENTRADA:
+            raise HTTPException(400, "Destino de entrada inválido: informe "
+                                     "venda direta ou triagem.")
+        ident = item.etiqueta or item.numero_serie or item.ativo or "ativo"
+        familia = ""
+        if destino == TRIAGEM:
+            if not (item.subcategoria or "").strip():
+                raise HTTPException(
+                    400, f"{ident}: informe a subcategoria para mandar à triagem.")
+            familia = familia_da_subcategoria(item.subcategoria)
+            if not familia:
+                raise HTTPException(
+                    400, f"{ident}: subcategoria \"{item.subcategoria}\" não está "
+                         "cadastrada. Ajuste em Configuração → Configuração "
+                         "Módulos → Recebimento.")
+        rota[pos] = (destino, (item.subcategoria or "").strip(), familia)
+
     created = 0
     skipped = 0
     errors: list[str] = []
     entrando: list[dict] = []
 
     with SessionLocal.begin() as s:
-        for item in body.items:
+        for pos, item in enumerate(body.items):
+            destino_entrada, subcategoria, familia = rota[pos]
             payload: dict[str, Any] = {
                 "empresa": item.empresa,
                 "asset_id": item.asset_id,
@@ -362,6 +399,9 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     "modelo": item.modelo,
                     "categoria": item.categoria or "",
                     "numero_ativo": item.ativo or "",
+                    "destino_entrada": destino_entrada,
+                    "subcategoria": subcategoria,
+                    "familia": familia,
                 })
             except Exception as e:
                 ident = item.etiqueta or item.ativo or item.numero_serie
@@ -413,6 +453,75 @@ _FILA_POR_FAMILIA = {
     "conectividade": "AG_TRIAGEM_CONECT",
 }
 
+# ── Subcategorias: é a subcategoria que escolhe a bancada ──────────
+# Lista fechada de propósito. Se o operador pudesse digitar, "PDV",
+# "P.D.V." e "pdv" virariam três subcategorias e o backlog da bancada
+# passaria a depender de grafia. A área mantém a lista em Configuração
+# → Configuração Módulos → Recebimento.
+CONFIG_SUBCATEGORIAS = "recebimento_subcategorias"
+
+_SUBCATEGORIAS_PADRAO = [
+    {"nome": "Coletor", "familia": "frota"},
+    {"nome": "Sled", "familia": "frota"},
+    {"nome": "Impressora portátil", "familia": "frota"},
+    {"nome": "PDV", "familia": "loja"},
+    {"nome": "Impressora fiscal", "familia": "loja"},
+    {"nome": "Impressora de etiqueta", "familia": "loja"},
+    {"nome": "Desktop", "familia": "loja"},
+    {"nome": "Monitor", "familia": "loja"},
+    {"nome": "Leitor", "familia": "loja"},
+    {"nome": "Balança", "familia": "loja"},
+    {"nome": "Periférico", "familia": "loja"},
+    {"nome": "Access point", "familia": "conectividade"},
+    {"nome": "Switch", "familia": "conectividade"},
+    {"nome": "Roteador", "familia": "conectividade"},
+    {"nome": "Firewall", "familia": "conectividade"},
+]
+
+
+def config_subcategorias() -> list[dict]:
+    """Subcategorias válidas e a família (bancada) de cada uma."""
+    with SessionLocal() as s:
+        x = s.get(Setting, CONFIG_SUBCATEGORIAS)
+        valor = (x.value or {}) if x else {}
+    linhas = valor.get("subcategorias") if isinstance(valor, dict) else None
+    if not isinstance(linhas, list) or not linhas:
+        return [dict(l) for l in _SUBCATEGORIAS_PADRAO]
+    limpas = []
+    for l in linhas:
+        if not isinstance(l, dict):
+            continue
+        nome = str(l.get("nome") or "").strip()
+        familia = str(l.get("familia") or "").strip().lower()
+        if nome and familia in _FILA_POR_FAMILIA:
+            limpas.append({"nome": nome, "familia": familia})
+    return limpas or [dict(l) for l in _SUBCATEGORIAS_PADRAO]
+
+
+def _chave_sub(nome: str) -> str:
+    """Compara subcategoria sem depender de acento, caixa ou espaço."""
+    texto = unicodedata.normalize("NFKD", str(nome or "").strip().lower())
+    return "".join(c for c in texto if not unicodedata.combining(c))
+
+
+def familia_da_subcategoria(nome: str) -> str:
+    """Família (bancada) da subcategoria, ou "" se não estiver na lista."""
+    alvo = _chave_sub(nome)
+    if not alvo:
+        return ""
+    for l in config_subcategorias():
+        if _chave_sub(l["nome"]) == alvo:
+            return l["familia"]
+    return ""
+
+
+@router.get("/recebimento/subcategorias")
+def api_subcategorias(req: Request):
+    require_permission(req, "recebimento", "view")
+    return {"subcategorias": config_subcategorias(),
+            "destinos": [{"valor": VENDA_DIRETA, "rotulo": "Venda direta"},
+                         {"valor": TRIAGEM, "rotulo": "Triagem"}]}
+
 _PALAVRAS_FROTA = ("coletor", "sled", "mc33", "tc2", "ef50", "rfr")
 _PALAVRAS_CONECT = ("access point", "acess point", " ap ", "switch",
                     "roteador", "router", "wifi", "wi-fi")
@@ -452,8 +561,35 @@ def _familia(modelo: str, categoria: str) -> str:
     return "loja"
 
 
+def _detalhe_entrada(it: dict, reentrada: bool = False) -> str:
+    """O que o Recebimento decidiu, gravado junto da movimentação."""
+    import json as _json
+    dados = {"destino_entrada": (it.get("destino_entrada") or TRIAGEM).upper()}
+    if it.get("subcategoria"):
+        dados["subcategoria"] = it["subcategoria"]
+    if reentrada:
+        dados["reentrada"] = True
+    return _json.dumps(dados, ensure_ascii=False)
+
+
+def _estado_de_entrada(it: dict) -> tuple[str, str]:
+    """Onde o ativo entra na trilha, e com que família (bancada).
+
+    Venda direta pula o reparo e vai esperar o ciclo de venda. Triagem
+    cai no backlog da bancada que a subcategoria indicou; sem
+    subcategoria (recebimento antigo, importação), a família ainda é
+    adivinhada pelo modelo — melhor um palpite do que ativo sem fila.
+    """
+    if (it.get("destino_entrada") or "").upper() == VENDA_DIRETA:
+        return "AG_VENDA", ""
+    familia = (it.get("familia") or "").strip().lower()
+    if familia not in _FILA_POR_FAMILIA:
+        familia = _familia(it.get("modelo", ""), it.get("categoria", ""))
+    return _FILA_POR_FAMILIA[familia], familia
+
+
 def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
-    """Cria o token de cada ativo recebido e o põe na fila da bancada."""
+    """Cria o token de cada ativo recebido e o põe onde o destino mandou."""
     if not itens:
         return {"criados": 0, "ja_existiam": 0, "falhas": 0}
     resumo = {"criados": 0, "reentradas": 0, "ja_existiam": 0, "falhas": 0}
@@ -472,7 +608,8 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
         if not serial:
             resumo["falhas"] += 1
             continue
-        familia = _familia(it.get("modelo", ""), it.get("categoria", ""))
+        estado_entrada, familia = _estado_de_entrada(it)
+        detalhe = _detalhe_entrada(it)
         try:
             with dbt.SessionLocal() as s:
                 ativo = abrir_ativo(
@@ -480,8 +617,9 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
                     modelo=it.get("modelo", ""),
                     numero_ativo=it.get("numero_ativo", ""),
                     tipo_equipamento=familia, origem="RECEBIMENTO")
-                mover(s, ativo, estado=_FILA_POR_FAMILIA[familia],
-                      tipo=dbt.FILA, processo="A01", usuario=usuario)
+                mover(s, ativo, estado=estado_entrada,
+                      tipo=dbt.FILA, processo="A01", usuario=usuario,
+                      detalhe=detalhe)
                 s.commit()
             resumo["criados"] += 1
         except TrilhaInvalida:
@@ -494,9 +632,9 @@ def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
                         dbt.Ativo.serial == serial.upper())).scalar_one_or_none()
                     if ativo is not None and ativo.encerrado:
                         reabrir_ativo(s, ativo, usuario=usuario, origem="RECEBIMENTO")
-                        mover(s, ativo, estado=_FILA_POR_FAMILIA[familia],
+                        mover(s, ativo, estado=estado_entrada,
                               tipo=dbt.FILA, processo="A01", usuario=usuario,
-                              detalhe='{"reentrada": true}')
+                              detalhe=_detalhe_entrada(it, reentrada=True))
                         s.commit()
                         resumo["reentradas"] += 1
                     else:

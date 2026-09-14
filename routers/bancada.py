@@ -1,17 +1,21 @@
 """Bancadas de Triagem e Reparo (A02, A03, A04).
 
 Primeiro módulo que usa a Trilha como fonte de estado, e não só como
-registro: a fila da bancada é lida dos intervalos abertos do núcleo, e
-o bipe move o ativo por lá. O que fica no banco próprio é o conteúdo do
-reparo — causa, peças, destino.
+registro: o backlog da bancada é lido dos intervalos abertos do núcleo.
+O que fica no banco próprio é o conteúdo do reparo — causa, peças,
+destino.
 
-Três coisas que o desenho exige e que o código faz questão de garantir:
+**Ninguém assume equipamento.** O ativo cai no backlog da bancada e o
+relógio corre até alguém bipar e registrar o que fez; esse registro é a
+saída — despacha o ativo para venda, assistência ou internalização no
+mesmo ato. Por isso o que se mede é o tempo parado e o volume por
+pessoa, não o tempo de custódia de ninguém.
+
+Duas coisas que o desenho exige e que o código faz questão de garantir:
 
 - **`AG_PECAS` só sai por bipe de retorno ou por ADMIN.** É a fila que
   mais envelhece, e sair dela sem o equipamento na mão é o jeito mais
   fácil de fabricar um indicador bonito.
-- **`EX_REPARO` é acumulativo.** Parar para esperar peça e voltar é o
-  mesmo trabalho; a espera fica num relógio à parte.
 - **A causa é lista fechada.** Texto livre aqui vira três grafias da
   mesma falha e a ponte com mobilidade (G12) perde o insumo.
 """
@@ -30,7 +34,7 @@ from db.bancada import (
     Reparo, Causa, SessionLocal,
     BANCADAS, ROTULO_BANCADA, PROCESSO,
     FILA_DA_BANCADA, TRATATIVA_DA_BANCADA,
-    APTO, AGUARDANDO_PECAS, ASSISTENCIA, INVIAVEL, DESTINOS,
+    VENDA, AGUARDANDO_PECAS, ASSISTENCIA, INTERNALIZACAO, DESTINOS,
     ROTULO_DESTINO, PROXIMO_ESTADO, FROTA, LOJA, CONECTIVIDADE,
 )
 from core.security import require_permission, check_rate_limit
@@ -64,6 +68,8 @@ def api_fila(req: Request, bancada: str = FROTA):
     bancada = _bancada_valida(bancada)
     cal, agora = _calendario(), dbt.utcnow()
     estado = FILA_DA_BANCADA[bancada]
+    # Estado antigo de custódia: não é mais produzido, mas ativo que ficou
+    # nele antes da mudança precisa continuar aparecendo para alguém tratar.
     em_curso = TRATATIVA_DA_BANCADA[bancada]
 
     with dbt.SessionLocal() as s:
@@ -201,16 +207,16 @@ def api_ativo(serial: str, req: Request, bancada: str = FROTA):
 
 @router.get("/dashboard")
 def api_dashboard(req: Request, data_inicio: str = "", data_fim: str = ""):
-    """Reparos fechados no período, com o tempo MEDIDO pelo núcleo.
+    """Reparos despachados no período, com o tempo MEDIDO pelo núcleo.
 
-    O saving sai de horas de tratativa × valor-hora (Configuração →
-    Configuração Módulos). Não há minuto digitado: o relógio é o da
-    trilha, o mesmo que a Torre mostra — se discordarem, um dos dois
-    está errado, e é isso que se quer descobrir.
+    Ninguém assume equipamento, então não há relógio de pessoa: o que se
+    mede é o **tempo parado** — de quando o ativo caiu no backlog da
+    bancada até o registro que o despachou — e o **volume**: quantos
+    equipamentos cada pessoa despachou, por dia e por mês. O relógio é o
+    da trilha, o mesmo que a Torre mostra.
     """
     require_permission(req, "reparos", "view")
-    from datetime import date as _date, timedelta as _td
-    from db.portal import SessionLocal as _Portal, Setting
+    from datetime import timedelta as _td
     cal, agora = _calendario(), dbt.utcnow()
     try:
         ini = datetime.fromisoformat(data_inicio) if data_inicio else agora - _td(days=30)
@@ -218,10 +224,6 @@ def api_dashboard(req: Request, data_inicio: str = "", data_fim: str = ""):
     except ValueError:
         raise HTTPException(400, "Datas inválidas.")
     ini = _utc(ini); fim = _utc(fim)
-    with _Portal() as sp:
-        row = sp.get(Setting, "hourly_rate")
-        valor_hora = float((row.value if row else {}).get("value", 0) or 0)
-
     with SessionLocal() as s:
         reparos = s.execute(
             select(Reparo).where(Reparo.fechado_em.isnot(None),
@@ -229,57 +231,51 @@ def api_dashboard(req: Request, data_inicio: str = "", data_fim: str = ""):
             .order_by(Reparo.fechado_em.desc())
         ).scalars().all()
         causas = {c.id: c.nome for c in s.execute(select(Causa)).scalars()}
-    ids = [r.trilha_ativo_id for r in reparos if r.trilha_ativo_id]
-    segundos_por_ativo: dict[int, int] = {}
-    if ids:
-        with dbt.SessionLocal() as st:
-            intervalos = st.execute(
-                select(dbt.Intervalo).where(
-                    dbt.Intervalo.ativo_id.in_(ids),
-                    dbt.Intervalo.tipo == dbt.TRATATIVA,
-                    dbt.Intervalo.estado.in_(tuple(TRATATIVA_DA_BANCADA.values())))
-            ).scalars().all()
-        por_ativo: dict[int, list] = {}
-        for i in intervalos:
-            por_ativo.setdefault(i.ativo_id, []).append(i)
-        for r in reparos:
-            if not r.trilha_ativo_id:
-                continue
-            a0, a1 = _utc(r.aberto_em), _utc(r.fechado_em)
-            seg = 0
-            for i in por_ativo.get(r.trilha_ativo_id, []):
-                i0, i1 = _utc(i.inicio), _utc(i.fim) or agora
-                if i1 < a0 or i0 > a1:
-                    continue
-                seg += duracao_util(max(i0, a0), min(i1, a1), cal, agora)
-            segundos_por_ativo[r.id] = seg
-
+    # Tempo parado: do momento em que o ativo entrou no backlog da bancada
+    # (gravado em `aberto_em` no registro) até o despacho.
     registros, por_bancada, por_tecnico, por_destino = [], {}, {}, {}
+    por_dia, por_mes, pessoa_dia = {}, {}, {}
     total_seg = 0
     for r in reparos:
-        seg = segundos_por_ativo.get(r.id, 0)
+        a0, a1 = _utc(r.aberto_em), _utc(r.fechado_em)
+        seg = duracao_util(a0, a1, cal, agora) if a1 > a0 else 0
         total_seg += seg
-        saving = round(seg / 3600 * valor_hora, 2)
+        dia = a1.date().isoformat()
         registros.append({
             "serial": r.serial, "modelo": r.modelo, "bancada": r.bancada,
             "bancada_rotulo": ROTULO_BANCADA.get(r.bancada, r.bancada),
             "tecnico": r.tecnico, "destino": r.destino,
             "destino_rotulo": ROTULO_DESTINO.get(r.destino, r.destino),
-            "causa": causas.get(r.causa_id, ""), "segundos": seg, "saving": saving,
-            "fechado_em": _utc(r.fechado_em).isoformat(),
+            "causa": causas.get(r.causa_id, ""), "segundos": seg,
+            "fechado_em": a1.isoformat(),
         })
         for chave, mapa, rot in ((r.bancada, por_bancada, ROTULO_BANCADA.get(r.bancada, r.bancada)),
                                  (r.tecnico or "—", por_tecnico, r.tecnico or "—"),
                                  (r.destino, por_destino, ROTULO_DESTINO.get(r.destino, r.destino))):
-            x = mapa.setdefault(chave, {"chave": chave, "rotulo": rot, "quantidade": 0, "segundos": 0, "saving": 0.0})
-            x["quantidade"] += 1; x["segundos"] += seg; x["saving"] += saving
+            x = mapa.setdefault(chave, {"chave": chave, "rotulo": rot,
+                                       "quantidade": 0, "segundos": 0})
+            x["quantidade"] += 1; x["segundos"] += seg
+        por_dia[dia] = por_dia.get(dia, 0) + 1
+        mes = dia[:7]
+        por_mes[mes] = por_mes.get(mes, 0) + 1
+        pessoa_dia.setdefault((r.tecnico or "—", dia), 0)
+        pessoa_dia[(r.tecnico or "—", dia)] += 1
+
+    # Média de equipamentos por pessoa por dia: só conta o dia em que a
+    # pessoa despachou algo — dia parado de um não vira média baixa do time.
+    for chave, x in por_tecnico.items():
+        dias = sum(1 for (t, _d) in pessoa_dia if t == chave)
+        x["dias"] = dias
+        x["por_dia"] = round(x["quantidade"] / dias, 1) if dias else 0.0
     return {
-        "de": ini.isoformat(), "ate": fim.isoformat(), "valor_hora": valor_hora,
+        "de": ini.isoformat(), "ate": fim.isoformat(),
         "total": len(reparos), "segundos": total_seg,
-        "saving": round(total_seg / 3600 * valor_hora, 2),
+        "medio_parado": int(total_seg / len(reparos)) if reparos else 0,
         "por_bancada": sorted(por_bancada.values(), key=lambda x: -x["quantidade"]),
-        "por_tecnico": sorted(por_tecnico.values(), key=lambda x: -x["segundos"]),
+        "por_tecnico": sorted(por_tecnico.values(), key=lambda x: -x["quantidade"]),
         "por_destino": sorted(por_destino.values(), key=lambda x: -x["quantidade"]),
+        "por_dia": [{"dia": d, "quantidade": q} for d, q in sorted(por_dia.items())],
+        "por_mes": [{"mes": m, "quantidade": q} for m, q in sorted(por_mes.items())],
         "registros": registros[:500],
     }
 
@@ -302,65 +298,10 @@ def api_causas(req: Request, bancada: str = ""):
 #  Bipe e registro
 # ══════════════════════════════════════════════════════════════════
 
-class BipeIn(BaseModel):
-    serial: str
-    bancada: str = FROTA
-
-
-@router.post("/bipar")
-def api_bipar(body: BipeIn, req: Request):
-    """Assume o equipamento: o relógio sai da fila e passa para a pessoa."""
-    sd = require_permission(req, "reparos", "edit")
-    check_rate_limit(req)
-    bancada = _bancada_valida(body.bancada)
-    serial = (body.serial or "").strip().upper()
-    usuario = sd.get("username", "")
-    if not serial:
-        raise HTTPException(400, "Bipe a série do equipamento.")
-
-    destino_estado = TRATATIVA_DA_BANCADA[bancada]
-    with dbt.SessionLocal() as s:
-        # Equipamento que nunca passou pelo Recebimento é adotado aqui, com
-        # o relógio começando agora — travar a bancada não ajudaria ninguém.
-        ativo = garantir_ativo(s, serial, usuario=usuario, origem="bancada")
-        if ativo is None:
-            raise HTTPException(
-                404, f"A série {serial} não está na trilha e a adoção "
-                     "automática está desligada em Configuração → Ciclo do ativo.")
-        if ativo.estado_fisico == destino_estado:
-            raise HTTPException(
-                409, f"A série {serial} já está na bancada com "
-                     f"{_quem_esta_com(s, ativo.id) or 'alguém'}.")
-        try:
-            mover(s, ativo, estado=destino_estado, tipo=dbt.TRATATIVA,
-                  processo=PROCESSO[bancada], usuario=usuario)
-        except TrilhaInvalida as exc:
-            raise HTTPException(409, str(exc))
-        s.commit()
-        ativo_id, modelo, tipo = ativo.id, ativo.modelo, ativo.tipo_equipamento
-
-    # Abre o registro do reparo se ainda não houver um em aberto. Bipar
-    # de novo depois de uma pausa continua o mesmo reparo.
-    with SessionLocal() as sb:
-        aberto = sb.execute(
-            select(Reparo).where(Reparo.serial == serial,
-                                 Reparo.fechado_em.is_(None))
-        ).scalar_one_or_none()
-        if aberto is None:
-            sb.add(Reparo(serial=serial, trilha_ativo_id=ativo_id,
-                          bancada=bancada, modelo=modelo,
-                          tipo_equipamento=tipo, tecnico=usuario))
-            sb.commit()
-    _log.info("bancada: %s assumiu a série %s (%s)", usuario, serial, bancada)
-    return api_ativo(serial, req, bancada)
-
-
-def _quem_esta_com(s, ativo_id: int) -> str:
-    linha = s.execute(
-        select(dbt.Intervalo).where(dbt.Intervalo.ativo_id == ativo_id,
-                                    dbt.Intervalo.fim.is_(None))
-    ).scalars().first()
-    return linha.usuario if linha else ""
+# Não há "assumir equipamento": o ativo cai no backlog da bancada e o
+# relógio dele corre até alguém bipar e registrar. O bipe é a SAÍDA — ele
+# despacha o ativo para a próxima etapa no mesmo ato. O que se mede é o
+# tempo parado no backlog e quantos equipamentos cada pessoa despachou.
 
 
 class RegistroIn(BaseModel):
@@ -381,10 +322,13 @@ class RegistroIn(BaseModel):
 def api_registrar(body: RegistroIn, req: Request):
     """Fecha a passagem pela bancada e manda o ativo para o próximo estado."""
     sd = require_permission(req, "reparos", "edit")
+    check_rate_limit(req)
     bancada = _bancada_valida(body.bancada)
     serial = (body.serial or "").strip().upper()
     usuario = sd.get("username", "")
 
+    if not serial:
+        raise HTTPException(400, "Bipe ou informe a série do equipamento.")
     if body.destino not in DESTINOS:
         raise HTTPException(400, "Destino inválido.")
     if not (body.acoes or "").strip():
@@ -398,9 +342,9 @@ def api_registrar(body: RegistroIn, req: Request):
         raise HTTPException(400, "Diga qual peça está sendo aguardada.")
     if body.destino == ASSISTENCIA and not (body.fornecedor or "").strip():
         raise HTTPException(400, "Informe o fornecedor da assistência.")
-    if body.destino == INVIAVEL and not (body.justificativa or "").strip():
+    if body.destino == VENDA and not (body.justificativa or "").strip():
         raise HTTPException(
-            400, "Reparo inviável exige justificativa: é o que sustenta a baixa.")
+            400, "Mandar para venda exige justificativa: é o que sustenta a baixa.")
 
     with SessionLocal() as sb:
         if sb.get(Causa, body.causa_id) is None:
@@ -415,14 +359,25 @@ def api_registrar(body: RegistroIn, req: Request):
             else dbt.FILA)
 
     with dbt.SessionLocal() as s:
-        ativo = s.execute(
-            select(dbt.Ativo).where(dbt.Ativo.serial == serial)
-        ).scalar_one_or_none()
+        # Série que nunca passou pelo Recebimento é adotada aqui: travar a
+        # bancada por causa disso não ajudaria ninguém.
+        ativo = garantir_ativo(s, serial, usuario=usuario, origem="bancada")
         if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha.")
-        if ativo.estado_fisico != TRATATIVA_DA_BANCADA[bancada]:
             raise HTTPException(
-                409, "Bipe o equipamento antes de registrar o reparo.")
+                404, f"A série {serial} não está na trilha e a adoção "
+                     "automática está desligada em Configuração → Ciclo do ativo.")
+        if ativo.estado_fisico == proximo:
+            raise HTTPException(
+                409, f"A série {serial} já está em "
+                     f"{dbt.rotulo_estado(proximo).lower()}.")
+        # Quando o ativo caiu no backlog: é o começo do tempo parado.
+        aberto = s.execute(
+            select(dbt.Intervalo).where(dbt.Intervalo.ativo_id == ativo.id,
+                                        dbt.Intervalo.fim.is_(None))
+            .order_by(dbt.Intervalo.inicio)
+        ).scalars().first()
+        entrou_em = _utc(aberto.inicio) if aberto else None
+        ativo_id, modelo, tipo_eq = ativo.id, ativo.modelo, ativo.tipo_equipamento
         try:
             mover(s, ativo, estado=proximo, tipo=tipo,
                   processo=PROCESSO[bancada], usuario=usuario,
@@ -438,8 +393,14 @@ def api_registrar(body: RegistroIn, req: Request):
             .order_by(Reparo.aberto_em.desc())
         ).scalars().first()
         if reparo is None:
-            reparo = Reparo(serial=serial, bancada=bancada, tecnico=usuario)
+            reparo = Reparo(serial=serial, bancada=bancada, tecnico=usuario,
+                            trilha_ativo_id=ativo_id, modelo=modelo,
+                            tipo_equipamento=tipo_eq)
             sb.add(reparo)
+            # O relógio do reparo começa quando o ativo entrou no backlog,
+            # não agora: é isso que mede o tempo parado.
+            if entrou_em is not None:
+                reparo.aberto_em = entrou_em
         reparo.acoes = body.acoes.strip()
         reparo.causa_id = body.causa_id
         reparo.pecas = body.pecas.strip()
@@ -490,8 +451,8 @@ def api_retornar_peca(body: RetornoIn, req: Request):
             raise HTTPException(
                 409, f"A série {serial} não está aguardando peça.")
         try:
-            mover(s, ativo, estado=TRATATIVA_DA_BANCADA[bancada],
-                  tipo=dbt.TRATATIVA, processo=PROCESSO[bancada],
+            mover(s, ativo, estado=FILA_DA_BANCADA[bancada],
+                  tipo=dbt.FILA, processo=PROCESSO[bancada],
                   usuario=usuario)
         except TrilhaInvalida as exc:
             raise HTTPException(409, str(exc))

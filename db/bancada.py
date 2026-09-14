@@ -105,41 +105,41 @@ TRATATIVA_DA_BANCADA = {
 }
 
 # ── Destinos possíveis e para onde cada um manda o ativo ───────────
-APTO = "APTO"
-AGUARDANDO_PECAS = "AGUARDANDO_PECAS"
+# As três bancadas destinam para os mesmos três lugares: venda,
+# assistência externa ou internalização. Aguardar peça não é destino, é
+# pausa — o ativo continua sendo desta bancada. Devolver ao terceiro é
+# a saída do que não é nosso (comodato, locação, garantia).
+VENDA = "VENDA"
+INTERNALIZACAO = "INTERNALIZACAO"
 ASSISTENCIA = "ASSISTENCIA"
-INVIAVEL = "INVIAVEL"
-DEVOLVER = "DEVOLVER"          # devolução a terceiro (A14): comodato, locação, garantia
-DESTINOS = (APTO, AGUARDANDO_PECAS, ASSISTENCIA, INVIAVEL, DEVOLVER)
+AGUARDANDO_PECAS = "AGUARDANDO_PECAS"
+DEVOLVER = "DEVOLVER"
+DESTINOS = (VENDA, ASSISTENCIA, INTERNALIZACAO, AGUARDANDO_PECAS, DEVOLVER)
 
 ROTULO_DESTINO = {
-    APTO: "Apto / reparado",
-    AGUARDANDO_PECAS: "Aguardando peças",
+    VENDA: "Venda",
     ASSISTENCIA: "Assistência externa",
-    INVIAVEL: "Reparo inviável",
+    INTERNALIZACAO: "Internalização",
+    AGUARDANDO_PECAS: "Aguardando peças",
     DEVOLVER: "Devolver ao terceiro",
+    # Destinos antigos, mantidos só para o histórico já gravado.
+    "APTO": "Apto / reparado (antigo)",
+    "INVIAVEL": "Reparo inviável (antigo)",
 }
 
-# Estado seguinte na Trilha. Coletor apto vai configurar antes de voltar
-# ao estoque; o resto vai direto para a internalização.
+# Estado seguinte na Trilha. Igual nas três bancadas: o que muda entre
+# elas é quem trabalha, não para onde o ativo vai.
+_POR_DESTINO = {
+    VENDA: "AG_VENDA",
+    ASSISTENCIA: "AG_ASSISTENCIA",
+    INTERNALIZACAO: "AG_INTERNALIZACAO",
+    AGUARDANDO_PECAS: "AG_PECAS",
+    DEVOLVER: "AG_DEVOLUCAO",
+}
 PROXIMO_ESTADO = {
-    (FROTA, APTO): "AG_CONFIGURACAO",
-    (LOJA, APTO): "AG_INTERNALIZACAO",
-    (CONECTIVIDADE, APTO): "AG_INTERNALIZACAO",
-    (FROTA, AGUARDANDO_PECAS): "AG_PECAS",
-    (LOJA, AGUARDANDO_PECAS): "AG_PECAS",
-    (CONECTIVIDADE, AGUARDANDO_PECAS): "AG_PECAS",
-    (FROTA, ASSISTENCIA): "AG_ASSISTENCIA",
-    (LOJA, ASSISTENCIA): "AG_ASSISTENCIA",
-    (CONECTIVIDADE, ASSISTENCIA): "AG_ASSISTENCIA",
-    (FROTA, INVIAVEL): "AG_DESCARACTERIZACAO",
-    (LOJA, INVIAVEL): "AG_DESCARACTERIZACAO",
-    (CONECTIVIDADE, INVIAVEL): "AG_DESCARACTERIZACAO",
-    # A14 nasce aqui: sem este destino a fila de devolução do módulo
-    # Assistência não tinha quem a alimentasse.
-    (FROTA, DEVOLVER): "AG_DEVOLUCAO",
-    (LOJA, DEVOLVER): "AG_DEVOLUCAO",
-    (CONECTIVIDADE, DEVOLVER): "AG_DEVOLUCAO",
+    (bancada, destino): estado
+    for bancada in BANCADAS
+    for destino, estado in _POR_DESTINO.items()
 }
 
 
@@ -168,7 +168,7 @@ class Reparo(Base):
     # trocou peça" de "esqueceu de preencher".
     pecas: Mapped[str] = mapped_column(Text, default="")
 
-    destino: Mapped[str] = mapped_column(String(20), default=APTO, index=True)
+    destino: Mapped[str] = mapped_column(String(20), default=INTERNALIZACAO, index=True)
     justificativa: Mapped[str] = mapped_column(Text, default="")
     fornecedor: Mapped[str] = mapped_column(String(120), default="")
     pecas_aguardadas: Mapped[str] = mapped_column(Text, default="")
