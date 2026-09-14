@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 import config as _config_mod
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import get_session
 
 _cfg = _config_mod.get_settings()
@@ -266,9 +267,16 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page() -> HTMLResponse:
+def _page(req: Request | None = None) -> HTMLResponse:
+    """A página inteira, com o prefixo do proxy quando houver.
+
+    A tela é servida daqui, e não pelo index do portal, então o prefixo
+    precisa ser aplicado aqui também — senão, atrás do proxy num
+    subcaminho, ela busca CSS e JS na raiz do domínio e toma 404.
+    """
     html = (_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("{{v}}", _asset_version()))
+    html = html.replace("{{v}}", _asset_version())
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 def _acesso_pagina(req: Request):
@@ -276,8 +284,9 @@ def _acesso_pagina(req: Request):
     módulo à parte. Sem sessão, manda para o login levando o destino."""
     sd = get_session(req, required=False)
     if not sd:
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
-    return _page()
+        return RedirectResponse(
+            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}", status_code=302)
+    return _page(req)
 
 
 @router.get("/obsolescencia", response_class=HTMLResponse)
