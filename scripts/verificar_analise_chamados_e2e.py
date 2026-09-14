@@ -7,7 +7,7 @@ Prova o caminho inteiro sem tocar o ServiceNow: planilha da área (com
 número repetido e linha vazia) → consulta → veredito → Excel com as três
 abas. Os três chamados são os casos que a área descreveu.
 """
-import sys, tempfile
+import os, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, "/home/user/CLAUDE")
 import pandas as pd
@@ -63,9 +63,55 @@ def consultar(tabela, query, campos, display=True, limite=100000):
         return [n for n in NOTAS if n["element_id"] in ids]
     return []
 
+print("\n[Conta de serviço] o script roda no terminal, sem banco")
+
+TC = Path(tempfile.mkdtemp())
+env = TC / "environment"
+env.write_text('# comentario\nSN_API_BASE="https://sn.exemplo/"\n'
+               "export SN_API_USER=conta.servico\nSN_API_PASS='segredo com espaço'\n"
+               "VERIFY_SSL=0\nDATABASE_URL=postgresql://x\n", encoding="utf-8")
+
+c = ac.preparar_conta(env)
+assert c.SN_API_BASE == "https://sn.exemplo", c.SN_API_BASE
+assert c.SN_API_USER == "conta.servico"
+assert c.SN_API_PASS == "segredo com espaço"
+assert c.VERIFY_SSL is False
+print("  ok   lê do arquivo de ambiente, sem precisar de banco")
+
+os.environ["SN_API_USER"] = "do.ambiente"
+os.environ["SN_API_BASE"] = "https://outro"
+os.environ["SN_API_PASS"] = "x"
+ac._CONTA = None
+c2 = ac.preparar_conta(None)
+assert c2.SN_API_USER == "do.ambiente", c2.SN_API_USER
+print("  ok   o ambiente tem prioridade sobre o arquivo")
+
+for k in ("SN_API_BASE", "SN_API_USER", "SN_API_PASS"):
+    os.environ.pop(k, None)
+ac._CONTA = None
+try:
+    ac.preparar_conta(TC / "nao-existe")
+    raise AssertionError("deveria ter recusado")
+except SystemExit as e:
+    assert "não encontrada" in str(e) and "nao-existe" in str(e), str(e)
+print("  ok   sem credencial, diz o que falta e onde procurou")
+
+env2 = TC / "cofre"
+env2.write_text("SN_API_BASE=https://sn\nSN_API_USER=u\nSN_API_PASS=@cofre:sn@\n")
+ac._CONTA = None
+try:
+    ac.preparar_conta(env2)
+    raise AssertionError("deveria ter recusado")
+except SystemExit as e:
+    assert "cofre" in str(e)
+print("  ok   senha ainda no cofre é apontada em vez de virar 401 confuso")
+
 ac.consultar = consultar
+ENV_E2E = T / "env-e2e"
+ENV_E2E.write_text("SN_API_BASE=https://sn.exemplo\nSN_API_USER=conta\nSN_API_PASS=x\n")
+ac._CONTA = None
 sys.argv = ["x", str(T / "entrada.xlsx"), "--grupo", "SPARE - Equipamentos",
-            "--saida", str(T / "saida.xlsx")]
+            "--saida", str(T / "saida.xlsx"), "--env-file", str(ENV_E2E)]
 assert ac.main() == 0
 
 df = pd.read_excel(T / "saida.xlsx", sheet_name="Chamados")
