@@ -276,6 +276,81 @@ checar(anon2.post("/api/cofre/sondar-varios", json={"nomes": "X"}).status_code i
        "e exige sessão")
 os.environ.pop("CORREIOS_CARTOES", None)
 
+print("\n[3k] Comando externo: a saída quando o loader Python não alcança")
+# Se outro programa lê o cofre (o PHP do time, por exemplo), o core resolve
+# por comando. O que não pode é o diagnóstico dizer "configurado" sem testar.
+import importlib  # noqa: E402
+import stat as _stat  # noqa: E402
+
+FALSO_CMD = _TMP / "cofre_falso.sh"
+FALSO_CMD.write_text(
+    "#!/bin/sh\n"
+    "case \"$1\" in\n"
+    "  CORREIOS_USUARIO) echo conta-vinda-do-comando ;;\n"
+    "  *) exit 0 ;;\n"
+    "esac\n", encoding="utf-8")
+os.chmod(FALSO_CMD, 0o755)
+
+os.environ["VCREPORTS_SECRETS_CMD"] = f"{FALSO_CMD} {{chave}}"
+cofre_cmd = importlib.reload(cofre)
+ok_cmd, det_cmd = cofre_cmd.diagnostico_corporativo("CORREIOS_USUARIO")
+checar(ok_cmd is True, "com o comando respondendo, o cofre é dado como disponível")
+checar("respondeu" in det_cmd, "e o detalhe diz que ele foi executado de verdade")
+checar("não verificado" not in det_cmd, "sem mais o 'não verificado' de antes")
+
+ruim, det_ruim = cofre_cmd.diagnostico_corporativo("CHAVE_QUE_O_COMANDO_NAO_TEM")
+checar(ruim is False, "com o comando calado para a chave, é indisponível")
+checar("não devolveu valor" in det_ruim, "dizendo exatamente isso")
+
+checar(cofre_cmd._corporativo("CORREIOS_USUARIO") == "conta-vinda-do-comando",
+       "e a resolução por comando realmente entrega o valor")
+os.environ.pop("VCREPORTS_SECRETS_CMD", None)
+importlib.reload(cofre)
+
+print("\n[3l] A ponte PHP: o portal resolvendo pelo cofre do time")
+# O acesso de referência que o time mantém é em PHP. Se o PHP lê e o Python
+# não, o portal resolve pela ponte — sem código novo, só a variável na unit.
+import shutil  # noqa: E402
+
+PHP = shutil.which("php")
+if not PHP:
+    print("  (sem php neste ambiente: a ponte não pode ser exercitada aqui)")
+else:
+    LOADER = _TMP / "secrets_do_time.php"
+    LOADER.write_text(
+        "<?php\n"
+        "function secret($k) {\n"
+        "  $m = ['ORACLE_EBS_USUARIO' => 'inframon',\n"
+        "        'ORACLE_EBS_SENHA' => 'senha-do-php-que-nao-pode-sair'];\n"
+        "  return $m[$k] ?? null;\n"
+        "}\n", encoding="utf-8")
+    PONTE = RAIZ / "scripts" / "cofre_php.php"
+    os.environ["VCREPORTS_SECRETS_PHP"] = str(LOADER)
+    os.environ["VCREPORTS_SECRETS_CMD"] = f"{PHP} {PONTE} {{chave}}"
+    cofre_php = importlib.reload(cofre)
+
+    checar(cofre_php._corporativo("ORACLE_EBS_USUARIO") == "inframon",
+           "a ponte entrega o valor que só o PHP enxerga")
+    checar(cofre_php.fonte("ORACLE_EBS_SENHA") == "cofre corporativo",
+           "e o portal contabiliza como cofre corporativo")
+    checar(cofre_php._corporativo("NAO_EXISTE_NO_PHP") == "",
+           "chave inexistente volta vazia, sem inventar valor")
+    ok_php, det_php = cofre_php.diagnostico_corporativo("ORACLE_EBS_USUARIO")
+    checar(ok_php is True and "respondeu" in det_php,
+           "e o diagnóstico confirma executando a ponte")
+
+    r16 = cliente.post("/api/cofre/sondar-varios",
+                       json={"nomes": "ORACLE_EBS_USUARIO ORACLE_EBS_SENHA"})
+    achados = {i["chave"]: i for i in r16.json()["itens"]}
+    checar(achados["ORACLE_EBS_USUARIO"]["valor"] == "inframon",
+           "a sondagem pela tela também acha, pela ponte")
+    checar("senha-do-php-que-nao-pode-sair" not in r16.text,
+           "e a senha vinda do PHP continua sem sair na resposta")
+
+    os.environ.pop("VCREPORTS_SECRETS_CMD", None)
+    os.environ.pop("VCREPORTS_SECRETS_PHP", None)
+    importlib.reload(cofre)
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")

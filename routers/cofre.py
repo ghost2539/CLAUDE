@@ -139,6 +139,10 @@ def _inventario_corporativo() -> dict:
         fn = cofre._funcao_do_modulo(mod)
         funcao = getattr(fn, "__name__", "") if fn else ""
     return {
+        # Saída de emergência que já existe no core: quando o loader Python
+        # não alcança o cofre mas outro programa alcança (o PHP do time, por
+        # exemplo), VCREPORTS_SECRETS_CMD resolve chave por chave.
+        "comando_externo": getattr(cofre, "COMANDO", ""),
         "modulo_carregado": mod is not None,
         "modulo_via": getattr(cofre, "_modulo_via", ""),
         "funcao": funcao,

@@ -581,6 +581,11 @@ async function renderCofre(c, S) {
                   e(inv.modulo_via || '') + '</span>' +
                   (inv.funcao ? ' <span class="text-muted">— função ' + e(inv.funcao) + '()</span>' : '')
                 : '<span class="badge badge-danger">não carregado</span>') + '</p>' +
+            (inv.comando_externo
+                ? '<p><b>Comando externo:</b> <span class="om-mono">' + e(inv.comando_externo) +
+                  '</span> <span class="text-muted">— quando configurado, é ele que resolve ' +
+                  'antes do loader Python.</span></p>'
+                : '') +
             '<p class="text-muted">O loader responde <b>por nome</b>, uma chave de cada vez, e não ' +
             'tem função de listar — o arquivo do cofre não é para ser aberto por quem consome. ' +
             'Então não há como "trazer tudo" daqui: para procurar, use a sondagem por nome. ' +
