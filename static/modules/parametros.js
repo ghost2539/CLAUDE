@@ -753,7 +753,13 @@ async function renderCofre(c, S) {
                 : '';
             host.innerHTML =
                 '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
-                (d.ok ? 'O PHP leu <b>' + e(d.chave) + '</b> no cofre — ' + e(d.detalhe) + '.'
+                (d.ok ? 'O PHP leu <b>' + e(d.chave) + '</b> no cofre — ' + e(d.detalhe) + '.' +
+                        (d.retirada_do_ambiente
+                            ? ' <br><small>Esta chave estava no ambiente do serviço e foi ' +
+                              'retirada só para este teste, para o valor não poder vir de lá. ' +
+                              'No serviço ela continua onde estava.</small>'
+                            : ' <br><small>A chave não estava no ambiente do serviço, então ' +
+                              'o valor só pode ter vindo do cofre.</small>')
                       : e(d.detalhe)) + '</div>' + receita;
             S.toast(d.ok ? 'O serviço alcança o cofre pelo PHP.' : 'O PHP também não leu.',
                     d.ok ? 'success' : 'error');
