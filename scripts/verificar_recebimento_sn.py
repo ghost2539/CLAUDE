@@ -200,8 +200,8 @@ checar(corpo.get("SelectedDeviceIds") == "691477", f"o id também vai no corpo (
 checar(corpo.get("__RequestVerificationToken") == "tok-123",
        "o token do formulário vai no corpo")
 checar(cab.get("RequestVerificationToken") == "tok-123", "e no cabeçalho")
-checar(ses.gets and ses.gets[0].endswith("/AirWatch/Devices/TagAssignment/691477"),
-       f"o token é buscado num formulário do próprio aparelho ({ses.gets[:1]})")
+checar(ses.gets and ses.gets[0].endswith("/AirWatch/Device/Details/Summary/691477"),
+       f"o token é buscado na página do próprio aparelho ({ses.gets[:1]})")
 
 ses = _Sessao(form="<form></form>")
 ok, _ = mdm.remover_dispositivo(ses, "1", "", "/x/{id}")
@@ -426,14 +426,12 @@ class _Resp:
         self.status_code, self.text, self.url = status, texto, url
 
 class _BS:
-    """BeautifulSoup de mentira: devolve o que o teste mandar achar."""
+    """BeautifulSoup de mentira: só o formulário; a ação vem do HTML cru."""
     def __init__(self, texto, _parser):
         self.texto = texto
     def find(self, tag, *a, **k):
-        if tag == "a":
-            return {"gsft_action_name": "acao-1"} if "CALC" in self.texto else None
         if tag == "form":
-            return _Form() if "FORM" in self.texto else None
+            return _Form() if "<form" in self.texto else None
         return None
 
 class _Form(dict):
@@ -460,20 +458,31 @@ sn._get_http = lambda: (None, _BS)
 d = sn._depreciacao_passos(_SessaoSN("", 200, "https://sn/login.do"), "sys-1", _BS)
 checar(not d["ok"] and "login" in d["motivo"], f"sessão caída no login é nomeada ({d['motivo'][:40]})")
 
-d = sn._depreciacao_passos(_SessaoSN("pagina sem acao"), "sys-1", _BS)
-checar(not d["ok"] and "Calculate Depreciation" in d["motivo"],
+_ACAO = ('<a gsft_action_name="sysverb_calculate_depreciation" href="#">'
+         'Calculate Depreciation</a>')
+_FORM = '<form name="alm_hardware.do" action="alm_hardware.do"></form>'
+
+d = sn._depreciacao_passos(_SessaoSN("<html>pagina sem acao</html>"), "sys-1", _BS)
+checar(not d["ok"] and "calcular depreciação" in d["motivo"],
        "ação ausente no formulário é nomeada")
 
-d = sn._depreciacao_passos(_SessaoSN("CALC mas sem form"), "sys-1", _BS)
+d = sn._depreciacao_passos(_SessaoSN(_ACAO), "sys-1", _BS)
 checar(not d["ok"] and "formulário do ativo" in d["motivo"], "formulário ausente é nomeado")
 
-d = sn._depreciacao_passos(_SessaoSN("CALC FORM"), "sys-1", _BS, executar=False)
+d = sn._depreciacao_passos(_SessaoSN(_ACAO + _FORM), "sys-1", _BS, executar=False)
 checar(d["ok"] and "não executa" in d["motivo"], "no modo diagnóstico não executa a ação")
-checar(len(d["passos"]) >= 4, "e mostra o caminho passo a passo")
+checar(len(d["passos"]) >= 3, "e mostra o caminho passo a passo")
 
-ses = _SessaoSN("CALC FORM")
+ses = _SessaoSN(_ACAO + _FORM)
 d = sn._depreciacao_passos(ses, "sys-1", _BS, executar=True)
 checar(d["ok"] and ses.posts, "com o caminho inteiro, executa e confirma")
+
+# O caso que a área encontrou: interface em português.
+_ACAO_PT = ('<a gsft_action_name="sysverb_calc_dep" href="#">'
+            '<span>Calcular Depreciação</span></a>')
+ses = _SessaoSN(_ACAO_PT + _FORM)
+d = sn._depreciacao_passos(ses, "sys-1", _BS, executar=True)
+checar(d["ok"] and ses.posts, "com a interface em português também executa")
 sn._get_http = _bs_real
 
 print("\n[15] Busca no MDM denuncia filtro ignorado pelo console")
@@ -620,6 +629,48 @@ checar(dbo.ler_config()["mdm_remocao_endpoint"] == "/AirWatch/Devices/DeleteBulk
        "e o caminho vencedor fica gravado para a próxima vez")
 mdm.remover_dispositivo = _remover_dispositivo_real
 dbo.gravar_config({"mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}"})
+
+print("\n[20] A ação de depreciação é achada em inglês E em português")
+PAGINA_EN = ('<div><a class="linked" gsft_action_name="sysverb_calculate_depreciation" '
+             'href="#">Calculate Depreciation</a></div>')
+PAGINA_PT = ('<div><a class="linked" gsft_action_name="sysverb_calc_dep" '
+             'href="#"><span>Calcular Depreciação</span></a></div>')
+PAGINA_ES = ('<div><a gsft_action_name="accion_x" href="#">Calcular '
+             'Depreciación</a></div>')
+PAGINA_SEM = ('<div><a gsft_action_name="sysverb_update" href="#">Atualizar</a>'
+              '<a href="#">Depreciação (só texto, sem ação)</a></div>')
+PAGINA_DUAS = ('<a gsft_action_name="ver_agenda" href="#">Depreciation schedule</a>'
+               '<a gsft_action_name="sysverb_calculate_depreciation" href="#">'
+               'Calculate Depreciation</a>')
+checar(sn.achar_acao_depreciacao(PAGINA_EN) == "sysverb_calculate_depreciation",
+       "inglês: acha pelo texto e pelo nome interno")
+checar(sn.achar_acao_depreciacao(PAGINA_PT) == "sysverb_calc_dep",
+       f"português: acha mesmo com o texto traduzido ({sn.achar_acao_depreciacao(PAGINA_PT)})")
+checar(sn.achar_acao_depreciacao(PAGINA_ES) == "accion_x", "espanhol também")
+checar(sn.achar_acao_depreciacao(PAGINA_SEM) == "",
+       "página sem a ação continua sendo página sem a ação")
+checar(sn.achar_acao_depreciacao(PAGINA_DUAS) == "sysverb_calculate_depreciation",
+       "entre duas, escolhe a de CALCULAR, não a agenda")
+checar(sn.achar_acao_depreciacao("") == "", "página vazia não inventa ação")
+
+print("\n[21] A recusa do console chega inteira, e a requisição parece vir da página")
+class _Console2(_Console):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.cabecalhos = None
+    def request(self, metodo, url, **k):
+        self.cabecalhos = k.get("headers") or {}
+        return super().request(metodo, url, **k)
+
+ses = _Console2(resposta_post=_R2(200, '{"RedirectUrl":null,"IsSuccess":false,'
+                                       '"Message":"Save Failed: device is enrolled"}'))
+ok, detalhe = _remover_real(ses, "691477", "https://mdm", ENDPOINT)
+checar(not ok and "Save Failed: device is enrolled" in detalhe,
+       f"a mensagem do console vem inteira ({detalhe[:70]})")
+checar((ses.cabecalhos or {}).get("Referer", "").endswith("/Summary/691477"),
+       f"a requisição diz que veio da página do aparelho ({(ses.cabecalhos or {}).get('Referer')})")
+checar(mdm.FORMULARIOS_TOKEN[0].startswith("/AirWatch/Device/Details"),
+       "o token é buscado primeiro na página onde o botão de excluir vive")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

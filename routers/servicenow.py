@@ -431,6 +431,46 @@ def _insert_record(session, record):
     return False, "", r.text[:200]
 
 
+# Nome interno da ação e o texto do botão, em qualquer idioma. O nome
+# interno ("...calculate_depreciation...") não é traduzido; o texto é.
+_RE_ANCORA = re.compile(r"<a\b[^>]*>", re.I)
+_RE_ACAO_NOME = re.compile(r'gsft_action_name\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_DEPRECIA = re.compile(r"deprecia", re.I)      # depreciation / depreciação / depreciación
+
+
+def achar_acao_depreciacao(html: str) -> str:
+    """Nome da ação de calcular depreciação na página, ou "".
+
+    Procura em duas frentes: o nome interno da ação (que o ServiceNow não
+    traduz) e o texto visível do link (que ele traduz). Trabalha sobre o
+    HTML cru de propósito — assim dá para verificar com uma página de
+    exemplo em cada idioma, sem depender do parser.
+    """
+    texto = html or ""
+    candidatos: list[tuple[int, str]] = []
+    for m in _RE_ANCORA.finditer(texto):
+        tag = m.group(0)
+        acao = _RE_ACAO_NOME.search(tag)
+        if not acao:
+            continue
+        nome = acao.group(1)
+        # Texto do link: até o </a> correspondente (basta o suficiente).
+        fim = texto.find("</a>", m.end())
+        rotulo = re.sub(r"<[^>]*>", " ", texto[m.end():fim] if fim > 0 else "")
+        casa_nome = bool(_RE_DEPRECIA.search(nome))
+        casa_rotulo = bool(_RE_DEPRECIA.search(rotulo))
+        if not (casa_nome or casa_rotulo):
+            continue
+        # Prefere quem também fala em calcular: "Calculate Depreciation",
+        # "Calcular depreciação" — e não "Depreciation schedule".
+        peso = 2 if re.search(r"calc", nome + " " + rotulo, re.I) else 1
+        candidatos.append((peso, nome))
+    if not candidatos:
+        return ""
+    candidatos.sort(key=lambda x: -x[0])
+    return candidatos[0][1]
+
+
 def _calculate_depreciation(session, sys_id, BS):
     """Roda o "Calculate Depreciation" do formulário. True se rodou."""
     return _depreciacao_passos(session, sys_id, BS)["ok"]
@@ -471,17 +511,18 @@ def _depreciacao_passos(session, sys_id, BS, executar: bool = True) -> dict:
                      "usa a interface, não a API.")
 
     soup = BS(r.text, "html.parser")
-    calc_link = soup.find("a", string=re.compile(r"Calculate\s+Depreciation", re.IGNORECASE))
-    passos.append({"passo": "achar a ação Calculate Depreciation", "ok": bool(calc_link)})
-    if not calc_link:
-        return parar("o formulário abriu, mas não tem a ação "
-                     '"Calculate Depreciation" — verifique se o usuário do '
-                     "portal tem esse botão no ServiceNow.")
-    action_id = calc_link.get("gsft_action_name", "")
-    passos.append({"passo": "ler o identificador da ação", "ok": bool(action_id),
-                   "acao": action_id})
+    # A ação é achada pelo NOME INTERNO e pelo texto em qualquer idioma: o
+    # ServiceNow de cada usuário pode estar em português, e procurar só por
+    # "Calculate Depreciation" fazia a depreciação não rodar para quem usa
+    # a interface traduzida.
+    action_id = achar_acao_depreciacao(r.text)
+    passos.append({"passo": "achar a ação de calcular depreciação",
+                   "ok": bool(action_id), "acao": action_id})
     if not action_id:
-        return parar("a ação existe na página mas veio sem identificador.")
+        return parar("o formulário abriu, mas não tem a ação de calcular "
+                     "depreciação (nem em inglês nem em português) — "
+                     "verifique se o usuário do portal tem esse botão no "
+                     "ServiceNow.")
     form_tag = soup.find("form", {"name": "alm_hardware.do"})
     if not form_tag:
         form_tag = soup.find("form", {"id": "alm_hardware.do"})
