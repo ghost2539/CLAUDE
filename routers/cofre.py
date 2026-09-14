@@ -328,12 +328,23 @@ def _remedio(arq: dict, usuario: str) -> dict:
     cofre é sempre a mesma. Deixar o comando escrito aqui evita o vaivém
     de "qual grupo?" — a tela já sabe, porque acabou de olhar.
     """
-    if not arq.get("existe") and not arq.get("pasta_acessivel"):
+    pasta = arq.get("pasta", {}).get("caminho", "")
+    if not arq.get("pasta_acessivel"):
+        # O caso que engana: o arquivo pode estar 644 e mesmo assim ninguém
+        # lê, porque sem permissão de ENTRAR na pasta o modo do arquivo nunca
+        # chega a ser consultado. O erro é o mesmo "Permission denied", e é
+        # por isso que ele parece contradizer o 644.
         return {"necessario": True, "motivo":
-                "O serviço não consegue nem entrar na pasta do cofre, então "
-                "não dá para saber se o arquivo está lá.",
-                "comandos": [f"setfacl -m u:{usuario}:x {arq.get('pasta', {}).get('caminho', '')}",
-                             f"setfacl -m u:{usuario}:r {arq.get('caminho', '')}"]}
+                f"O serviço não consegue entrar em {pasta}. Enquanto isso valer, "
+                f"o modo do arquivo não importa — nem 644 é lido, porque a "
+                f"permissão da pasta é verificada antes.",
+                "comandos": [f"chmod o+x {pasta}",
+                             f"# ou, liberando só o serviço:",
+                             f"setfacl -m u:{usuario}:x {pasta}"]}
+    if not arq.get("existe"):
+        return {"necessario": True, "motivo":
+                f"A pasta abre, mas {arq.get('caminho', '')} não está lá.",
+                "comandos": []}
     if arq.get("existe") and not arq.get("legivel"):
         grupo = arq.get("grupo") or arq.get("pasta", {}).get("grupo") or "<grupo do cofre>"
         return {"necessario": True, "motivo":

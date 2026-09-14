@@ -282,13 +282,26 @@ checar(any("usermod -aG vcreports portal" in c for c in rem["comandos"]),
        "e monta o comando com os dois nomes certos")
 checar(any("chmod g+r" in c for c in rem["comandos"]), "mais a leitura do arquivo")
 
+# O caso que engana: arquivo 644 e mesmo assim "Permission denied", porque
+# a permissão da PASTA é verificada antes do modo do arquivo.
 fora = rc2._remedio({"caminho": "/etc/vcreports/.secrets.env", "existe": False,
-                     "pasta_acessivel": False,
+                     "pasta_acessivel": False, "modo": "644",
                      "pasta": {"caminho": "/etc/vcreports"}}, "portal")
-checar(fora["necessario"] is True and any("setfacl" in c for c in fora["comandos"]),
-       "pasta inacessível também vira pedido, não silêncio")
+checar(fora["necessario"] is True, "pasta inacessível vira pedido, não silêncio")
+checar("644" in fora["motivo"] and "/etc/vcreports" in fora["motivo"],
+       "e explica por que o 644 do arquivo não resolve sozinho")
+checar(any(c == "chmod o+x /etc/vcreports" for c in fora["comandos"]),
+       "com o comando que abre a pasta")
+checar(any("setfacl" in c for c in fora["comandos"]),
+       "e a alternativa que libera só o serviço")
+
+sumido = rc2._remedio({"caminho": "/etc/vcreports/.secrets.env", "existe": False,
+                       "pasta_acessivel": True,
+                       "pasta": {"caminho": "/etc/vcreports"}}, "portal")
+checar("não está lá" in sumido["motivo"],
+       "pasta acessível e arquivo ausente é outro problema, e é dito como tal")
 checar(rc2._remedio(info, "portal")["necessario"] is False,
-       "arquivo legível não gera pedido nenhum")
+       "arquivo legível, em pasta acessível, não gera pedido nenhum")
 
 print("\n[3h] Ver tudo: a lista completa, sem publicar segredo")
 os.environ["CORREIOS_CARTOES"] = "cartao-do-ambiente"
