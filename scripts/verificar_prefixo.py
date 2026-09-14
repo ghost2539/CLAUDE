@@ -138,6 +138,22 @@ for caminho, raiz in (("/obsolescencia/", ""), ("/portal-spare/obsolescencia/", 
 r = passar("/portal-spare/api/auth/me", "/portal-spare")
 checar(r["path"] == "/portal-spare/api/auth/me", "sem barra, nada muda")
 
+print("\n[6] Contorno do proxy que acrescenta barra por redirecionamento")
+# Com a chave ligada, a página avisa o front-end para já pedir com a barra.
+pf._cfg.API_BARRA_FINAL = True
+saida = pf.com_prefixo(HTML, "/portal-spare")
+checar('<meta name="api-barra-final" content="1">' in saida,
+       "a marca chega à página junto com o prefixo")
+so_marca = pf.com_prefixo(HTML, "")
+checar('api-barra-final' in so_marca,
+       "vale mesmo na raiz do domínio, se alguém precisar")
+checar('app-base' not in so_marca, "e sem prefixo não inventa app-base")
+checar(pf.com_prefixo(saida, "/portal-spare").count("api-barra-final") == 1,
+       "aplicar duas vezes não duplica a marca")
+pf._cfg.API_BARRA_FINAL = False
+checar('api-barra-final' not in pf.com_prefixo(HTML, "/portal-spare"),
+       "desligada, a marca não aparece — é este o padrão")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))

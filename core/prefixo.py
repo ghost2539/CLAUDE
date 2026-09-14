@@ -99,10 +99,14 @@ def com_prefixo(html: str, base: str) -> str:
     que é como o JavaScript da página descobre onde ficam a API e os
     módulos. Base vazia devolve o HTML como veio.
     """
-    if not base:
-        return html
-    html = html.replace('="/static/', f'="{base}/static/')
-    if 'name="app-base"' not in html:
-        html = html.replace(
-            "<head>", f'<head>\n    <meta name="app-base" content="{base}">', 1)
+    marcas = ""
+    if base:
+        html = html.replace('="/static/', f'="{base}/static/')
+        if 'name="app-base"' not in html:
+            marcas += f'\n    <meta name="app-base" content="{base}">'
+    # O contorno da barra vale mesmo sem prefixo: quem decide é a chave.
+    if _cfg.API_BARRA_FINAL and 'name="api-barra-final"' not in html:
+        marcas += '\n    <meta name="api-barra-final" content="1">'
+    if marcas:
+        html = html.replace("<head>", "<head>" + marcas, 1)
     return html

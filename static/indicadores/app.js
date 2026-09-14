@@ -12,6 +12,19 @@
         return (m && m.content ? m.content : '').replace(/\/+$/, '');
     })();
 
+    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
+    // vira GET). Com a marca ligada, a URL já sai com a barra.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+    function comBarra(url) {
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
+
 
     var AUTO_MS = 120000;              // 2 min
     var SVGNS = "http://www.w3.org/2000/svg";
@@ -268,7 +281,7 @@
 
     // ── carregar / atualizar ─────────────────────────────────
     function carregar() {
-        return fetch(BASE + "/api/indicadores/dados", { credentials: "same-origin" })
+        return fetch(comBarra(BASE + "/api/indicadores/dados"), { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 state.dados = j.snapshot;
@@ -281,7 +294,7 @@
     function atualizar() {
         var btn = $("#btn-refresh");
         btn.disabled = true; var txt = btn.textContent; btn.textContent = "⏳ Atualizando…";
-        fetch(BASE + "/api/indicadores/atualizar", { method: "POST", credentials: "same-origin" })
+        fetch(comBarra(BASE + "/api/indicadores/atualizar"), { method: "POST", credentials: "same-origin" })
             .then(function (r) {
                 if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || ("HTTP " + r.status)); });
                 return r.json();
