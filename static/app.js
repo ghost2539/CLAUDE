@@ -545,7 +545,10 @@
             e.preventDefault();
             var username = $('#login-username').value.trim();
             var password = $('#login-password').value;
-            var authType = $('.login-type-btn.active').dataset.authType;
+            var _tb = $('.login-type-btn.active');
+            // O login novo nao tem seletor de tipo: AD/SSO e a unica
+            // autenticacao do portal, entao esse e o padrao.
+            var authType = (_tb && _tb.dataset.authType) || 'SSO';
             try {
                 loading(true);
                 state.user = await api('/auth/login', {
