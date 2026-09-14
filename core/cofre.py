@@ -166,7 +166,14 @@ def diagnostico_corporativo(chave_teste: str = "") -> tuple[bool, str]:
     if not USAR_CORPORATIVO:
         return False, "desligado por configuração (COFRE_CORPORATIVO=nao)"
     if COMANDO:
-        return True, f"comando configurado (não verificado): {COMANDO}"
+        # Dizer "configurado" sem testar é pior que não dizer nada: some com a
+        # única pergunta que interessa. Então o comando é executado de fato,
+        # com a chave de prova, e o resultado é o que se relata.
+        chave = chave_teste or os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
+        if _por_comando(chave):
+            return True, (f"comando externo respondeu para '{chave}': {COMANDO}")
+        return False, (f"comando externo configurado, mas não devolveu valor para "
+                       f"'{chave}': {COMANDO}")
     mod = _resolver_modulo()
     if mod is not None:
         fn = _funcao_do_modulo(mod)
