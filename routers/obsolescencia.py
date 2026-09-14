@@ -669,21 +669,35 @@ def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
             if not termo:
                 continue
             try:
-                achados = mdm.procurar(sessao, termo, base)
+                detalhe = mdm.procurar_detalhado(sessao, termo, base)
             except Exception as exc:  # noqa: BLE001 — o diagnóstico mostra a falha
                 saida["busca"].append({"termo": termo, "erro": str(exc)[:200]})
                 continue
-            saida["busca"].append({
+            achados = detalhe.get("coletores") or []
+            linha = {
                 "termo": termo, "quantidade": len(achados),
+                "http": detalhe.get("http"), "erro": detalhe.get("erro", ""),
+                # O rodapé denuncia filtro ignorado pelo console.
+                "rodape": detalhe.get("rodape"),
                 "aparelhos": [{"id": a.get("id"), "nome": a.get("nome"),
                                "usuario": a.get("usuario"), "modelo": a.get("modelo")}
                               for a in achados[:5]],
-            })
+            }
+            rod = detalhe.get("rodape") or {}
+            if rod.get("total") and rod["total"] > 50 and len(achados) > 5:
+                linha["alerta"] = (f"a busca devolveu {rod['total']} aparelhos: o console "
+                                   "ignorou o filtro (o parâmetro de busca desta versão "
+                                   "não é SearchText).")
+            saida["busca"].append(linha)
 
     if not saida["conclusao"]:
         achou_parque = saida["no_parque"] is not None
         achou_busca = any(b.get("quantidade") == 1 for b in saida["busca"])
         ambiguo = any((b.get("quantidade") or 0) > 1 for b in saida["busca"])
+        filtro_ignorado = any(b.get("alerta") for b in saida["busca"])
+        if filtro_ignorado:
+            saida["conclusao"] = next(b["alerta"] for b in saida["busca"] if b.get("alerta"))
+            return saida
         if achou_parque or achou_busca:
             saida["conclusao"] = ("O aparelho é encontrado; a remoção deve funcionar. "
                                   "Se não funcionou, o console recusou a escrita — "

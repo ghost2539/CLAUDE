@@ -130,6 +130,7 @@ with dbo.SessionLocal() as s:
            "a tentativa fica na trilha de escrita")
 
 from integracoes import mdm_airwatch as mdm  # noqa: E402
+_procurar_detalhado_real = mdm.procurar_detalhado
 REQ_DIAG = object()
 chamadas = []
 mdm.remover_dispositivo = lambda sessao, mdm_id, base="", endpoint="", metodo="POST", campo="id": (
@@ -390,6 +391,10 @@ dbo.gravar_config({"remover_do_mdm_no_recebimento": "1",
                    "mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}"})
 mdm.procurar = lambda sessao, texto, base="": (
     [{"id": "m-55", "nome": "ljr055_coletor"}] if texto == "SN-ACHA" else [])
+mdm.procurar_detalhado = lambda sessao, texto, base="": {
+    "coletores": [{"id": "m-55", "nome": "ljr055_coletor"}] if texto == "SN-ACHA" else [],
+    "rodape": {"de": 1, "ate": 1, "total": 1} if texto == "SN-ACHA" else None,
+    "erro": "", "http": 200, "url": ""}
 
 d = ob.mdm_diagnostico(REQ_DIAG, serie="SN-ACHA")
 checar(d["remocao_ligada"] and d["endpoint"].endswith("{id}"), "mostra a configuração vigente")
@@ -411,6 +416,80 @@ e = ob.mdm_escritas(REQ_DIAG, limite=5)
 checar("escritas" in e and isinstance(e["escritas"], list),
        "a trilha de escritas no MDM é consultável")
 checar(all("resposta" in x for x in e["escritas"]), "com a resposta do console em cada uma")
+
+print("\n[14] Diagnóstico da depreciação diz em qual passo ela para")
+class _Resp:
+    def __init__(self, status=200, texto="", url=""):
+        self.status_code, self.text, self.url = status, texto, url
+
+class _BS:
+    """BeautifulSoup de mentira: devolve o que o teste mandar achar."""
+    def __init__(self, texto, _parser):
+        self.texto = texto
+    def find(self, tag, *a, **k):
+        if tag == "a":
+            return {"gsft_action_name": "acao-1"} if "CALC" in self.texto else None
+        if tag == "form":
+            return _Form() if "FORM" in self.texto else None
+        return None
+
+class _Form(dict):
+    def __bool__(self):
+        return True          # formulário vazio ainda é um formulário
+    def find_all(self, _tag):
+        return []
+    def get(self, chave, padrao=None):
+        return padrao
+
+class _SessaoSN:
+    def __init__(self, pagina, status=200, url="https://sn/alm_hardware.do"):
+        self.pagina, self.status, self.url = pagina, status, url
+        self.posts = []
+    def get(self, url, **k):
+        return _Resp(self.status, self.pagina, self.url)
+    def post(self, url, **k):
+        self.posts.append(url)
+        return _Resp(200, "ok", "https://sn/alm_hardware.do")
+
+_bs_real = sn._get_http
+sn._get_http = lambda: (None, _BS)
+
+d = sn._depreciacao_passos(_SessaoSN("", 200, "https://sn/login.do"), "sys-1", _BS)
+checar(not d["ok"] and "login" in d["motivo"], f"sessão caída no login é nomeada ({d['motivo'][:40]})")
+
+d = sn._depreciacao_passos(_SessaoSN("pagina sem acao"), "sys-1", _BS)
+checar(not d["ok"] and "Calculate Depreciation" in d["motivo"],
+       "ação ausente no formulário é nomeada")
+
+d = sn._depreciacao_passos(_SessaoSN("CALC mas sem form"), "sys-1", _BS)
+checar(not d["ok"] and "formulário do ativo" in d["motivo"], "formulário ausente é nomeado")
+
+d = sn._depreciacao_passos(_SessaoSN("CALC FORM"), "sys-1", _BS, executar=False)
+checar(d["ok"] and "não executa" in d["motivo"], "no modo diagnóstico não executa a ação")
+checar(len(d["passos"]) >= 4, "e mostra o caminho passo a passo")
+
+ses = _SessaoSN("CALC FORM")
+d = sn._depreciacao_passos(ses, "sys-1", _BS, executar=True)
+checar(d["ok"] and ses.posts, "com o caminho inteiro, executa e confirma")
+sn._get_http = _bs_real
+
+print("\n[15] Busca no MDM denuncia filtro ignorado pelo console")
+mdm.procurar_detalhado = _procurar_detalhado_real   # aqui a função real é o alvo
+class _SessaoMDM:
+    def __init__(self, html):
+        self.html = html
+    def get(self, url, **k):
+        return _Resp(200, self.html, url)
+
+GRADE_UMA = ('<table class="DeviceGrid"><tr data-view-url="/AirWatch/Device/Details/Summary/77">'
+             '<td data-property="FriendlyName"><span id="FriendlyName">ljr077</span></td></tr>'
+             '</table>Items 1 - 1 of 1')
+d = mdm.procurar_detalhado(_SessaoMDM(GRADE_UMA), "SN-X", "https://mdm")
+checar(len(d["coletores"]) == 1 and d["rodape"]["total"] == 1,
+       "busca que filtra devolve um aparelho e o rodapé bate")
+d = mdm.procurar_detalhado(_SessaoMDM("<html>login</html>"), "SN-X", "https://mdm")
+checar(not d["coletores"] and "fragmento" in d["erro"],
+       f"resposta que não é a grade vira erro explicado ({d['erro'][:30]})")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

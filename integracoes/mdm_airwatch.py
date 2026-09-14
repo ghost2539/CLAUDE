@@ -245,19 +245,39 @@ def procurar(sessao, texto: str, base: str = "") -> list[dict]:
     publica a série nas colunas, então o parque guardado não pode ser o
     único caminho — o console é quem sabe.
     """
+    return procurar_detalhado(sessao, texto, base)["coletores"]
+
+
+def procurar_detalhado(sessao, texto: str, base: str = "") -> dict:
+    """Igual a `procurar`, mas devolve também o rodapé e o que houve.
+
+    O rodapé é o que denuncia filtro ignorado: se a busca por uma série
+    devolve "Items 1 - 100 of 15819", o console não filtrou nada e quem
+    lê a lista está olhando o parque inteiro.
+    """
+    saida = {"coletores": [], "rodape": None, "erro": "", "http": 0, "url": ""}
     texto = str(texto or "").strip()
     if not texto:
-        return []
+        saida["erro"] = "sem texto de busca"
+        return saida
     from urllib.parse import quote
     url = (base or "") + GRADE + "?Page=0&SearchText=" + quote(texto)
+    saida["url"] = url
     try:
         r = sessao.get(url, headers=CABECALHOS, timeout=60)
-    except Exception:  # noqa: BLE001 — quem chama registra a falha
-        return []
+    except Exception as exc:  # noqa: BLE001 — quem chama registra a falha
+        saida["erro"] = str(exc)[:200]
+        return saida
+    saida["http"] = getattr(r, "status_code", 0)
     txt = getattr(r, "text", "") or ""
     if "DeviceGrid" not in txt:
-        return []
-    return parse_grade(txt)["coletores"]
+        saida["erro"] = ("a grade não respondeu o fragmento "
+                         "(sessão expirada ou parâmetro de busca diferente)")
+        return saida
+    grade = parse_grade(txt)
+    saida["coletores"] = grade["coletores"]
+    saida["rodape"] = grade["rodape"]
+    return saida
 
 
 def varrer(sessao, base: str = "", max_paginas: int = 400, progresso=None) -> dict:
