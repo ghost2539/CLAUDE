@@ -40,15 +40,18 @@ MODULO = "orcamento_manutencao"
 R = db.Reparo
 
 # Categorias com rótulo canônico (3.1); qualquer outra vai por família.
+# Tudo o que a planilha chama de coletor vira a categoria "Coletor", e tudo
+# o que ela chama de sled vira "SLED". O modelo (HF550, RFR901…) sai da série
+# e vive em coluna própria.
 CATEGORIAS_CANONICAS = {
     "coletor": ("Coletor", "COLETOR"),
     # A planilha do fornecedor chama o Coletor pelo fabricante (8.2).
     "coletor - bluebird": ("Coletor", "COLETOR"),
     "coletor bluebird": ("Coletor", "COLETOR"),
-    "coletor hf550x": ("Coletor HF550X", "COLETOR"),
-    "coletor s70": ("Coletor S70", "COLETOR"),
-    "sled rfid": ("Sled RFID", "SLED"),
-    "sled rfr901": ("Sled RFR901", "SLED"),
+    "coletor hf550x": ("Coletor", "COLETOR"),
+    "coletor s70": ("Coletor", "COLETOR"),
+    "sled rfid": ("SLED", "SLED"),
+    "sled rfr901": ("SLED", "SLED"),
 }
 
 
@@ -134,15 +137,47 @@ def _texto_rma(v) -> str:
 
 # ── Normalização (seção 3) — funções puras ──────────────────────────────
 def normalizar_categoria(texto) -> tuple[str, str]:
+    """Categoria é só Coletor ou SLED — o modelo é que distingue o aparelho.
+
+    O texto que vem da planilha ainda traz o modelo junto ("Coletor HF550X",
+    "Sled RFR901"); aqui ele é reduzido à categoria. Texto que não fala nem de
+    coletor nem de sled volta como veio, com família OUTRO, para não sumir da
+    base sem alguém ver.
+    """
     original = _texto(texto, 40)
     chave = _sem_acento(original)
     if chave in CATEGORIAS_CANONICAS:
         return CATEGORIAS_CANONICAS[chave]
     if "coletor" in chave:
-        return original.title(), "COLETOR"
+        return "Coletor", "COLETOR"
     if "sled" in chave:
-        return original.title(), "SLED"
+        return "SLED", "SLED"
     return original, "OUTRO"
+
+
+# ── Modelo pelo prefixo da série (regra da área) ────────────────────────
+# A tabela e a leitura vivem no módulo do banco: a subida precisa delas para
+# preencher o modelo dos reparos que já estavam na base.
+MODELOS_POR_PREFIXO = db.MODELOS_POR_PREFIXO
+modelo_da_serie = db.modelo_da_serie
+modelo_no_texto = db.modelo_no_texto
+
+
+def resolver_modelo(serie, categoria_texto) -> tuple[str, str, str]:
+    """(modelo, categoria, família) — a série manda; a categoria é o socorro.
+
+    Devolve a categoria já reduzida a Coletor/SLED sempre que dá para saber a
+    família. Sem nenhuma pista, devolve o texto da categoria como veio.
+    """
+    modelo, familia = modelo_da_serie(serie)
+    if not modelo:
+        modelo, familia = modelo_no_texto(categoria_texto)
+    categoria, familia_texto = normalizar_categoria(categoria_texto)
+    if not familia:
+        familia = familia_texto
+    if familia in db.CATEGORIA_DA_FAMILIA:
+        categoria = db.CATEGORIA_DA_FAMILIA[familia]
+    return modelo, categoria, familia
 
 
 def normalizar_status(texto) -> tuple[str, bool]:
@@ -311,7 +346,10 @@ def calcular(r, limiar: float) -> bool:
             r.status = "APROVADO"
             r.status_original = "Aprovado — garantia"
         return antes != (r.percentual, r.avaliacao, r.status, r.status_original)
-    if r.avaliacao == "FORA" and r.status in db.STATUS_PENDENTES:
+    # RFR901, HF550 e S70 podem ser aprovados mesmo acima dos 60 %: ficam de
+    # fora da reprovação automática e seguem pendentes para decisão manual.
+    if (r.avaliacao == "FORA" and r.status in db.STATUS_PENDENTES
+            and not _isento_60(getattr(r, "modelo", ""), r.categoria)):
         r.status = "REPROVADO"
         pct = f"{perc * 100:.1f}".replace(".", ",")
         lim = f"{limiar * 100:g}".replace(".", ",")
@@ -319,13 +357,45 @@ def calcular(r, limiar: float) -> bool:
     return antes != (r.percentual, r.avaliacao, r.status, r.status_original)
 
 
-def _padrao_categoria(config: dict, categoria: str) -> Optional[float]:
-    chave = _sem_acento(categoria)
-    for nome, valor in (config.get("valor_compra_padrao") or {}).items():
-        if _sem_acento(nome) == chave:
-            v = _numero(valor)
-            if v and v > 0:
-                return round(v, 2)
+# Modelos que podem ser aprovados acima dos 60 %: a regra automática não os
+# reprova; a aprovação é decidida manualmente.
+_ISENTOS_60 = ("RFR901", "HF550", "S70")
+
+
+def _isento_60(*textos) -> bool:
+    """Modelo isento da reprovação automática. Olha modelo e categoria: na
+    base antiga o modelo estava dentro do texto da categoria."""
+    chave = "".join(_sem_acento(x).replace(" ", "") for x in textos if x)
+    return any(m.lower() in chave for m in _ISENTOS_60)
+
+
+# Nomes que a configuração usa hoje para o valor de compra, por modelo. Os
+# valores continuam sendo os da configuração — aqui só se diz onde procurar
+# o preço de cada modelo, do mais específico para o mais genérico.
+CHAVES_VALOR_COMPRA: dict[str, tuple[str, ...]] = {
+    "HF550": ("HF550", "Coletor HF550X", "Coletor"),
+    "EF500": ("EF500", "Coletor"),
+    "EF501": ("EF501", "Coletor"),
+    "S70": ("S70", "Coletor S70", "Coletor"),
+    "SLED RFR900": ("SLED RFR900", "RFR900", "Sled RFID"),
+    "SLED RFR901": ("SLED RFR901", "RFR901", "Sled RFR901", "Sled RFID"),
+}
+
+
+def _padrao_categoria(config: dict, categoria: str,
+                      modelo: str = "") -> Optional[float]:
+    """Valor de compra padrão: pelo modelo, e só então pela categoria."""
+    padroes = config.get("valor_compra_padrao") or {}
+    procurar = [*CHAVES_VALOR_COMPRA.get(modelo or "", ()), categoria]
+    for alvo in procurar:
+        if not alvo:
+            continue
+        chave = _sem_acento(alvo)
+        for nome, valor in padroes.items():
+            if _sem_acento(nome) == chave:
+                v = _numero(valor)
+                if v and v > 0:
+                    return round(v, 2)
     return None
 
 
@@ -347,7 +417,7 @@ def _valor_compra_para(r, config: dict, ebs_custo: Optional[float] = None,
         return round(orc / razao, 2), "PLANILHA"
     if atual and fonte == "PLANILHA":
         return atual, "PLANILHA"
-    padrao = _padrao_categoria(config, r.categoria)
+    padrao = _padrao_categoria(config, r.categoria, getattr(r, "modelo", "") or "")
     if padrao:
         return padrao, "PADRAO"
     if atual and fonte == "MANUAL":
@@ -493,7 +563,7 @@ def _mes_entrada(v) -> Optional[str]:
 # ── Filtros e serialização ──────────────────────────────────────────────
 def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None,
              status_retorno=None, empresa=None, tipo_manutencao=None, q=None,
-             min_reparos=None):
+             min_reparos=None, lote=None, modelo=None):
     if min_reparos and int(min_reparos) > 1:
         # Reincidência (8.4): só as séries com N atendimentos ou mais. Uma
         # subconsulta agrupada, para valer igual na lista e na contagem.
@@ -508,12 +578,18 @@ def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None
         stmt = stmt.where(R.familia == familia.strip().upper())
     if categoria:
         stmt = stmt.where(R.categoria == normalizar_categoria(categoria)[0])
+    if modelo and modelo.strip():
+        stmt = stmt.where(R.modelo == modelo.strip().upper())
     if status:
         stmt = stmt.where(R.status == normalizar_status(status)[0])
     if status_retorno:
         stmt = stmt.where(R.status_retorno == normalizar_status_retorno(status_retorno))
     if empresa:
         stmt = stmt.where(R.empresa == normalizar_empresa(empresa))
+    if lote and lote.strip():
+        # Casa por conteúdo e sem diferenciar maiúsculas (vale em SQLite e
+        # Postgres): digitar "lote" traz todos que contêm "lote".
+        stmt = stmt.where(func.lower(R.lote_prime).like(f"%{lote.strip().lower()}%"))
     if tipo_manutencao:
         stmt = stmt.where(R.tipo_manutencao == normalizar_tipo(tipo_manutencao)[0])
     if q and q.strip():
@@ -657,12 +733,16 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
                   "reprovados": 0, "pendentes": 0, "garantia": 0,
                   "consumo": 0.0, "consumo_contrato": 0.0, "consumo_avulsa": 0.0,
                   "reprovados_valor": 0.0}
-        for cat, fam, tipo, status, garantia, q, soma_orc, soma_vc in s.execute(
-            select(R.categoria, R.familia, R.tipo_manutencao, R.status, R.garantia,
-                   func.count(R.id), func.coalesce(func.sum(R.orcamento), 0),
+        # Consumo por modelo, no mesmo escopo — a quebra fina do painel.
+        modelos: dict[str, dict] = {}
+        for cat, fam, mod, tipo, status, garantia, q, soma_orc, soma_vc in s.execute(
+            select(R.categoria, R.familia, R.modelo, R.tipo_manutencao, R.status,
+                   R.garantia, func.count(R.id),
+                   func.coalesce(func.sum(R.orcamento), 0),
                    func.coalesce(func.sum(R.valor_compra), 0))
             .where(escopo)
-            .group_by(R.categoria, R.familia, R.tipo_manutencao, R.status, R.garantia)
+            .group_by(R.categoria, R.familia, R.modelo, R.tipo_manutencao,
+                      R.status, R.garantia)
         ).all():
             c = categorias.setdefault((cat, fam), {
                 "categoria": cat, "familia": fam, "consumo": 0.0,
@@ -670,7 +750,23 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
                 "reparados_contrato": 0, "reparados_avulsa": 0,
                 "reprovados_qtde": 0, "reprovados_valor": 0.0,
             })
+            # Reparo antigo pode não ter modelo: fica sob "não identificado"
+            # em vez de sumir da conta.
+            chave_mod = mod or "(sem modelo)"
+            m = modelos.setdefault(chave_mod, {
+                "modelo": chave_mod, "categoria": cat, "familia": fam,
+                "consumo": 0.0, "reparados": 0, "reprovados_qtde": 0,
+                "reprovados_valor": 0.0, "pendentes": 0,
+            })
             q, valor_orc, valor_vc = int(q), float(soma_orc), float(soma_vc)
+            if status == "APROVADO":
+                m["consumo"] += valor_orc
+                m["reparados"] += q
+            elif status == "REPROVADO":
+                m["reprovados_qtde"] += q
+                m["reprovados_valor"] += valor_vc
+            else:
+                m["pendentes"] += q
             sufixo = "contrato" if tipo == "CONTRATO" else "avulsa"
             if status == "APROVADO":
                 c["consumo"] += valor_orc
@@ -701,6 +797,16 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
         for c in lista_categorias:
             for chave in ("consumo", "consumo_contrato", "consumo_avulsa", "reprovados_valor"):
                 c[chave] = _dinheiro(c[chave])
+        lista_modelos = sorted(modelos.values(),
+                               key=lambda x: (-x["consumo"], -x["reparados"], x["modelo"]))
+        consumo_modelos = sum(m["consumo"] for m in lista_modelos)
+        for m in lista_modelos:
+            m["media"] = _dinheiro(m["consumo"] / m["reparados"]) if m["reparados"] else 0.0
+            # Fatia do consumo do período: é a leitura que a área pede.
+            m["participacao"] = (round(m["consumo"] / consumo_modelos, 4)
+                                 if consumo_modelos else None)
+            for chave in ("consumo", "reprovados_valor"):
+                m[chave] = _dinheiro(m[chave])
         for bloco in (gerais, por_tipo):
             for dados in bloco.values():
                 dados["consumo"] = _dinheiro(dados["consumo"])
@@ -776,6 +882,7 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
         "aguardando_aprovacao": ag_aprovacao,
         "aguardando_devolucao": list(devolucao.values()),
         "categorias": lista_categorias,
+        "modelos": lista_modelos,
         "totais": totais,
     }
 
@@ -787,6 +894,7 @@ def listar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
            status: Optional[str] = None, status_retorno: Optional[str] = None,
            empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
            q: Optional[str] = None, min_reparos: Optional[int] = None,
+           lote: Optional[str] = None, modelo: Optional[str] = None,
            limit: int = 100, offset: int = 0):
     """`min_reparos=2` deixa só o que é reincidente (8.4). Cada item leva
     `serie_reparos` e `serie_custo` — o histórico da série na base inteira."""
@@ -795,7 +903,8 @@ def listar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
     offset = max(0, int(offset or 0))
     filtros = dict(ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
                    status_retorno=status_retorno, empresa=empresa,
-                   tipo_manutencao=tipo_manutencao, q=q, min_reparos=min_reparos)
+                   tipo_manutencao=tipo_manutencao, q=q, min_reparos=min_reparos,
+                   lote=lote, modelo=modelo)
     with db.SessionLocal() as s:
         total = s.scalar(_filtrar(select(func.count(R.id)), **filtros)) or 0
         itens = s.scalars(_ordenado(_filtrar(select(R), **filtros))
@@ -818,7 +927,7 @@ def criar(body: ReparoIn, req: Request):
 
     rma = _texto_rma(body.rma)
     serie = _texto(body.serie, 60).upper()
-    categoria, familia = normalizar_categoria(body.categoria)
+    modelo, categoria, familia = resolver_modelo(serie, body.categoria)
     if not rma or not serie or not categoria:
         raise HTTPException(422, "RMA, série e categoria são obrigatórios.")
     try:
@@ -835,7 +944,7 @@ def criar(body: ReparoIn, req: Request):
         config = db.ler_config(s)
 
     r = R(
-        rma=rma, serie=serie, categoria=categoria, familia=familia,
+        rma=rma, serie=serie, categoria=categoria, modelo=modelo, familia=familia,
         loja=_inteiro(body.loja), empresa=normalizar_empresa(body.empresa),
         orcamento=orcamento, garantia=bool(garantia or body.garantia),
         status=status, status_original=status_original,
@@ -899,8 +1008,11 @@ def atualizar(reparo_id: int, body: ReparoPatch, req: Request):
             r.serie = _texto(dados["serie"], 60).upper()
             if not r.serie:
                 raise HTTPException(422, "Série não pode ficar vazia.")
-        if "categoria" in dados:
-            r.categoria, r.familia = normalizar_categoria(dados["categoria"])
+        if "serie" in dados or "categoria" in dados:
+            # Trocar a série pode trocar o modelo, e o modelo manda na
+            # categoria: as três andam juntas.
+            texto_categoria = dados.get("categoria", r.categoria)
+            r.modelo, r.categoria, r.familia = resolver_modelo(r.serie, texto_categoria)
             if not r.categoria:
                 raise HTTPException(422, "Categoria não pode ficar vazia.")
         if "loja" in dados:
@@ -1051,8 +1163,15 @@ CAMPOS_OPCIONAIS = ("loja", "lote_prime", "qtde", "status_retorno", "ano_devoluc
 def _mapear_colunas(colunas) -> dict:
     """{destino: nome da coluna no arquivo}; None para o que não veio."""
     cmap = {_sem_acento(c): c for c in colunas}
-    return {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
+    mapa = {k: next((cmap[_sem_acento(a)] for a in al if _sem_acento(a) in cmap), None)
             for k, al in ALIASES.items()}
+    # Lote: se o nome exato não bateu, aceita qualquer coluna que contenha
+    # "lote" (ex.: "Lote de Reparo"), para não vir vazio.
+    if not mapa.get("lote_prime"):
+        achou = next((orig for norm, orig in cmap.items() if "lote" in norm), None)
+        if achou:
+            mapa["lote_prime"] = achou
+    return mapa
 
 
 def _layout_da_aba(colunas) -> str:
@@ -1134,7 +1253,8 @@ def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str,
     não apagar o que ele nem menciona (ver CAMPOS_OPCIONAIS)."""
     cols = {
         "rma": d.rma, "serie": d.serie, "categoria": d.categoria,
-        "familia": d.familia, "empresa": d.empresa, "orcamento": d.orcamento,
+        "modelo": d.modelo, "familia": d.familia,
+        "empresa": d.empresa, "orcamento": d.orcamento,
         "garantia": d.garantia, "valor_compra": d.valor_compra,
         "valor_compra_fonte": d.valor_compra_fonte, "percentual": d.percentual,
         "avaliacao": d.avaliacao, "status": d.status, "status_original": d.status_original,
@@ -1149,10 +1269,15 @@ def _linha_para_colunas(d: SimpleNamespace, agora, usuario: str,
 
 @router.post("/importar")
 def importar(req: Request, file: UploadFile = File(...),
-             substituir: bool = Form(False), aba: str = Form("")):
+             substituir: bool = Form(False), aba: str = Form(""),
+             dry_run: bool = Form(False), lote: str = Form(""),
+             lotes: str = Form("")):
     """`substituir=true`: a planilha vira a base. Linhas importadas antes que
     não estão no arquivo são removidas; o que foi digitado no portal fica.
-    `aba`: qual aba do xlsx ler; sem ela, a primeira que servir (8.2)."""
+    `aba`: qual aba do xlsx ler; sem ela, a primeira que servir (8.2).
+    `lote`: lote de reparo informado na prévia, para as linhas que a planilha
+    não trouxe preenchidas. `lotes`: JSON {RMA: lote} com o que foi corrigido
+    linha a linha na prévia — este manda em todos os outros."""
     sd = _exigir(req, "admin")
     check_rate_limit(req, "api")
     usuario = _usuario(sd)
@@ -1169,6 +1294,19 @@ def importar(req: Request, file: UploadFile = File(...),
                             + f". Colunas encontradas: {', '.join(map(str, df.columns))}")
     extras = tuple(c for c in CAMPOS_OPCIONAIS if colunas.get(c))
     tem_categoria = bool(colunas["categoria"])
+
+    # Lote de reparo digitado na prévia. Só entra na gravação se houver algo
+    # a gravar — sem isso, uma planilha sem coluna de lote apagaria o lote
+    # que já está na base.
+    lote_geral = _texto(lote, 200)
+    try:
+        lote_por_rma = {_texto_rma(k): _texto(v, 200)
+                        for k, v in (json.loads(lotes or "{}") or {}).items()}
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Lista de lotes inválida.")
+    lote_por_rma = {k: v for k, v in lote_por_rma.items() if k}
+    if (lote_geral or lote_por_rma) and "lote_prime" not in extras:
+        extras = (*extras, "lote_prime")
 
     detalhes, avisos_detalhes = [], []
     avisos = Counter(status_nao_reconhecido=0, tipo_nao_reconhecido=0,
@@ -1218,14 +1356,20 @@ def importar(req: Request, file: UploadFile = File(...),
                 rejeitar(idx, "série vazia")
                 continue
             ant = existentes.get(rma)
-            if tem_categoria:
-                categoria, familia = normalizar_categoria(val("categoria"))
-                if not categoria:
-                    rejeitar(idx, "categoria vazia")
-                    continue
-            else:
-                # Sem coluna CATEGORIA (aba AVULSO): mantém a que já existe.
-                categoria, familia = (ant.categoria, ant.familia) if ant else ("", "OUTRO")
+            # O modelo sai do prefixo da série; a categoria vem dele. Sem
+            # série reconhecida, vale o texto da planilha (ou o que já existe).
+            texto_categoria = val("categoria") if tem_categoria else (
+                ant.categoria if ant else "")
+            modelo, categoria, familia = resolver_modelo(serie, texto_categoria)
+            if tem_categoria and not categoria:
+                rejeitar(idx, "categoria vazia")
+                continue
+            if not categoria and ant:
+                # Sem coluna CATEGORIA (aba AVULSO) e série desconhecida:
+                # mantém o que já está gravado.
+                categoria, familia = ant.categoria, ant.familia
+            if not familia:
+                familia = "OUTRO"
             try:
                 orcamento, garantia = interpretar_orcamento(val("orcamento"))
             except ValueError as exc:
@@ -1297,7 +1441,10 @@ def importar(req: Request, file: UploadFile = File(...),
                 status_retorno=normalizar_status_retorno(val("status_retorno")),
                 ano=_inteiro(val("ano")) or (int(mes[:4]) if mes else date.today().year),
                 mes_referencia=mes, ano_devolucao=_inteiro(val("ano_devolucao")),
-                lote_prime=_texto(val("lote_prime"), 200), qtde=_inteiro(val("qtde")) or 1,
+                modelo=modelo,
+                lote_prime=(lote_por_rma.get(rma)
+                            or _texto(val("lote_prime"), 200) or lote_geral),
+                qtde=_inteiro(val("qtde")) or 1,
                 origem_equipamento=_texto(val("origem_equipamento"), 10).upper(),
                 disponibilizacao=disponibilizacao, po=_texto(val("po"), 40),
             )
@@ -1311,35 +1458,54 @@ def importar(req: Request, file: UploadFile = File(...),
                 novos.append({**cols, "observacao": "", "ebs_erro": "", "ebs_consultado_em": None,
                               "criado_em": agora, "criado_por": usuario, "origem": "PLANILHA"})
 
-        for i in range(0, len(novos), 500):
-            s.execute(insert(R), novos[i:i + 500])
-        for i in range(0, len(alterados), 500):
-            s.execute(update(R), alterados[i:i + 500])
+        # Amostra para a tela conferir antes de gravar (o que entraria).
+        def _amostra(reg, acao):
+            return {
+                "acao": acao, "rma": reg.get("rma", ""), "serie": reg.get("serie", ""),
+                "categoria": reg.get("categoria", ""), "modelo": reg.get("modelo", ""),
+                "familia": reg.get("familia", ""),
+                "lote_prime": reg.get("lote_prime", ""), "status": reg.get("status", ""),
+                "tipo_manutencao": reg.get("tipo_manutencao", ""),
+                "mes_referencia": reg.get("mes_referencia") or "",
+                "empresa": reg.get("empresa", ""),
+                "orcamento": reg.get("orcamento", 0), "loja": reg.get("loja"),
+            }
+        previa = ([_amostra(r_, "incluir") for r_ in novos[:400]]
+                  + [_amostra(r_, "atualizar") for r_ in alterados[:400]])[:500]
 
         removidas = 0
-        if substituir:
-            # Só sai o que veio de planilha: o que foi digitado no portal fica.
-            sobrando = [
-                rid for rid, rma in s.execute(
-                    select(R.id, R.rma).where(R.origem == "PLANILHA")).all()
-                if rma not in no_arquivo
-            ]
-            for i in range(0, len(sobrando), 500):
-                s.execute(delete(R).where(R.id.in_(sobrando[i:i + 500])))
-            removidas = len(sobrando)
+        if not dry_run:
+            for i in range(0, len(novos), 500):
+                s.execute(insert(R), novos[i:i + 500])
+            for i in range(0, len(alterados), 500):
+                s.execute(update(R), alterados[i:i + 500])
 
-        rejeitadas = lidas - len(novos) - len(alterados)
-        s.add(db.Importacao(
-            arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
-            atualizadas=len(alterados), rejeitadas=rejeitadas,
-            detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
-                                 "aba": aba_usada, "rejeicoes": detalhes}, ensure_ascii=False),
-        ))
+            if substituir:
+                # Só sai o que veio de planilha: o que foi digitado no portal fica.
+                sobrando = [
+                    rid for rid, rma in s.execute(
+                        select(R.id, R.rma).where(R.origem == "PLANILHA")).all()
+                    if rma not in no_arquivo
+                ]
+                for i in range(0, len(sobrando), 500):
+                    s.execute(delete(R).where(R.id.in_(sobrando[i:i + 500])))
+                removidas = len(sobrando)
 
+            rejeitadas_log = lidas - len(novos) - len(alterados)
+            s.add(db.Importacao(
+                arquivo=nome, usuario=usuario, lidas=lidas, incluidas=len(novos),
+                atualizadas=len(alterados), rejeitadas=rejeitadas_log,
+                detalhes=json.dumps({"substituir": bool(substituir), "removidas": removidas,
+                                     "aba": aba_usada, "rejeicoes": detalhes}, ensure_ascii=False),
+            ))
+        # dry_run: nada é gravado — o bloco só leu, então fecha sem alterações.
+
+    rejeitadas = lidas - len(novos) - len(alterados)
     return {
+        "dry_run": bool(dry_run),
         "lidas": lidas, "incluidas": len(novos), "atualizadas": len(alterados),
         "rejeitadas": rejeitadas, "removidas": removidas,
-        "substituiu": bool(substituir), "detalhes": detalhes,
+        "substituiu": bool(substituir), "detalhes": detalhes, "previa": previa,
         "aba": aba_usada, "abas_disponiveis": abas_disponiveis, "layout": layout,
         "avisos": dict(avisos), "avisos_detalhes": avisos_detalhes,
     }
@@ -1384,14 +1550,15 @@ def exportar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
              familia: Optional[str] = None, categoria: Optional[str] = None,
              status: Optional[str] = None, status_retorno: Optional[str] = None,
              empresa: Optional[str] = None, tipo_manutencao: Optional[str] = None,
-             q: Optional[str] = None, min_reparos: Optional[int] = None):
+             q: Optional[str] = None, min_reparos: Optional[int] = None,
+             lote: Optional[str] = None):
     _exigir(req, "export")
     with db.SessionLocal() as s:
         config = db.ler_config(s)
         itens = s.scalars(_ordenado(_filtrar(
             select(R), ano=ano, mes=mes, familia=familia, categoria=categoria, status=status,
             status_retorno=status_retorno, empresa=empresa, tipo_manutencao=tipo_manutencao,
-            q=q, min_reparos=min_reparos,
+            q=q, min_reparos=min_reparos, lote=lote,
         ))).all()
         # Sem paginação a exportação pode levar a base toda: um agregado só.
         agregado = _agregado_series(s)
@@ -1400,7 +1567,7 @@ def exportar(req: Request, ano: Optional[int] = None, mes: Optional[str] = None,
     aval = {"DENTRO": f"Dentro dos {lim}%", "FORA": f"Fora dos {lim}%", "": ""}
     colunas = [
         ("SÉRIE", lambda r: r.serie), ("LOJA", lambda r: r.loja), ("RMA", lambda r: r.rma),
-        ("CATEGORIA", lambda r: r.categoria),
+        ("CATEGORIA", lambda r: r.categoria), ("MODELO", lambda r: r.modelo or ""),
         ("ORÇAMENTO", lambda r: "Garantia" if r.garantia else float(r.orcamento or 0)),
         ("60% ORÇAMENTO", lambda r: r.percentual), ("ANO", lambda r: r.ano),
         ("LOTE PRIME", lambda r: r.lote_prime),
@@ -1475,20 +1642,36 @@ def config_gravar(body: ConfigIn, req: Request):
 @router.post("/recalcular")
 def recalcular(req: Request):
     """Refaz percentual/avaliação de todas as linhas (e o valor PADRAO, se a
-    configuração mudou) e aplica a regra 3.5 nas pendentes."""
+    configuração mudou) e aplica a regra 3.5 nas pendentes.
+
+    Também preenche o modelo pela série e reduz a categoria a Coletor/SLED
+    na base antiga, que guardava o modelo dentro do texto da categoria."""
     sd = _exigir(req, "admin")
     check_rate_limit(req, "api")
     mudaram = 0
+    modelos_preenchidos = 0
     with db.SessionLocal.begin() as s:
         config = db.ler_config(s)
         linhas = s.scalars(select(R)).all()
         for r in linhas:
             antes = (r.valor_compra, r.valor_compra_fonte)
+            modelo, categoria, familia = resolver_modelo(r.serie, r.categoria)
+            antes_ident = (r.modelo, r.categoria, r.familia)
+            if modelo:
+                r.modelo = modelo
+            if categoria:
+                r.categoria, r.familia = categoria, familia or r.familia
+            if antes_ident != (r.modelo, r.categoria, r.familia):
+                modelos_preenchidos += 1
+            # O valor de compra depende do modelo, então vem depois dele.
             r.valor_compra, r.valor_compra_fonte = _valor_compra_para(r, config)
-            if calcular(r, config["limiar_percentual"]) or antes != (r.valor_compra, r.valor_compra_fonte):
+            if (calcular(r, config["limiar_percentual"])
+                    or antes != (r.valor_compra, r.valor_compra_fonte)
+                    or antes_ident != (r.modelo, r.categoria, r.familia)):
                 mudaram += 1
                 r.atualizado_por = _usuario(sd)
-    return {"total": len(linhas), "mudaram": mudaram}
+    return {"total": len(linhas), "mudaram": mudaram,
+            "modelos_preenchidos": modelos_preenchidos}
 
 
 # ── 5.10 Opções para os selects ─────────────────────────────────────────
@@ -1498,15 +1681,18 @@ def opcoes(req: Request):
     with db.SessionLocal() as s:
         config = db.ler_config(s)
         categorias = {c for (c,) in s.execute(select(R.categoria).distinct()).all() if c}
-        categorias |= set((config.get("valor_compra_padrao") or {}).keys())
+        modelos = {m for (m,) in s.execute(select(R.modelo).distinct()).all() if m}
         empresas = {e for (e,) in s.execute(select(R.empresa).distinct()).all() if e}
         anos = sorted({int(a) for (a,) in s.execute(select(R.ano).distinct()).all() if a}
                       | {date.today().year}, reverse=True)
+        # Todos os lotes distintos (o filtro tem autocompletar por conteúdo,
+        # então precisa da lista inteira), do mais usado para o menos usado.
         lotes = [l for (l, _) in s.execute(
             select(R.lote_prime, func.count(R.id)).where(R.lote_prime != "")
-            .group_by(R.lote_prime).order_by(func.count(R.id).desc()).limit(20)).all()]
+            .group_by(R.lote_prime).order_by(func.count(R.id).desc())).all()]
     return {
         "categorias": sorted(categorias),
+        "modelos": sorted(set(db.MODELOS) | modelos),
         "familias": list(db.FAMILIAS),
         "status": [{"valor": k, "rotulo": v} for k, v in db.STATUS_ROTULOS.items()],
         "tipos": [{"valor": k, "rotulo": v} for k, v in db.TIPOS_ROTULOS.items()],
@@ -1551,7 +1737,8 @@ def _item_retorno(r) -> dict:
     return {
         "rma": r.rma, "encontrado": True,
         "ja_devolvido": r.status_retorno == "DEVOLVIDO",
-        "id": r.id, "serie": r.serie, "categoria": r.categoria, "familia": r.familia,
+        "id": r.id, "serie": r.serie, "categoria": r.categoria,
+        "modelo": r.modelo or "", "familia": r.familia,
         "loja": r.loja, "empresa": r.empresa, "orcamento": float(r.orcamento or 0),
         "status": r.status, "status_rotulo": db.STATUS_ROTULOS.get(r.status, r.status),
         "status_retorno": r.status_retorno, "mes_referencia": r.mes_referencia,

@@ -118,15 +118,25 @@ O painel `/tv` (e `/api/tv/dashboard`) e o Controle de Orçamento de portfólio
 
 ### 5.3 `/controle-orcamento` — Execução de CAPEX
 Banco próprio (`db/orcamento_exec.py`, tabela `budget_projects` com as colunas
-`a_realizar` e `locked`). **Acesso controlado**: exige login do portal e o
+`a_realizar`, `em_andamento` e `locked`). **Acesso controlado**: exige login do portal e o
 módulo `orcamento` liberado para o usuário; toda abertura e toda gravação
 ficam na trilha `budget_acessos`.
 - **Barra de inclusão** no topo: Número (ID que puxa do EBS), Tipo (CAPEX/OPEX),
   Projeto/Demanda (manual), Categoria, Área.
 - **Puxa da API de CAPEX do EBS** (`/ebs/api/capex/?projetos=...`), mapeando:
   `saldo_inicial`→Orçamento Aprovado, `comprometido`+`reservados`→Comprometido,
-  `realizado`→Realizado, `saldo_dia`→A Realizar. (`empresa`, `devoluções`,
+  `realizado`→Realizado, `saldo_dia`→`a_realizar` (gravado, não exibido).
+  (`empresa`, `devoluções`,
   `pct_exec`, `nome_projeto` **não** são puxados.)
+- **Em Andamento** (`em_andamento`): o que ainda **não** está comprometido no
+  EBS mas já está em curso — uma PO aguardando aprovação, por exemplo. É
+  digitado na tela e **não** vem do EBS: sincronizar não o altera.
+- **Disponível** é o único saldo da tela:
+  `Orçamento Aprovado − Comprometido − Em Andamento − Realizado`. As três
+  parcelas descontam dele, e o gráfico "Situação do Orçamento" mostra as
+  quatro fatias. A coluna **A Realizar** saiu da tela (havia dois saldos
+  concorrendo); `a_realizar` continua sendo gravado pelo EBS (`saldo_dia`),
+  só não é mais exibido.
 - **Conversão de moeda**: projetos com `empresa` Argentina (ARS) ou Uruguai (UYU)
   têm valores convertidos para BRL (cotação fixa por env ou ao vivo).
 - **Cadeado por projeto** (`locked`): projeto travado **não** é alterado no
@@ -185,7 +195,7 @@ a configurar. Doc: `docs/EBS_ORACLE_BASE.md`.
 `printers`.
 
 **Bancos isolados (separados do portal):**
-- `db/orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`locked`,`synced_at`), `budget_categories`.
+- `db/orcamento_exec.py` (/controle-orcamento): `budget_projects` (+`a_realizar`,`em_andamento`,`locked`,`synced_at`), `budget_categories`.
 - `database_indicadores.py` (/indicadores): `indicador_snapshot`.
 
 ---

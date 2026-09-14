@@ -11,8 +11,20 @@ valores financeiros:
   saldo_inicial            → Orçamento Aprovado
   comprometido+reservados  → Comprometido
   realizado                → Realizado (Acum.)
-  saldo_dia                → A Realizar
+  saldo_dia                → a_realizar (gravado, não exibido)
   (empresa, devolucoes, pct_exec, nome_projeto: NÃO são puxados)
+
+"Em andamento" é digitado na tela e NÃO vem do EBS: é o que ainda não está
+comprometido lá, mas já está em curso — uma PO aguardando aprovação, por
+exemplo. Sincronizar com o EBS não o altera.
+
+O saldo da tela é um só, "Disponível":
+
+  Orçamento Aprovado − Comprometido − Em Andamento − Realizado
+
+As três parcelas descontam dele. A coluna "A Realizar" saiu da tela; o
+campo `a_realizar` continua recebendo o saldo do dia do EBS, mas não é
+mostrado — dois saldos concorrentes confundiam a leitura.
 
 ACESSO CONTROLADO: exige sessão do portal e permissão do módulo
 ``orcamento`` — liberada usuário a usuário em Parâmetros → Usuários e
@@ -25,6 +37,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import json
 import logging
 import re
 from datetime import date
@@ -42,9 +55,12 @@ from config import get_settings
 from db.orcamento_exec import (
     BudgetCategory, BudgetProject, SessionLocal, ensure_db, utcnow,
     listar_acessos, registrar_acesso,
+    NIVEIS_MODULO, nivel_do_login, listar_permissoes_modulo,
+    definir_permissao_modulo, remover_permissao_modulo,
+    OpexItem,
 )
 from core.security import (
-    check_rate_limit, client_ip, get_session, require_permission,
+    check_rate_limit, client_ip, get_session,
 )
 
 _cfg = get_settings()
@@ -131,19 +147,57 @@ def _acesso_pagina(req: Request):
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
         pass
-    try:
-        require_permission(req, MODULO, "view")
-    except HTTPException:
+    if not _pode(sd, "view"):
         registrar_acesso(sd.get("username", ""), client_ip(req), "negado",
-                         "sem permissão do módulo orcamento")
+                         "sem acesso liberado ao módulo")
         return HTMLResponse(_SEM_PERMISSAO, status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
     return _page()
 
 
+# Ações da API mapeadas ao nível mínimo próprio do módulo.
+_NIVEL_ORDEM = {"view": 1, "edit": 2, "admin": 3}
+_ACAO_NIVEL = {"view": "view", "export": "view",
+               "create": "edit", "edit": "edit", "admin": "admin"}
+
+
+def _admin_portal(sd: dict) -> bool:
+    """ADMIN do módulo vem do portal (Parâmetros): is_admin ou can_admin em
+    'orcamento'. É quem pode liberar acessos deste módulo."""
+    if sd.get("is_admin"):
+        return True
+    return bool((sd.get("permission_map") or {}).get(MODULO, {}).get("can_admin"))
+
+
+def _nivel_efetivo(sd: dict) -> str:
+    """Maior nível do usuário: admin do portal → admin; senão a liberação
+    própria do módulo (por login); e, por compatibilidade, a permissão antiga
+    do portal para 'orcamento' — assim ninguém perde acesso na migração."""
+    if _admin_portal(sd):
+        return "admin"
+    niveis = []
+    n = nivel_do_login(sd.get("username", ""))
+    if n:
+        niveis.append(n)
+    perms = (sd.get("permission_map") or {}).get(MODULO, {})
+    if perms.get("can_edit"):
+        niveis.append("edit")
+    elif perms.get("can_view"):
+        niveis.append("view")
+    return max(niveis, key=lambda x: _NIVEL_ORDEM.get(x, 0)) if niveis else ""
+
+
+def _pode(sd: dict, acao: str) -> bool:
+    alvo = _ACAO_NIVEL.get(acao, "view")
+    return _NIVEL_ORDEM.get(_nivel_efetivo(sd), 0) >= _NIVEL_ORDEM[alvo]
+
+
 def _exigir(req: Request, acao: str, registro: str = "", detalhe: str = "") -> dict:
-    """Permissão de API + trilha de acesso da operação."""
-    sd = require_permission(req, MODULO, acao)
+    """Permissão PRÓPRIA do módulo (não a grade do portal) + trilha de acesso.
+    O login continua vindo do SSO; aqui só decidimos o que ele pode fazer."""
+    sd = get_session(req)  # exige sessão (login via SSO)
+    if not _pode(sd, acao):
+        raise HTTPException(403, "Permissão insuficiente para este módulo.")
     if registro:
         registrar_acesso(sd.get("username", ""), client_ip(req), registro, detalhe)
     return sd
@@ -217,7 +271,12 @@ def _data(v: Any) -> Optional[date]:
 
 
 class ProjetoIn(BaseModel):
-    """Campos editáveis pela tabela. a_realizar NÃO entra aqui: vem do EBS."""
+    """Campos editáveis pela tabela.
+
+    `a_realizar` NÃO entra aqui: vem do EBS. `em_andamento` entra — é
+    justamente o que o EBS não tem, o que ainda não está comprometido mas já
+    está em curso (uma PO aguardando aprovação, por exemplo).
+    """
     model_config = ConfigDict(extra="forbid")
 
     codigo: Optional[str] = None
@@ -230,6 +289,7 @@ class ProjetoIn(BaseModel):
     orcamento: Optional[Decimal] = None
     comprometido: Optional[Decimal] = None
     realizado: Optional[Decimal] = None
+    em_andamento: Optional[Decimal] = None
     bloqueado: Optional[bool] = None
     vencimento: Optional[date] = None
 
@@ -268,7 +328,8 @@ class ProjetoIn(BaseModel):
     def _v_prioridade(cls, v):
         return None if v is None else _opcao(v, PRIORIDADES, "Prioridade")
 
-    @field_validator("orcamento", "comprometido", "realizado", mode="before")
+    @field_validator("orcamento", "comprometido", "realizado", "em_andamento",
+                     mode="before")
     @classmethod
     def _v_valor(cls, v):
         return None if v is None else _valor(v)
@@ -323,13 +384,15 @@ _CAMPOS = {
     "area": "area", "estagio": "stage", "prioridade": "priority",
     "orcamento": "approved_budget", "comprometido": "committed",
     "realizado": "realized", "bloqueado": "locked", "vencimento": "due_date",
+    "em_andamento": "em_andamento",
 }
 
 _PADRAO = {
     "codigo": "", "nome": "Novo projeto", "tipo": "CAPEX", "categoria": "Outros",
     "area": "", "estagio": "Planejamento", "prioridade": "Média",
     "orcamento": Decimal("0"), "comprometido": Decimal("0"),
-    "realizado": Decimal("0"), "bloqueado": False, "vencimento": None,
+    "realizado": Decimal("0"), "em_andamento": Decimal("0"),
+    "bloqueado": False, "vencimento": None,
 }
 
 
@@ -347,6 +410,7 @@ def _dict(p: BudgetProject) -> dict:
         "comprometido": float(p.committed or 0),
         "realizado": float(p.realized or 0),
         "a_realizar": float(p.a_realizar or 0),
+        "em_andamento": float(p.em_andamento or 0),
         "bloqueado": bool(p.locked),
         "vencimento": p.due_date.isoformat() if p.due_date else "",
         "ordem": p.sort_order,
@@ -608,7 +672,11 @@ def sessao(req: Request):
     sd = get_session(req, required=False)
     if not sd:
         return {"usuario": None}
-    return {"usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")}}
+    return {
+        "usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")},
+        "nivel": _nivel_efetivo(sd),          # view | edit | admin | ""
+        "admin_modulo": _admin_portal(sd),    # pode liberar acessos deste módulo
+    }
 
 
 @router.get("/api/controle-orcamento-exec/acessos")
@@ -617,6 +685,228 @@ def acessos(req: Request, limit: int = 300, usuario: str = "", acao: str = ""):
     """Trilha de acesso da tela — quem abriu e quem alterou o quê."""
     _exigir(req, "admin")
     return {"acessos": listar_acessos(limit=limit, usuario=usuario, acao=acao)}
+
+
+# ── Liberações de acesso PRÓPRIAS do módulo ─────────────────────────────
+class PermissaoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    login: str
+    nivel: str = "view"
+    nome: str = ""
+
+
+def _exigir_admin_modulo(req: Request) -> dict:
+    """Só o ADMIN do módulo (marcado em Parâmetros) gerencia as liberações."""
+    sd = get_session(req)
+    if not _admin_portal(sd):
+        raise HTTPException(403, "Apenas o administrador do módulo pode liberar acessos.")
+    return sd
+
+
+@router.get("/api/controle-orcamento-exec/permissoes")
+@_com_banco
+def listar_permissoes(req: Request):
+    _exigir_admin_modulo(req)
+    return {"permissoes": listar_permissoes_modulo(), "niveis": list(NIVEIS_MODULO)}
+
+
+@router.post("/api/controle-orcamento-exec/permissoes", status_code=201)
+@_com_banco
+def salvar_permissao(body: PermissaoIn, req: Request):
+    sd = _exigir_admin_modulo(req)
+    check_rate_limit(req, "api")
+    try:
+        p = definir_permissao_modulo(body.login, body.nivel, body.nome, sd.get("username", ""))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    registrar_acesso(sd.get("username", ""), client_ip(req), "liberar",
+                     f"{p['login']} → {p['nivel']}")
+    return p
+
+
+@router.delete("/api/controle-orcamento-exec/permissoes/{login}")
+@_com_banco
+def excluir_permissao(login: str, req: Request):
+    sd = _exigir_admin_modulo(req)
+    if not remover_permissao_modulo(login):
+        raise HTTPException(404, "Liberação não encontrada.")
+    registrar_acesso(sd.get("username", ""), client_ip(req), "revogar", login)
+    return {"ok": True}
+
+
+# ── OPEX (incluído manualmente, sem EBS; cada país na sua moeda) ─────────
+OPEX_PAISES = ("BR", "AR", "UY")
+OPEX_MOEDA = {"BR": "BRL", "AR": "ARS", "UY": "UYU"}
+OPEX_REGIAO = {"BR": "BR", "AR": "LATAM", "UY": "LATAM"}
+
+
+def _opex_valida_pais(pais: str) -> str:
+    pais = (pais or "").strip().upper()
+    if pais not in OPEX_PAISES:
+        raise HTTPException(422, "País inválido (use BR, AR ou UY).")
+    return pais
+
+
+def _opex_meses(bruto) -> dict:
+    """Normaliza o mapa de meses {1..12: valor} para JSON, ignorando o resto."""
+    out = {}
+    if isinstance(bruto, dict):
+        for k, v in bruto.items():
+            try:
+                m = int(str(k).strip())
+                if 1 <= m <= 12:
+                    out[str(m)] = round(float(v or 0), 2)
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
+class OpexItemIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    regiao: Optional[str] = None
+    pais: str = "BR"
+    ano: Optional[int] = None
+    bu: str = ""
+    fornecedor: str = ""
+    conta_contabil: str = ""
+    conta_descricao: str = ""
+    tipo_despesa: str = ""
+    orcado_meses: Optional[dict] = None
+    realizado_meses: Optional[dict] = None
+
+
+class OpexItemPatch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    pais: Optional[str] = None
+    ano: Optional[int] = None
+    bu: Optional[str] = None
+    fornecedor: Optional[str] = None
+    conta_contabil: Optional[str] = None
+    conta_descricao: Optional[str] = None
+    tipo_despesa: Optional[str] = None
+    orcado_meses: Optional[dict] = None
+    realizado_meses: Optional[dict] = None
+
+
+def _opex_resumo(s, ano: int) -> dict:
+    """Orçado e realizado por país (moeda local, sem conversão) + alerta.
+    Orçado e realizado saem das séries mensais das próprias linhas."""
+    from datetime import date as _date
+    itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)).all()
+    orcados = {p: 0.0 for p in OPEX_PAISES}
+    realizado = {p: 0.0 for p in OPEX_PAISES}
+    for it in itens:
+        d = it.to_dict()
+        if it.pais in realizado:
+            orcados[it.pais] += d["total_orcado"]
+            realizado[it.pais] += d["total_realizado"]
+    hoje = _date.today()
+    decorridos = 12 if ano < hoje.year else (hoje.month if ano == hoje.year else 0)
+    resumo = {}
+    for p in OPEX_PAISES:
+        orc = round(orcados[p], 2)
+        real = round(realizado[p], 2)
+        pct = (real / orc) if orc > 0 else None
+        # Ritmo esperado: fração do ano decorrido. Compara o realizado com ele.
+        esperado = orc * (decorridos / 12) if orc > 0 else 0.0
+        if orc <= 0:
+            alerta = "sem_orcado"
+        elif real > orc:
+            alerta = "acima"          # estourou o orçado do ano
+        elif esperado > 0 and real < esperado * 0.8:
+            alerta = "abaixo"         # gastando menos que o ritmo esperado
+        elif esperado > 0 and real > esperado * 1.1:
+            alerta = "atencao"        # acima do ritmo, mas dentro do ano
+        else:
+            alerta = "ok"
+        resumo[p] = {"pais": p, "moeda": OPEX_MOEDA[p], "regiao": OPEX_REGIAO[p],
+                     "orcado": orc, "realizado": real, "pct": pct,
+                     "residual": round(orc - real, 2), "alerta": alerta}
+    return resumo
+
+
+@router.get("/api/controle-orcamento-exec/opex")
+@_com_banco
+def opex_listar(req: Request, ano: Optional[int] = None):
+    _exigir(req, "view")
+    from datetime import date as _date
+    with SessionLocal() as s:
+        anos = sorted({a for (a,) in s.execute(
+            select(OpexItem.ano).where(OpexItem.ano > 0).distinct()).all()})
+        ano = ano or (anos[-1] if anos else _date.today().year)
+        itens = s.scalars(select(OpexItem).where(OpexItem.ano == ano)
+                          .order_by(OpexItem.sort_order, OpexItem.id)).all()
+        return {
+            "ano": ano,
+            "anos": anos or [ano],
+            "paises": list(OPEX_PAISES),
+            "moedas": OPEX_MOEDA,
+            "itens": [it.to_dict() for it in itens],
+            "resumo": _opex_resumo(s, ano),
+        }
+
+
+@router.post("/api/controle-orcamento-exec/opex", status_code=201)
+@_com_banco
+def opex_incluir(body: OpexItemIn, req: Request):
+    sd = _exigir(req, "create", "incluir", "linha OPEX")
+    check_rate_limit(req, "api")
+    from datetime import date as _date
+    pais = _opex_valida_pais(body.pais)
+    ano = int(body.ano or _date.today().year)
+    with SessionLocal.begin() as s:
+        ordem = (s.scalar(select(func.max(OpexItem.sort_order))) or 0) + 1
+        it = OpexItem(
+            regiao=OPEX_REGIAO[pais], pais=pais, ano=ano,
+            bu=body.bu[:120], fornecedor=body.fornecedor[:200],
+            conta_contabil=body.conta_contabil[:60], conta_descricao=body.conta_descricao[:200],
+            tipo_despesa=body.tipo_despesa[:80],
+            orcado_meses=json.dumps(_opex_meses(body.orcado_meses)),
+            realizado_meses=json.dumps(_opex_meses(body.realizado_meses)),
+            sort_order=ordem, atualizado_por=sd.get("username", ""),
+        )
+        s.add(it)
+        s.flush()
+        return it.to_dict()
+
+
+@router.patch("/api/controle-orcamento-exec/opex/{item_id}")
+@_com_banco
+def opex_alterar(item_id: int, body: OpexItemPatch, req: Request):
+    sd = _exigir(req, "edit")
+    with SessionLocal.begin() as s:
+        it = s.get(OpexItem, item_id)
+        if not it:
+            raise HTTPException(404, "Linha não encontrada.")
+        dados = body.model_dump(exclude_unset=True)
+        if "pais" in dados and dados["pais"] is not None:
+            it.pais = _opex_valida_pais(dados["pais"])
+            it.regiao = OPEX_REGIAO[it.pais]
+        if "ano" in dados and dados["ano"]:
+            it.ano = int(dados["ano"])
+        for campo, limite in (("bu", 120), ("fornecedor", 200), ("conta_contabil", 60),
+                              ("conta_descricao", 200), ("tipo_despesa", 80)):
+            if campo in dados and dados[campo] is not None:
+                setattr(it, campo, str(dados[campo])[:limite])
+        if "orcado_meses" in dados and dados["orcado_meses"] is not None:
+            it.orcado_meses = json.dumps(_opex_meses(dados["orcado_meses"]))
+        if "realizado_meses" in dados and dados["realizado_meses"] is not None:
+            it.realizado_meses = json.dumps(_opex_meses(dados["realizado_meses"]))
+        it.atualizado_por = sd.get("username", "")
+        s.flush()
+        return it.to_dict()
+
+
+@router.delete("/api/controle-orcamento-exec/opex/{item_id}")
+@_com_banco
+def opex_excluir(item_id: int, req: Request):
+    _exigir(req, "edit", "excluir", f"linha OPEX {item_id}")
+    with SessionLocal.begin() as s:
+        it = s.get(OpexItem, item_id)
+        if not it:
+            raise HTTPException(404, "Linha não encontrada.")
+        s.delete(it)
+    return {"ok": True}
 
 
 @router.get("/api/controle-orcamento-exec/projetos")
