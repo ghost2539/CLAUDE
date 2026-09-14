@@ -227,6 +227,36 @@ checar(sn.get("fonte") == "cofre corporativo",
        "e diz qual dos dois o portal usa de fato")
 cofre._modulo, cofre._modulo_via = None, ""
 
+print("\n[3f] Sem permissão, a tela entrega o pedido pronto")
+# O caso real do servidor: o módulo importa, mas o arquivo do cofre não é
+# legível pelo usuário do serviço. A tela precisa dizer o que pedir.
+from routers import cofre as rc2  # noqa: E402
+
+ARQ = _TMP / "secrets.env"
+ARQ.write_text("X=1\n", encoding="utf-8")
+info = rc2._arquivo(str(ARQ))
+checar(info["existe"] and info["dono"] and info["modo"],
+       "diz dono e modo do arquivo do cofre")
+checar(info["pasta"]["caminho"] == str(_TMP) and info["pasta"]["grupo"],
+       "e o dono/grupo da pasta — serve quando o arquivo não se deixa consultar")
+
+sem_leitura = dict(info, legivel=False, grupo="vcreports", dono="root")
+rem = rc2._remedio(sem_leitura, "portal")
+checar(rem["necessario"] is True, "reconhece que falta permissão")
+checar("vcreports" in rem["motivo"] and "portal" in rem["motivo"],
+       "explica com o grupo do arquivo e o usuário do serviço")
+checar(any("usermod -aG vcreports portal" in c for c in rem["comandos"]),
+       "e monta o comando com os dois nomes certos")
+checar(any("chmod g+r" in c for c in rem["comandos"]), "mais a leitura do arquivo")
+
+fora = rc2._remedio({"caminho": "/etc/vcreports/.secrets.env", "existe": False,
+                     "pasta_acessivel": False,
+                     "pasta": {"caminho": "/etc/vcreports"}}, "portal")
+checar(fora["necessario"] is True and any("setfacl" in c for c in fora["comandos"]),
+       "pasta inacessível também vira pedido, não silêncio")
+checar(rc2._remedio(info, "portal")["necessario"] is False,
+       "arquivo legível não gera pedido nenhum")
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -267,6 +297,7 @@ checar("['cofre',           'Cofre de segredos']" in js, "a aba está na lista")
 checar("cofre:          renderCofre" in js, "e ligada ao renderizador")
 checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")
 checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
+checar("remedioHtml" in js, "a tela mostra o pedido de permissão pronto")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
 checar("inventarioHtml" in js and "alternativasHtml" in js,
        "a tela mostra de onde o cofre lê e os apelidos sondados")
