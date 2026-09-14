@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
 from db.portal import init_db
+from core.prefixo import com_prefixo, prefixo
 from core.security import (
     SecurityHeadersMiddleware,
     BotProtectionMiddleware,
@@ -58,18 +59,11 @@ def create_app() -> FastAPI:
     # ── Page routes ─────────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
-    def index():
+    def index(request: Request):
+        # O prefixo sai do --root-path do uvicorn ou do APP_BASE_PATH; na
+        # raiz do domínio é vazio e a página vai como está.
         html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
-        base = _cfg.APP_BASE_PATH
-        if base:
-            # Servido num subcaminho do proxy: os arquivos e a API precisam
-            # levar o prefixo, senão o navegador os busca na raiz do domínio.
-            # O <meta> diz o prefixo ao app.js; os <link>/<script> do topo
-            # ganham o prefixo aqui. Vazio (produção) não muda nada.
-            html = html.replace('="/static/', f'="{base}/static/')
-            html = html.replace(
-                "<head>", f'<head>\n    <meta name="app-base" content="{base}">', 1)
-        return html
+        return com_prefixo(html, prefixo(request))
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 import db.ebs_forms as db
 import integracoes.ebs_forms as forms
 from config import get_settings
+from core.prefixo import destino, prefixo
 from core.security import check_rate_limit, get_session, require_permission
 
 _log = logging.getLogger("ebs_forms")
@@ -240,7 +241,7 @@ def _acesso_pagina(req: Request):
     if not sd:
         # o destino vai junto: depois do login o portal volta para esta tela
         return RedirectResponse(
-            f"{_cfg.APP_BASE_PATH}/?next={quote(_cfg.APP_BASE_PATH + req.url.path, safe='/')}",
+            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}",
             status_code=302)
     try:
         require_permission(req, MODULO, "view")

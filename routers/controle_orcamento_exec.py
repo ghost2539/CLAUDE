@@ -59,6 +59,7 @@ from db.orcamento_exec import (
     definir_permissao_modulo, remover_permissao_modulo,
     OpexItem,
 )
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import (
     check_rate_limit, client_ip, get_session,
 )
@@ -110,9 +111,16 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page() -> HTMLResponse:
+def _page(req: Request | None = None) -> HTMLResponse:
+    """A página inteira, com o prefixo do proxy quando houver.
+
+    A tela é servida daqui, e não pelo index do portal, então o prefixo
+    precisa ser aplicado aqui também — senão, atrás do proxy num
+    subcaminho, ela busca CSS e JS na raiz do domínio e toma 404.
+    """
     html = (_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("{{v}}", _asset_version()))
+    html = html.replace("{{v}}", _asset_version())
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 # ── Controle de acesso ────────────────────────────────────────────
@@ -141,7 +149,7 @@ def _acesso_pagina(req: Request):
         # Leva o destino junto: depois do login o portal volta para cá, em vez
         # de largar quem digitou o endereço na tela de Bem-vindo.
         return RedirectResponse(
-            f"{_cfg.APP_BASE_PATH}/?next={quote(_cfg.APP_BASE_PATH + req.url.path, safe='/')}",
+            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}",
             status_code=302)
     try:
         ensure_db()   # a trilha de acesso vive no banco do módulo
@@ -152,7 +160,7 @@ def _acesso_pagina(req: Request):
                          "sem acesso liberado ao módulo")
         return HTMLResponse(_SEM_PERMISSAO, status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
-    return _page()
+    return _page(req)
 
 
 # Ações da API mapeadas ao nível mínimo próprio do módulo.
