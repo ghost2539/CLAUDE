@@ -13,6 +13,22 @@
     })();
     var API = APP_BASE + '/api';
 
+    // Alguns proxies acrescentam a barra no fim por REDIRECIONAMENTO (301).
+    // O navegador reemite um POST como GET e o login quebra. Com a marca
+    // ligada, a URL já sai com a barra e não há o que o proxy acrescentar.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+
+    // Junta a base ao caminho, pondo a barra ANTES da query quando preciso.
+    function apiUrl(caminho) {
+        var url = API + caminho;
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
     var ROUTES = {
         bemvindo:       'Bem-vindo',
         consulta:       'Consulta',
@@ -84,7 +100,7 @@
         if (body && !(body instanceof FormData) && typeof body === 'object') {
             body = JSON.stringify(body);
         }
-        var url = path.indexOf('http') === 0 ? path : API + path;
+        var url = path.indexOf('http') === 0 ? path : apiUrl(path);
         var r = await fetch(url, Object.assign({}, opts, {
             credentials: 'include',
             body: body,
@@ -96,7 +112,7 @@
             var msg = d.detail || 'Erro na requisição.';
             if (r.status === 401 && !url.match(/\/auth\/login/)) {
                 try {
-                    var chk = await fetch(API + '/auth/me', { credentials: 'include' });
+                    var chk = await fetch(apiUrl('/auth/me'), { credentials: 'include' });
                     if (!chk.ok) showLogin();
                 } catch (_) {
                     showLogin();
@@ -236,7 +252,7 @@
     function startSnKeepAlive() {
         if (_snKeepAlive) return;
         var ping = function () {
-            fetch(API + '/servicenow/session-status', { credentials: 'same-origin' })
+            fetch(apiUrl('/servicenow/session-status'), { credentials: 'same-origin' })
                 .catch(function () {});
         };
         ping();

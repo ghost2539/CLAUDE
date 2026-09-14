@@ -14,6 +14,19 @@
         return (m && m.content ? m.content : '').replace(/\/+$/, '');
     })();
 
+    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
+    // vira GET). Com a marca ligada, a URL já sai com a barra.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+    function comBarra(url) {
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
+
 
     var alvo = document.getElementById('obs-conteudo');
     var ehAdmin = false;
@@ -200,7 +213,7 @@
     }
 
     function abrirCredencial() {
-        fetch(BASE + '/api/obsolescencia/credencial', { credentials: 'include' })
+        fetch(comBarra(BASE + '/api/obsolescencia/credencial'), { credentials: 'include' })
             .then(resposta)
             .catch(function () { return {}; })
             .then(function (estado) {
@@ -226,7 +239,7 @@
         if (!u || !p) { m.textContent = 'Informe usuário e senha.'; return; }
         b.disabled = true;
         m.textContent = 'Guardando no cofre…';
-        fetch(BASE + '/api/obsolescencia/credencial', {
+        fetch(comBarra(BASE + '/api/obsolescencia/credencial'), {
             method: 'POST', credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: u, senha: p })
@@ -293,7 +306,7 @@
             var m = document.getElementById('obs-msg');
             b.disabled = true;
             if (m) m.textContent = 'Lendo o parque no MDM… isso leva alguns minutos.';
-            fetch(BASE + '/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
+            fetch(comBarra(BASE + '/api/obsolescencia/coletar'), { method: 'POST', credentials: 'include' })
                 .then(resposta)
                 .then(function (j) {
                     if (m) m.textContent = 'Coleta concluída: ' + num(j.lidos) + ' lidos, ' +
@@ -310,7 +323,7 @@
     }
 
     function carregar() {
-        fetch(BASE + '/api/obsolescencia/resumo', { credentials: 'include' })
+        fetch(comBarra(BASE + '/api/obsolescencia/resumo'), { credentials: 'include' })
             .then(function (r) {
                 if (r.status === 401) { location.href = '/?next=/obsolescencia'; return null; }
                 return resposta(r);
@@ -329,7 +342,7 @@
     }
 
     // Só admin vê o botão de coletar; o painel em si é de quem tem login.
-    fetch(BASE + '/api/auth/me', { credentials: 'include' })
+    fetch(comBarra(BASE + '/api/auth/me'), { credentials: 'include' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (u) { ehAdmin = !!(u && u.is_admin); })
         .catch(function () {})

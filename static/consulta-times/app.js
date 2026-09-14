@@ -11,6 +11,19 @@
         return (m && m.content ? m.content : '').replace(/\/+$/, '');
     })();
 
+    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
+    // vira GET). Com a marca ligada, a URL já sai com a barra.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+    function comBarra(url) {
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
+
 
     var API = BASE + '/api/consulta-times';
 
