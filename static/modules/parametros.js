@@ -508,7 +508,21 @@ async function renderCofre(c, S) {
             '<div class="form-group"><textarea id="cf-nomes" class="form-control" rows="3" ' +
             'placeholder="ORACLE_EBS_USUARIO, ORACLE_EBS_SENHA, MYSQL_LOCAL_PASS"></textarea></div>' +
             '<div class="btn-row"><button id="cf-sondar" class="btn btn-primary btn-sm">Sondar</button></div>' +
-            '<div id="cf-sondagem" class="mt-3"></div></div></div>' +
+            '<div id="cf-sondagem" class="mt-3"></div>' +
+            '<hr>' +
+            '<p class="text-muted">O cofre do time é mantido em PHP. Como só o serviço ' +
+            'alcança o cofre, quem roda o teste é o próprio portal — no seu terminal o ' +
+            'resultado seria sobre o seu usuário, não sobre ele.</p>' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="cf-php-loader">Loader PHP</label>' +
+                    '<input id="cf-php-loader" class="form-control" ' +
+                    'value="/usr/local/lib/vcreports/secrets.php"></div>' +
+                '<div class="form-group"><label for="cf-php-chave">Chave de prova</label>' +
+                    '<input id="cf-php-chave" class="form-control" value="CORREIOS_USUARIO"></div>' +
+            '</div>' +
+            '<div class="btn-row"><button id="cf-php" class="btn btn-secondary btn-sm">Testar pelo PHP</button></div>' +
+            '<div id="cf-php-saida" class="mt-3"></div>' +
+            '</div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
             '<span>Situação</span>' +
             '<span><button id="cf-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
@@ -655,6 +669,40 @@ async function renderCofre(c, S) {
                 '</tbody></table></div>';
         } catch (x) {
             host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    document.getElementById('cf-php').onclick = async function () {
+        var host = document.getElementById('cf-php-saida');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Rodando o PHP…</div>';
+        try {
+            var d = await S.api('/cofre/testar-php', {
+                method: 'POST',
+                body: JSON.stringify({
+                    loader: document.getElementById('cf-php-loader').value.trim(),
+                    chave: document.getElementById('cf-php-chave').value.trim()
+                })
+            });
+            // Quando funciona, o que falta e uma linha na unit — entao ela ja
+            // vem escrita, em vez de virar mais uma ida e volta.
+            var receita = d.ok
+                ? '<p>Para o portal passar a resolver por aqui, acrescente na unit:</p>' +
+                  '<pre class="om-mono" style="white-space:pre-wrap">' +
+                  e('Environment="VCREPORTS_SECRETS_CMD=' + d.comando_para_a_unit + '"') +
+                  (d.variavel_do_loader
+                      ? '\n' + e('Environment="' + d.variavel_do_loader + '"') : '') +
+                  '\nsudo systemctl daemon-reload && sudo systemctl restart portal-spare' +
+                  '</pre>'
+                : '';
+            host.innerHTML =
+                '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
+                (d.ok ? 'O PHP leu <b>' + e(d.chave) + '</b> no cofre — ' + e(d.detalhe) + '.'
+                      : e(d.detalhe)) + '</div>' + receita;
+            S.toast(d.ok ? 'O serviço alcança o cofre pelo PHP.' : 'O PHP também não leu.',
+                    d.ok ? 'success' : 'error');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
         }
     };
 

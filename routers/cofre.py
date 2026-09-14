@@ -330,3 +330,75 @@ def sondar_varios(body: dict, req: Request):
     return {"total": len(itens),
             "resolvidas": sum(1 for i in itens if i["resolvida"]),
             "itens": itens}
+
+
+# Onde um loader de cofre pode morar. O caminho vem da tela, e vira `require`
+# dentro do PHP — ou seja, vira código executado. Sem esta cerca, um admin
+# distraído (ou um navegador comprometido) mandaria o serviço executar
+# qualquer arquivo do disco. Admin já pode muito; não precisa poder isso.
+PASTAS_DE_LOADER = ("/usr/local/lib/vcreports/", "/etc/vcreports/")
+LOADER_PADRAO = "/usr/local/lib/vcreports/secrets.php"
+
+
+@router.post("/testar-php")
+def testar_php(body: dict, req: Request):
+    """Roda a ponte PHP DE DENTRO do serviço e diz se o cofre respondeu.
+
+    Só o serviço alcança o cofre — rodar `php` no terminal responde sobre o
+    terminal. Então quem executa é o processo do portal, e o que volta é
+    "respondeu / não respondeu / o que o PHP reclamou", nunca o valor.
+    """
+    _exigir(req)
+    check_rate_limit(req, "api")
+    import os
+    import re as _re
+    import shutil
+    import subprocess
+    from pathlib import Path as _P
+
+    chave = str((body or {}).get("chave", "") or "CORREIOS_USUARIO").strip().upper()
+    if not _re.fullmatch(r"[A-Z0-9_.-]{1,64}", chave):
+        raise HTTPException(422, "Nome de chave inválido.")
+
+    loader = str((body or {}).get("loader", "") or LOADER_PADRAO).strip()
+    if not loader.endswith(".php") or not any(
+            loader.startswith(pasta) for pasta in PASTAS_DE_LOADER):
+        raise HTTPException(
+            422, "O loader precisa ser um .php dentro de "
+                 + " ou ".join(PASTAS_DE_LOADER) + ".")
+
+    php = shutil.which("php")
+    if not php:
+        return {"ok": False, "etapa": "php",
+                "detalhe": "O PHP não está instalado neste servidor, "
+                           "então a ponte não tem como rodar."}
+
+    ponte = _P(__file__).resolve().parent.parent / "scripts" / "cofre_php.php"
+    if not ponte.is_file():
+        return {"ok": False, "etapa": "ponte",
+                "detalhe": f"A ponte não está no lugar esperado: {ponte}"}
+
+    ambiente = dict(os.environ, VCREPORTS_SECRETS_PHP=loader)
+    try:
+        r = subprocess.run([php, str(ponte), chave, "--tamanho"],
+                           capture_output=True, text=True, timeout=15,
+                           env=ambiente)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "etapa": "execucao", "detalhe": str(exc)}
+
+    saida = (r.stdout or "").strip()
+    erro = (r.returncode and (r.stderr or "").strip()) or ""
+    # A linha pronta para a unit: se funcionou, é só isto que falta.
+    comando = f'{php} {ponte} {{chave}}'
+    return {
+        "ok": r.returncode == 0,
+        "etapa": "cofre",
+        "chave": chave,
+        "loader": loader,
+        "codigo": r.returncode,
+        # --tamanho garante que só o comprimento sai daqui, nunca o valor.
+        "detalhe": saida if r.returncode == 0 else (erro or "sem detalhe"),
+        "comando_para_a_unit": comando if r.returncode == 0 else "",
+        "variavel_do_loader": (f"VCREPORTS_SECRETS_PHP={loader}"
+                               if r.returncode == 0 and loader != LOADER_PADRAO else ""),
+    }
