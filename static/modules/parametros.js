@@ -525,8 +525,16 @@ async function renderEbsOracle(c, S) {
         var marca = marcas[k.situacao] || (k.resolvida
             ? '<span class="badge badge-success">resolvida</span>'
             : '<span class="badge badge-danger">faltando</span>');
-        return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + marca + '</td>' +
-            '<td>' + e(k.fonte || '—') + '</td>' +
+        var onde = [];
+        if (k.no_corporativo) onde.push('corporativo');
+        if (k.no_local) onde.push('local');
+        var aviso = (k.no_local && !k.no_corporativo)
+            ? ' <span class="badge badge-warning" title="Só o cofre local tem esta chave. ' +
+              'Se o valor estiver errado, é aqui que ele está.">só no local</span>' : '';
+        return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + marca + aviso + '</td>' +
+            '<td>' + e(k.fonte || '—') +
+                (onde.length ? ' <span class="text-muted">(está em: ' + e(onde.join(', ')) + ')</span>' : '') +
+            '</td>' +
             '<td>' + (k.valor ? e(k.valor) : '<span class="text-muted">—</span>') + '</td></tr>';
     }
 
