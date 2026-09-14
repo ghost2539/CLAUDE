@@ -156,41 +156,11 @@ def normalizar_categoria(texto) -> tuple[str, str]:
 
 
 # ── Modelo pelo prefixo da série (regra da área) ────────────────────────
-# A ordem importa só para leitura: os prefixos não se sobrepõem entre si.
-MODELOS_POR_PREFIXO: tuple[tuple[str, str, str], ...] = (
-    ("HF550", "HF550", "COLETOR"),
-    ("EF500", "EF500", "COLETOR"),
-    ("EF501", "EF501", "COLETOR"),
-    ("S70", "S70", "COLETOR"),
-    ("RFR900", "SLED RFR900", "SLED"),
-    ("RFR901", "SLED RFR901", "SLED"),
-)
-
-
-def modelo_da_serie(serie) -> tuple[str, str]:
-    """(modelo, família) pelo começo da série; ("", "") quando não reconhece.
-
-    A série chega com espaço, hífen ou minúscula conforme quem digitou, então
-    a comparação é feita sobre o texto limpo.
-    """
-    chave = "".join(str(serie or "").split()).upper().replace("-", "")
-    for prefixo, modelo, familia in MODELOS_POR_PREFIXO:
-        if chave.startswith(prefixo):
-            return modelo, familia
-    return "", ""
-
-
-def modelo_no_texto(texto) -> tuple[str, str]:
-    """Mesmo reconhecimento, mas em qualquer lugar do texto.
-
-    Serve para a base antiga, em que o modelo está na categoria
-    ("Coletor HF550X", "Sled RFR901") e não na série.
-    """
-    chave = _sem_acento(texto).replace(" ", "").replace("-", "").upper()
-    for prefixo, modelo, familia in MODELOS_POR_PREFIXO:
-        if prefixo in chave:
-            return modelo, familia
-    return "", ""
+# A tabela e a leitura vivem no módulo do banco: a subida precisa delas para
+# preencher o modelo dos reparos que já estavam na base.
+MODELOS_POR_PREFIXO = db.MODELOS_POR_PREFIXO
+modelo_da_serie = db.modelo_da_serie
+modelo_no_texto = db.modelo_no_texto
 
 
 def resolver_modelo(serie, categoria_texto) -> tuple[str, str, str]:

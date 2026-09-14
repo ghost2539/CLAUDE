@@ -14,6 +14,7 @@ import copy
 import json
 import logging
 import threading
+import unicodedata
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
@@ -92,6 +93,47 @@ FAMILIAS = ("COLETOR", "SLED")
 # modelo, deduzido da série.
 CATEGORIA_DA_FAMILIA = {"COLETOR": "Coletor", "SLED": "SLED"}
 MODELOS = ("EF500", "EF501", "HF550", "S70", "SLED RFR900", "SLED RFR901")
+
+# Prefixo da série → (modelo, família). Fica aqui, e não no router, porque o
+# banco precisa disso para preencher a base antiga na subida. Os prefixos não
+# se sobrepõem entre si.
+MODELOS_POR_PREFIXO: tuple[tuple[str, str, str], ...] = (
+    ("HF550", "HF550", "COLETOR"),
+    ("EF500", "EF500", "COLETOR"),
+    ("EF501", "EF501", "COLETOR"),
+    ("S70", "S70", "COLETOR"),
+    ("RFR900", "SLED RFR900", "SLED"),
+    ("RFR901", "SLED RFR901", "SLED"),
+)
+
+
+def _chave(texto) -> str:
+    """Texto comparável: sem acento, sem espaço, sem hífen, em maiúsculas."""
+    bruto = unicodedata.normalize("NFKD", str(texto or ""))
+    bruto = "".join(c for c in bruto if not unicodedata.combining(c))
+    return bruto.replace(" ", "").replace("-", "").upper()
+
+
+def modelo_da_serie(serie) -> tuple[str, str]:
+    """(modelo, família) pelo COMEÇO da série; ("", "") quando não reconhece."""
+    chave = _chave(serie)
+    for prefixo, modelo, familia in MODELOS_POR_PREFIXO:
+        if chave.startswith(prefixo):
+            return modelo, familia
+    return "", ""
+
+
+def modelo_no_texto(texto) -> tuple[str, str]:
+    """Mesmo reconhecimento, em qualquer lugar do texto.
+
+    Serve para a base antiga, em que o modelo está dentro da categoria
+    ("Coletor HF550X", "Sled RFR901") e não na série.
+    """
+    chave = _chave(texto)
+    for prefixo, modelo, familia in MODELOS_POR_PREFIXO:
+        if prefixo in chave:
+            return modelo, familia
+    return "", ""
 EMPRESAS = ("RENNER", "CAMICADO", "YOUCOM")
 FONTES_VALOR = ("EBS", "PLANILHA", "PADRAO", "MANUAL")
 
@@ -300,6 +342,45 @@ def migrar_colunas(engine) -> list[str]:
     return acrescentadas
 
 
+def preencher_modelos() -> int:
+    """Preenche o modelo dos reparos que já estão na base.
+
+    A coluna nasceu vazia para todo o histórico. Quem já usa o módulo não
+    deveria precisar clicar em nada para ver o modelo dos reparos antigos:
+    a subida preenche o que dá para deduzir — pela série e, quando ela não
+    diz nada, pelo texto da categoria, que é onde a base antiga guardava o
+    modelo. Também reduz a categoria a Coletor/SLED nessas linhas.
+
+    Só grava o que muda de verdade, e só olha as linhas ainda sem modelo:
+    rodar de novo não reescreve nada. Devolve quantas linhas mudaram.
+    """
+    mudaram = 0
+    try:
+        with SessionLocal.begin() as s:
+            pendentes = s.scalars(
+                select(Reparo).where((Reparo.modelo == "") | (Reparo.modelo.is_(None)))
+            ).all()
+            for r in pendentes:
+                modelo, familia = modelo_da_serie(r.serie)
+                if not modelo:
+                    modelo, familia = modelo_no_texto(r.categoria)
+                antes = (r.modelo, r.categoria, r.familia)
+                if modelo:
+                    r.modelo = modelo
+                if familia:
+                    r.familia = familia
+                if r.familia in CATEGORIA_DA_FAMILIA:
+                    r.categoria = CATEGORIA_DA_FAMILIA[r.familia]
+                if antes != (r.modelo, r.categoria, r.familia):
+                    mudaram += 1
+    except Exception as exc:  # noqa: BLE001 — nunca impedir o módulo de subir
+        _log.warning("não consegui preencher o modelo dos reparos antigos: %s", exc)
+        return 0
+    if mudaram:
+        _log.info("modelo preenchido em %d reparo(s) que já estavam na base", mudaram)
+    return mudaram
+
+
 def init_db() -> None:
     global _ready
     with _init_lock:
@@ -309,6 +390,8 @@ def init_db() -> None:
         Base.metadata.create_all(engine)
         migrar_colunas(engine)
         _ready = True
+    # Fora do lock: já dá para usar o banco, e isto é só um acerto de dado.
+    preencher_modelos()
 
 
 def ensure_db() -> None:
