@@ -18,7 +18,14 @@ const corSugerida = (categorias) => {
   const usadas = new Set(categorias.map((c) => (c.cor || "").toLowerCase()));
   return PALETA_CATEGORIAS.find((c) => !usadas.has(c)) || PALETA_CATEGORIAS[categorias.length % PALETA_CATEGORIAS.length];
 };
-const API_BASE = "/api/controle-orcamento-exec";
+// Prefixo do proxy: atrás de suporte.lojasrenner.com.br/portal-spare, a API
+// mora em /portal-spare/api/... — não na raiz. O <meta name="app-base"> é
+// injetado pelo servidor (com_prefixo); sem proxy fica vazio e nada muda.
+const APP_BASE = (() => {
+  const m = document.querySelector('meta[name="app-base"]');
+  return (m && m.content ? m.content : "").replace(/\/+$/, "");
+})();
+const API_BASE = APP_BASE + "/api/controle-orcamento-exec";
 const API_CATEGORIAS = API_BASE + "/categorias";
 
 const ESTAGIOS = ["Planejamento", "Aprovação", "Em Execução", "Concluído"];
