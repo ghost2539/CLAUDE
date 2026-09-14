@@ -383,7 +383,7 @@ else:
                        json={"loader": str(ALVO), "chave": "CORREIOS_USUARIO"}).json()
     checar(d18["ok"] is True, "o serviço executa a ponte e o PHP responde")
     checar(d18["retirada_do_ambiente"] is False,
-           "chave que não estava no ambiente: o valor só pode ter vindo do cofre")
+           "chave fora do ambiente: aí sim o valor só pode ter vindo do cofre")
     checar("caracteres" in d18["detalhe"] and "conta-de-servico" not in str(d18),
            "informando só o tamanho — o valor nunca sai")
     checar(str(RAIZ / "scripts" / "cofre_php.php") in d18["comando_para_a_unit"],
@@ -399,10 +399,10 @@ else:
     os.environ["CHAVE_SO_DO_AMBIENTE"] = "valor-que-veio-do-ambiente"
     d18b = cliente.post("/api/cofre/testar-php",
                         json={"loader": str(ECO), "chave": "CHAVE_SO_DO_AMBIENTE"}).json()
-    checar(d18b["ok"] is False,
-           "loader que só ecoa o ambiente NÃO passa — a chave é retirada do subprocesso")
+    checar(d18b["ok"] is True,
+           "loader que ecoa o ambiente responde — é o comportamento real da ponte")
     checar(d18b["retirada_do_ambiente"] is True,
-           "e a tela avisa que a chave foi retirada só para o teste")
+           "e a tela avisa que a chave também está no ambiente, então não prova o cofre")
     os.environ.pop("CHAVE_SO_DO_AMBIENTE", None)
     ECO.unlink()
 

@@ -174,3 +174,75 @@ def descrever(req: Request, objeto: str, owner: str = "APPS"):
                                  f"não enxerga esse objeto.")
     return {"objeto": alvo, "owner": owner.strip().upper() or "APPS",
             "total": len(linhas), "colunas": linhas}
+
+
+# Só leitura, e dito de duas formas: a transação já é READ ONLY na camada de
+# acesso, e aqui a consulta é recusada antes de sair se não começar por SELECT
+# ou WITH. A primeira barreira protege o banco; esta protege quem digitou.
+import re as _re
+
+_INICIO_PERMITIDO = _re.compile(r"^\s*(select|with)\b", _re.IGNORECASE)
+_LIMITE_PADRAO = 200
+_LIMITE_TETO = 5000
+
+
+def _validar_sql(sql: str) -> str:
+    limpo = (sql or "").strip().rstrip(";").strip()
+    if not limpo:
+        raise HTTPException(422, "Escreva a consulta.")
+    if len(limpo) > 20000:
+        raise HTTPException(422, "Consulta grande demais.")
+    if not _INICIO_PERMITIDO.match(limpo):
+        raise HTTPException(422, "Só SELECT ou WITH. Esta tela não escreve no EBS.")
+    # Uma consulta só. Com duas, a segunda passaria sem a checagem acima.
+    if ";" in limpo:
+        raise HTTPException(422, "Uma consulta por vez — tire o ';' do meio.")
+    return limpo
+
+
+@router.post("/consultar")
+def consultar(body: dict, req: Request):
+    """Roda um SELECT no BASE_REMOVIDA e devolve as linhas.
+
+    A credencial vem por `core.cofre.obter`, ou seja, passa pelo loader do
+    cofre antes de qualquer outra fonte — nada é lido de arquivo por conta
+    própria. A sessão é só-leitura e tem teto de linhas e de tempo.
+    """
+    _exigir(req)
+    check_rate_limit(req, "api")
+    sql = _validar_sql(str((body or {}).get("sql", "")))
+    binds = (body or {}).get("binds") or {}
+    if not isinstance(binds, dict):
+        raise HTTPException(422, "Os parâmetros devem vir como objeto {nome: valor}.")
+    # Nome de bind é identificador; valor vai como bind variable, nunca
+    # concatenado — é o que separa parâmetro de injeção.
+    for nome in binds:
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", str(nome)):
+            raise HTTPException(422, f"Nome de parâmetro inválido: {nome}")
+    try:
+        limite = int((body or {}).get("limite") or _LIMITE_PADRAO)
+    except (TypeError, ValueError):
+        limite = _LIMITE_PADRAO
+    limite = max(1, min(limite, _LIMITE_TETO))
+
+    import time
+    inicio = time.monotonic()
+    try:
+        from integracoes import ebs_oracle
+        linhas = ebs_oracle.query(sql, binds, max_rows=limite)
+    except ImportError as exc:
+        raise HTTPException(503, f"Driver Oracle ausente neste servidor: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Consulta ao BASE_REMOVIDA falhou: %s", exc)
+        raise HTTPException(502, f"O BASE_REMOVIDA recusou a consulta: {exc}") from exc
+    ms = int((time.monotonic() - inicio) * 1000)
+    colunas = list(linhas[0].keys()) if linhas else []
+    return {
+        "total": len(linhas),
+        # Quem pediu 200 e recebeu 200 precisa saber que pode haver mais.
+        "truncado": len(linhas) >= limite,
+        "limite": limite,
+        "ms": ms,
+        "colunas": colunas,
+        "linhas": linhas,
+    }
