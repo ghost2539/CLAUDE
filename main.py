@@ -308,6 +308,19 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Venda de ativos (A11) — banco próprio ───────────────────────────
+    # A fila de venda mora na Trilha; aqui ficam os ciclos trimestrais.
+    try:
+        import db.venda as _db_vnd
+        _db_vnd.init_db()
+        from routers.venda import router as venda_router
+        app.include_router(venda_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("venda").error(
+            "Módulo Venda de Ativos NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Atendimento a chamados (A20) — banco próprio ────────────────────
     # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
     # ligar o atendimento à separação. Carregamento isolado: a separação

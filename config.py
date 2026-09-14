@@ -225,6 +225,12 @@ class Settings:
         _sqlite("inventario"),
     )
 
+    # ── Venda de ativos (A11) ───────────────────────────────────────────
+    VENDA_DATABASE_URL: str = os.getenv(
+        "VENDA_DATABASE_URL",
+        _sqlite("venda"),
+    )
+
     # ── Regularização de ativo (A19) ────────────────────────────────────
     REGULARIZACAO_DATABASE_URL: str = os.getenv(
         "REGULARIZACAO_DATABASE_URL",
@@ -369,7 +375,7 @@ class Settings:
         # a linha e require_permission nega para todo não-admin.
         "trilha", "torre", "atendimento", "preparacao", "separacao",
         "projetos", "reversa", "inventario", "regularizacao", "externo",
-        "destinacao", "obsolescencia", "consulta_times",
+        "destinacao", "obsolescencia", "consulta_times", "venda",
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

@@ -23,6 +23,7 @@
         inventario:     'Inventário',
         regularizacao:  'Regularização',
         externo:        'Assistência',
+        venda:          'Venda de Ativos',
         destinacao:     'Destinação',
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
