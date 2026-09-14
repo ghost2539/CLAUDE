@@ -49,8 +49,21 @@ PAGINA = 1000
 ENVS_CONHECIDOS = (
     "/etc/portal_operacoes_spare_testes/environment",
     "/etc/portal_operacoes_spare/environment",
+    # A grafia sem o "n" aparece em instalação feita à mão; procurar as
+    # duas custa nada e evita caça ao arquivo.
+    "/etc/portal_operacoes_spare_testes/enviroment",
+    "/etc/portal_operacoes_spare/enviroment",
     "~/.config/portal-spare-testes/environment",
     "~/.config/portal-spare/environment",
+)
+
+# Consultadas quando nenhum arquivo conhecido serve: qualquer arquivo lá
+# dentro é candidato, seja qual for o nome que deram a ele.
+PASTAS_DE_AMBIENTE = (
+    "/etc/portal_operacoes_spare_testes",
+    "/etc/portal_operacoes_spare",
+    "~/.config/portal-spare-testes",
+    "~/.config/portal-spare",
 )
 
 _CHAVES = ("SN_API_BASE", "SN_API_USER", "SN_API_PASS", "SN_API_PROXY", "VERIFY_SSL")
@@ -88,6 +101,50 @@ def ler_env(caminho: Path) -> dict:
     return valores
 
 
+def _candidatos(env_file: Path | None) -> list[Path]:
+    """Arquivos a consultar: o indicado, os conhecidos e o resto das pastas."""
+    if env_file:
+        return [Path(env_file).expanduser()]
+    vistos: list[Path] = []
+    for p in ENVS_CONHECIDOS:
+        c = Path(p).expanduser()
+        if c not in vistos:
+            vistos.append(c)
+    for pasta in PASTAS_DE_AMBIENTE:
+        try:
+            achados = sorted(x for x in Path(pasta).expanduser().iterdir() if x.is_file())
+        except OSError:
+            continue
+        for c in achados:
+            if c not in vistos:
+                vistos.append(c)
+    return vistos
+
+
+def _diagnostico(candidatos: list[Path]) -> str:
+    """O que há em cada caminho — só nomes de variável, nunca valores."""
+    esperadas = ("SN_API_BASE", "SN_API_USER", "SN_API_PASS")
+    linhas = []
+    for c in candidatos:
+        if not c.exists():
+            linhas.append(f"  {c} — não existe")
+            continue
+        try:
+            c.read_text(encoding="utf-8", errors="ignore")
+        except OSError as e:
+            linhas.append(f"  {c} — sem permissão de leitura ({e.strerror})")
+            continue
+        do_arq = ler_env(c)
+        tem = [k for k in esperadas if do_arq.get(k)]
+        falta = [k for k in esperadas if not do_arq.get(k)]
+        if tem:
+            linhas.append(f"  {c} — tem {', '.join(tem)}; falta {', '.join(falta)}")
+        else:
+            linhas.append(f"  {c} — existe, com {len(do_arq)} variáveis, "
+                          "nenhuma delas SN_API_*")
+    return "\n".join(linhas) or "  (nenhum caminho para consultar)"
+
+
 _CONTA: Conta | None = None
 
 
@@ -98,7 +155,7 @@ def preparar_conta(env_file: Path | None = None) -> Conta:
     valores = {k: os.environ[k] for k in _CHAVES if os.environ.get(k)}
     origens = ["ambiente"] if valores.get("SN_API_USER") else []
 
-    candidatos = [env_file] if env_file else [Path(p) for p in ENVS_CONHECIDOS]
+    candidatos = _candidatos(env_file)
     for caminho in candidatos:
         if not caminho:
             continue
@@ -121,9 +178,13 @@ def preparar_conta(env_file: Path | None = None) -> Conta:
         raise SystemExit(
             "Conta de serviço do ServiceNow não encontrada: falta "
             + ", ".join(faltando) + ".\n"
-            "Passe --env-file com o arquivo de ambiente do serviço, ou exporte "
-            "as variáveis antes de rodar. Procurei em:\n  "
-            + "\n  ".join(str(Path(p).expanduser()) for p in candidatos if p))
+            "SN_API_BASE, SN_API_USER e SN_API_PASS são as variáveis que o "
+            "próprio portal usa para ler o ServiceNow — as mesmas do serviço.\n"
+            "Onde procurei:\n"
+            + _diagnostico(candidatos) + "\n"
+            "Se nenhum arquivo tem SN_API_PASS, a senha do serviço não está em "
+            "arquivo. Nesse caso exporte as três variáveis nesta sessão antes "
+            "de rodar, ou aponte --env-file para o arquivo certo.")
     if valores.get("SN_API_PASS", "").startswith("@cofre:"):
         raise SystemExit(
             "A senha está guardada no cofre (@cofre:…). Rode com as variáveis "

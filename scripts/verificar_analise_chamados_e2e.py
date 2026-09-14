@@ -147,4 +147,35 @@ sys.argv = ["x", str(T / "nao-existe.xlsx"), "--grupo", "F", "--env-file", str(E
 assert ac.main() == 1
 print("  ok   planilha inexistente para o script antes de pedir credencial")
 
+print("\n[Onde está a credencial] o erro diz qual arquivo tem o quê")
+TD = Path(tempfile.mkdtemp())
+(TD / "so-do-portal").write_text("DATABASE_URL=postgresql://x\nTZ=America/Sao_Paulo\n")
+(TD / "meio").write_text("SN_API_BASE=https://sn\nSN_API_USER=conta\n")
+(TD / "completo").write_text("SN_API_BASE=https://sn\nSN_API_USER=conta\nSN_API_PASS=segredo\n")
+
+d = ac._diagnostico([TD / "nao-existe", TD / "so-do-portal", TD / "meio"])
+assert "não existe" in d
+assert "nenhuma delas SN_API_*" in d
+assert "tem SN_API_BASE, SN_API_USER; falta SN_API_PASS" in d
+assert "segredo" not in ac._diagnostico([TD / "completo"])
+print("  ok   separa inexistente, sem SN_API_* e incompleto, sem vazar o valor")
+
+CONHECIDOS, PASTAS = ac.ENVS_CONHECIDOS, ac.PASTAS_DE_AMBIENTE
+ac.ENVS_CONHECIDOS, ac.PASTAS_DE_AMBIENTE = ("/nao/existe/environment",), (str(TD),)
+for k in ("SN_API_BASE", "SN_API_USER", "SN_API_PASS"):
+    os.environ.pop(k, None)
+ac._CONTA = None
+assert ac.preparar_conta(None).SN_API_USER == "conta"
+print("  ok   acha o arquivo mesmo com nome fora do padrão, varrendo a pasta")
+
+ac.ENVS_CONHECIDOS, ac.PASTAS_DE_AMBIENTE = (str(TD / "meio"),), ()
+ac._CONTA = None
+try:
+    ac.preparar_conta(None)
+    raise AssertionError("deveria ter recusado")
+except SystemExit as e:
+    assert "falta SN_API_PASS" in str(e) and "tem SN_API_BASE" in str(e), str(e)
+print("  ok   com a senha faltando, aponta o arquivo e o que falta nele")
+ac.ENVS_CONHECIDOS, ac.PASTAS_DE_AMBIENTE = CONHECIDOS, PASTAS
+
 print("\nAnálise de chamados íntegra (ponta a ponta).")
