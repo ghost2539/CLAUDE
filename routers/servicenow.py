@@ -1,6 +1,7 @@
 """ServiceNow router — upload de ativos do recebimento para alm_hardware via SSO + JSONv2."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -15,6 +16,8 @@ from sqlalchemy import select, func, or_
 
 from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
 from core.security import require_permission, get_session, check_rate_limit
+
+_log = logging.getLogger("servicenow")
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -1350,18 +1353,38 @@ def _registro_individual(session, tag: str, serie: str) -> dict | None:
             "serial_number": str(_plain(r.get("serial_number"))).strip()}
 
 
-def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict) -> None:
-    """Roda o cálculo de depreciação do ativo recém-escrito."""
+def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
+               tag: str = "", serie: str = "") -> None:
+    """Roda o cálculo de depreciação do ativo recém-escrito.
+
+    Nunca silencia: sem sys_id o registro é reprocurado pelos
+    identificadores, e o que não depreciar entra em `falhas`. Depreciação
+    que falha sem ninguém saber é exatamente o que a área reclamou.
+    """
     if not sys_id or sys_id == "N/A":
-        return
+        achado = _registro_individual(session, tag, serie)
+        sys_id = (achado or {}).get("sys_id", "")
+        if not sys_id:
+            resumo["falhas"].append(
+                f"{rotulo}: subiu, mas o ServiceNow não devolveu o sys_id — "
+                "depreciação não calculada")
+            resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+            return
     try:
         if _calculate_depreciation(session, sys_id, BS):
             resumo["depreciados"] = resumo.get("depreciados", 0) + 1
             return
     except Exception as exc:  # noqa: BLE001 — o ativo já subiu; isto é aviso
+        _log.error("servicenow: depreciação de %s falhou: %s", rotulo, exc)
         resumo["falhas"].append(f"{rotulo}: cálculo da depreciação falhou — {exc}")
+        resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
         return
-    resumo["falhas"].append(f"{rotulo}: o ServiceNow não calculou a depreciação")
+    _log.error("servicenow: o ServiceNow não calculou a depreciação de %s "
+               "(sys_id %s)", rotulo, sys_id)
+    resumo["falhas"].append(
+        f"{rotulo}: o ServiceNow não calculou a depreciação (sys_id {sys_id}). "
+        "Verifique se a sessão do portal ainda abre o formulário do ativo.")
+    resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
 
 
 def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
@@ -1392,7 +1415,8 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
     recebeu.
     """
     resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
-              "nao_encontrados": 0, "incompletos": 0, "falhas": []}
+              "nao_encontrados": 0, "incompletos": 0, "depreciados": 0,
+              "sem_depreciacao": 0, "falhas": []}
     if not itens:
         return resumo
 
@@ -1494,7 +1518,8 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                     alteracao["serial_number"] = serie
                 if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
                     resumo["atualizados"] += 1
-                    _depreciar(session, existente["sys_id"], BS, rotulo, resumo)
+                    _depreciar(session, existente["sys_id"], BS, rotulo, resumo,
+                               tag, serie)
                 else:
                     resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
             elif criar:
@@ -1509,7 +1534,8 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                 ok, novo_sys_id, detalhe = _insert_record(session, registro)
                 if ok:
                     resumo["criados"] += 1
-                    _depreciar(session, novo_sys_id, BS, rotulo, resumo)
+                    _depreciar(session, novo_sys_id, BS, rotulo, resumo,
+                               tag, serie)
                 else:
                     resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
             else:

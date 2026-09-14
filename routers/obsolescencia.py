@@ -608,6 +608,116 @@ def coleta_progresso(req: Request):
     return p
 
 
+@router.get("/api/obsolescencia/mdm/diagnostico")
+def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
+    """Por que a remoção do coletor no MDM não aconteceu — sem apagar nada.
+
+    Responde, em ordem, o que a remoção olha: se a remoção está ligada, se
+    o endpoint está configurado, se a sessão do console abre, se o
+    aparelho está no parque guardado e o que a busca do console devolve.
+    Só leitura: existe para o diagnóstico não depender de tentar apagar.
+    """
+    _exigir_admin(req)
+    import db.obsolescencia as _db
+    from sqlalchemy import select as _select
+    from integracoes import mdm_airwatch as mdm
+
+    cfg = _db.ler_config()
+    base = getattr(_cfg, "MDM_BASE_URL", "")
+    ligado = str(cfg.get("remover_do_mdm_no_recebimento", "1")).strip().lower() in ("1", "sim", "true")
+    endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
+    saida = {
+        "remocao_ligada": ligado,
+        "endpoint": endpoint,
+        "metodo": cfg.get("mdm_remocao_metodo", "POST"),
+        "campo": cfg.get("mdm_remocao_campo") or "SelectedDeviceIds",
+        "base": base,
+        "sessao_ok": False,
+        "no_parque": None,
+        "busca": [],
+        "conclusao": "",
+    }
+    if not ligado:
+        saida["conclusao"] = "A remoção está desligada na configuração."
+    elif not endpoint:
+        saida["conclusao"] = "Não há endpoint de remoção configurado."
+
+    serie = (serie or "").strip()
+    etiqueta = (etiqueta or "").strip()
+    chaves = [k.upper() for k in (serie, etiqueta) if k]
+
+    if chaves:
+        with _db.SessionLocal() as s:
+            for linha in s.execute(_select(_db.Coletor)).scalars():
+                candidatos = {(linha.serie or "").strip().upper(),
+                              (linha.nome or "").strip().upper()}
+                candidatos.discard("")
+                if candidatos & set(chaves):
+                    saida["no_parque"] = {"mdm_id": linha.mdm_id, "nome": linha.nome,
+                                          "serie": linha.serie, "usuario": linha.usuario}
+                    break
+
+    sessao = None
+    try:
+        sessao = sessao_mdm()
+        saida["sessao_ok"] = True
+    except HTTPException as exc:
+        saida["sessao_erro"] = str(exc.detail)
+
+    if sessao is not None:
+        for termo in (serie, etiqueta):
+            if not termo:
+                continue
+            try:
+                achados = mdm.procurar(sessao, termo, base)
+            except Exception as exc:  # noqa: BLE001 — o diagnóstico mostra a falha
+                saida["busca"].append({"termo": termo, "erro": str(exc)[:200]})
+                continue
+            saida["busca"].append({
+                "termo": termo, "quantidade": len(achados),
+                "aparelhos": [{"id": a.get("id"), "nome": a.get("nome"),
+                               "usuario": a.get("usuario"), "modelo": a.get("modelo")}
+                              for a in achados[:5]],
+            })
+
+    if not saida["conclusao"]:
+        achou_parque = saida["no_parque"] is not None
+        achou_busca = any(b.get("quantidade") == 1 for b in saida["busca"])
+        ambiguo = any((b.get("quantidade") or 0) > 1 for b in saida["busca"])
+        if achou_parque or achou_busca:
+            saida["conclusao"] = ("O aparelho é encontrado; a remoção deve funcionar. "
+                                  "Se não funcionou, o console recusou a escrita — "
+                                  "veja a trilha de escrita (ação deletar).")
+        elif ambiguo:
+            saida["conclusao"] = ("A busca devolve mais de um aparelho e por isso "
+                                  "nada é apagado. Informe uma série exata.")
+        elif not chaves:
+            saida["conclusao"] = "Informe a série (e a etiqueta, se houver) para diagnosticar."
+        else:
+            saida["conclusao"] = ("Nem o parque nem a busca do console acham este "
+                                  "aparelho. Confira se a série do recebimento é a "
+                                  "mesma que o console conhece.")
+    return saida
+
+
+@router.get("/api/obsolescencia/mdm/escritas")
+def mdm_escritas(req: Request, limite: int = 20):
+    """Últimas escritas tentadas no MDM, com a resposta do console."""
+    _exigir_admin(req)
+    import db.obsolescencia as _db
+    from sqlalchemy import select as _select
+    with _db.SessionLocal() as s:
+        linhas = s.execute(
+            _select(_db.Escrita).order_by(_db.Escrita.id.desc()).limit(max(1, min(limite, 200)))
+        ).scalars().all()
+    return {"escritas": [{
+        "quando": e.quando.isoformat() if e.quando else "",
+        "usuario": e.usuario, "acao": e.acao, "origem": e.origem,
+        "mdm_id": e.mdm_id, "serie": e.serie, "sucesso": e.sucesso,
+        "resposta": (e.resposta or "")[:400], "detalhe": e.detalhe,
+    } for e in linhas]}
+
+
 @router.post("/api/obsolescencia/coletar")
 def coletar(req: Request):
     """Varre o parque de coletores e grava. Sob demanda, por botão.

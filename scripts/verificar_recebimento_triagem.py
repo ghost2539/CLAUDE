@@ -56,8 +56,11 @@ rec.require_permission = lambda req, m, a: {"username": "recebedor"}
 rec.check_rate_limit = lambda req: None
 # Os ganchos de fora do recebimento têm suíte própria; aqui interessa a rota.
 rec._config_servicenow = lambda: {"ativo": False}
-rec._marcar_no_servicenow = lambda itens, req, espaco="": {"ativo": False}
-rec._remover_do_mdm = lambda itens, usuario: {"tentados": 0, "removidos": 0, "pendentes": 0}
+GANCHO_SN, GANCHO_MDM = [], []
+rec._marcar_no_servicenow = lambda itens, req, espaco="": (
+    GANCHO_SN.append(list(itens)) or {"ativo": False})
+rec._remover_do_mdm = lambda itens, usuario: (
+    GANCHO_MDM.append(list(itens)) or {"tentados": 0, "removidos": 0, "pendentes": 0})
 rec._casar_com_coleta = lambda itens, usuario: {"casados": 0, "coletas": []}
 rec._registrar_mdm_no_ciclo = lambda itens, resultado, usuario: 0
 REQ = object()
@@ -170,6 +173,25 @@ checar(depois == antes, f"a base continua com os mesmos ativos ({antes} → {dep
 checar(len(linhas) == 1, "uma linha só para o mesmo equipamento")
 checar(ciclos_depois == ciclos_antes,
        "e nenhum ciclo novo: o recebimento em aberto é atualizado, não duplicado")
+
+print("\n[8] Recebimento repetido continua avisando ServiceNow e MDM")
+GANCHO_SN.clear(); GANCHO_MDM.clear()
+i10 = item(subcategoria="Coletor")
+enviar(i10)
+checar(len(GANCHO_SN) == 1 and len(GANCHO_SN[0]) == 1, "primeira leitura chama o ServiceNow")
+GANCHO_SN.clear(); GANCHO_MDM.clear()
+# Mesmo equipamento com o ciclo ainda aberto: não cria outro ciclo, mas o
+# equipamento voltou às mãos de alguém — os ganchos têm de rodar.
+r = enviar(rec.BulkSubmitItem(empresa="1", ativo=i10.ativo, etiqueta=i10.etiqueta,
+                              numero_serie=i10.numero_serie, modelo="Zebra TC21",
+                              categoria="Coletor", subcategoria="Coletor"))
+checar(r["criados"] == 0 and r["ignorados"] == 1, "não cria segundo ciclo")
+checar(len(GANCHO_SN) == 1 and len(GANCHO_SN[0]) == 1,
+       "o ServiceNow é avisado mesmo com o ciclo já aberto")
+checar(len(GANCHO_MDM) == 1 and GANCHO_MDM[0][0]["serial"] == i10.numero_serie,
+       "e o MDM também: é o coletor que voltou ao CD")
+checar(GANCHO_SN[0][0].get("custo") is not None and "dpis" in GANCHO_SN[0][0],
+       "com custo e DPIS, como em qualquer subida")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

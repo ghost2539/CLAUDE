@@ -352,6 +352,28 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
             try:
                 a = upsert_asset(s, payload)
 
+                def _linha() -> dict:
+                    """O que os ganchos (trilha, ServiceNow, MDM) recebem."""
+                    return {
+                        "serial": item.numero_serie or item.etiqueta or item.ativo,
+                        "etiqueta": item.etiqueta or "",
+                        "modelo": item.modelo,
+                        "categoria": item.categoria or "",
+                        "numero_ativo": item.ativo or "",
+                        "destino_entrada": destino_entrada,
+                        "subcategoria": subcategoria,
+                        "familia": familia,
+                        # Custo e DPIS vão junto: o ServiceNow recusa ativo pela
+                        # metade. Se não vieram na leitura, valem os da base —
+                        # é o mesmo dado do EBS, gravado numa passagem anterior.
+                        "custo": ("" if item.custo_asset in (None, "")
+                                  else str(item.custo_asset)) or (
+                                      str(a.cost) if a.cost is not None else ""),
+                        "dpis": (item.dpis or "") or (
+                            a.dpis.isoformat() if a.dpis else ""),
+                        "empresa": item.empresa or "",
+                    }
+
                 current = s.scalar(
                     select(ReceiptCycle)
                     .where(
@@ -361,7 +383,13 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     .order_by(ReceiptCycle.id.desc())
                 )
                 if current:
+                    # Ciclo já aberto: não se cria outro, MAS o equipamento
+                    # chegou de novo às mãos de alguém. Os ganchos precisam
+                    # rodar — sem isso o ativo não é atualizado no ServiceNow
+                    # e o coletor não sai do MDM só porque já havia um
+                    # recebimento em aberto.
                     skipped += 1
+                    entrando.append(_linha())
                     continue
 
                 n = (
@@ -393,25 +421,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     username=sd["username"],
                 ))
                 created += 1
-                entrando.append({
-                    "serial": item.numero_serie or item.etiqueta or item.ativo,
-                    "etiqueta": item.etiqueta or "",
-                    "modelo": item.modelo,
-                    "categoria": item.categoria or "",
-                    "numero_ativo": item.ativo or "",
-                    "destino_entrada": destino_entrada,
-                    "subcategoria": subcategoria,
-                    "familia": familia,
-                    # Custo e DPIS vão junto: o ServiceNow recusa ativo pela
-                    # metade. Se não vieram na leitura, valem os da base —
-                    # é o mesmo dado do EBS, gravado numa passagem anterior.
-                    "custo": ("" if item.custo_asset in (None, "")
-                              else str(item.custo_asset)) or (
-                                  str(a.cost) if a.cost is not None else ""),
-                    "dpis": (item.dpis or "") or (
-                        a.dpis.isoformat() if a.dpis else ""),
-                    "empresa": item.empresa or "",
-                })
+                entrando.append(_linha())
             except Exception as e:
                 ident = item.etiqueta or item.ativo or item.numero_serie
                 errors.append(f"{ident}: {e}")
