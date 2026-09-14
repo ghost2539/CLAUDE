@@ -227,6 +227,39 @@ checar(sn.get("fonte") == "cofre corporativo",
        "e diz qual dos dois o portal usa de fato")
 cofre._modulo, cofre._modulo_via = None, ""
 
+print("\n[3g] Correios pelo ambiente, e o cofre local sombreando")
+# O jeito novo de entregar o segredo: variável no processo do serviço. O
+# cofre local vem ANTES do ambiente, então um valor velho esquecido ali
+# derruba a variável nova sem avisar — é isso que a tela precisa mostrar.
+os.environ["CORREIOS_CARTOES"] = "cartao-do-ambiente"
+os.environ["CORREIOS_USUARIO"] = "usuario-do-ambiente"
+d9 = cliente.get("/api/cofre/diagnostico").json()
+co9 = {c["chave"]: c for g in d9["grupos"] if g["nome"] == "Correios" for c in g["chaves"]}
+
+checar(co9["CORREIOS_CARTOES"]["fonte"] == "ambiente",
+       "chave só no ambiente é resolvida pelo ambiente")
+checar(co9["CORREIOS_CARTOES"]["sombreado"] is False,
+       "e sem aviso de sombreamento, porque só há uma fonte")
+
+# CORREIOS_USUARIO está no cofre local (posto no início) E no ambiente.
+checar(co9["CORREIOS_USUARIO"]["fonte"] == "cofre local",
+       "com as duas fontes, o cofre local ganha do ambiente")
+checar(co9["CORREIOS_USUARIO"]["sombreado"] is True,
+       "e a tela avisa que a chave está em mais de uma fonte")
+checar(co9["CORREIOS_USUARIO"]["divergente"] is True,
+       "apontando que os valores discordam")
+checar(co9["CORREIOS_USUARIO"]["fontes_com_valor"] == ["cofre local", "ambiente"],
+       "nomeando quais fontes têm a chave")
+checar("usuario-do-ambiente" not in str(co9["CORREIOS_USUARIO"]),
+       "sem comparar valores na tela — só o fato de discordarem")
+
+os.environ.pop("CORREIOS_USUARIO", None)
+d10 = cliente.get("/api/cofre/diagnostico").json()
+co10 = {c["chave"]: c for g in d10["grupos"] if g["nome"] == "Correios" for c in g["chaves"]}
+checar(co10["CORREIOS_USUARIO"]["sombreado"] is False,
+       "tirada a duplicidade, o aviso some")
+os.environ.pop("CORREIOS_CARTOES", None)
+
 print("\n[3f] Sem permissão, a tela entrega o pedido pronto")
 # O caso real do servidor: o módulo importa, mas o arquivo do cofre não é
 # legível pelo usuário do serviço. A tela precisa dizer o que pedir.
@@ -297,6 +330,8 @@ checar("['cofre',           'Cofre de segredos']" in js, "a aba está na lista")
 checar("cofre:          renderCofre" in js, "e ligada ao renderizador")
 checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")
 checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
+checar("em ' + (k.fontes_com_valor || []).length + ' fontes" in js,
+       "a tela mostra em quantas fontes a chave está")
 checar("remedioHtml" in js, "a tela mostra o pedido de permissão pronto")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
 checar("inventarioHtml" in js and "alternativasHtml" in js,

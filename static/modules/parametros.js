@@ -522,11 +522,20 @@ async function renderCofre(c, S) {
         if (k.no_ambiente) onde.push('ambiente');
         // Sombreamento é a falha silenciosa clássica: o cofre local responde
         // primeiro e o corporativo, correto, nunca é consultado.
-        var aviso = (k.no_local && !k.no_corporativo)
-            ? ' <span class="badge badge-warning" title="Só o cofre local tem esta chave.">só no local</span>' : '';
+        // A ordem é corporativo → local → ambiente. Quando mais de uma fonte
+        // tem a chave, a que vence pode não ser a que alguém acabou de
+        // configurar — e é sempre aí que se perde tempo.
+        var aviso = '';
+        if (k.sombreado) aviso += ' <span class="badge badge-warning" title="' +
+            e((k.fontes_com_valor || []).join(' e ')) +
+            ' têm esta chave. Vale a primeira da ordem: corporativo, local, ambiente.">' +
+            'em ' + (k.fontes_com_valor || []).length + ' fontes</span>';
         if (k.divergente) aviso += ' <span class="badge badge-danger" ' +
-            'title="Os dois cofres têm esta chave com valores diferentes, e o local ganha.">' +
+            'title="As fontes têm valores diferentes para esta chave.">' +
             'valores diferentes</span>';
+        else if (k.no_local && !k.no_corporativo && !k.no_ambiente)
+            aviso += ' <span class="badge badge-warning" ' +
+                'title="Só o cofre local tem esta chave.">só no local</span>';
         return '<tr><td class="om-mono">' + e(k.chave) + '</td>' +
             '<td>' + badge(k.resolvida, 'resolvida', 'faltando') + aviso + '</td>' +
             '<td>' + e(k.fonte || '—') +
