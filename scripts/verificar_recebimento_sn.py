@@ -131,6 +131,7 @@ with dbo.SessionLocal() as s:
 
 from integracoes import mdm_airwatch as mdm  # noqa: E402
 _procurar_detalhado_real = mdm.procurar_detalhado
+_remover_dispositivo_real = mdm.remover_dispositivo
 REQ_DIAG = object()
 chamadas = []
 mdm.remover_dispositivo = lambda sessao, mdm_id, base="", endpoint="", metodo="POST", campo="id": (
@@ -206,8 +207,10 @@ ses = _Sessao(form="<form></form>")
 ok, _ = mdm.remover_dispositivo(ses, "1", "", "/x/{id}")
 checar(ok and "__RequestVerificationToken" not in ses.posts[0][2],
        "console sem token não impede a remoção")
-checar(len(ses.gets) == len(mdm.FORMULARIOS_TOKEN),
-       "sem token, tenta todos os formulários conhecidos e desiste")
+_tentativas = [u for u in ses.gets
+               if any(f.split("{")[0] in u for f in mdm.FORMULARIOS_TOKEN)]
+checar(len(_tentativas) >= len(mdm.FORMULARIOS_TOKEN),
+       f"sem token, tenta todos os formulários conhecidos e desiste ({len(_tentativas)})")
 
 ses = _Sessao(status=403)
 ok, detalhe = mdm.remover_dispositivo(ses, "1", "", "/x/{id}")
@@ -529,6 +532,94 @@ checar(r["por_item"][0]["depreciacao"] == "não calculada",
        "depreciação que não roda aparece na linha do ativo")
 sn._calculate_depreciation = lambda sessao, sys_id, BS: (
     DEPRECIADOS.append(sys_id) or True)
+
+print("\n[18] \"Removido do MDM\" só depois de conferir que sumiu")
+_remover_real = _remover_dispositivo_real
+
+class _R2:
+    def __init__(self, status=200, texto="", url=""):
+        self.status_code, self.text, self.url = status, texto, url
+
+class _Console:
+    """Console de mentira: responde ao POST e ao GET de conferência."""
+    def __init__(self, resposta_post=None, ainda_la=True, erro_get=False):
+        self.resposta_post = resposta_post or _R2(200, "")
+        self.ainda_la, self.erro_get = ainda_la, erro_get
+        self.gets, self.posts = [], []
+    def get(self, url, **k):
+        self.gets.append(url)
+        if self.erro_get:
+            raise RuntimeError("rede caiu")
+        if "TagAssignment" in url or "Summary" in url and "form" in url:
+            return _R2(200, "<form></form>")
+        if self.ainda_la:
+            return _R2(200, "<div>aparelho 691477 ainda aqui</div>", url)
+        return _R2(404, "Device not found", url)
+    def request(self, metodo, url, **k):
+        self.posts.append(url)
+        return self.resposta_post
+
+ENDPOINT = "/AirWatch/Devices/DeleteDevice/{id}"
+ses = _Console(ainda_la=True)
+ok, detalhe = _remover_real(ses, "691477", "https://mdm", ENDPOINT)
+checar(not ok and "CONTINUA" in detalhe,
+       f"HTTP 200 com o aparelho ainda inscrito NÃO é remoção ({detalhe[:60]})")
+
+ses = _Console(ainda_la=False)
+ok, detalhe = _remover_real(ses, "691477", "https://mdm", ENDPOINT)
+checar(ok and "conferido" in detalhe, f"só confirma quando o aparelho some ({detalhe})")
+
+ses = _Console(resposta_post=_R2(200, '{"Success":false,"Message":"sem permissão"}'))
+ok, detalhe = _remover_real(ses, "691477", "https://mdm", ENDPOINT)
+checar(not ok and "recusou" in detalhe, "corpo com Success:false é recusa, não sucesso")
+
+ses = _Console(ainda_la=False, erro_get=True)
+ok, detalhe = _remover_real(ses, "691477", "https://mdm", ENDPOINT)
+checar(not ok and "CONTINUA" in detalhe,
+       "sem conseguir conferir, não se afirma que removeu")
+
+checar(mdm.ainda_existe(_Console(ainda_la=False), "1", "https://mdm") is False,
+       "conferência: 404 é aparelho removido")
+checar(mdm.ainda_existe(_Console(ainda_la=True), "691477", "https://mdm") is True,
+       "conferência: página com o id é aparelho ainda lá")
+
+print("\n[19] Se o caminho configurado não apaga, os outros são tentados e conferidos")
+tentados = []
+def _remove_fake(sessao, mdm_id, base="", endpoint="", metodo="POST", campo="x"):
+    tentados.append(endpoint)
+    # Só o terceiro caminho conhecido apaga de verdade neste console falso.
+    if endpoint == "/AirWatch/Devices/DeleteBulkDevices":
+        return True, "removido e conferido (HTTP 200)"
+    return False, "o console respondeu HTTP 200 mas o aparelho CONTINUA inscrito"
+mdm.remover_dispositivo = _remove_fake
+ok, detalhe, trilha, venceu = mdm.remover_tentando(object(), "77", "https://mdm")
+checar(ok and venceu == "/AirWatch/Devices/DeleteBulkDevices",
+       f"para no caminho que realmente apaga ({venceu})")
+checar(len(trilha) == 3 and not trilha[0]["ok"],
+       f"a trilha guarda o que cada tentativa respondeu ({len(trilha)})")
+
+tentados.clear()
+mdm.remover_dispositivo = lambda *a, **k: (False, "não apagou")
+ok, detalhe, trilha, venceu = mdm.remover_tentando(object(), "77", "https://mdm")
+checar(not ok and not venceu and len(trilha) == len(mdm.CAMINHOS_REMOCAO),
+       "nenhum funcionando, todos ficam registrados")
+checar("DeleteDevice" in detalhe, "e o detalhe resume o que cada um respondeu")
+
+# No fluxo do recebimento: o caminho vencedor vira o configurado.
+dbo.gravar_config({"remover_do_mdm_no_recebimento": "1",
+                   "mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}"})
+with dbo.SessionLocal.begin() as s:
+    s.query(dbo.Coletor).delete()
+    s.add(dbo.Coletor(mdm_id="m-88", serie="SN-TROCA", usuario="ljr088_coletor",
+                      situacao=dbo.ATIVO))
+mdm.remover_dispositivo = _remove_fake
+tentados.clear()
+r = ob.remover_recebidos_do_mdm([{"serial": "SN-TROCA"}], usuario="t")
+checar(r["removidos"] == 1, f"removeu usando o caminho que funciona ({r['removidos']})")
+checar(dbo.ler_config()["mdm_remocao_endpoint"] == "/AirWatch/Devices/DeleteBulkDevices",
+       "e o caminho vencedor fica gravado para a próxima vez")
+mdm.remover_dispositivo = _remover_dispositivo_real
+dbo.gravar_config({"mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}"})
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
