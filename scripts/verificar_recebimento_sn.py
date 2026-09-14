@@ -130,6 +130,7 @@ with dbo.SessionLocal() as s:
            "a tentativa fica na trilha de escrita")
 
 from integracoes import mdm_airwatch as mdm  # noqa: E402
+REQ_DIAG = object()
 chamadas = []
 mdm.remover_dispositivo = lambda sessao, mdm_id, base="", endpoint="", metodo="POST", campo="id": (
     chamadas.append(mdm_id) or (True, "removido"))
@@ -348,6 +349,68 @@ apagados.clear()
 mdm.procurar = lambda sessao, texto, base="": [{"id": "a"}, {"id": "b"}]
 r = ob.remover_recebidos_do_mdm([{"serial": "AMBIGUA"}], usuario="t")
 checar(not apagados, "busca ambígua não apaga nada: deletar do MDM não tem volta")
+
+print("\n[12] Depreciação que não roda nunca passa em silêncio")
+limpar()
+sn._calculate_depreciation = lambda sessao, sys_id, BS: False
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(r["criados"] == 1, "o ativo sobe")
+checar(r["sem_depreciacao"] == 1, "e o resumo conta que ele ficou sem depreciação")
+checar(any("depreciação" in f for f in r["falhas"]),
+       f"a falha diz que a depreciação não foi calculada ({r['falhas'][:1]})")
+
+limpar()
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    _ for _ in ()).throw(RuntimeError("sessão do formulário expirou"))
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(r["sem_depreciacao"] == 1 and any("expirou" in f for f in r["falhas"]),
+       "erro no cálculo aparece com a causa")
+
+limpar()
+DEPRECIADOS_2 = []
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    DEPRECIADOS_2.append(sys_id) or True)
+# Inserção que não devolve sys_id: o registro é reprocurado para depreciar.
+sn._insert_record = lambda sessao, registro: (True, "N/A", "criado")
+INDIVIDUAIS.append({"sys_id": "sys-reachado", "asset_tag": "RN-NOVO-1",
+                    "serial_number": "SN-NOVO-1"})
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(DEPRECIADOS_2 == ["sys-reachado"],
+       f"sem sys_id na resposta, o ativo é reprocurado e depreciado ({DEPRECIADOS_2})")
+checar(r.get("depreciados") == 1, "e o resumo conta a depreciação feita")
+sn._insert_record = _ins
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    DEPRECIADOS.append(sys_id) or True)
+
+print("\n[13] Diagnóstico do MDM diz onde a remoção para — sem apagar nada")
+ob._exigir_admin = lambda req: {"username": "admin", "is_admin": True}
+apagados_diag = []
+mdm.remover_dispositivo = lambda *a, **k: (apagados_diag.append(a) or (True, "x"))
+dbo.gravar_config({"remover_do_mdm_no_recebimento": "1",
+                   "mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}"})
+mdm.procurar = lambda sessao, texto, base="": (
+    [{"id": "m-55", "nome": "ljr055_coletor"}] if texto == "SN-ACHA" else [])
+
+d = ob.mdm_diagnostico(REQ_DIAG, serie="SN-ACHA")
+checar(d["remocao_ligada"] and d["endpoint"].endswith("{id}"), "mostra a configuração vigente")
+checar(d["sessao_ok"], "diz se a sessão do console abriu")
+checar(d["busca"][0]["quantidade"] == 1, "mostra o que a busca do console devolveu")
+checar("deve funcionar" in d["conclusao"], f"conclui que acharia ({d['conclusao'][:40]})")
+checar(not apagados_diag, "o diagnóstico não apaga nada")
+
+d = ob.mdm_diagnostico(REQ_DIAG, serie="SN-QUE-NAO-EXISTE")
+checar("não acham" in d["conclusao"] or "Nem o parque" in d["conclusao"],
+       f"quando não acha, diz isso ({d['conclusao'][:40]})")
+
+dbo.gravar_config({"remover_do_mdm_no_recebimento": "0"})
+d = ob.mdm_diagnostico(REQ_DIAG, serie="SN-ACHA")
+checar("desligada" in d["conclusao"], "remoção desligada aparece como causa")
+dbo.gravar_config({"remover_do_mdm_no_recebimento": "1"})
+
+e = ob.mdm_escritas(REQ_DIAG, limite=5)
+checar("escritas" in e and isinstance(e["escritas"], list),
+       "a trilha de escritas no MDM é consultável")
+checar(all("resposta" in x for x in e["escritas"]), "com a resposta do console em cada uma")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

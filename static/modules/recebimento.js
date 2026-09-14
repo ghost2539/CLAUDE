@@ -436,12 +436,15 @@ function renderNovo(c, S) {
                 if (sn.criados) partes.push(sn.criados + ' criado(s) no ServiceNow');
                 if (sn.atualizados) partes.push(sn.atualizados + ' atualizado(s)');
                 if (sn.incompletos) partes.push(sn.incompletos + ' sem custo/depreciação (não subiram)');
+                if (sn.depreciados) partes.push(sn.depreciados + ' com depreciação calculada');
+                if (sn.sem_depreciacao) partes.push(sn.sem_depreciacao + ' SEM depreciação');
                 if (partes.length) msg += ' ' + partes.join(', ') + '.';
                 if (sn.falhas && sn.falhas.length) msg += ' ServiceNow: ' + sn.falhas[0];
             }
             var mdm = d.mdm || {};
             if (mdm.removidos) msg += ' ' + mdm.removidos + ' coletor(es) removido(s) do MDM.';
             else if (mdm.pendentes) msg += ' ' + mdm.pendentes + ' remoção(ões) do MDM pendente(s): ' + (mdm.motivo || (mdm.falhas || [])[0] || '');
+            else if (mdm.nao_encontrados) msg += ' ' + mdm.nao_encontrados + ' não localizado(s) no MDM.';
             S.toast(msg, (d.erros && d.erros.length) || (sn.falhas && sn.falhas.length) ? 'warning' : 'success');
             sessionItems = sessionItems.filter(function (x) { return !x._selected; });
             drawSession();
