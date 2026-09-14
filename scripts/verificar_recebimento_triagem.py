@@ -142,6 +142,35 @@ i8 = item(subcategoria="Totem")
 enviar(i8)
 checar(estado(i8.numero_serie) == "AG_TRIAGEM_CONECT", "o ativo segue a lista nova")
 
+print("\n[7] Receber de novo não duplica o ativo na base")
+# Volta a lista padrão, trocada no passo anterior.
+with SessionLocal.begin() as s:
+    linha = s.get(Setting, rec.CONFIG_SUBCATEGORIAS)
+    if linha is not None:
+        s.delete(linha)
+from db.portal import Asset, ReceiptCycle  # noqa: E402
+from sqlalchemy import func as _func  # noqa: E402
+i9 = item(subcategoria="PDV")
+enviar(i9)
+with SessionLocal() as s:
+    antes = s.query(_func.count(Asset.id)).scalar()
+    ciclos_antes = s.query(_func.count(ReceiptCycle.id)).scalar()
+# Mesmo equipamento, lido de novo — e também só pela série, sem a etiqueta.
+enviar(rec.BulkSubmitItem(empresa="1", ativo=i9.ativo, etiqueta=i9.etiqueta,
+                          numero_serie=i9.numero_serie, modelo="Zebra TC21",
+                          categoria="Coletor", subcategoria="PDV"))
+enviar(rec.BulkSubmitItem(empresa="1", numero_serie=i9.numero_serie,
+                          modelo="Zebra TC21", categoria="Coletor",
+                          subcategoria="PDV"))
+with SessionLocal() as s:
+    depois = s.query(_func.count(Asset.id)).scalar()
+    ciclos_depois = s.query(_func.count(ReceiptCycle.id)).scalar()
+    linhas = s.query(Asset).filter(Asset.serial_number == i9.numero_serie).all()
+checar(depois == antes, f"a base continua com os mesmos ativos ({antes} → {depois})")
+checar(len(linhas) == 1, "uma linha só para o mesmo equipamento")
+checar(ciclos_depois == ciclos_antes,
+       "e nenhum ciclo novo: o recebimento em aberto é atualizado, não duplicado")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))

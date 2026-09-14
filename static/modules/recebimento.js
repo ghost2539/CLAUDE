@@ -435,6 +435,7 @@ function renderNovo(c, S) {
                 var partes = [];
                 if (sn.criados) partes.push(sn.criados + ' criado(s) no ServiceNow');
                 if (sn.atualizados) partes.push(sn.atualizados + ' atualizado(s)');
+                if (sn.incompletos) partes.push(sn.incompletos + ' sem custo/depreciação (não subiram)');
                 if (partes.length) msg += ' ' + partes.join(', ') + '.';
                 if (sn.falhas && sn.falhas.length) msg += ' ServiceNow: ' + sn.falhas[0];
             }

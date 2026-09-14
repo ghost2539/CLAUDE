@@ -1008,13 +1008,63 @@ def resumo_parque() -> dict:
 
 
 # ── Coletor recebido sai do MDM ───────────────────────────────────
+def _achar_no_mdm(sessao, base: str, alvo: dict) -> tuple[str, int | None]:
+    """id do aparelho no console, e o id da linha do parque se houver.
+
+    Procura no parque guardado (série ou nome) e, não achando, na busca do
+    próprio console — que é o único lugar onde a série sempre está.
+    """
+    import db.obsolescencia as _db
+    from sqlalchemy import select as _select
+    from integracoes import mdm_airwatch as mdm
+
+    serie = (alvo.get("serie") or "").strip()
+    etiqueta = (alvo.get("etiqueta") or "").strip()
+    chaves = [k.upper() for k in (serie, etiqueta) if k]
+    if not chaves:
+        return "", None
+
+    with _db.SessionLocal() as s:
+        for linha in s.execute(_select(_db.Coletor)).scalars():
+            candidatos = {(linha.serie or "").strip().upper(),
+                          (linha.nome or "").strip().upper()}
+            candidatos.discard("")
+            if candidatos & set(chaves):
+                return linha.mdm_id, linha.id
+
+    if sessao is None:
+        return "", None
+    for termo in (serie, etiqueta):
+        if not termo:
+            continue
+        try:
+            achados = mdm.procurar(sessao, termo, base)
+        except Exception as exc:  # noqa: BLE001 — busca falha não derruba o lote
+            _log.warning("MDM: busca por %s falhou: %s", termo, exc)
+            continue
+        # Só age quando a busca é inequívoca: apagar do MDM não tem volta,
+        # e escolher entre dois resultados é chute.
+        if len(achados) == 1 and achados[0].get("id"):
+            return achados[0]["id"], None
+        if len(achados) > 1:
+            _log.warning("MDM: busca por %s devolveu %d aparelhos; nada removido",
+                         termo, len(achados))
+    return "", None
+
+
+
 def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
     """Remove do MDM os coletores que acabaram de ser recebidos no CD.
 
     Vale SÓ para o que passou pelo Recebimento: a base inteira não é
-    tocada. Só sai quem está no parque (foi coletado como coletor de
-    loja) e casa por série. Cada tentativa fica na trilha de escrita, com
-    sucesso ou motivo da falha — apagar do MDM não tem volta.
+    tocada. Cada tentativa fica na trilha de escrita, com sucesso ou
+    motivo da falha — apagar do MDM não tem volta.
+
+    O aparelho é achado em dois passos: primeiro no parque guardado
+    (quando a série já é conhecida) e, se não estiver lá, **procurando no
+    próprio console** pela série e pela etiqueta. A grade não publica a
+    série nas colunas, então depender só do parque fazia a remoção não
+    achar ninguém e o coletor recebido continuar inscrito.
 
     Sem endpoint configurado nada é enviado: a remoção fica pendente e o
     resumo diz por quê.
@@ -1032,18 +1082,16 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
         resumo["motivo"] = "desligado na configuração"
         return resumo
 
-    seriais = {str(it.get("serial") or "").strip().upper() for it in itens}
-    seriais.discard("")
-    if not seriais:
+    # Chaves de busca de cada recebido: série primeiro, etiqueta como
+    # reserva — coletor costuma ter as duas gravadas no console.
+    procurados = []
+    for it in itens:
+        serie = str(it.get("serial") or "").strip()
+        etiqueta = str(it.get("etiqueta") or "").strip()
+        if serie or etiqueta:
+            procurados.append({"serie": serie, "etiqueta": etiqueta})
+    if not procurados:
         return resumo
-
-    with _db.SessionLocal() as s:
-        alvos = [c for c in s.execute(_select(_db.Coletor)).scalars()
-                 if (c.serie or "").strip().upper() in seriais]
-    resumo["nao_encontrados"] = len(seriais) - len(alvos)
-    if not alvos:
-        return resumo
-    resumo["tentados"] = len(alvos)
 
     endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
     base = getattr(_cfg, "MDM_BASE_URL", "")
@@ -1057,12 +1105,23 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
         resumo["motivo"] = ("endpoint de remoção do MDM não configurado "
                             "(Configuração → Obsolescência)")
 
-    for c in alvos:
+    for alvo in procurados:
+        serie = alvo["serie"]
+        chave = serie.upper()
+        mdm_id, linha_id = _achar_no_mdm(sessao, base, alvo)
+        if not mdm_id:
+            resumo["nao_encontrados"] += 1
+            resumo["por_serie"][chave] = {
+                "ok": False, "mdm_id": "",
+                "detalhe": "não encontrado no MDM (nem no parque, nem na busca do console)"}
+            continue
+
+        resumo["tentados"] += 1
         ok, detalhe = False, resumo["motivo"] or "não enviado"
-        if sessao is not None:
+        if sessao is not None and endpoint:
             try:
                 ok, detalhe = mdm.remover_dispositivo(
-                    sessao, c.mdm_id, base, endpoint,
+                    sessao, mdm_id, base, endpoint,
                     cfg.get("mdm_remocao_metodo", "POST"),
                     cfg.get("mdm_remocao_campo") or "SelectedDeviceIds")
             except mdm.RemocaoNaoConfigurada as exc:
@@ -1070,18 +1129,17 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
             except Exception as exc:  # noqa: BLE001 — um aparelho não derruba o lote
                 ok, detalhe = False, str(exc)[:200]
         with _db.SessionLocal.begin() as s:
-            s.add(_db.Escrita(usuario=usuario, acao="deletar", mdm_id=c.mdm_id,
-                              serie=c.serie or "", origem="recebimento",
+            s.add(_db.Escrita(usuario=usuario, acao="deletar", mdm_id=mdm_id,
+                              serie=serie, origem="recebimento",
                               sucesso=ok, resposta=detalhe[:400],
                               detalhe="coletor recebido no CD"))
-            if ok:
-                alvo = s.get(_db.Coletor, c.id)
-                if alvo is not None:
-                    s.delete(alvo)
+            if ok and linha_id:
+                registro = s.get(_db.Coletor, linha_id)
+                if registro is not None:
+                    s.delete(registro)
         # Por série para quem chamou poder registrar no próprio processo
         # (o Recebimento guarda o desfecho no ciclo do ativo).
-        resumo["por_serie"][(c.serie or "").strip().upper()] = {
-            "ok": ok, "detalhe": detalhe, "mdm_id": c.mdm_id}
+        resumo["por_serie"][chave] = {"ok": ok, "detalhe": detalhe, "mdm_id": mdm_id}
         if ok:
             resumo["removidos"] += 1
         else:
