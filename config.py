@@ -280,6 +280,21 @@ class Settings:
     )
     EBS_CAPEX_FX_PROXY: str = _env("EBS_CAPEX_FX_PROXY", "")
 
+    # ── Gestão de Compras — API PHP em suporte.lojasrenner.com.br ───────
+    # O módulo /gestao_compras roda sob o Apache, que ENXERGA o cofre
+    # corporativo, e já expõe as consultas de PO e projetos do EBS por HTTP.
+    # O portal fala com ele como cliente — o cofre fica onde está, lido por
+    # quem pode lê-lo. Mesmo desenho do /ebs/api que o portal já usa.
+    GESTAO_COMPRAS_URL: str = _env(
+        "GESTAO_COMPRAS_URL", "https://suporte.lojasrenner.com.br/gestao_compras/"
+    ).rstrip("/") + "/"
+    # Consulta ao Oracle pelo lado de lá pode levar dezenas de segundos; o
+    # próprio módulo permite 120 s. Curto demais só produz timeout falso.
+    GESTAO_COMPRAS_TIMEOUT: int = int(_env("GESTAO_COMPRAS_TIMEOUT", "90"))
+    GESTAO_COMPRAS_VERIFY: bool = _env(
+        "GESTAO_COMPRAS_VERIFY", _env("VERIFY_SSL", "false")).lower() == "true"
+    GESTAO_COMPRAS_PROXY: str = _proxy("GESTAO_COMPRAS_PROXY", "HTTPS_PROXY", "https_proxy")
+
     # Módulos com permissão por usuário. "orcamento" não aparece na sidebar
     # do portal — é a tela /controle-orcamento, liberada individualmente.
     # ── EBS Forms (RPA sobre o cliente Oracle Forms) ────────────────────

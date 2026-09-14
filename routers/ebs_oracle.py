@@ -200,6 +200,35 @@ def _validar_sql(sql: str) -> str:
     return limpo
 
 
+def _consultas_nomeadas() -> tuple[dict, dict]:
+    """QUERIES e BINDS do módulo de acesso, mesmo sem o driver Oracle.
+
+    O módulo importa `oracledb` no topo; sem o driver, o import estoura e a
+    tela ficaria sem a lista. Ler o dicionário do fonte por regex é feio,
+    mas mantém a tela útil num servidor onde o driver ainda não foi instalado.
+    """
+    try:
+        from integracoes import ebs_oracle
+        return dict(ebs_oracle.QUERIES), dict(ebs_oracle.BINDS)
+    except ImportError:
+        from pathlib import Path as _P
+        fonte = (_P(__file__).resolve().parent.parent / "integracoes" / "ebs_oracle.py"
+                 ).read_text(encoding="utf-8")
+        escopo: dict = {"re": _re}
+        exec(_re.search(r"QUERIES: dict\[str, str\] = \{.*?\n\}\n", fonte, _re.S).group(0), escopo)  # noqa: S102
+        exec(_re.search(r"BINDS: dict.*?\n\}\n", fonte, _re.S).group(0), escopo)  # noqa: S102
+        return escopo["QUERIES"], escopo["BINDS"]
+
+
+@router.get("/consultas")
+def consultas(req: Request):
+    """As consultas nomeadas (as mesmas do módulo Gestão de Compras) e seus binds."""
+    _exigir(req)
+    queries, binds = _consultas_nomeadas()
+    return {"consultas": [{"nome": n, "binds": list(binds.get(n, ())), "sql": queries[n]}
+                          for n in sorted(queries)]}
+
+
 @router.post("/consultar")
 def consultar(body: dict, req: Request):
     """Roda um SELECT no BASE_REMOVIDA e devolve as linhas.
@@ -210,7 +239,14 @@ def consultar(body: dict, req: Request):
     """
     _exigir(req)
     check_rate_limit(req, "api")
-    sql = _validar_sql(str((body or {}).get("sql", "")))
+    nome = str((body or {}).get("nome", "") or "").strip().lower()
+    if nome:
+        queries, _binds = _consultas_nomeadas()
+        if nome not in queries:
+            raise HTTPException(422, f"Consulta '{nome}' não existe. Veja /api/ebs-oracle/consultas.")
+        sql = _validar_sql(queries[nome])
+    else:
+        sql = _validar_sql(str((body or {}).get("sql", "")))
     binds = (body or {}).get("binds") or {}
     if not isinstance(binds, dict):
         raise HTTPException(422, "Os parâmetros devem vir como objeto {nome: valor}.")
