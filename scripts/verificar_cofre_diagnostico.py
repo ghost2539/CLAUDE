@@ -351,6 +351,63 @@ else:
     os.environ.pop("VCREPORTS_SECRETS_PHP", None)
     importlib.reload(cofre)
 
+print("\n[3m] O teste do PHP feito PELO SERVIÇO, não pelo terminal")
+# Só o serviço alcança o cofre. Rodar php no terminal responde sobre o
+# terminal — então quem executa a ponte é o processo do portal.
+r17 = cliente.post("/api/cofre/testar-php",
+                   json={"loader": "/tmp/qualquer.php", "chave": "X"})
+checar(r17.status_code == 422, f"loader fora das pastas do cofre é recusado ({r17.status_code})")
+checar("/usr/local/lib/vcreports/" in r17.json().get("detail", ""),
+       "dizendo onde ele pode estar")
+checar(cliente.post("/api/cofre/testar-php",
+                    json={"loader": "/etc/vcreports/x.txt"}).status_code == 422,
+       "e precisa ser um .php — o caminho vira require, ou seja, código")
+checar(cliente.post("/api/cofre/testar-php",
+                    json={"chave": "a b; rm -rf /"}).status_code == 422,
+       "nome de chave inválido é recusado antes de qualquer execução")
+
+if not PHP:
+    print("  (sem php: o resto desta seção não se aplica)")
+else:
+    PASTA = Path("/usr/local/lib/vcreports")
+    criei = not PASTA.exists()
+    PASTA.mkdir(parents=True, exist_ok=True)
+    ALVO = PASTA / "secrets_de_teste.php"
+    ALVO.write_text(
+        "<?php\n"
+        "function secret($k) {\n"
+        "  return $k === 'CORREIOS_USUARIO' ? 'conta-de-servico' : null;\n"
+        "}\n", encoding="utf-8")
+
+    d18 = cliente.post("/api/cofre/testar-php",
+                       json={"loader": str(ALVO), "chave": "CORREIOS_USUARIO"}).json()
+    checar(d18["ok"] is True, "o serviço executa a ponte e o PHP responde")
+    checar("caracteres" in d18["detalhe"] and "conta-de-servico" not in str(d18),
+           "informando só o tamanho — o valor nunca sai")
+    checar(str(RAIZ / "scripts" / "cofre_php.php") in d18["comando_para_a_unit"],
+           "e devolve a linha pronta para a unit")
+    checar(str(ALVO) in d18["variavel_do_loader"],
+           "com a variável do loader quando ele não é o padrão")
+
+    d19 = cliente.post("/api/cofre/testar-php",
+                       json={"loader": str(ALVO), "chave": "NAO_EXISTE"}).json()
+    checar(d19["ok"] is False and "Sem valor" in d19["detalhe"],
+           "chave ausente vira mensagem do PHP, não erro do portal")
+    checar(d19["comando_para_a_unit"] == "",
+           "e não sugere configurar nada quando não funcionou")
+
+    d20 = cliente.post("/api/cofre/testar-php",
+                       json={"loader": "/usr/local/lib/vcreports/nao_existe.php"}).json()
+    checar(d20["ok"] is False and "legível" in d20["detalhe"],
+           "loader inexistente é dito como tal, sem 500")
+
+    ALVO.unlink()
+    if criei:
+        PASTA.rmdir()
+
+checar(anon2.post("/api/cofre/testar-php", json={}).status_code in (401, 403),
+       "e tudo isso exige sessão de admin")
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -400,6 +457,8 @@ checar("remedioHtml" not in js and "pasta_acessivel" not in js,
        "e não fala mais em permissão de arquivo — o cofre é por referência")
 checar("/cofre/sondar-varios" in js and "cf-nomes" in js,
        "a tela tem a caixa de sondagem por nome")
+checar("/cofre/testar-php" in js and "cf-php-loader" in js,
+       "e o teste do PHP, feito pelo serviço")
 checar("/cofre/tudo" in js and "cf-filtro" in js,
        "a tela tem o botão Ver tudo, com filtro por nome")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
