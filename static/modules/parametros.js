@@ -524,6 +524,9 @@ async function renderCofre(c, S) {
         // primeiro e o corporativo, correto, nunca é consultado.
         var aviso = (k.no_local && !k.no_corporativo)
             ? ' <span class="badge badge-warning" title="Só o cofre local tem esta chave.">só no local</span>' : '';
+        if (k.divergente) aviso += ' <span class="badge badge-danger" ' +
+            'title="Os dois cofres têm esta chave com valores diferentes, e o local ganha.">' +
+            'valores diferentes</span>';
         return '<tr><td class="om-mono">' + e(k.chave) + '</td>' +
             '<td>' + badge(k.resolvida, 'resolvida', 'faltando') + aviso + '</td>' +
             '<td>' + e(k.fonte || '—') +
@@ -581,13 +584,24 @@ async function renderCofre(c, S) {
                 }).join(', ') + '</p>';
         }).join('');
 
+        var conteudo = (inv.conteudo || []).map(function (c) {
+            if (c.erro) return '<p class="om-mono">' + e(c.caminho) +
+                ' — <span class="badge badge-danger">' + e(c.erro) + '</span></p>';
+            if (!c.total) return '<p class="om-mono">' + e(c.caminho) +
+                ' — <span class="badge badge-warning">legível, mas sem nenhuma chave dentro</span></p>';
+            return '<p class="om-mono">' + e(c.caminho) + ' — <span class="badge badge-success">' +
+                'legível</span> ' + c.total + ' chave(s): ' + e((c.nomes || []).join(', ')) + '</p>';
+        }).join('');
+
         var nomes = inv.sabe_listar
             ? '<p><b>Chaves que o cofre expõe:</b> <span class="om-mono">' +
               e((inv.nomes || []).join(', ')) + '</span></p>'
             : '<p class="text-muted">Este cofre não sabe se listar — só responde chave por chave. ' +
               'Por isso a sondagem de nomes abaixo.</p>';
 
-        return cab + arqs + pastas + nomes;
+        return cab + arqs + pastas + conteudo + nomes +
+            '<p class="text-muted">Só os nomes. Valor de senha e chave não sai daqui — ' +
+            'para saber se o serviço enxerga, o nome e o tamanho bastam.</p>';
     }
 
     function alternativasHtml(lista) {

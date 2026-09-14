@@ -152,6 +152,81 @@ checar(alt6["ORACLE_EBS_SENHA"]["resolvida"] is True
        "e o apelido certo aparece resolvido, no cofre corporativo")
 cofre._modulo, cofre._modulo_via = None, ""
 
+print("\n[3d] Os nomes que estão DENTRO do arquivo do cofre")
+# É a pergunta direta: o serviço enxerga o conteúdo? Lista cheia = enxerga;
+# erro de permissão = não enxerga. E em nenhum dos casos o valor sai.
+PHP = _TMP / "secrets.php"
+PHP.write_text(
+    "<?php\n"
+    "define('ORACLE_EBS_USUARIO', 'USUARIO_REMOVIDO');\n"
+    "define('ORACLE_EBS_SENHA', 'senha-do-arquivo-que-nao-pode-sair');\n"
+    "$mapa = ['CORREIOS_CHAVE' => 'chave-do-arquivo-que-nao-pode-sair'];\n",
+    encoding="utf-8")
+ENV = _TMP / "outro.env"
+ENV.write_text("# comentário\nexport SN_API_USER=conta\nMDM_SENHA='nao-pode-sair'\n",
+               encoding="utf-8")
+JSON = _TMP / "cofre_ext.json"
+JSON.write_text('{"EBS_PASS": "tambem-nao-pode-sair"}', encoding="utf-8")
+
+mod2 = types.ModuleType("vcreports_secrets")
+mod2.ARQUIVO_PHP = str(PHP)
+mod2.ARQUIVO_ENV = str(ENV)
+mod2.ARQUIVO_JSON = str(JSON)
+mod2.s = lambda nome: ""
+cofre._modulo, cofre._modulo_via = mod2, "import direto (simulado 2)"
+
+r7 = cliente.get("/api/cofre/diagnostico")
+d7 = r7.json()
+conteudo = {c["caminho"]: c for c in (d7.get("inventario") or {}).get("conteudo", [])}
+php = conteudo.get(str(PHP), {})
+checar(php.get("legivel") is True, "lê o arquivo em formato PHP")
+checar("ORACLE_EBS_USUARIO" in php.get("nomes", [])
+       and "ORACLE_EBS_SENHA" in php.get("nomes", []),
+       "pega os nomes do define()")
+checar("CORREIOS_CHAVE" in php.get("nomes", []), "e os nomes do array =>")
+env = conteudo.get(str(ENV), {})
+checar("SN_API_USER" in env.get("nomes", []) and "MDM_SENHA" in env.get("nomes", []),
+       "pega os nomes do formato env, com ou sem export")
+checar("comentário" not in str(env.get("nomes")), "e ignora comentário")
+js_ = conteudo.get(str(JSON), {})
+checar("EBS_PASS" in js_.get("nomes", []), "pega os nomes do formato JSON")
+for proibido in ("senha-do-arquivo-que-nao-pode-sair", "chave-do-arquivo-que-nao-pode-sair",
+                 "nao-pode-sair", "tambem-nao-pode-sair", "USUARIO_REMOVIDO"):
+    checar(proibido not in r7.text, f"nenhum valor do arquivo sai na resposta ({proibido})")
+inv7 = d7.get("inventario") or {}
+checar("ORACLE_EBS_USUARIO" in inv7.get("nomes", []),
+       "o inventário junta o que veio dos arquivos")
+
+# Arquivo sem permissão: a tela precisa dizer isso, não uma lista vazia.
+FECHADO = _TMP / "fechado.env"
+FECHADO.write_text("X=1\n", encoding="utf-8")
+os.chmod(FECHADO, 0o000)
+from routers import cofre as rc  # noqa: E402
+# Como root o chmod não impede nada, e é justamente o caso do servidor que
+# precisa estar certo — então a recusa é forçada na abertura do arquivo.
+from unittest.mock import patch  # noqa: E402
+with patch("builtins.open", side_effect=PermissionError("negado")):
+    sem = rc._nomes_no_arquivo(str(FECHADO))
+checar(sem["legivel"] is False and "permissão" in sem["erro"],
+       "arquivo sem permissão vira erro claro, não lista vazia")
+os.chmod(FECHADO, 0o600)
+checar(rc._nomes_no_arquivo(str(_TMP / "nao-existe.env"))["erro"] != "",
+       "arquivo inexistente também explica o porquê")
+
+print("\n[3e] Chave nos dois cofres com valores diferentes")
+cofre.definir("SN_API_USER", "valor-do-cofre-local")
+mod3 = types.ModuleType("vcreports_secrets")
+mod3.s = lambda n: "valor-do-corporativo" if n == "SN_API_USER" else ""
+cofre._modulo, cofre._modulo_via = mod3, "import direto (simulado 3)"
+d8 = cliente.get("/api/cofre/diagnostico").json()
+sn = {c["chave"]: c for g in d8["grupos"] if g["nome"] == "ServiceNow"
+      for c in g["chaves"]}["SN_API_USER"]
+checar(sn.get("divergente") is True,
+       "aponta que os dois cofres discordam — sem comparar nada na tela")
+checar(sn.get("fonte") == "cofre corporativo",
+       "e diz qual dos dois o portal usa de fato")
+cofre._modulo, cofre._modulo_via = None, ""
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -192,6 +267,7 @@ checar("['cofre',           'Cofre de segredos']" in js, "a aba está na lista")
 checar("cofre:          renderCofre" in js, "e ligada ao renderizador")
 checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")
 checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
+checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
 checar("inventarioHtml" in js and "alternativasHtml" in js,
        "a tela mostra de onde o cofre lê e os apelidos sondados")
 
