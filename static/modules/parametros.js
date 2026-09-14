@@ -655,11 +655,17 @@ async function renderCofre(c, S) {
                   '</span> <span class="text-muted">— quando configurado, é ele que resolve ' +
                   'antes do loader Python.</span></p>'
                 : '') +
-            '<p class="text-muted">O loader responde <b>por nome</b>, uma chave de cada vez, e não ' +
-            'tem função de listar — o arquivo do cofre não é para ser aberto por quem consome. ' +
-            'Então não há como "trazer tudo" daqui: para procurar, use a sondagem por nome. ' +
-            'A ordem do loader é cofre → variável de ambiente → padrão, e é por isso que uma ' +
-            'chave pode funcionar mesmo com o cofre inacessível.</p>';
+            (inv.sabe_listar
+                ? '<p><b>Chaves que o loader carregou do cofre</b> <span class="text-muted">(' +
+                  e(inv.listagem_por) + (inv.exporta_para_ambiente ? ', e exportou para o ambiente do processo' : '') +
+                  '):</span></p><p class="om-mono">' + e((inv.nomes || []).join(', ')) + '</p>' +
+                  '<p class="text-muted">Lista cheia significa: o serviço lê o cofre pelo loader, do mesmo ' +
+                  'jeito que o módulo do time lê. O que não está nesta lista não existe no cofre que ' +
+                  'este serviço alcança — é nome errado ou chave não provisionada.</p>'
+                : '<p class="text-muted">O loader está carregado, mas o cache dele veio vazio: o <span class="om-mono">_load()</span> ' +
+                  'não conseguiu ler o cofre para este usuário (é o "cofre nao legivel" do log). ' +
+                  'A ordem dele é cofre → variável de ambiente → padrão, então uma chave pode responder ' +
+                  'mesmo assim se estiver no ambiente. Para procurar por nome, use a sondagem abaixo.</p>');
     }
 
     function alternativasHtml(lista) {

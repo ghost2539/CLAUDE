@@ -100,7 +100,7 @@ inv = d.get("inventario") or {}
 checar(isinstance(inv, dict) and "modulo_carregado" in inv,
        "diz se o módulo do cofre carregou")
 checar(inv.get("sabe_listar") is False,
-       "e que ele não sabe listar — só responde por nome")
+       "sem loader, não há o que listar")
 alt = d.get("alternativas") or []
 checar(len(alt) == 3, "sonda os apelidos de usuário, senha e endereço do EBS")
 nomes_alt = [c["chave"] for g in alt for c in g["chaves"]]
@@ -130,8 +130,8 @@ inv6 = d6.get("inventario") or {}
 checar(inv6.get("modulo_carregado") is True, "o módulo aparece como carregado")
 checar(inv6.get("funcao") == "<lambda>" or inv6.get("funcao"),
        "diz qual função do módulo é usada")
-checar(inv6.get("sabe_listar") is False and inv6.get("nomes") == [],
-       "e diz que não sabe listar — é o contrato do loader, não uma falha")
+checar(inv6.get("sabe_listar") is True and "ORACLE_EBS_SENHA" in inv6.get("nomes", []),
+       "lê o cache do loader (atributo SECRETS) e lista os NOMES que ele carregou")
 checar("senha-simulada-que-nao-pode-sair" not in r6.text,
        "e a senha do cofre corporativo não sai na resposta")
 alt6 = {c["chave"]: c for g in d6.get("alternativas", []) for c in g["chaves"]}
@@ -483,6 +483,41 @@ amb2 = cliente.get("/api/cofre/diagnostico").json().get("ambiente_do_servico") o
 checar(amb2.get("existe") is False and amb2.get("erro"),
        "sem arquivo, diz isso em vez de ficar mudo")
 os.environ.pop("PORTAL_ENV_FILE", None)
+
+print("\n[3q] O loader de verdade: _load() com cache, exportando para o ambiente")
+# É assim que o loader do time se descreve: `cache = _load()`, "cache em
+# memória por processo", e ordem cofre -> os.environ -> default. Se ele
+# exporta o que leu para o os.environ (estilo dotenv), tudo do cofre parece
+# "ambiente" para quem olha só o os.environ — foi esse o erro a corrigir.
+mod6 = types.ModuleType("vcreports_secrets")
+_COFRE_DO_TIME = {"CORREIOS_USUARIO": "conta-do-cofre", "CORREIOS_CHAVE": "chave-do-cofre-que-nao-pode-sair",
+                  "ORACLE_EBS_USER": "USUARIO_REMOVIDO", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"}
+def _load6():
+    for k, v in _COFRE_DO_TIME.items():
+        os.environ.setdefault(k, v)   # exporta, como o load_dotenv
+    return dict(_COFRE_DO_TIME)
+mod6._load = _load6
+mod6.s = lambda k, default=None: _load6().get(k, os.environ.get(k, default))
+cofre._modulo, cofre._modulo_via = mod6, "import direto (loader com _load)"
+for k in _COFRE_DO_TIME: os.environ.pop(k, None)
+
+d24 = cliente.get("/api/cofre/diagnostico").json()
+inv24 = d24["inventario"]
+checar(inv24["sabe_listar"] is True and inv24["listagem_por"] == "função _load()",
+       "pergunta ao loader pelo _load() e recebe o cache")
+checar(inv24["nomes"] == sorted(_COFRE_DO_TIME), "lista exatamente os nomes que o loader carregou")
+checar(inv24["exporta_para_ambiente"] is True, "e percebe que o loader exportou tudo para o os.environ")
+ebs24 = {c["chave"]: c for g in d24["grupos"] if g["nome"] == "Base EBS (Oracle)" for c in g["chaves"]}
+checar(ebs24["ORACLE_EBS_PASS"]["no_corporativo"] is True and ebs24["ORACLE_EBS_PASS"]["fonte"] == "cofre corporativo (loader)",
+       "chave no cache do loader é DO COFRE, mesmo estando também no os.environ")
+checar(ebs24["ORACLE_EBS_PASS"]["indistinguivel"] is False, "sem o rótulo 'pode ser só o ambiente' — não há dúvida")
+checar(ebs24["ORACLE_EBS_PASS"]["sombreado"] is False and ebs24["ORACLE_EBS_PASS"]["fontes_com_valor"] == ["cofre corporativo"],
+       "e o eco no os.environ não conta como segunda fonte — é o loader exportando")
+checar(ebs24["ORACLE_EBS_DSN"]["no_corporativo"] is False, "chave fora do cache não é dada como do cofre")
+checar("senha-do-cofre-que-nao-pode-sair" not in r_txt if (r_txt := cliente.get("/api/cofre/diagnostico").text) else True,
+       "e o valor da senha do cofre não aparece em lugar nenhum")
+for k in _COFRE_DO_TIME: os.environ.pop(k, None)
+cofre._modulo, cofre._modulo_via = None, ""
 
 print("\n[3o] Falso positivo: o loader devolvendo a variável de ambiente")
 # O loader do time resolve cofre -> os.environ -> default. Com a variável no
