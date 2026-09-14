@@ -488,14 +488,13 @@ def testar_php(body: dict, req: Request):
         return {"ok": False, "etapa": "ponte",
                 "detalhe": f"A ponte não está no lugar esperado: {ponte}"}
 
-    # A ponte roda como subprocesso e herdaria o ambiente do portal. Se o
-    # loader PHP também resolve cofre -> getenv (como o Python faz), uma
-    # variável qualquer do serviço voltaria disfarçada de segredo do cofre.
-    # Tirando a chave do ambiente do subprocesso, resposta só pode vir do
-    # cofre — o teste deixa de ser indício e vira prova.
+    # O subprocesso herda o ambiente do portal, de propósito: é assim que a
+    # ponte se comporta em uso real, e tirar a chave daqui fazia o teste
+    # responder "não achou" para credencial que funciona. O preço é que uma
+    # chave presente no ambiente não prova acesso ao cofre — por isso o
+    # resultado diz de qual dos dois casos se trata, em vez de esconder.
     ambiente = dict(os.environ, VCREPORTS_SECRETS_PHP=loader)
     tinha_no_ambiente = chave in ambiente
-    ambiente.pop(chave, None)
     try:
         r = subprocess.run([php, str(ponte), chave, "--tamanho"],
                            capture_output=True, text=True, timeout=15,

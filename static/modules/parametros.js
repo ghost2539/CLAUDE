@@ -755,11 +755,11 @@ async function renderCofre(c, S) {
                 '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
                 (d.ok ? 'O PHP leu <b>' + e(d.chave) + '</b> no cofre — ' + e(d.detalhe) + '.' +
                         (d.retirada_do_ambiente
-                            ? ' <br><small>Esta chave estava no ambiente do serviço e foi ' +
-                              'retirada só para este teste, para o valor não poder vir de lá. ' +
-                              'No serviço ela continua onde estava.</small>'
-                            : ' <br><small>A chave não estava no ambiente do serviço, então ' +
-                              'o valor só pode ter vindo do cofre.</small>')
+                            ? ' <br><small>Atenção: esta chave também está no ambiente do ' +
+                              'serviço, e o loader resolve cofre → ambiente. O valor pode ter ' +
+                              'vindo de lá, não do cofre.</small>'
+                            : ' <br><small>A chave não está no ambiente do serviço, então o ' +
+                              'valor só pode ter vindo do cofre.</small>')
                       : e(d.detalhe)) + '</div>' + receita;
             S.toast(d.ok ? 'O serviço alcança o cofre pelo PHP.' : 'O PHP também não leu.',
                     d.ok ? 'success' : 'error');
@@ -846,6 +846,24 @@ async function renderEbsOracle(c, S) {
         '<div class="card mb-3" id="eo-teste-card" style="display:none">' +
             '<div class="card-header">Resultado do teste</div>' +
             '<div class="card-body" id="eo-teste"></div></div>' +
+        '<div class="card mb-3"><div class="card-header">Consulta</div><div class="card-body">' +
+            '<p class="text-muted" style="margin-top:0">Só leitura: a sessão é aberta como ' +
+            'READ ONLY e a consulta precisa começar por SELECT ou WITH. A credencial vem do ' +
+            'cofre pelo loader, como no resto do portal.</p>' +
+            '<div class="form-group"><label for="eo-sql">SQL</label>' +
+                '<textarea id="eo-sql" class="form-control om-mono" rows="5" ' +
+                'placeholder="select * from apps.csi_item_instances where instance_number = :serie"></textarea></div>' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="eo-binds">Parâmetros (opcional)</label>' +
+                    '<input id="eo-binds" class="form-control om-mono" ' +
+                    'placeholder=\'{"serie": "HF550123456"}\'></div>' +
+                '<div class="form-group"><label for="eo-limite">Máximo de linhas</label>' +
+                    '<input id="eo-limite" class="form-control" type="number" value="200" ' +
+                    'min="1" max="5000"></div>' +
+            '</div>' +
+            '<div class="btn-row mt-2"><button id="eo-rodar" class="btn btn-primary btn-sm">Executar</button></div>' +
+            '<div id="eo-resultado" class="mt-3"></div>' +
+        '</div></div>' +
         '<div class="card"><div class="card-header">Procurar objeto</div><div class="card-body">' +
             '<p class="text-muted" style="margin-top:0">Lista tabelas e views que a conta enxerga. ' +
             'Só catálogo — nenhum dado de negócio é lido aqui.</p>' +
@@ -922,6 +940,46 @@ async function renderEbsOracle(c, S) {
                     return '<tr><td><b>' + e(k) + '</b></td><td>' + e(a[k]) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
             S.toast('EBSPRD respondeu.', 'success');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('eo-rodar').onclick = async function () {
+        var host = document.getElementById('eo-resultado');
+        var sql = document.getElementById('eo-sql').value;
+        if (!sql.trim()) { S.toast('Escreva a consulta.', 'warning'); return; }
+        var binds = {};
+        var bruto = document.getElementById('eo-binds').value.trim();
+        if (bruto) {
+            try { binds = JSON.parse(bruto); }
+            catch (x) { S.toast('Parâmetros não são um JSON válido.', 'error'); return; }
+        }
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando o EBSPRD…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/consultar', {
+                method: 'POST',
+                body: JSON.stringify({
+                    sql: sql, binds: binds,
+                    limite: parseInt(document.getElementById('eo-limite').value, 10) || 200
+                })
+            });
+            if (!d.total) {
+                host.innerHTML = '<p class="text-muted">Nenhuma linha (' + d.ms + ' ms).</p>';
+                return;
+            }
+            host.innerHTML =
+                '<p>' + d.total + ' linha(s) em ' + d.ms + ' ms.' +
+                (d.truncado ? ' <span class="badge badge-warning">cortado no limite de ' +
+                    d.limite + '</span>' : '') + '</p>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                d.colunas.map(function (c) { return '<th>' + e(c) + '</th>'; }).join('') +
+                '</tr></thead><tbody>' + d.linhas.map(function (r) {
+                    return '<tr>' + d.colunas.map(function (c) {
+                        return '<td>' + e(r[c] == null ? '' : r[c]) + '</td>';
+                    }).join('') + '</tr>';
+                }).join('') + '</tbody></table></div>';
         } catch (x) {
             host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
             S.toast(x.message, 'error');
