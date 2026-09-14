@@ -153,6 +153,72 @@ def _inventario_corporativo() -> dict:
     }
 
 
+# O arquivo de ambiente que a unit do systemd carrega com EnvironmentFile.
+# Este é NOSSO arquivo, não o cofre do time: ler os nomes daqui é legítimo, e
+# é o que explica de onde vêm as variáveis que o processo tem.
+ENVS_DO_SERVICO = (
+    "/var/www/vcreports/portal-spare/data/environment",
+    "/etc/portal_operacoes_spare_testes/environment",
+    "/etc/portal_operacoes_spare/environment",
+)
+
+
+def _ambiente_do_servico() -> dict:
+    """Qual arquivo de ambiente a unit carrega, e que nomes ele define.
+
+    Responde a pergunta que ficou no ar: se uma credencial funciona sem
+    estar no cofre nem na unit, ela veio daqui. E é aqui que se acrescenta
+    a próxima, sem precisar mexer na unit — basta reiniciar o serviço.
+
+    Nomes e marcadores, nunca valores.
+    """
+    import os
+    import re as _re
+    from pathlib import Path as _P
+
+    escolhido = os.environ.get("PORTAL_ENV_FILE", "")
+    candidatos = [escolhido] if escolhido else list(ENVS_DO_SERVICO)
+    for caminho in candidatos:
+        if not caminho:
+            continue
+        p = _P(caminho)
+        info = {"caminho": caminho, "existe": p.is_file(), "legivel": False,
+                "chaves": [], "erro": ""}
+        if not info["existe"]:
+            continue
+        try:
+            texto = p.read_text(encoding="utf-8", errors="replace")
+        except PermissionError:
+            info["erro"] = "existe, mas o serviço não consegue ler"
+            return info
+        except OSError as exc:
+            info["erro"] = str(exc)
+            return info
+        info["legivel"] = True
+        for linha in texto.splitlines():
+            linha = linha.strip()
+            if not linha or linha.startswith("#") or "=" not in linha:
+                continue
+            nome, _, valor = linha.partition("=")
+            nome = nome.strip().removeprefix("export ").strip()
+            if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nome):
+                continue
+            valor = valor.strip().strip('"').strip("'")
+            # O marcador @cofre:NOME@ delega ao cofre — e com o cofre fora do
+            # ar ele não resolve. Distinguir isso de um valor direto é o que
+            # explica por que uma chave funciona e a outra não.
+            ref = _re.fullmatch(r"@cofre:([A-Za-z0-9_.-]{1,64})@", valor)
+            info["chaves"].append({
+                "chave": nome,
+                "marcador": bool(ref),
+                "aponta_para": ref.group(1) if ref else "",
+                "vazio": valor == "",
+            })
+        return info
+    return {"caminho": "", "existe": False, "legivel": False, "chaves": [],
+            "erro": "nenhum arquivo de ambiente encontrado nos caminhos conhecidos"}
+
+
 def _seguro(rotulo: str, fn, padrao):
     """Roda um pedaço do diagnóstico sem deixar que ele derrube o resto.
 
@@ -211,6 +277,9 @@ def diagnostico(req: Request):
         # Nomes que o cofre expõe e apelidos plausíveis da credencial do
         # EBS: responde "a chave tem outro nome?" sem chutar um por vez.
         "inventario": parte("inventário do cofre", _inventario_corporativo, {}),
+        # De onde vêm as variáveis que o processo tem sem estar no cofre.
+        "ambiente_do_servico": parte("arquivo de ambiente do serviço",
+                                     _ambiente_do_servico, {}),
         "alternativas": parte("apelidos do EBS",
                               lambda: [{"nome": rotulo,
                                         "chaves": [_sondar(k) for k in chaves]}

@@ -586,6 +586,36 @@ async function renderCofre(c, S) {
     // O módulo do cofre importa, mas nada resolve? Então o problema não é o
     // módulo: é o arquivo que ELE lê, ou o nome da chave. Estas duas seções
     // respondem as duas perguntas sem precisar de acesso ao servidor.
+    // Se uma credencial funciona sem estar no cofre nem na unit, ela veio
+    // daqui — e é aqui que se acrescenta a próxima, sem mexer na unit.
+    function ambienteHtml(a) {
+        if (!a) return '';
+        var cab = '<h3 class="mt-3">Arquivo de ambiente do serviço</h3>';
+        if (!a.existe) return cab + '<p class="text-muted om-mono">' +
+            e(a.erro || 'não encontrado') + '</p>';
+        if (!a.legivel) return cab + '<p class="om-mono">' + e(a.caminho) +
+            ' — <span class="badge badge-danger">' + e(a.erro || 'sem leitura') + '</span></p>';
+        var chaves = a.chaves || [];
+        return cab + '<p class="om-mono">' + e(a.caminho) +
+            ' — <span class="badge badge-success">legível</span> ' + chaves.length + ' variável(is)</p>' +
+            (chaves.length
+                ? '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                  '<th>Variável</th><th>Como está definida</th></tr></thead><tbody>' +
+                  chaves.map(function (k) {
+                      var como = k.marcador
+                          ? '<span class="badge badge-info">marcador do cofre</span> ' +
+                            '<span class="om-mono">@cofre:' + e(k.aponta_para) + '@</span>' +
+                            ' <span class="text-muted">— só resolve se o cofre responder</span>'
+                          : (k.vazio ? '<span class="badge badge-warning">vazia</span>'
+                                     : '<span class="badge badge-success">valor direto</span>');
+                      return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + como + '</td></tr>';
+                  }).join('') + '</tbody></table></div>'
+                : '') +
+            '<p class="text-muted">Valores nunca aparecem — só o nome e se é valor direto ou ' +
+            'marcador. Acrescentar uma variável aqui não exige mexer na unit: basta reiniciar ' +
+            'o serviço.</p>';
+    }
+
     function inventarioHtml(inv) {
         if (!inv) return '';
         return '<h3 class="mt-3">Loader do cofre corporativo</h3>' +
@@ -637,7 +667,8 @@ async function renderCofre(c, S) {
                         ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
                           e(d.algoritmo || '') + '</span>'
                         : '<span class="text-muted">não existe</span>') + '</td></tr>' +
-                '</tbody></table></div>' + inventarioHtml(d.inventario) +
+                '</tbody></table></div>' + ambienteHtml(d.ambiente_do_servico) +
+                inventarioHtml(d.inventario) +
                 (d.grupos || []).map(function (g) {
                     return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
                         '<div class="table-wrapper"><table class="data-table"><thead><tr>' +

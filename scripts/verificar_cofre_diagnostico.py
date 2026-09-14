@@ -408,6 +408,42 @@ else:
 checar(anon2.post("/api/cofre/testar-php", json={}).status_code in (401, 403),
        "e tudo isso exige sessão de admin")
 
+print("\n[3n] O arquivo de ambiente do serviço: de onde vêm as variáveis")
+# Uma credencial que funciona sem estar no cofre nem na unit veio daqui. E é
+# aqui que se acrescenta a próxima, sem mexer na unit.
+ENV_SERVICO = _TMP / "environment"
+ENV_SERVICO.write_text(
+    "# comentário que deve ser ignorado\n"
+    "CORREIOS_USUARIO=conta-de-servico\n"
+    'export CORREIOS_CHAVE="chave-do-environment-que-nao-pode-sair"\n'
+    "SN_API_PASS=@cofre:SN_API_PASS@\n"
+    "MDM_SENHA=\n"
+    "linha sem igual\n",
+    encoding="utf-8")
+os.environ["PORTAL_ENV_FILE"] = str(ENV_SERVICO)
+
+r21 = cliente.get("/api/cofre/diagnostico")
+amb = r21.json().get("ambiente_do_servico") or {}
+checar(amb.get("caminho") == str(ENV_SERVICO) and amb.get("legivel") is True,
+       "acha e lê o arquivo de ambiente que a unit carrega")
+por_nome = {k["chave"]: k for k in amb.get("chaves", [])}
+checar(set(por_nome) == {"CORREIOS_USUARIO", "CORREIOS_CHAVE", "SN_API_PASS", "MDM_SENHA"},
+       "lista as variáveis, ignorando comentário e linha sem '='")
+checar(por_nome["CORREIOS_CHAVE"]["marcador"] is False,
+       "reconhece valor direto — é assim que os Correios chegam hoje")
+checar(por_nome["SN_API_PASS"]["marcador"] is True
+       and por_nome["SN_API_PASS"]["aponta_para"] == "SN_API_PASS",
+       "e reconhece o marcador @cofre:NOME@, que só resolve se o cofre responder")
+checar(por_nome["MDM_SENHA"]["vazio"] is True, "variável vazia é apontada como tal")
+checar("chave-do-environment-que-nao-pode-sair" not in r21.text,
+       "e nenhum valor do arquivo sai na resposta")
+
+os.environ["PORTAL_ENV_FILE"] = str(_TMP / "nao-existe-environment")
+amb2 = cliente.get("/api/cofre/diagnostico").json().get("ambiente_do_servico") or {}
+checar(amb2.get("existe") is False and amb2.get("erro"),
+       "sem arquivo, diz isso em vez de ficar mudo")
+os.environ.pop("PORTAL_ENV_FILE", None)
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -459,6 +495,8 @@ checar("/cofre/sondar-varios" in js and "cf-nomes" in js,
        "a tela tem a caixa de sondagem por nome")
 checar("/cofre/testar-php" in js and "cf-php-loader" in js,
        "e o teste do PHP, feito pelo serviço")
+checar("ambienteHtml" in js and "marcador do cofre" in js,
+       "a tela mostra o arquivo de ambiente e separa marcador de valor direto")
 checar("/cofre/tudo" in js and "cf-filtro" in js,
        "a tela tem o botão Ver tudo, com filtro por nome")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
