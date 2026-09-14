@@ -1616,13 +1616,22 @@ def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
     em qual passo e por quê.
     """
     require_permission(req, "servicenow", "view")
+    serie = (serie or "").strip()
+    etiqueta = (etiqueta or "").strip()
+    if not serie and not etiqueta:
+        # Dizer "não encontrado" quando ninguém informou o que procurar
+        # manda o diagnóstico para o lado errado. Já mandou.
+        return {"encontrado": False, "informado": False,
+                "motivo": "informe a série (ou a etiqueta) do equipamento "
+                          "para diagnosticar."}
     session = _sn_session_from_portal(req)
     _req, BS = _get_http()
-    achado = _registro_individual(session, (etiqueta or "").strip(), (serie or "").strip())
+    achado = _registro_individual(session, etiqueta, serie)
     if not achado or not achado.get("sys_id"):
-        return {"encontrado": False,
-                "motivo": "o ativo não foi encontrado no ServiceNow por essa "
-                          "série/etiqueta — sem ativo não há o que depreciar."}
+        return {"encontrado": False, "informado": True,
+                "motivo": f"o ativo não foi encontrado no ServiceNow por "
+                          f"série \"{serie or '—'}\" / etiqueta \"{etiqueta or '—'}\" "
+                          "— sem ativo no cadastro não há o que depreciar."}
     saida = _depreciacao_passos(session, achado["sys_id"], BS, executar=False)
     saida["encontrado"] = True
     saida["asset_tag"] = achado.get("asset_tag", "")
