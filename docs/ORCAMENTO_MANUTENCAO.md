@@ -35,7 +35,8 @@ escreve no banco de outro módulo.
 | `rma` | str(40), **único**, índice | RMA | texto; remover espaços e `\xa0` (a planilha tem) |
 | `serie` | str(60), índice | SÉRIE | maiúsculas, sem espaços nas pontas |
 | `loja` | int, nulo | LOJA | loja que paga o reparo |
-| `categoria` | str(40), índice | CATEGORIA | rótulo canônico, ver 3.1 |
+| `categoria` | str(40), índice | CATEGORIA | só `Coletor` ou `SLED`, ver 3.1 |
+| `modelo` | str(20), índice | derivado da SÉRIE | `EF500`, `EF501`, `HF550`, `S70`, `SLED RFR900`, `SLED RFR901` ou `""`, ver 3.1 |
 | `familia` | str(10), índice | derivado | `COLETOR` ou `SLED`, ver 3.1 |
 | `empresa` | str(20) | EMPRESA / EBS | `RENNER`, `CAMICADO`, `YOUCOM` ou `""` |
 | `orcamento` | Numeric(12,2) | ORÇAMENTO | valor do reparo em R$; `"Garantia"` e `"R$ -"` viram `0` |
@@ -82,20 +83,36 @@ escreve no banco de outro módulo.
 A planilha de 3 anos tem 8.123 linhas e estas variações reais. Toda regra
 abaixo foi tirada dela.
 
-### 3.1 Categoria e família
+### 3.1 Categoria, modelo e família
 
-Comparação sem acento, sem caixa, sem espaços duplicados.
+**Categoria é só Coletor ou SLED.** O que distingue o aparelho é o
+`modelo`, em coluna própria, deduzido do **prefixo da série**.
 
-| vem assim | `categoria` | `familia` |
+| a série começa com | `modelo` | `categoria` | `familia` |
+|---|---|---|---|
+| `HF550` | `HF550` | `Coletor` | `COLETOR` |
+| `EF500` | `EF500` | `Coletor` | `COLETOR` |
+| `EF501` | `EF501` | `Coletor` | `COLETOR` |
+| `S70` | `S70` | `Coletor` | `COLETOR` |
+| `RFR900` | `SLED RFR900` | `SLED` | `SLED` |
+| `RFR901` | `SLED RFR901` | `SLED` | `SLED` |
+
+A comparação é feita sem espaço, sem hífen e sem caixa — `hf550 x1` é
+`HF550`. Os prefixos não se sobrepõem: `EF500` não casa com `EF501`, nem
+`RFR900` com `RFR901`.
+
+Quando a série não começa com nenhum deles, o modelo é procurado no texto
+da categoria (a base antiga guardava `Coletor HF550X`, `Sled RFR901`); não
+achando nada, o modelo fica vazio e só a categoria é resolvida:
+
+| vem assim na coluna CATEGORIA | `categoria` | `familia` |
 |---|---|---|
-| `Coletor`, `coletor` | `Coletor` | `COLETOR` |
-| `Coletor HF550X` | `Coletor HF550X` | `COLETOR` |
-| `Coletor S70` | `Coletor S70` | `COLETOR` |
-| `Sled RFID` | `Sled RFID` | `SLED` |
-| `SLED RFR901` | `Sled RFR901` | `SLED` |
-| qualquer outra com "coletor" | texto original com caixa de título | `COLETOR` |
-| qualquer outra com "sled" | texto original com caixa de título | `SLED` |
+| qualquer texto com "coletor" | `Coletor` | `COLETOR` |
+| qualquer texto com "sled" | `SLED` | `SLED` |
 | nada disso | texto original | `OUTRO` |
+
+`POST /recalcular` preenche o modelo e reduz a categoria em toda a base
+antiga, e devolve `modelos_preenchidos` com quantas linhas mudaram.
 
 ### 3.2 Status do orçamento
 
@@ -131,8 +148,12 @@ Orçamento · Validando Orçamento.
    `valor_compra = round(orcamento / razão, 2)` e fonte `PLANILHA`.
    (Confere: dá 4.978,29 para Coletor e 3.731,51 para Sled RFID em toda a
    base.)
-3. **Padrão por categoria** (`manut_config.valor_compra_padrao`), fonte
-   `PADRAO`.
+3. **Padrão por modelo** (`manut_config.valor_compra_padrao`), fonte
+   `PADRAO`. Procura primeiro uma chave com o nome do modelo (`HF550`,
+   `EF500`…), depois os nomes que a configuração já usa (`Coletor HF550X`
+   para o HF550, `Sled RFID` para o RFR900, `Sled RFR901` para o RFR901) e,
+   por último, a categoria. Assim o preço cadastrado continua valendo e dá
+   para cadastrar um preço por modelo sem mexer no resto.
 4. Digitado pelo usuário: fonte `MANUAL`. Valor manual **não** é
    sobrescrito por consulta automática ao EBS; só por ação explícita
    (`POST /reparos/{id}/ebs`).
@@ -236,7 +257,7 @@ Respostas em JSON; valores monetários como número (a tela formata).
     "SLED":    {"consumo": 28439.92,   "reparados": 51,  "media": 557.65}
   },
   "aguardando_aprovacao": [
-    {"categoria": "Sled RFID", "familia": "SLED", "qtde": 36, "valor": 19774.00}
+    {"categoria": "SLED", "familia": "SLED", "qtde": 36, "valor": 19774.00}
   ],
   "aguardando_devolucao": [
     {"categoria": "Coletor", "familia": "COLETOR", "total": 54,
@@ -304,6 +325,21 @@ resto é incluído. Não consulta o EBS (3.4). Devolve
 
 e grava em `manut_importacao`.
 
+**Prévia e lote de reparo.** A tela sempre importa em dois tempos:
+
+1. `dry_run=true` — nada é gravado; a resposta traz `previa`, uma linha por
+   RMA com ação, série, categoria, **modelo** e lote. É a sessão temporária
+   onde o lote de reparo é preenchido.
+2. Confirmação — o mesmo arquivo é enviado sem `dry_run`, agora com:
+
+| campo | efeito |
+|---|---|
+| `lote` | lote de reparo para as linhas que a planilha **não** trouxe com lote |
+| `lotes` | JSON `{"RMA": "lote"}` com os ajustes feitos linha a linha; vence o `lote` e também o que veio na planilha |
+
+Sem nenhum dos dois, e sem coluna de lote no arquivo, o lote gravado
+**não** é tocado — reimportar não apaga o que já estava lá.
+
 ### 5.8 `GET /exportar.xlsx` — `export`
 
 Mesmos filtros de 5.2, sem paginação. Use `routers.helpers.xlsx_response`.
@@ -315,6 +351,9 @@ Mesmos filtros de 5.2, sem paginação. Use `routers.helpers.xlsx_response`.
  "valor_compra_padrao": {"Coletor": 4978.29, "Sled RFID": 3731.51}}
 ```
 
+As chaves de `valor_compra_padrao` podem ser nomes de modelo (`HF550`,
+`EF500`, `SLED RFR901`) — ver 3.4.
+
 `PUT` aceita o mesmo objeto, parcial. Mudar `limiar_percentual` **não**
 recalcula o histórico sozinho — há `POST /recalcular` (`admin`) que refaz
 `percentual`/`avaliacao` de todas as linhas e aplica a regra 3.5 nas
@@ -322,7 +361,7 @@ pendentes, devolvendo quantas mudaram.
 
 ### 5.10 `GET /opcoes` — `view`
 
-Listas para os selects: categorias (das linhas + padrão), status, tipos,
+Listas para os selects: categorias, **modelos**, status, tipos,
 empresas, anos, lotes mais usados. Evita hard-code na tela.
 
 ---
@@ -386,7 +425,7 @@ Layout, verificado no arquivo real (aba `CONTRATO 464`, 1.678 linhas úteis):
 | coluna | destino |
 |---|---|
 | DISPONIBILIZAÇÃO | `disponibilizacao` (data) |
-| CATEGORIA | `categoria`: `Coletor - BlueBird` → **Coletor**; `Sled RFID` → **Sled RFID** |
+| CATEGORIA | `categoria`: `Coletor - BlueBird` → **Coletor**; `Sled RFID` → **SLED**. O modelo vem da série, não daqui |
 | SÉRIE | `serie` |
 | ORIGEM | `origem_equipamento` (`LOJA`/`CD`) |
 | RMA | `rma` (único) |
