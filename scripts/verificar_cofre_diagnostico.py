@@ -290,6 +290,69 @@ checar(fora["necessario"] is True and any("setfacl" in c for c in fora["comandos
 checar(rc2._remedio(info, "portal")["necessario"] is False,
        "arquivo legível não gera pedido nenhum")
 
+print("\n[3h] Ver tudo: a lista completa, sem publicar segredo")
+os.environ["CORREIOS_CARTOES"] = "cartao-do-ambiente"
+r11 = cliente.get("/api/cofre/tudo")
+checar(r11.status_code == 200, f"HTTP 200 ({r11.status_code})")
+d11 = r11.json()
+chaves11 = {i["chave"]: i for i in d11.get("itens", [])}
+checar(d11["total"] == len(d11["itens"]) and d11["total"] > 10,
+       "traz a lista inteira das três fontes")
+checar("CORREIOS_CHAVE" in chaves11 and chaves11["CORREIOS_CHAVE"]["fonte"] == "cofre local",
+       "inclui o que está no cofre local")
+checar("CORREIOS_CARTOES" in chaves11
+       and chaves11["CORREIOS_CARTOES"]["fonte"] == "ambiente",
+       "e o que está só no ambiente")
+checar(d11["por_fonte"]["ambiente"] >= 1 and d11["por_fonte"]["cofre local"] >= 1,
+       "conta quantas vieram de cada fonte")
+
+# O ambiente do processo carrega o que assina a sessão e a URL do banco.
+# Publicar qualquer um dos dois numa tela seria pior que o problema.
+checar(SEGREDO not in r11.text, "a chave dos Correios não aparece")
+checar(os.environ["PORTAL_SESSION_SECRET"] not in r11.text,
+       "o segredo que assina a sessão não aparece")
+checar("valor" not in chaves11.get("PORTAL_SESSION_SECRET", {"valor": 1}),
+       "e ele é tratado como segredo pelo nome")
+checar("valor" not in chaves11.get("DATABASE_URL", {"valor": 1}),
+       "a URL do banco também — senha vem embutida nela com frequência")
+for nome in ("MINHA_SENHA", "API_TOKEN", "X_PWD", "SERVICO_URL", "BASE_DSN",
+             "CRED_AUTH", "COOKIE_X", "CHAVE_Y"):
+    checar(rc2._e_segredo(nome), f"{nome} é tratado como segredo")
+checar(not rc2._e_segredo("CORREIOS_USUARIO") and not rc2._e_segredo("ORACLE_EBS_USER"),
+       "e nome de usuário continua visível, que é o que se precisa conferir")
+os.environ.pop("CORREIOS_CARTOES", None)
+
+anon2 = TestClient(app)
+checar(anon2.get("/api/cofre/tudo").status_code in (401, 403), "sem sessão, não responde")
+
+print("\n[3i] Uma parte quebrada não derruba a tela inteira")
+# A tela existe para explicar falhas. Se ela mesma devolver 500, não sobra
+# nada para diagnosticar — então cada parte responde por si.
+from unittest.mock import patch as _patch  # noqa: E402
+
+with _patch.object(rc2, "_inventario_corporativo",
+                   side_effect=RuntimeError("cofre explodiu")):
+    r12 = cliente.get("/api/cofre/diagnostico")
+checar(r12.status_code == 200, f"segue respondendo 200 ({r12.status_code})")
+d12 = r12.json()
+checar(d12.get("usuario_do_servico"), "o resto do diagnóstico continua inteiro")
+checar("inventário do cofre" in (d12.get("erros") or {}),
+       "e a parte que falhou aparece nomeada")
+checar("cofre explodiu" in d12["erros"]["inventário do cofre"],
+       "com o erro de verdade, não um texto genérico")
+
+with _patch.object(rc2, "_sondar", side_effect=RuntimeError("sonda explodiu")):
+    r13 = cliente.get("/api/cofre/diagnostico")
+checar(r13.status_code == 200, "idem quando a sondagem de chaves falha")
+checar("chaves por assunto" in (r13.json().get("erros") or {}),
+       "nomeando a seção certa")
+
+with _patch.object(rc2, "_inventario_corporativo",
+                   side_effect=RuntimeError("cofre explodiu")):
+    r14 = cliente.get("/api/cofre/tudo")
+checar(r14.status_code == 200 and "erros" in r14.json(),
+       "a lista completa também não morre por causa de uma parte")
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -323,6 +386,8 @@ comum = TestClient(app)
 comum.cookies.set("spare_session", cookie2)
 checar(comum.get("/api/cofre/diagnostico").status_code == 403,
        "usuário sem admin recebe 403")
+checar(comum.get("/api/cofre/tudo").status_code == 403,
+       "e a lista completa também é só de admin")
 
 print("\n[7] A aba existe na tela de Parâmetros")
 js = (RAIZ / "static/modules/parametros.js").read_text(encoding="utf-8")
@@ -332,6 +397,9 @@ checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")
 checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
 checar("em ' + (k.fontes_com_valor || []).length + ' fontes" in js,
        "a tela mostra em quantas fontes a chave está")
+checar("errosHtml" in js, "a tela mostra qual parte do diagnóstico falhou")
+checar("/cofre/tudo" in js and "cf-filtro" in js,
+       "a tela tem o botão Ver tudo, com filtro por nome")
 checar("remedioHtml" in js, "a tela mostra o pedido de permissão pronto")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
 checar("inventarioHtml" in js and "alternativasHtml" in js,
