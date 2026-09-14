@@ -16,6 +16,8 @@ import time
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
+
+from core.prefixo import com_prefixo, prefixo
 from fastapi.responses import HTMLResponse
 
 import config as _config_mod
@@ -464,9 +466,9 @@ def start_scheduler() -> None:
 
 # ── Endpoints ──────────────────────────────────────────────────────────
 @router.get("/indicadores", response_class=HTMLResponse)
-def indicadores_page():
+def indicadores_page(req: Request):
     html = (_cfg.STATIC / "indicadores" / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html)
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 @router.get("/indicadores/", response_class=HTMLResponse)

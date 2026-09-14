@@ -5,6 +5,14 @@
 (function () {
     "use strict";
 
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Vazio na raiz do domínio.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+
+
     var AUTO_MS = 120000;              // 2 min
     var SVGNS = "http://www.w3.org/2000/svg";
     var MES_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun",
@@ -260,7 +268,7 @@
 
     // ── carregar / atualizar ─────────────────────────────────
     function carregar() {
-        return fetch("/api/indicadores/dados", { credentials: "same-origin" })
+        return fetch(BASE + "/api/indicadores/dados", { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 state.dados = j.snapshot;
@@ -273,7 +281,7 @@
     function atualizar() {
         var btn = $("#btn-refresh");
         btn.disabled = true; var txt = btn.textContent; btn.textContent = "⏳ Atualizando…";
-        fetch("/api/indicadores/atualizar", { method: "POST", credentials: "same-origin" })
+        fetch(BASE + "/api/indicadores/atualizar", { method: "POST", credentials: "same-origin" })
             .then(function (r) {
                 if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || ("HTTP " + r.status)); });
                 return r.json();
