@@ -350,18 +350,23 @@ def gravar(linhas: list[dict], resumo: dict, saida: Path) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    # Cada opção aceita a forma curta e a acentuada: quem digita no
+    # servidor não deveria perder tempo com "--saída" contra "--saida".
     ap.add_argument("planilha", type=Path, help="xlsx ou csv com os números dos chamados")
-    ap.add_argument("--grupo", action="append", required=True,
+    ap.add_argument("-g", "--grupo", "--fila", action="append", required=True,
                     help="nome da fila do time (pode repetir)")
-    ap.add_argument("--saida", type=Path, default=Path("analise_chamados.xlsx"))
-    ap.add_argument("--amostra", type=int, default=0,
+    ap.add_argument("-o", "--saida", "--saída", "--arquivo-saida", dest="saida",
+                    type=Path, default=Path("analise_chamados.xlsx"),
+                    help="arquivo .xlsx de saída")
+    ap.add_argument("-n", "--amostra", type=int, default=0,
                     help="processa só os N primeiros — use para conferir o critério antes")
     ap.add_argument("--modelos", type=Path,
                     help="arquivo com um modelo por linha, para somar aos conhecidos")
-    ap.add_argument("--env-file", type=Path, dest="env_file",
+    ap.add_argument("--env-file", "--env", "--ambiente", type=Path, dest="env_file",
                     help="arquivo de ambiente com SN_API_BASE/USER/PASS "
                          "(por padrão procura o do serviço)")
     args = ap.parse_args()
+    print(f"  script: {Path(__file__).resolve()}")
 
     preparar_conta(args.env_file)
 
