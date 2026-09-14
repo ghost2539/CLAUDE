@@ -133,27 +133,23 @@ function derive(p) {
   const orcamento = toNumber(p.orcamento);
   const comprometido = toNumber(p.comprometido);
   const realizado = toNumber(p.realizado);
-  // A Realizar: para projetos vindos do EBS usa o saldo do dia (saldo_dia);
-  // para projetos manuais (sem sincronização) calcula na tela.
-  const aRealizar = p.sincronizado_em != null
-    ? toNumber(p.a_realizar)
-    : orcamento - (comprometido + realizado);
   // Em andamento é digitado na tela: o que ainda NÃO está comprometido no
   // EBS mas já está em curso (uma PO aguardando aprovação, por exemplo).
-  // Ele sai de dentro do "A Realizar": o que sobra livre é a diferença.
   const emAndamento = toNumber(p.em_andamento);
-  const disponivel = aRealizar - emAndamento;
+  // Disponível é o que sobra do orçamento: comprometido, em andamento e
+  // realizado descontam dele. É a única leitura de saldo da tela.
+  const disponivel = orcamento - comprometido - emAndamento - realizado;
   const pctRealizado = orcamento > 0 ? realizado / orcamento : 0;
 
   let status = "No Prazo";
   if (p.estagio === "Concluído") status = "Concluído";
   else if (p.vencimento && p.vencimento < todayISO()) status = "Atrasado";
-  else if (aRealizar < 0) status = "Atenção";
+  else if (disponivel < 0) status = "Atenção";
   else if (p.vencimento) {
     const dias = (new Date(p.vencimento) - new Date(todayISO())) / 86400000;
     if (dias <= 30) status = "Atenção";
   }
-  return { ...p, orcamento, comprometido, realizado, emAndamento, aRealizar,
+  return { ...p, orcamento, comprometido, realizado, emAndamento,
            disponivel, pctRealizado, status };
 }
 
@@ -1137,9 +1133,8 @@ export default function App() {
   const totalCapex = sumBy(visiveis.filter((p) => p.tipo === "CAPEX"), "orcamento");
   const totalRealizado = sumBy(visiveis, "realizado");
   const totalComprometido = sumBy(visiveis, "comprometido");
-  const totalARealizar = sumBy(visiveis, "aRealizar");
   const totalEmAndamento = sumBy(visiveis, "emAndamento");
-  const totalDisponivel = totalARealizar - totalEmAndamento;
+  const totalDisponivel = sumBy(visiveis, "disponivel");
   const emExecucao = visiveis.filter((p) => p.estagio === "Em Execução").length;
   const pct = (v) => (totalOrcamento > 0 ? fmtPct(v / totalOrcamento) : "0,0%") + " do orçamento total";
 
@@ -1203,7 +1198,7 @@ export default function App() {
       ["Área", "area"], ["Estágio", "estagio"], ["Prioridade", "prioridade"],
       ["Orçamento Aprovado", "orcamento"], ["Comprometido", "comprometido"],
       ["Em Andamento", "emAndamento"], ["Realizado (Acum.)", "realizado"],
-      ["A Realizar", "aRealizar"], ["Disponível", "disponivel"],
+      ["Disponível", "disponivel"],
       ["Vencimento", "vencimento"], ["Status", "status"], ["Bloqueado", "bloqueado"],
     ];
     const esc = (v) => {
@@ -1301,7 +1296,7 @@ export default function App() {
       <KpiCard icon={Icon.trend} color="#8b5cf6" label="Realizado (Acum.)" value={fmtBRL(totalRealizado)} sub={pct(totalRealizado)} />
       <KpiCard icon={Icon.clipboard} color="#f97316" label="Comprometido" value={fmtBRL(totalComprometido)} sub={pct(totalComprometido)} />
       <KpiCard icon={Icon.target} color="#eab308" label="Em Andamento" value={fmtBRL(totalEmAndamento)} sub="ainda não comprometido, já em curso" />
-      <KpiCard icon={Icon.target} color="#06b6d4" label="Disponível" value={fmtBRL(totalDisponivel)} sub="a realizar − em andamento" />
+      <KpiCard icon={Icon.target} color="#06b6d4" label="Disponível" value={fmtBRL(totalDisponivel)} sub="orçamento − comprometido − em andamento − realizado" />
     </section>
   );
 
@@ -1350,7 +1345,7 @@ export default function App() {
               <th rowSpan={2} className="th text-left">Área Responsável</th>
               <th rowSpan={2} className="th">Estágio</th>
               <th rowSpan={2} className="th">Prioridade</th>
-              <th colSpan={6} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
+              <th colSpan={5} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
               <th rowSpan={2} className="th text-right">% Realizado</th>
               <th rowSpan={2} className="th">Vencimento Previsto</th>
               <th rowSpan={2} className="th">Status</th>
@@ -1361,13 +1356,12 @@ export default function App() {
               <th className="th text-right">Comprometido</th>
               <th className="th text-right" title="Ainda não comprometido, mas já em curso — uma PO aguardando aprovação, por exemplo">Em Andamento</th>
               <th className="th text-right">Realizado (Acum.)</th>
-              <th className="th text-right">A Realizar</th>
-              <th className="th text-right" title="A Realizar − Em Andamento: o que sobra de fato">Disponível</th>
+              <th className="th text-right" title="Orçamento − Comprometido − Em Andamento − Realizado">Disponível</th>
             </tr>
           </thead>
           <tbody>
             {!carregando && visiveis.length === 0 && (
-              <tr><td colSpan={17} className="px-4 py-8 text-center text-gray-500 text-xs">
+              <tr><td colSpan={16} className="px-4 py-8 text-center text-gray-500 text-xs">
                 {projects.length === 0 ? "Nenhum projeto cadastrado. Clique em \"Novo projeto\" para começar." : "Nenhum projeto corresponde aos filtros selecionados."}
               </td></tr>
             )}
@@ -1408,10 +1402,7 @@ export default function App() {
                   <td className="td"><MoneyInput title="Comprometido" value={p.comprometido} onChange={(v) => handleUpdateProject(p.id, "comprometido", v)} /></td>
                   <td className="td"><MoneyInput title="Em andamento — ainda não comprometido, mas já em curso (PO aguardando aprovação, por exemplo). Não vem do EBS." value={p.emAndamento} onChange={(v) => handleUpdateProject(p.id, "em_andamento", v)} /></td>
                   <td className="td"><MoneyInput title="Realizado acumulado" value={p.realizado} onChange={(v) => handleUpdateProject(p.id, "realizado", v)} /></td>
-                  <td className={"td text-right tabular-nums " + (p.aRealizar < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title={p.sincronizado_em ? "Saldo do dia (EBS)" : "Orçamento − (Comprometido + Realizado)"}>
-                    {fmtBRL(p.aRealizar)}
-                  </td>
-                  <td className={"td text-right tabular-nums " + (p.disponivel < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title="A Realizar − Em Andamento">
+                  <td className={"td text-right tabular-nums " + (p.disponivel < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title="Orçamento − Comprometido − Em Andamento − Realizado">
                     {fmtBRL(p.disponivel)}
                   </td>
                   <td className="td text-right tabular-nums" title="Realizado ÷ Orçamento">
@@ -1452,7 +1443,6 @@ export default function App() {
                 <td className="td text-right tabular-nums">{fmtBRL(totalComprometido)}</td>
                 <td className="td text-right tabular-nums">{fmtBRL(totalEmAndamento)}</td>
                 <td className="td text-right tabular-nums">{fmtBRL(totalRealizado)}</td>
-                <td className={"td text-right tabular-nums " + (totalARealizar < 0 ? "text-red-600" : "")}>{fmtBRL(totalARealizar)}</td>
                 <td className={"td text-right tabular-nums " + (totalDisponivel < 0 ? "text-red-600" : "")}>{fmtBRL(totalDisponivel)}</td>
                 <td className="td text-right tabular-nums">{totalOrcamento > 0 ? fmtPct(totalRealizado / totalOrcamento) : "0,0%"}</td>
                 <td colSpan={3} className="td" />

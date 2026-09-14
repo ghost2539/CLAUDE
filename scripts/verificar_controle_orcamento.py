@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Verificação do Controle de Orçamento: a coluna "Em andamento".
+"""Verificação do Controle de Orçamento: "Em andamento" e o disponível.
 
     python3 scripts/verificar_controle_orcamento.py
 
 "Em andamento" é o que ainda NÃO está comprometido no EBS mas já está em
 curso — uma PO aguardando aprovação, por exemplo. É digitado na tela, e
-sincronizar com o EBS não pode apagá-lo. Roda contra um SQLite temporário.
+sincronizar com o EBS não pode apagá-lo.
+
+O saldo da tela é um só: disponível = orçamento − comprometido − em
+andamento − realizado. As três parcelas descontam dele.
+
+Roda contra um SQLite temporário.
 """
 from __future__ import annotations
 
@@ -116,18 +121,34 @@ dbo._ensure_coluna_a_realizar()
 checar(True, "rodar a migração de novo não quebra")
 
 print("\n[5] A conta da tela fecha")
-# A tela calcula: disponível = a realizar − em andamento. O valor foi
-# zerado pela migração da seção [4], então é digitado de novo — que é
-# exatamente o que o usuário faria depois de subir a versão.
+# Regra da área: comprometido, em andamento e realizado descontam do
+# disponível. "A realizar" não é mais mostrado. O em andamento foi zerado
+# pela migração da seção [4], então é digitado de novo — que é exatamente
+# o que o usuário faria depois de subir a versão.
 dbo._engine = None
 dbo._factory = None
 with dbo.SessionLocal.begin() as s:
     s.scalar(select(P).where(P.code == "PRJ-1")).em_andamento = Decimal("15000")
 with dbo.SessionLocal() as s:
     d = co._dict(s.scalar(select(P).where(P.code == "PRJ-1")))
-disponivel = d["a_realizar"] - d["em_andamento"]
+# Depois da sincronização da seção [3]: orçamento 120.000, comprometido
+# 45.000 (40.000 + 5.000 reservados), realizado 25.000, em andamento 15.000.
+disponivel = (d["orcamento"] - d["comprometido"] - d["em_andamento"]
+              - d["realizado"])
+checar(d["orcamento"] == 120000.0 and d["comprometido"] == 45000.0
+       and d["realizado"] == 25000.0,
+       f"parcelas conferem ({d['orcamento']}, {d['comprometido']}, {d['realizado']})")
 checar(disponivel == 35000.0,
-       f"disponível = {d['a_realizar']} − {d['em_andamento']} = {disponivel}")
+       f"disponível = 120.000 − 45.000 − 15.000 − 25.000 = {disponivel}")
+# Cada parcela desconta: subir qualquer uma derruba o disponível na mesma medida.
+for campo, quanto in (("comprometido", 1000.0), ("em_andamento", 2000.0),
+                      ("realizado", 3000.0)):
+    alterado = dict(d)
+    alterado[campo] += quanto
+    novo = (alterado["orcamento"] - alterado["comprometido"]
+            - alterado["em_andamento"] - alterado["realizado"])
+    checar(abs((disponivel - novo) - quanto) < 0.001,
+           f"+{quanto:.0f} em {campo} tira {quanto:.0f} do disponível")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
