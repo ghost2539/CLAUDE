@@ -491,6 +491,17 @@ d = mdm.procurar_detalhado(_SessaoMDM("<html>login</html>"), "SN-X", "https://md
 checar(not d["coletores"] and "fragmento" in d["erro"],
        f"resposta que não é a grade vira erro explicado ({d['erro'][:30]})")
 
+print("\n[16] Diagnóstico sem série avisa em vez de dizer \"não encontrado\"")
+sn.require_permission = lambda req, m, a: {"username": "u"}
+sn._sn_session_from_portal = lambda req: object()
+d = sn.diagnostico_depreciacao(REQ_DIAG, serie="", etiqueta="")
+checar(d.get("informado") is False and "informe a série" in d["motivo"].lower(),
+       f"série vazia é apontada como falta de dado ({d['motivo'][:40]})")
+INDIVIDUAIS.clear()
+d = sn.diagnostico_depreciacao(REQ_DIAG, serie="SN-QUE-NAO-EXISTE")
+checar(d.get("informado") is True and "SN-QUE-NAO-EXISTE" in d["motivo"],
+       "com série informada, o motivo repete o que foi procurado")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas)); sys.exit(1)
