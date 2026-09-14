@@ -432,22 +432,67 @@ def _insert_record(session, record):
 
 
 def _calculate_depreciation(session, sys_id, BS):
+    """Roda o "Calculate Depreciation" do formulário. True se rodou."""
+    return _depreciacao_passos(session, sys_id, BS)["ok"]
+
+
+def _depreciacao_passos(session, sys_id, BS, executar: bool = True) -> dict:
+    """O cálculo da depreciação, passo a passo e com o motivo da parada.
+
+    O caminho é o formulário da interface, não a API: são cinco pontos
+    onde ele pode parar (página não abre, link ausente, formulário
+    ausente, sessão caiu no login, ação desconhecida). Devolver só
+    "não deu" transforma um diagnóstico de dois minutos em três rodadas
+    de tentativa e erro — foi exatamente o que aconteceu.
+    """
+    passos: list[dict] = []
+    resultado = {"sys_id": sys_id, "ok": False, "passos": passos, "motivo": ""}
+
+    def parar(motivo: str) -> dict:
+        resultado["motivo"] = motivo
+        return resultado
+
     form_url = f"{SERVICENOW_BASE}/alm_hardware.do?sys_id={sys_id}"
-    r = session.get(form_url, timeout=30)
+    try:
+        r = session.get(form_url, timeout=30)
+    except Exception as exc:  # noqa: BLE001 — rede/certificado com a causa
+        passos.append({"passo": "abrir formulário", "ok": False, "detalhe": str(exc)[:200]})
+        return parar(f"não foi possível abrir o formulário do ativo: {exc}")
+    caiu_no_login = "login" in (getattr(r, "url", "") or "").lower() or \
+                    "oam" in (getattr(r, "url", "") or "").lower()
+    passos.append({"passo": "abrir formulário", "ok": r.status_code == 200 and not caiu_no_login,
+                   "http": r.status_code, "url": getattr(r, "url", ""),
+                   "tamanho": len(getattr(r, "text", "") or "")})
     if r.status_code != 200:
-        return False
+        return parar(f"o formulário do ativo respondeu HTTP {r.status_code}")
+    if caiu_no_login:
+        return parar("a sessão do portal não abre o formulário do ServiceNow "
+                     "(a resposta foi a tela de login). O cálculo da depreciação "
+                     "usa a interface, não a API.")
+
     soup = BS(r.text, "html.parser")
     calc_link = soup.find("a", string=re.compile(r"Calculate\s+Depreciation", re.IGNORECASE))
+    passos.append({"passo": "achar a ação Calculate Depreciation", "ok": bool(calc_link)})
     if not calc_link:
-        return False
+        return parar("o formulário abriu, mas não tem a ação "
+                     '"Calculate Depreciation" — verifique se o usuário do '
+                     "portal tem esse botão no ServiceNow.")
     action_id = calc_link.get("gsft_action_name", "")
+    passos.append({"passo": "ler o identificador da ação", "ok": bool(action_id),
+                   "acao": action_id})
     if not action_id:
-        return False
+        return parar("a ação existe na página mas veio sem identificador.")
     form_tag = soup.find("form", {"name": "alm_hardware.do"})
     if not form_tag:
         form_tag = soup.find("form", {"id": "alm_hardware.do"})
+    passos.append({"passo": "achar o formulário do ativo", "ok": bool(form_tag)})
     if not form_tag:
-        return False
+        return parar("a página não trouxe o formulário do ativo.")
+    if not executar:
+        resultado["ok"] = True
+        resultado["motivo"] = ("o caminho está inteiro; o cálculo rodaria "
+                               "(diagnóstico não executa a ação)")
+        return resultado
     payload = {}
     for inp in form_tag.find_all("input"):
         name = inp.get("name")
@@ -468,12 +513,27 @@ def _calculate_depreciation(session, sys_id, BS):
     form_action = form_tag.get("action", "alm_hardware.do")
     if not form_action.startswith("http"):
         form_action = f"{SERVICENOW_BASE}/{form_action.lstrip('/')}"
-    r_dep = session.post(form_action, data=payload, allow_redirects=True, timeout=60)
-    if r_dep.status_code == 200 and "login" not in r_dep.url.lower() and "oam" not in r_dep.url.lower():
-        if "Unknown action" in r_dep.text:
-            return False
-        return True
-    return False
+    try:
+        r_dep = session.post(form_action, data=payload, allow_redirects=True, timeout=60)
+    except Exception as exc:  # noqa: BLE001
+        passos.append({"passo": "executar a ação", "ok": False, "detalhe": str(exc)[:200]})
+        return parar(f"falha de rede ao executar a ação: {exc}")
+    url_dep = (getattr(r_dep, "url", "") or "").lower()
+    desconhecida = "Unknown action" in (getattr(r_dep, "text", "") or "")
+    ok = (r_dep.status_code == 200 and "login" not in url_dep
+          and "oam" not in url_dep and not desconhecida)
+    passos.append({"passo": "executar a ação", "ok": ok, "http": r_dep.status_code,
+                   "url": getattr(r_dep, "url", ""),
+                   "acao_desconhecida": desconhecida})
+    if ok:
+        resultado["ok"] = True
+        resultado["motivo"] = "depreciação calculada"
+        return resultado
+    if desconhecida:
+        return parar('o ServiceNow respondeu "Unknown action" à ação de calcular.')
+    if "login" in url_dep or "oam" in url_dep:
+        return parar("a sessão caiu no login ao executar a ação.")
+    return parar(f"a ação respondeu HTTP {r_dep.status_code}")
 
 
 def _parse_date(value):
@@ -1546,6 +1606,55 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
             resumo["falhas"].append(f"{rotulo}: {exc}")
 
     return resumo
+
+
+@router.get("/diagnostico/depreciacao")
+def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
+    """Por que a depreciação não foi calculada — sem executar nada.
+
+    Percorre o mesmo caminho do cálculo e para onde ele pararia, dizendo
+    em qual passo e por quê.
+    """
+    require_permission(req, "servicenow", "view")
+    session = _sn_session_from_portal(req)
+    _req, BS = _get_http()
+    achado = _registro_individual(session, (etiqueta or "").strip(), (serie or "").strip())
+    if not achado or not achado.get("sys_id"):
+        return {"encontrado": False,
+                "motivo": "o ativo não foi encontrado no ServiceNow por essa "
+                          "série/etiqueta — sem ativo não há o que depreciar."}
+    saida = _depreciacao_passos(session, achado["sys_id"], BS, executar=False)
+    saida["encontrado"] = True
+    saida["asset_tag"] = achado.get("asset_tag", "")
+    saida["serial_number"] = achado.get("serial_number", "")
+    return saida
+
+
+class RecalcularIn(BaseModel):
+    serie: str = ""
+    etiqueta: str = ""
+
+
+@router.post("/depreciacao/recalcular")
+def recalcular_depreciacao(body: RecalcularIn, req: Request):
+    """Calcula a depreciação de um ativo já cadastrado, sob demanda.
+
+    Serve para o que subiu antes desta correção e ficou sem o cálculo:
+    não é preciso receber o equipamento de novo.
+    """
+    sd = require_permission(req, "servicenow", "edit")
+    check_rate_limit(req)
+    session = _sn_session_from_portal(req)
+    _req, BS = _get_http()
+    achado = _registro_individual(session, (body.etiqueta or "").strip(),
+                                  (body.serie or "").strip())
+    if not achado or not achado.get("sys_id"):
+        raise HTTPException(404, "Ativo não encontrado no ServiceNow por essa série/etiqueta.")
+    resultado = _depreciacao_passos(session, achado["sys_id"], BS, executar=True)
+    _log.info("servicenow: %s recalculou depreciação de %s → %s",
+              sd.get("username", ""), achado.get("serial_number") or achado.get("asset_tag"),
+              "ok" if resultado["ok"] else resultado["motivo"])
+    return resultado
 
 
 class EntradaPreviewIn(BaseModel):
