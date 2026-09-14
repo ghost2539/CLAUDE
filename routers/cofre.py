@@ -223,10 +223,38 @@ def _ambiente_do_servico() -> dict:
                 "marcador": bool(ref),
                 "aponta_para": ref.group(1) if ref else "",
                 "vazio": valor == "",
+                # Está no arquivo mas não chegou ao processo? Então o systemd
+                # não conseguiu ler a linha — valor com espaço, aspas abertas
+                # ou cifrão sem escape derrubam a variável (às vezes as
+                # seguintes junto). É a explicação mais comum para "mexi no
+                # environment e o portal mudou de comportamento".
+                "chegou_ao_processo": nome in os.environ,
             })
         return info
     return {"caminho": "", "existe": False, "legivel": False, "chaves": [],
             "erro": "nenhum arquivo de ambiente encontrado nos caminhos conhecidos"}
+
+
+def _prefixo_em_uso(req) -> dict:
+    """Qual subcaminho a página está usando, e de onde ele saiu.
+
+    Quando o portal perde o prefixo, o navegador busca CSS e JS no lugar
+    errado e a tela aparece sem estilo nenhum. Como o prefixo vem do
+    ambiente, uma linha quebrada no arquivo derruba a tela inteira — e o
+    sintoma não parece ter nada a ver com a causa.
+    """
+    from config import get_settings
+    from core.prefixo import prefixo as _prefixo
+    cfg = get_settings()
+    root = (req.scope.get("root_path") or "") if req is not None else ""
+    return {
+        "em_uso": _prefixo(req),
+        "root_path_do_uvicorn": root,
+        "app_base_path": getattr(cfg, "APP_BASE_PATH", ""),
+        "origem": ("--root-path do uvicorn" if root
+                   else "APP_BASE_PATH" if getattr(cfg, "APP_BASE_PATH", "")
+                   else "nenhuma — a página vai sem prefixo"),
+    }
 
 
 def _seguro(rotulo: str, fn, padrao):
@@ -290,6 +318,9 @@ def diagnostico(req: Request):
         # De onde vêm as variáveis que o processo tem sem estar no cofre.
         "ambiente_do_servico": parte("arquivo de ambiente do serviço",
                                      _ambiente_do_servico, {}),
+        # Sem prefixo, o navegador busca CSS e JS no lugar errado e a tela
+        # aparece crua. Como ele vem do ambiente, entra no mesmo diagnóstico.
+        "prefixo": parte("prefixo em uso", lambda: _prefixo_em_uso(req), {}),
         "alternativas": parte("apelidos do EBS",
                               lambda: [{"nome": rotulo,
                                         "chaves": [_sondar(k) for k in chaves]}

@@ -438,6 +438,29 @@ checar(por_nome["MDM_SENHA"]["vazio"] is True, "variável vazia é apontada como
 checar("chave-do-environment-que-nao-pode-sair" not in r21.text,
        "e nenhum valor do arquivo sai na resposta")
 
+# O caso que derruba a tela sem parecer: a variável está no arquivo e não
+# chegou ao processo, porque o systemd não conseguiu ler a linha.
+checar(por_nome["CORREIOS_USUARIO"]["chegou_ao_processo"] is False,
+       "variável do arquivo que não está no processo é apontada")
+os.environ["CORREIOS_USUARIO"] = "conta-de-servico"
+amb1b = cliente.get("/api/cofre/diagnostico").json()["ambiente_do_servico"]
+checar({k["chave"]: k for k in amb1b["chaves"]}["CORREIOS_USUARIO"]["chegou_ao_processo"] is True,
+       "e quando chega, é dito que chegou")
+os.environ.pop("CORREIOS_USUARIO", None)
+
+print("\n[3p] O prefixo do portal, que também vem do ambiente")
+# Sem prefixo o navegador busca CSS e JS no lugar errado e a tela abre crua.
+from core import prefixo as _pf  # noqa: E402
+
+_pf._cfg.APP_BASE_PATH = "/portal-spare"
+pf1 = cliente.get("/api/cofre/diagnostico").json()["prefixo"]
+checar(pf1["em_uso"] == "/portal-spare", "diz qual prefixo a página está usando")
+checar(pf1["origem"] == "APP_BASE_PATH", "e de onde ele saiu")
+_pf._cfg.APP_BASE_PATH = ""
+pf2 = cliente.get("/api/cofre/diagnostico").json()["prefixo"]
+checar(pf2["em_uso"] == "" and "nenhuma" in pf2["origem"],
+       "sem prefixo, diz isso em vez de ficar calado — é o que explica a tela crua")
+
 os.environ["PORTAL_ENV_FILE"] = str(_TMP / "nao-existe-environment")
 amb2 = cliente.get("/api/cofre/diagnostico").json().get("ambiente_do_servico") or {}
 checar(amb2.get("existe") is False and amb2.get("erro"),
@@ -542,6 +565,8 @@ checar("/cofre/sondar-varios" in js and "cf-nomes" in js,
        "a tela tem a caixa de sondagem por nome")
 checar("/cofre/testar-php" in js and "cf-php-loader" in js,
        "e o teste do PHP, feito pelo serviço")
+checar("prefixoHtml" in js and "não chegou ao processo" in js,
+       "a tela mostra o prefixo em uso e a variável que o systemd não carregou")
 checar("pode ser só o ambiente" in js,
        "a tela avisa quando não dá para distinguir cofre de ambiente")
 checar("ambienteHtml" in js and "marcador do cofre" in js,
