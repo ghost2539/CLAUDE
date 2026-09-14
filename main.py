@@ -167,6 +167,16 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Cofre: o serviço enxerga os segredos? — só diagnóstico ──────────
+    try:
+        from routers.cofre import router as cofre_router
+        app.include_router(cofre_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("cofre_diag").error(
+            "Diagnóstico do cofre NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── EBS Oracle (leitura do BASE_REMOVIDA) — sem banco próprio ──────────────
     # Aditivo e isolado: sem o driver Oracle ou sem credencial no cofre, o
     # módulo simplesmente não carrega e o portal segue igual.

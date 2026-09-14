@@ -19,6 +19,7 @@ window.SPARE_MODULES.parametros = {
             ['config-modulos',  'Configuração Módulos'],
             ['automacoes',      'Automações'],
             ['monitoramento',   'Monitoramento'],
+            ['cofre',           'Cofre de segredos'],
             ['ebs-oracle',      'Base EBS (Oracle)'],
             ['acessos',         'Acessos & Alertas'],
             ['dashboards',      'Dashboards'],
@@ -29,7 +30,8 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'monitoramento', 'ebs-oracle', 'acessos', 'dashboards'];
+                         'monitoramento', 'cofre', 'ebs-oracle', 'acessos',
+                         'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -49,6 +51,7 @@ window.SPARE_MODULES.parametros = {
             'config-modulos': renderConfigModulos,
             automacoes:     renderAutomacoes,
             monitoramento:  renderMonitoramento,
+            cofre:          renderCofre,
             'ebs-oracle':   renderEbsOracle,
             acessos:        renderAcessos,
             dashboards:     renderDashboards,
@@ -488,6 +491,125 @@ async function renderAutomacoes(c, S) {
 /* Base EBS (Oracle) — provar o acesso antes de qualquer consulta.
    Nenhuma senha é digitada aqui: a credencial vem por referência do cofre,
    e a tela mostra só de onde cada valor foi resolvido. */
+// O cofre visto de DENTRO do serviço. No servidor, quem roda o portal e quem
+// abre um terminal são usuários diferentes: o CLI responde pelo shell, e só
+// esta tela responde pelo processo que faz as consultas de verdade.
+async function renderCofre(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Cofre de segredos</h1>' +
+        '<p class="text-muted">O que o <b>processo do portal</b> alcança. Nenhum valor de ' +
+            'segredo aparece aqui — só de onde veio e quantos caracteres tem.</p>' +
+        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<span>Situação</span>' +
+            '<span><button id="cf-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
+            '<button id="cf-correios" class="btn btn-sm btn-primary" style="margin-left:6px">Testar Correios</button></span>' +
+            '</div><div class="card-body" id="cf-situacao">' +
+            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
+        '<div class="card" id="cf-teste-card" style="display:none">' +
+            '<div class="card-header">Teste dos Correios</div>' +
+            '<div class="card-body" id="cf-teste"></div></div>';
+
+    function badge(ok, sim, nao) {
+        return ok ? '<span class="badge badge-success">' + sim + '</span>'
+                  : '<span class="badge badge-danger">' + nao + '</span>';
+    }
+
+    function linha(k) {
+        var onde = [];
+        if (k.no_corporativo) onde.push('corporativo');
+        if (k.no_local) onde.push('local');
+        if (k.no_ambiente) onde.push('ambiente');
+        // Sombreamento é a falha silenciosa clássica: o cofre local responde
+        // primeiro e o corporativo, correto, nunca é consultado.
+        var aviso = (k.no_local && !k.no_corporativo)
+            ? ' <span class="badge badge-warning" title="Só o cofre local tem esta chave.">só no local</span>' : '';
+        return '<tr><td class="om-mono">' + e(k.chave) + '</td>' +
+            '<td>' + badge(k.resolvida, 'resolvida', 'faltando') + aviso + '</td>' +
+            '<td>' + e(k.fonte || '—') +
+                (onde.length ? ' <span class="text-muted">(está em: ' + e(onde.join(', ')) + ')</span>' : '') + '</td>' +
+            '<td>' + (k.valor ? e(k.valor)
+                              : (k.resolvida ? '<span class="text-muted">' + k.tamanho + ' caracteres</span>'
+                                             : '<span class="text-muted">—</span>')) + '</td></tr>';
+    }
+
+    function arquivo(rotulo, a) {
+        if (!a) return '';
+        var estado = !a.existe
+            ? '<span class="badge badge-danger">não encontrado</span>'
+            : (a.legivel ? '<span class="badge badge-success">legível</span>'
+                         : '<span class="badge badge-danger">sem permissão de leitura</span>');
+        var pasta = a.pasta_acessivel ? '' :
+            ' <span class="badge badge-warning">pasta inacessível</span>';
+        return '<tr><td><b>' + e(rotulo) + '</b></td><td class="om-mono">' + e(a.caminho) + '</td>' +
+               '<td>' + estado + pasta + '</td></tr>';
+    }
+
+    async function carregar() {
+        var host = document.getElementById('cf-situacao');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        try {
+            var d = await S.api('/cofre/diagnostico');
+            var perm = d.permissoes_corporativo || {};
+            var dono = (perm.dono || perm.grupo || perm.modo)
+                ? '<p class="text-muted" style="margin-bottom:0">Arquivo do cofre: dono <b>' +
+                  e(perm.dono || '?') + '</b>, grupo <b>' + e(perm.grupo || '?') + '</b>, modo <b>' +
+                  e(perm.modo || '?') + '</b>. O serviço roda como <b>' + e(d.usuario_do_servico || '?') +
+                  '</b>' + ((perm.grupos_atuais || []).length
+                        ? ', nos grupos ' + e((perm.grupos_atuais || []).join(', ')) : '') + '.</p>'
+                : '';
+            host.innerHTML =
+                '<p><b>Usuário do serviço:</b> <span class="om-mono">' + e(d.usuario_do_servico || '?') + '</span></p>' +
+                '<p><b>Cofre corporativo:</b> ' +
+                    badge(d.corporativo_ok, 'disponível', 'indisponível') +
+                    ' <span class="text-muted">' + e(d.corporativo_detalhe || '') + '</span></p>' +
+                '<div class="table-wrapper mb-3"><table class="data-table"><tbody>' +
+                    arquivo('Módulo', d.modulo_corporativo) +
+                    arquivo('Arquivo', d.arquivo_corporativo) +
+                    '<tr><td><b>Cofre local</b></td><td class="om-mono">' + e(d.cofre_local || '') + '</td>' +
+                    '<td>' + (d.cofre_local_existe
+                        ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
+                          e(d.algoritmo || '') + '</span>'
+                        : '<span class="text-muted">não existe</span>') + '</td></tr>' +
+                '</tbody></table></div>' + dono +
+                (d.grupos || []).map(function (g) {
+                    return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
+                        '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                        '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                        '</tr></thead><tbody>' + (g.chaves || []).map(linha).join('') +
+                        '</tbody></table></div>';
+                }).join('');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('cf-atualizar').onclick = carregar;
+
+    document.getElementById('cf-correios').onclick = async function () {
+        var card = document.getElementById('cf-teste-card');
+        var host = document.getElementById('cf-teste');
+        card.style.display = '';
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Autenticando…</div>';
+        try {
+            var d = await S.api('/cofre/testar-correios', { method: 'POST' });
+            host.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
+                e(d.detalhe || '') + '</div>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                '</tr></thead><tbody>' + (d.chaves || []).map(linha).join('') +
+                '</tbody></table></div>';
+            S.toast(d.ok ? 'Cofre e Correios respondendo.' : (d.detalhe || 'Falhou.'),
+                    d.ok ? 'success' : 'error');
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    carregar();
+}
+
 async function renderEbsOracle(c, S) {
     var e = S.esc;
     c.innerHTML =
