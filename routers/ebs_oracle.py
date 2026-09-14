@@ -56,6 +56,14 @@ def _situacao_das_chaves() -> list[dict]:
             origem = cofre.fonte(nome) if valor else ""
         except Exception as exc:  # noqa: BLE001
             valor, origem = "", f"erro ao consultar o cofre: {exc}"
+        # Onde cada fonte tem a chave. Sem isto, um valor errado no cofre
+        # local sombra o corporativo em silêncio — foi o que aconteceu: a
+        # tela dizia "do cofre" e ninguém via que era o cofre errado.
+        try:
+            tem_corp = bool(cofre._corporativo(nome))
+            tem_local = bool(cofre._local(nome))
+        except Exception:  # noqa: BLE001
+            tem_corp = tem_local = False
         padrao = PADROES.get(nome, "")
         # Três situações diferentes, e a tela precisa separá-las: veio do
         # cofre, vai usar o padrão do código, ou não há valor nenhum.
@@ -66,7 +74,8 @@ def _situacao_das_chaves() -> list[dict]:
         else:
             situacao = "ausente"
         item = {"chave": nome, "situacao": situacao,
-                "resolvida": situacao != "ausente", "fonte": origem}
+                "resolvida": situacao != "ausente", "fonte": origem,
+                "no_corporativo": tem_corp, "no_local": tem_local}
         # Só o que não é segredo aparece; a senha fica no sim/não.
         efetivo = valor or padrao
         if efetivo and nome not in SIGILOSAS:
