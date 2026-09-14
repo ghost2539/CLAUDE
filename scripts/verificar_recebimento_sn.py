@@ -495,8 +495,10 @@ print("\n[16] Diagnóstico sem série avisa em vez de dizer \"não encontrado\""
 sn.require_permission = lambda req, m, a: {"username": "u"}
 sn._sn_session_from_portal = lambda req: object()
 d = sn.diagnostico_depreciacao(REQ_DIAG, serie="", etiqueta="")
-checar(d.get("informado") is False and "informe a série" in d["motivo"].lower(),
+checar(d.get("informado") is False and "sem série" in d["motivo"].lower(),
        f"série vazia é apontada como falta de dado ({d['motivo'][:40]})")
+checar(d.get("recebido", {}).get("serie") == "",
+       "e a resposta ecoa o que o servidor recebeu")
 INDIVIDUAIS.clear()
 d = sn.diagnostico_depreciacao(REQ_DIAG, serie="SN-QUE-NAO-EXISTE")
 checar(d.get("informado") is True and "SN-QUE-NAO-EXISTE" in d["motivo"],
