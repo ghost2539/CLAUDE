@@ -265,6 +265,39 @@ with dbm.SessionLocal() as s:
     conferir = s.scalar(select(R).where(R.rma == "R1"))
 checar(conferir.modelo == "HF550", f"R1 voltou a ter modelo ({conferir.modelo!r})")
 
+print("\n[10] A base que já existia ganha o modelo só por subir o módulo")
+# Reparos antigos: gravados sem modelo, com o modelo dentro da categoria
+# (como a planilha histórica fazia) ou só na série.
+with dbm.SessionLocal.begin() as s:
+    s.execute(dbm.Reparo.__table__.update().values(modelo="", categoria="Coletor HF550X"))
+    s.add(R(rma="ANTIGO-SERIE", serie="RFR900ZZ9", categoria="", familia="",
+            modelo="", orcamento=50, ano=2026, mes_referencia="2026-03",
+            status="APROVADO"))
+    s.add(R(rma="ANTIGO-SEM-PISTA", serie="ZZZ999", categoria="Outro treco",
+            familia="OUTRO", modelo="", orcamento=10, ano=2026,
+            mes_referencia="2026-03", status="APROVADO"))
+with dbm.SessionLocal() as s:
+    vazios = s.scalars(select(R).where(R.modelo == "")).all()
+checar(len(vazios) >= 3, f"base antiga montada: {len(vazios)} reparos sem modelo")
+
+# É isto que acontece quando o serviço sobe com a versão nova.
+mudaram = dbm.preencher_modelos()
+checar(mudaram >= 3, f"a subida preencheu {mudaram} reparo(s)")
+
+with dbm.SessionLocal() as s:
+    achados = {r.rma: (r.modelo, r.categoria, r.familia) for r in s.scalars(select(R)).all()}
+checar(achados["R1"][0] == "HF550",
+       f"modelo veio da série mesmo com a categoria antiga ({achados['R1']})")
+checar(achados["R1"][1] == "Coletor", "categoria reduzida junto")
+checar(achados["ANTIGO-SERIE"] == ("SLED RFR900", "SLED", "SLED"),
+       f"série resolve sozinha, sem categoria ({achados['ANTIGO-SERIE']})")
+checar(achados["ANTIGO-SEM-PISTA"][0] == "",
+       "sem pista nenhuma, não inventa modelo")
+checar(achados["ANTIGO-SEM-PISTA"][1] == "Outro treco",
+       f"e não mexe na categoria que não sabe ler ({achados['ANTIGO-SEM-PISTA']})")
+checar(dbm.preencher_modelos() == 0,
+       "subir de novo não reescreve nada (idempotente)")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))
