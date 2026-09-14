@@ -80,7 +80,9 @@ def situacao(req: Request):
     """O que o portal consegue resolver hoje, sem tocar no banco."""
     _exigir(req)
     from core import cofre
-    ok_corp, detalhe = cofre.diagnostico_corporativo()
+    # Prova o cofre com a chave de que ESTA tela depende. Com a chave
+    # genérica, um cofre bom para o EBS apareceria como quebrado.
+    ok_corp, detalhe = cofre.diagnostico_corporativo("ORACLE_EBS_PASS")
     return {
         "cofre_corporativo": ok_corp,
         "cofre_detalhe": detalhe,
