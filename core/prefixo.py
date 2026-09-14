@@ -53,6 +53,45 @@ def destino(req) -> str:
     return caminho
 
 
+class BarraFinalMiddleware:
+    """Tira a barra do fim dos caminhos de `/api` antes de rotear.
+
+    Alguns proxies acrescentam uma barra ao encaminhar. Nenhuma rota de
+    `/api` é registrada com barra no fim, então o Starlette responderia 307
+    para o caminho sem ela — e o `Location` desse redirecionamento é uma URL
+    ABSOLUTA, montada com o esquema que chegou ao processo. Atrás do proxy
+    isso vira `http://` numa página `https://`, o navegador bloqueia como
+    conteúdo misto e a chamada morre como "Failed to fetch".
+
+    Aparar a barra aqui resolve na origem: a rota casa de primeira e nenhum
+    redirecionamento é emitido. As páginas (fora de `/api`) não são tocadas —
+    lá a barra no fim é registrada de propósito.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            caminho = scope.get("path", "")
+            if len(caminho) > 1 and caminho.endswith("/"):
+                sem_barra = caminho.rstrip("/")
+                # Sob `--root-path`, o uvicorn entrega o caminho COM o
+                # prefixo; o TestClient entrega sem. O que decide é o que
+                # sobra depois do prefixo, então ele é descontado aqui.
+                raiz = (scope.get("root_path") or "").rstrip("/")
+                resto = sem_barra
+                if raiz and resto.startswith(raiz):
+                    resto = resto[len(raiz):] or "/"
+                # Só a API: as páginas têm rota própria com barra no fim.
+                if resto.startswith("/api/") or resto == "/api":
+                    scope = dict(scope, path=sem_barra)
+                    bruto = scope.get("raw_path")
+                    if bruto:
+                        scope["raw_path"] = bruto.rstrip(b"/") or b"/"
+        await self.app(scope, receive, send)
+
+
 def com_prefixo(html: str, base: str) -> str:
     """Aplica o prefixo numa página que o portal serve inteira.
 
