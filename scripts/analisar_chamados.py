@@ -6,10 +6,10 @@
     python3 scripts/analisar_chamados.py chamados.xlsx \\
         --grupo "SPARE - Equipamentos" --saida analise.xlsx
 
-Roda FORA do portal, no servidor, com a conta de serviço do ServiceNow
-(SN_API_USER / SN_API_PASS / SN_API_BASE — as mesmas do portal). Como não
-roda dentro do serviço, ele lê o arquivo de ambiente do serviço sozinho;
-use --env-file se o seu estiver em outro lugar.
+Roda FORA do portal, no servidor, com a mesma conta de serviço do
+ServiceNow que o portal usa — só usuário e senha. Como não roda dentro do
+serviço, ele lê o arquivo de ambiente sozinho; use --env-file se o seu
+estiver em outro lugar.
 
 Para cada chamado da planilha ele responde:
 
@@ -68,13 +68,22 @@ PASTAS_DE_AMBIENTE = (
 
 _CHAVES = ("SN_API_BASE", "SN_API_USER", "SN_API_PASS", "SN_API_PROXY", "VERIFY_SSL")
 
+# A instância do ServiceNow não muda: é a mesma que o portal usa por
+# padrão em config.py. Só faz sentido pedir usuário e senha.
+BASE_PADRAO = "https://renner.service-now.com"
+
+# O que realmente precisa vir de fora.
+_OBRIGATORIAS = ("SN_API_USER", "SN_API_PASS")
+
 
 class Conta:
     """Só o que o script precisa. Não depende do config do portal, que
     exige banco — aqui não há banco nenhum."""
 
     def __init__(self, valores: dict):
-        self.SN_API_BASE = (valores.get("SN_API_BASE") or "").rstrip("/")
+        # A instância é sempre a mesma; o padrão é o do portal (config.py).
+        # Só usuário e senha precisam ser informados.
+        self.SN_API_BASE = (valores.get("SN_API_BASE") or BASE_PADRAO).rstrip("/")
         self.SN_API_USER = valores.get("SN_API_USER") or ""
         self.SN_API_PASS = valores.get("SN_API_PASS") or ""
         self.SN_API_PROXY = valores.get("SN_API_PROXY") or ""
@@ -123,7 +132,7 @@ def _candidatos(env_file: Path | None) -> list[Path]:
 
 def _diagnostico(candidatos: list[Path]) -> str:
     """O que há em cada caminho — só nomes de variável, nunca valores."""
-    esperadas = ("SN_API_BASE", "SN_API_USER", "SN_API_PASS")
+    esperadas = _OBRIGATORIAS
     linhas = []
     for c in candidatos:
         if not c.exists():
@@ -141,7 +150,7 @@ def _diagnostico(candidatos: list[Path]) -> str:
             linhas.append(f"  {c} — tem {', '.join(tem)}; falta {', '.join(falta)}")
         else:
             linhas.append(f"  {c} — existe, com {len(do_arq)} variáveis, "
-                          "nenhuma delas SN_API_*")
+                          "sem usuário nem senha do ServiceNow")
     return "\n".join(linhas) or "  (nenhum caminho para consultar)"
 
 
@@ -159,7 +168,7 @@ def preparar_conta(env_file: Path | None = None) -> Conta:
     for caminho in candidatos:
         if not caminho:
             continue
-        if valores.get("SN_API_USER") and valores.get("SN_API_PASS") and valores.get("SN_API_BASE"):
+        if all(valores.get(k) for k in _OBRIGATORIAS):
             break
         do_arquivo = ler_env(Path(caminho))
         if not do_arquivo:
@@ -172,26 +181,24 @@ def preparar_conta(env_file: Path | None = None) -> Conta:
         if achou:
             origens.append(str(Path(caminho).expanduser()))
 
-    faltando = [n for n in ("SN_API_BASE", "SN_API_USER", "SN_API_PASS")
-                if not valores.get(n)]
+    faltando = [n for n in _OBRIGATORIAS if not valores.get(n)]
     if faltando:
         raise SystemExit(
             "Conta de serviço do ServiceNow não encontrada: falta "
             + ", ".join(faltando) + ".\n"
-            "SN_API_BASE, SN_API_USER e SN_API_PASS são as variáveis que o "
-            "próprio portal usa para ler o ServiceNow — as mesmas do serviço.\n"
+            "São o usuário e a senha que o portal já usa para ler o "
+            "ServiceNow — os mesmos do serviço.\n"
             "Onde procurei:\n"
             + _diagnostico(candidatos) + "\n"
-            "Se nenhum arquivo tem SN_API_PASS, a senha do serviço não está em "
-            "arquivo. Nesse caso exporte as três variáveis nesta sessão antes "
-            "de rodar, ou aponte --env-file para o arquivo certo.")
+            "Se a senha não está em arquivo nenhum, exporte as duas nesta "
+            "sessão antes de rodar, ou aponte --env-file para o arquivo certo.")
     if valores.get("SN_API_PASS", "").startswith("@cofre:"):
         raise SystemExit(
             "A senha está guardada no cofre (@cofre:…). Rode com as variáveis "
             "já resolvidas — por exemplo, exportando-as a partir do serviço.")
-    print(f"  conta de serviço: {valores['SN_API_USER']} @ {valores['SN_API_BASE']}"
-          f" (de {', '.join(origens) or 'ambiente'})")
     _CONTA = Conta(valores)
+    print(f"  conta de serviço: {_CONTA.SN_API_USER} @ {_CONTA.SN_API_BASE}"
+          f" (de {', '.join(origens) or 'ambiente'})")
     return _CONTA
 
 
