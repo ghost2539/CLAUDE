@@ -45,6 +45,51 @@ def _funcao_do_modulo(mod):
     return None
 
 
+def caminho_do_loader() -> str:
+    """O arquivo que o loader do time vai ler — a mesma regra dele.
+
+    Os três loaders (py, sh, php) honram VCREPORTS_SECRETS_FILE e caem em
+    /etc/vcreports/.secrets.env. É a única forma sancionada de apontar o
+    portal para um cofre próprio, com só as chaves a que ele tem direito.
+    """
+    return os.environ.get("VCREPORTS_SECRETS_FILE", "/etc/vcreports/.secrets.env")
+
+
+def _cache_do_loader(mod) -> dict | None:
+    """O que o loader LEU do cofre — perguntando a ele. None = loader sem `_load()`.
+
+    `s(chave)` do loader cai no os.environ quando o cache não tem a chave;
+    por isso "s() devolveu valor" nunca provou que o valor veio do cofre.
+    O cache, sim: só tem o que foi lido do arquivo.
+    """
+    if mod is None or not callable(getattr(mod, "_load", None)):
+        return None
+    try:
+        dados = mod._load()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("loader do cofre: _load() falhou: %s", exc)
+        return {}
+    return dict(dados) if isinstance(dados, dict) else {}
+
+
+def reler_loader() -> int:
+    """Faz o loader ler o arquivo de novo e devolve quantas chaves vieram.
+
+    O cache dele é fixo por processo, INCLUSIVE quando a primeira leitura
+    falha. Liberou-se a permissão depois que o serviço subiu? Sem isto, só
+    reiniciando. Zerar `_cache` é o gesto mínimo que o próprio loader faz
+    para começar limpo.
+    """
+    mod = _resolver_modulo()
+    if mod is None:
+        return 0
+    if hasattr(mod, "_cache"):
+        mod._cache = None
+    global _arquivo_cache
+    _arquivo_cache = None
+    return len(_cache_do_loader(mod) or {})
+
+
 def _resolver_modulo():
     global _modulo, _modulo_via
     if _modulo is not None:
@@ -120,6 +165,12 @@ def _corporativo(nome: str) -> str:
         return v
     mod = _resolver_modulo()
     if mod is not None:
+        cache = _cache_do_loader(mod)
+        if cache is not None:
+            # Loader do time: "do cofre" é o que está no cache dele. O que
+            # s() devolveria a mais vem do os.environ, e o os.environ tem a
+            # vez dele depois do cofre local — na ordem documentada.
+            return str(cache.get(nome, "") or "")
         fn = _funcao_do_modulo(mod)
         if fn:
             try:
@@ -180,6 +231,22 @@ def diagnostico_corporativo(chave_teste: str = "") -> tuple[bool, str]:
         if not fn:
             return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
         chave = chave_teste or os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
+        cache = _cache_do_loader(mod)
+        if cache is not None:
+            # O loader do time tem cache: a prova é o cache, não o s().
+            arquivo = caminho_do_loader()
+            if not cache:
+                return False, (
+                    f"{_modulo_via}: o _load() do loader não leu {arquivo} para este "
+                    f"usuário (é o 'cofre nao legivel' do log). O cache dele é fixo "
+                    f"por processo — depois de liberar a leitura, use Reler ou "
+                    f"reinicie o serviço.")
+            tem = chave in cache
+            return True, (
+                f"{_modulo_via}: o loader leu {len(cache)} chave(s) de {arquivo}; "
+                f"'{chave}' " + ("está entre elas" if tem else
+                                 "NÃO está entre elas — nome errado ou chave não "
+                                 "provisionada neste cofre"))
         try:
             valor = fn(chave)
         except Exception as exc:  # noqa: BLE001

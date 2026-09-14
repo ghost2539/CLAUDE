@@ -147,34 +147,21 @@ def _sondar(nome: str) -> dict:
 
 
 def _chaves_do_loader(mod) -> tuple[list[str], str]:
-    """Os NOMES que o loader do time carregou, perguntando a ele mesmo.
+    """Os NOMES que o loader carregou, perguntando a ele.
 
-    A docstring do loader diz `cache = _load()` e "cache em memória por
-    processo": então existe um dicionário com tudo que ele leu do cofre.
-    Chamar `_load()` (ou achar esse dicionário) é ler o cofre DO JEITO QUE O
-    MÓDULO DO TIME LÊ — pelo loader, nunca pelo arquivo. Só nomes saem daqui.
-    Devolve também de onde a lista veio, para a tela dizer.
+    O loader do time expõe `_load()`; é por ele que o core decide o que é
+    "do cofre". Para um loader de outro formato, sobra olhar um dicionário
+    no módulo — só para a tela listar; o core não se apoia nisso.
     """
-    if mod is None:
-        return [], ""
-    for nome_fn in ("_load", "load", "_cache", "cache", "all", "keys", "listar"):
-        fn = getattr(mod, nome_fn, None)
-        if callable(fn):
-            try:
-                dados = fn()
-            except Exception as exc:  # noqa: BLE001
-                _log.debug("loader.%s() falhou: %s", nome_fn, exc)
-                continue
-            if isinstance(dados, dict) and dados:
-                return sorted(str(k) for k in dados), f"função {nome_fn}()"
-            if isinstance(dados, (list, tuple, set)) and dados:
-                return sorted(str(k) for k in dados), f"função {nome_fn}()"
-    # Sem função: o cache costuma ser um dicionário no próprio módulo.
-    for atributo, valor in vars(mod).items():
-        if atributo.startswith("__") or not isinstance(valor, dict) or not valor:
-            continue
-        if all(isinstance(k, str) for k in valor):
-            return sorted(valor), f"atributo {atributo}"
+    from core import cofre
+    cache = cofre._cache_do_loader(mod)
+    if cache is not None:
+        return sorted(cache), "função _load()"
+    if mod is not None:
+        for atributo, valor in vars(mod).items():
+            if (not atributo.startswith("__") and isinstance(valor, dict) and valor
+                    and all(isinstance(k, str) for k in valor)):
+                return sorted(valor), f"atributo {atributo}"
     return [], ""
 
 
@@ -199,18 +186,21 @@ def _inventario_corporativo() -> dict:
         fn = cofre._funcao_do_modulo(mod)
         funcao = getattr(fn, "__name__", "") if fn else ""
     nomes, origem = _chaves_do_loader(mod)
+    tem_cache = cofre._cache_do_loader(mod) is not None
     return {
         "comando_externo": getattr(cofre, "COMANDO", ""),
         "modulo_carregado": mod is not None,
         "modulo_via": getattr(cofre, "_modulo_via", ""),
         "funcao": funcao,
+        # O arquivo que o loader lê e por que esse: é o ponto de ajuste que
+        # o próprio time deixou (VCREPORTS_SECRETS_FILE) para um cofre próprio.
+        "arquivo_do_loader": cofre.caminho_do_loader(),
+        "arquivo_por": ("VCREPORTS_SECRETS_FILE" if "VCREPORTS_SECRETS_FILE" in os.environ
+                        else "padrão do loader"),
+        "loader_tem_cache": tem_cache,
         "sabe_listar": bool(nomes),
         "listagem_por": origem,
         "nomes": nomes,
-        # Loaders no estilo dotenv exportam o que leram para o os.environ.
-        # Quando isso acontece, tudo que veio do cofre parece "ambiente" para
-        # quem olha só o os.environ — e foi assim que o diagnóstico errou.
-        "exporta_para_ambiente": bool(nomes) and all(n in os.environ for n in nomes),
     }
 
 
@@ -573,3 +563,22 @@ def testar_php(body: dict, req: Request):
         "variavel_do_loader": (f"VCREPORTS_SECRETS_PHP={loader}"
                                if r.returncode == 0 and loader != LOADER_PADRAO else ""),
     }
+
+
+@router.post("/reler")
+def reler(req: Request):
+    """Manda o loader ler o cofre de novo, sem reiniciar o serviço.
+
+    O cache do loader é fixo por processo, inclusive quando a primeira
+    leitura falha. Liberou a permissão depois que o portal subiu? É isto
+    ou reiniciar.
+    """
+    _exigir(req)
+    check_rate_limit(req, "api")
+    from core import cofre
+    quantas = cofre.reler_loader()
+    arquivo = cofre.caminho_do_loader()
+    return {"ok": quantas > 0, "chaves": quantas, "arquivo": arquivo,
+            "detalhe": (f"O loader releu {arquivo} e trouxe {quantas} chave(s)." if quantas else
+                        f"O loader releu {arquivo} e continua sem conseguir ler — "
+                        f"permissão, ou o arquivo não existe.")}

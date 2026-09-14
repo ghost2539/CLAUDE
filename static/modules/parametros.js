@@ -655,17 +655,22 @@ async function renderCofre(c, S) {
                   '</span> <span class="text-muted">— quando configurado, é ele que resolve ' +
                   'antes do loader Python.</span></p>'
                 : '') +
+            '<p><b>Arquivo que o loader lê:</b> <span class="om-mono">' + e(inv.arquivo_do_loader || '') +
+                '</span> <span class="text-muted">(' + e(inv.arquivo_por || '') + ')</span> ' +
+                '<button id="cf-reler" class="btn btn-sm btn-secondary" style="margin-left:6px">Reler o cofre</button></p>' +
+            '<div id="cf-reler-saida"></div>' +
             (inv.sabe_listar
                 ? '<p><b>Chaves que o loader carregou do cofre</b> <span class="text-muted">(' +
-                  e(inv.listagem_por) + (inv.exporta_para_ambiente ? ', e exportou para o ambiente do processo' : '') +
-                  '):</span></p><p class="om-mono">' + e((inv.nomes || []).join(', ')) + '</p>' +
+                  e(inv.listagem_por) + '):</span></p><p class="om-mono">' + e((inv.nomes || []).join(', ')) + '</p>' +
                   '<p class="text-muted">Lista cheia significa: o serviço lê o cofre pelo loader, do mesmo ' +
                   'jeito que o módulo do time lê. O que não está nesta lista não existe no cofre que ' +
                   'este serviço alcança — é nome errado ou chave não provisionada.</p>'
-                : '<p class="text-muted">O loader está carregado, mas o cache dele veio vazio: o <span class="om-mono">_load()</span> ' +
-                  'não conseguiu ler o cofre para este usuário (é o "cofre nao legivel" do log). ' +
-                  'A ordem dele é cofre → variável de ambiente → padrão, então uma chave pode responder ' +
-                  'mesmo assim se estiver no ambiente. Para procurar por nome, use a sondagem abaixo.</p>');
+                : (inv.loader_tem_cache
+                    ? '<p class="text-muted">O loader está carregado, mas o <span class="om-mono">_load()</span> dele não ' +
+                      'conseguiu ler esse arquivo para este usuário (é o "cofre nao legivel" do log). O cache é fixo ' +
+                      'por processo: depois que a leitura for liberada, clique em Reler ou reinicie o serviço. ' +
+                      'Enquanto isso, o que responde é o que está no ambiente.</p>'
+                    : '<p class="text-muted">Este loader não expõe cache; só responde por nome. Use a sondagem abaixo.</p>'));
     }
 
     function alternativasHtml(lista) {
@@ -714,6 +719,21 @@ async function renderCofre(c, S) {
     }
 
     document.getElementById('cf-atualizar').onclick = carregar;
+
+    // O botão nasce dentro do HTML que carregar() monta; por isso o ouvinte
+    // fica no container, e vale para cada remontagem.
+    c.addEventListener('click', async function (ev) {
+        if (!ev.target || ev.target.id !== 'cf-reler') return;
+        var host = document.getElementById('cf-reler-saida');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Relendo…</div>';
+        try {
+            var d = await S.api('/cofre/reler', { method: 'POST' });
+            host.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'warning') + '">' + e(d.detalhe) + '</div>';
+            if (d.ok) carregar();
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    });
 
     document.getElementById('cf-sondar').onclick = async function () {
         var host = document.getElementById('cf-sondagem');

@@ -506,7 +506,6 @@ inv24 = d24["inventario"]
 checar(inv24["sabe_listar"] is True and inv24["listagem_por"] == "função _load()",
        "pergunta ao loader pelo _load() e recebe o cache")
 checar(inv24["nomes"] == sorted(_COFRE_DO_TIME), "lista exatamente os nomes que o loader carregou")
-checar(inv24["exporta_para_ambiente"] is True, "e percebe que o loader exportou tudo para o os.environ")
 ebs24 = {c["chave"]: c for g in d24["grupos"] if g["nome"] == "Base EBS (Oracle)" for c in g["chaves"]}
 checar(ebs24["ORACLE_EBS_PASS"]["no_corporativo"] is True and ebs24["ORACLE_EBS_PASS"]["fonte"] == "cofre corporativo (loader)",
        "chave no cache do loader é DO COFRE, mesmo estando também no os.environ")
@@ -518,6 +517,90 @@ checar("senha-do-cofre-que-nao-pode-sair" not in r_txt if (r_txt := cliente.get(
        "e o valor da senha do cofre não aparece em lugar nenhum")
 for k in _COFRE_DO_TIME: os.environ.pop(k, None)
 cofre._modulo, cofre._modulo_via = None, ""
+
+print("\n[3r] O LOADER DO TIME, tal e qual, lendo um cofre de verdade")
+# Réplica exata de /usr/local/lib/vcreports/vcreports_secrets.py (enviado pelo
+# time). Não é imitação: é o código dele, importado por caminho como o portal
+# faz num venv. O que se prova: o portal lê o cofre PELO LOADER, considera
+# "do cofre" só o que o loader leu, e diz qual arquivo foi lido.
+import importlib.util  # noqa: E402
+LOADER_REAL = _TMP / "vcreports_secrets.py"
+LOADER_REAL.write_text('"""\n/usr/local/lib/vcreports/vcreports_secrets.py\n\nLoader do cofre central de credenciais (/etc/vcreports/.secrets.env).\n\nUso (Python do sistema, com .pth instalado):\n    from vcreports_secrets import s\n    db_pass = s(\'MYSQL_LOCAL_PASS\')\n\nUso em venv isolado (sem .pth):\n    from dotenv import load_dotenv\n    load_dotenv(\'/etc/vcreports/.secrets.env\')\n    # ou: importlib.util para carregar este modulo por path absoluto.\n\nOrdem de resolucao: cofre -> os.environ[key] -> default.\nCache em memoria (por processo).\n"""\nfrom __future__ import annotations\n\nimport os\nfrom typing import Optional\n\n_DEFAULT_PATH = "/etc/vcreports/.secrets.env"\n_cache: Optional[dict] = None\n\n\ndef _load() -> dict:\n    global _cache\n    if _cache is not None:\n        return _cache\n    path = os.environ.get("VCREPORTS_SECRETS_FILE", _DEFAULT_PATH)\n    out: dict = {}\n    try:\n        with open(path, "r", encoding="utf-8") as f:\n            for raw in f:\n                line = raw.strip()\n                if not line or line.startswith("#"):\n                    continue\n                if "=" not in line:\n                    continue\n                k, _, v = line.partition("=")\n                k, v = k.strip(), v.strip()\n                if len(v) >= 2 and ((v[0] == v[-1] == \'"\') or (v[0] == v[-1] == "\'")):\n                    v = v[1:-1]\n                out[k] = v\n    except OSError as e:\n        import sys\n        print(f"[vcreports/secrets] cofre nao legivel ({path}): {e}", file=sys.stderr)\n    _cache = out\n    return _cache\n\n\ndef s(key: str, default: Optional[str] = None) -> Optional[str]:\n    """Retorna o valor de `key` no cofre, ou env var, ou `default`."""\n    cache = _load()\n    if key in cache:\n        return cache[key]\n    return os.environ.get(key, default)\n\n\n# alias\nsecret = s\n', encoding="utf-8")
+COFRE_REAL = _TMP / "secrets.env"
+COFRE_REAL.write_text(
+    "# cofre central\n"
+    "CORREIOS_USUARIO=conta-do-cofre\n"
+    "CORREIOS_CHAVE='chave-do-cofre-que-nao-pode-sair'\n"
+    "ORACLE_EBS_USER=inframon\n"
+    'ORACLE_EBS_PASS="senha-do-cofre-que-nao-pode-sair"\n', encoding="utf-8")
+
+
+def carregar_loader_real():
+    spec = importlib.util.spec_from_file_location("vcreports_secrets", LOADER_REAL)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    cofre._modulo, cofre._modulo_via = m, f"carregado por caminho ({LOADER_REAL})"
+    cofre._arquivo_cache = None
+    return m
+
+
+for k in ("CORREIOS_USUARIO", "CORREIOS_CHAVE", "ORACLE_EBS_USER", "ORACLE_EBS_PASS", "MDM_USUARIO"):
+    os.environ.pop(k, None)
+os.environ["VCREPORTS_SECRETS_FILE"] = str(COFRE_REAL)
+m = carregar_loader_real()
+
+checar(cofre.caminho_do_loader() == str(COFRE_REAL), "o portal calcula o arquivo do loader pela regra dele (VCREPORTS_SECRETS_FILE)")
+checar(cofre._cache_do_loader(m) == {"CORREIOS_USUARIO": "conta-do-cofre", "CORREIOS_CHAVE": "chave-do-cofre-que-nao-pode-sair",
+                                      "ORACLE_EBS_USER": "inframon", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"},
+       "o cache do loader real tem exatamente o que está no arquivo, aspas tratadas")
+checar(cofre.obter("ORACLE_EBS_PASS") == "senha-do-cofre-que-nao-pode-sair", "obter() entrega a senha do EBS vinda do cofre — pelo loader")
+checar(cofre.fonte("ORACLE_EBS_PASS") == "cofre corporativo", "e diz que veio do cofre corporativo")
+ok_r, det_r = cofre.diagnostico_corporativo("ORACLE_EBS_PASS")
+checar(ok_r is True and "leu 4 chave(s)" in det_r and "está entre elas" in det_r,
+       "o diagnóstico diz quantas chaves o loader leu, de qual arquivo, e que a chave está lá")
+ok_r2, det_r2 = cofre.diagnostico_corporativo("MDM_USUARIO")
+checar(ok_r2 is True and "NÃO está entre elas" in det_r2,
+       "chave ausente: o cofre está de pé, mas ela não está provisionada — dito assim")
+
+# O falso positivo original, morto na raiz: chave SÓ no ambiente não é do cofre.
+os.environ["MDM_USUARIO"] = "so-no-ambiente"
+checar(cofre._corporativo("MDM_USUARIO") == "", "_corporativo() não devolve o que só está no ambiente")
+checar(cofre.obter("MDM_USUARIO") == "so-no-ambiente" and cofre.fonte("MDM_USUARIO") == "ambiente",
+       "obter() ainda a entrega — mas pela fonte certa: ambiente")
+d30 = cliente.get("/api/cofre/diagnostico").json()
+inv30 = d30["inventario"]
+checar(inv30["arquivo_do_loader"] == str(COFRE_REAL) and inv30["arquivo_por"] == "VCREPORTS_SECRETS_FILE",
+       "a tela mostra o arquivo lido e que veio da variável")
+checar(inv30["nomes"] == ["CORREIOS_CHAVE", "CORREIOS_USUARIO", "ORACLE_EBS_PASS", "ORACLE_EBS_USER"],
+       "e lista os nomes que o loader real carregou")
+ebs30 = {c["chave"]: c for g in d30["grupos"] if g["nome"] == "Base EBS (Oracle)" for c in g["chaves"]}
+checar(ebs30["ORACLE_EBS_PASS"]["fonte"] == "cofre corporativo (loader)" and ebs30["ORACLE_EBS_PASS"]["resolvida"],
+       "na tela, ORACLE_EBS_PASS aparece como do cofre, resolvida")
+mdm30 = {c["chave"]: c for g in d30["grupos"] if g["nome"] == "MDM" for c in g["chaves"]}
+checar(mdm30["MDM_USUARIO"]["fonte"] == "ambiente" and mdm30["MDM_USUARIO"]["no_corporativo"] is False,
+       "e MDM_USUARIO, que só está no ambiente, aparece como ambiente — o falso positivo acabou")
+checar("senha-do-cofre-que-nao-pode-sair" not in cliente.get("/api/cofre/diagnostico").text,
+       "a senha lida do cofre não sai na resposta")
+r_ebs = cliente.get("/api/ebs-oracle/situacao").json()
+ch_ebs = {c["chave"]: c for c in r_ebs["chaves"]}
+checar(ch_ebs["ORACLE_EBS_PASS"]["no_corporativo"] is True and r_ebs["cofre_corporativo"] is True,
+       "a tela Base EBS também: senha do cofre, cofre disponível")
+
+# Cache fixo por processo: arquivo some -> continua lendo do cache; Reler -> vê a realidade.
+COFRE_REAL.unlink()
+checar(cofre.obter("ORACLE_EBS_PASS") == "senha-do-cofre-que-nao-pode-sair",
+       "com o arquivo removido, o loader ainda responde pelo cache (é assim que ele é)")
+r31 = cliente.post("/api/cofre/reler").json()
+checar(r31["ok"] is False and "continua sem conseguir ler" in r31["detalhe"], "Reler: sem o arquivo, diz que não leu")
+ok_r3, det_r3 = cofre.diagnostico_corporativo("ORACLE_EBS_PASS")
+checar(ok_r3 is False and "não leu" in det_r3 and "Reler ou" in det_r3,
+       "e o diagnóstico explica o cache fixo e o que fazer")
+COFRE_REAL.write_text("ORACLE_EBS_PASS=nova-senha-que-nao-pode-sair\n", encoding="utf-8")
+r32 = cliente.post("/api/cofre/reler").json()
+checar(r32["ok"] is True and r32["chaves"] == 1, "arquivo de volta + Reler: o loader recarrega sem reiniciar")
+checar(cofre.obter("ORACLE_EBS_PASS") == "nova-senha-que-nao-pode-sair", "e o portal já enxerga o valor novo")
+
+os.environ.pop("MDM_USUARIO", None); os.environ.pop("VCREPORTS_SECRETS_FILE", None)
+cofre._modulo, cofre._modulo_via, cofre._arquivo_cache = None, "", None
 
 print("\n[3o] Falso positivo: o loader devolvendo a variável de ambiente")
 # O loader do time resolve cofre -> os.environ -> default. Com a variável no
