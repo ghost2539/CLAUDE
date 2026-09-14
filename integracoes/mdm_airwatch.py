@@ -160,6 +160,7 @@ _CAMPOS_USUARIO = ("username", "UserName", "userid", "user", "login", "j_usernam
 _CAMPOS_SENHA = ("password", "Password", "passwd", "pass", "j_password")
 
 LOGIN = "/AirWatch/Login/Login/Login-User"
+DETALHE = "/AirWatch/Device/Details/Summary/{id}"
 
 
 def _campos_do_form(html: str, acao_padrao: str) -> tuple[str, dict]:
@@ -397,10 +398,88 @@ def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
                            headers=cabecalhos, timeout=60)
     except Exception as exc:  # noqa: BLE001 — a rede não pode derrubar o lote
         return False, f"falha de rede: {exc}"
-    if 200 <= r.status_code < 300:
-        texto = (getattr(r, "text", "") or "")[:200]
-        if "login" in (getattr(r, "url", "") or "").lower():
-            return False, "o console devolveu a tela de login (sessão expirada)"
-        return True, texto or f"HTTP {r.status_code}"
-    return False, f"HTTP {r.status_code}: {(getattr(r, 'text', '') or '')[:200]}"
+    corpo_txt = (getattr(r, "text", "") or "")
+    if not (200 <= r.status_code < 300):
+        return False, f"HTTP {r.status_code}: {corpo_txt[:200]}"
+    if "login" in (getattr(r, "url", "") or "").lower():
+        return False, "o console devolveu a tela de login (sessão expirada)"
+    # O console responde 200 mesmo quando não apaga: página de erro, JSON
+    # com Success:false, ou simplesmente nada feito. Tratar 200 como prova
+    # de exclusão foi o que fez o portal anunciar remoção que não houve.
+    negado = re.search(r'"(?:success|isSuccess)"\s*:\s*false', corpo_txt, re.I)
+    if negado:
+        return False, f"o console recusou: {corpo_txt[:200]}"
+
+    if ainda_existe(sessao, mdm_id, base):
+        return False, ("o console respondeu HTTP 200 mas o aparelho CONTINUA "
+                       f"inscrito. Resposta: {corpo_txt[:160] or '(vazia)'}")
+    return True, f"removido e conferido (HTTP {r.status_code})"
+
+
+# Caminhos de exclusão conhecidos deste console, na ordem em que são
+# tentados. Cada tentativa é CONFERIDA: só para quando o aparelho some de
+# verdade. É busca limitada e verificada, não tentativa e erro no escuro.
+CAMINHOS_REMOCAO = (
+    ("/AirWatch/Devices/DeleteDevice/{id}", "POST", "SelectedDeviceIds"),
+    ("/AirWatch/Device/Delete/{id}", "POST", "id"),
+    ("/AirWatch/Devices/DeleteBulkDevices", "POST", "SelectedDeviceIds"),
+    ("/AirWatch/Device/DeleteDevice", "POST", "id"),
+)
+
+
+def remover_tentando(sessao, mdm_id: str, base: str = "",
+                     caminhos=None) -> tuple[bool, str, list, str]:
+    """Tenta os caminhos de exclusão até um deles apagar de verdade.
+
+    Devolve (ok, detalhe, trilha, caminho_que_funcionou). A trilha traz o
+    que cada tentativa respondeu — é ela que vira registro quando nenhuma
+    funciona, para a próxima conversa começar do fato.
+    """
+    trilha = []
+    for caminho, metodo, campo in (caminhos or CAMINHOS_REMOCAO):
+        try:
+            ok, detalhe = remover_dispositivo(sessao, mdm_id, base, caminho,
+                                              metodo, campo)
+        except RemocaoNaoConfigurada:
+            continue
+        except Exception as exc:  # noqa: BLE001 — a próxima tentativa segue
+            ok, detalhe = False, f"erro: {exc}"[:200]
+        trilha.append({"caminho": caminho, "metodo": metodo, "campo": campo,
+                       "ok": ok, "detalhe": detalhe})
+        if ok:
+            return True, detalhe, trilha, caminho
+    resumo = "; ".join(f"{t['caminho']} → {t['detalhe'][:80]}" for t in trilha)
+    return False, (resumo or "nenhum caminho de remoção tentado"), trilha, ""
+
+
+def ainda_existe(sessao, mdm_id: str, base: str = "") -> bool:
+    """O aparelho continua no console?
+
+    Conferência depois de apagar. Sem ela, "removido" é só o que o
+    servidor respondeu — e ele responde 200 para coisa nenhuma.
+    Na dúvida (rede caiu, resposta estranha) devolve True: dizer que
+    removeu sem ter certeza é pior do que dizer que não deu.
+    """
+    mdm_id = str(mdm_id or "").strip()
+    if not mdm_id:
+        return False
+    url = (base or "") + DETALHE.replace("{id}", mdm_id)
+    try:
+        r = sessao.get(url, headers=CABECALHOS, timeout=30)
+    except Exception:  # noqa: BLE001 — sem conferir, não se afirma remoção
+        return True
+    status = getattr(r, "status_code", 0)
+    if status in (404, 410):
+        return False
+    texto = (getattr(r, "text", "") or "")
+    destino = (getattr(r, "url", "") or "").lower()
+    if "login" in destino:
+        return True                      # sessão caiu: não dá para afirmar
+    # Console devolve a lista (ou uma página de "não encontrado") quando o
+    # aparelho não existe mais.
+    sumiu = re.search(r"(device\s+not\s+found|no\s+longer\s+available|"
+                      r"n[aã]o\s+encontrado)", texto, re.I)
+    if sumiu:
+        return False
+    return status == 200 and mdm_id in texto
 

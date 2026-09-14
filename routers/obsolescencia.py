@@ -1256,11 +1256,19 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
         resumo["tentados"] += 1
         ok, detalhe = False, resumo["motivo"] or "não enviado"
         if sessao is not None and endpoint:
+            # Primeiro o caminho configurado; se ele responder sem apagar,
+            # os outros caminhos conhecidos, cada um CONFERIDO. O que
+            # funcionar vira o configurado — a próxima remoção vai direto.
+            caminhos = [(endpoint, cfg.get("mdm_remocao_metodo", "POST"),
+                         cfg.get("mdm_remocao_campo") or "SelectedDeviceIds")]
+            caminhos += [c for c in mdm.CAMINHOS_REMOCAO if c[0] != endpoint]
             try:
-                ok, detalhe = mdm.remover_dispositivo(
-                    sessao, mdm_id, base, endpoint,
-                    cfg.get("mdm_remocao_metodo", "POST"),
-                    cfg.get("mdm_remocao_campo") or "SelectedDeviceIds")
+                ok, detalhe, trilha, venceu = mdm.remover_tentando(
+                    sessao, mdm_id, base, caminhos)
+                resumo.setdefault("trilha", []).extend(trilha)
+                if ok and venceu and venceu != endpoint:
+                    _db.gravar_config({"mdm_remocao_endpoint": venceu})
+                    _log.info("MDM: caminho de remoção que funciona é %s", venceu)
             except mdm.RemocaoNaoConfigurada as exc:
                 ok, detalhe = False, str(exc)
             except Exception as exc:  # noqa: BLE001 — um aparelho não derruba o lote
