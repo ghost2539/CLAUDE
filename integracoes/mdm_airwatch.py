@@ -340,9 +340,11 @@ class RemocaoNaoConfigurada(RuntimeError):
 _RE_TOKEN = re.compile(r"<input[^>]*__RequestVerificationToken[^>]*>", re.I)
 _RE_VALOR = re.compile(r"value\s*=\s*[\"']([^\"']+)[\"']", re.I)
 
-# Páginas do próprio aparelho que trazem o formulário com o token.
-FORMULARIOS_TOKEN = ("/AirWatch/Devices/TagAssignment/{id}",
-                     "/AirWatch/Device/Details/Summary/{id}")
+# Páginas do próprio aparelho que trazem o formulário com o token. A do
+# detalhe vem primeiro: é a página onde o botão de excluir vive, e é o
+# token dela que o console espera na exclusão.
+FORMULARIOS_TOKEN = ("/AirWatch/Device/Details/Summary/{id}",
+                     "/AirWatch/Devices/TagAssignment/{id}")
 
 
 def token_verificacao(sessao, mdm_id: str, base: str = "") -> str:
@@ -389,6 +391,10 @@ def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
     url = caminho if caminho.startswith("http") else (base or "") + caminho
     corpo = {(campo or "SelectedDeviceIds"): mdm_id}
     cabecalhos = dict(CABECALHOS)
+    # O console recusa ("Save Failed") requisição que não parece ter vindo
+    # da página do aparelho: manda o Referer dela junto.
+    cabecalhos["Referer"] = (base or "") + DETALHE.replace("{id}", mdm_id)
+    cabecalhos["Origin"] = base or ""
     token = token_verificacao(sessao, mdm_id, base)
     if token:
         corpo["__RequestVerificationToken"] = token
@@ -408,7 +414,10 @@ def remover_dispositivo(sessao, mdm_id: str, base: str = "", endpoint: str = "",
     # de exclusão foi o que fez o portal anunciar remoção que não houve.
     negado = re.search(r'"(?:success|isSuccess)"\s*:\s*false', corpo_txt, re.I)
     if negado:
-        return False, f"o console recusou: {corpo_txt[:200]}"
+        # A mensagem do console é o dado mais valioso aqui: vai inteira.
+        recado = re.search(r'"Message"\s*:\s*"([^"]*)"', corpo_txt, re.I)
+        motivo = recado.group(1) if recado else corpo_txt[:400]
+        return False, f"o console recusou: {motivo}"
 
     if ainda_existe(sessao, mdm_id, base):
         return False, ("o console respondeu HTTP 200 mas o aparelho CONTINUA "
