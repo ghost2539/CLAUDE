@@ -500,15 +500,24 @@ async function renderCofre(c, S) {
         '<h1 class="page-title">Cofre de segredos</h1>' +
         '<p class="text-muted">O que o <b>processo do portal</b> alcança. Nenhum valor de ' +
             'segredo aparece aqui — só de onde veio e quantos caracteres tem.</p>' +
+        '<div class="card mb-3"><div class="card-header">Sondar nomes no cofre</div>' +
+            '<div class="card-body">' +
+            '<p class="text-muted" style="margin-top:0">O cofre corporativo responde por nome, ' +
+            'uma chave de cada vez — não dá para listar. Cole os nomes candidatos (vírgula, ' +
+            'espaço ou um por linha) e veja quais respondem.</p>' +
+            '<div class="form-group"><textarea id="cf-nomes" class="form-control" rows="3" ' +
+            'placeholder="ORACLE_EBS_USUARIO, ORACLE_EBS_SENHA, MYSQL_LOCAL_PASS"></textarea></div>' +
+            '<div class="btn-row"><button id="cf-sondar" class="btn btn-primary btn-sm">Sondar</button></div>' +
+            '<div id="cf-sondagem" class="mt-3"></div></div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
             '<span>Situação</span>' +
             '<span><button id="cf-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
-            '<button id="cf-tudo" class="btn btn-sm btn-secondary" style="margin-left:6px">Ver tudo</button> ' +
+            '<button id="cf-tudo" class="btn btn-sm btn-secondary" style="margin-left:6px">Ver ambiente e cofre local</button> ' +
             '<button id="cf-correios" class="btn btn-sm btn-primary" style="margin-left:6px">Testar Correios</button></span>' +
             '</div><div class="card-body" id="cf-situacao">' +
             '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
         '<div class="card mb-3" id="cf-tudo-card" style="display:none">' +
-            '<div class="card-header">Tudo o que o serviço enxerga</div>' +
+            '<div class="card-header">Ambiente e cofre local</div>' +
             '<div class="card-body" id="cf-tudo-corpo"></div></div>' +
         '<div class="card" id="cf-teste-card" style="display:none">' +
             '<div class="card-header">Teste dos Correios</div>' +
@@ -549,24 +558,6 @@ async function renderCofre(c, S) {
                                              : '<span class="text-muted">—</span>')) + '</td></tr>';
     }
 
-    function arquivo(rotulo, a) {
-        if (!a) return '';
-        var estado = !a.existe
-            ? '<span class="badge badge-danger">não encontrado</span>'
-            : (a.legivel ? '<span class="badge badge-success">legível</span>'
-                         : '<span class="badge badge-danger">sem permissão de leitura</span>');
-        var pasta = a.pasta_acessivel ? '' :
-            ' <span class="badge badge-warning">pasta inacessível</span>';
-        var quem = (a.dono || a.grupo || a.modo)
-            ? ' <span class="text-muted">' + e(a.dono || '?') + ':' + e(a.grupo || '?') +
-              ' ' + e(a.modo || '?') + '</span>'
-            : (a.pasta && a.pasta.grupo
-                ? ' <span class="text-muted">(pasta: ' + e(a.pasta.dono || '?') + ':' +
-                  e(a.pasta.grupo) + ' ' + e(a.pasta.modo || '?') + ')</span>' : '');
-        return '<tr><td><b>' + e(rotulo) + '</b></td><td class="om-mono">' + e(a.caminho) + '</td>' +
-               '<td>' + estado + pasta + quem + '</td></tr>';
-    }
-
     // Cada parte do diagnóstico responde por si. Quando uma falha, ela
     // aparece nomeada — some da tela é o que não pode.
     function errosHtml(erros) {
@@ -578,70 +569,23 @@ async function renderCofre(c, S) {
             }).join('') + '</ul></div>';
     }
 
-    // Falta de permissão tem conserto conhecido. Escrever o comando com o
-    // grupo e o usuário certos poupa o vaivém com quem administra o cofre.
-    function remedioHtml(r) {
-        if (!r || !r.necessario) return '';
-        return '<div class="alert alert-warning"><b>Falta permissão de leitura.</b> ' +
-            e(r.motivo) + '<br>Peça a quem administra o cofre (precisa de root):' +
-            '<pre class="om-mono" style="white-space:pre-wrap;margin:6px 0 0">' +
-            e((r.comandos || []).join('\n')) + '</pre></div>';
-    }
-
     // O módulo do cofre importa, mas nada resolve? Então o problema não é o
     // módulo: é o arquivo que ELE lê, ou o nome da chave. Estas duas seções
     // respondem as duas perguntas sem precisar de acesso ao servidor.
     function inventarioHtml(inv) {
         if (!inv) return '';
-        var cab = '<h3 class="mt-3">De onde o cofre corporativo lê</h3>' +
+        return '<h3 class="mt-3">Loader do cofre corporativo</h3>' +
             '<p><b>Módulo:</b> ' +
             (inv.modulo_carregado
                 ? '<span class="badge badge-success">carregado</span> <span class="text-muted">' +
                   e(inv.modulo_via || '') + '</span>' +
                   (inv.funcao ? ' <span class="text-muted">— função ' + e(inv.funcao) + '()</span>' : '')
-                : '<span class="badge badge-danger">não carregado</span>') + '</p>';
-
-        var arqs = (inv.arquivos_do_modulo || []).length
-            ? '<div class="table-wrapper mb-2"><table class="data-table"><thead><tr>' +
-              '<th>Atributo</th><th>Caminho</th><th>Leitura</th></tr></thead><tbody>' +
-              inv.arquivos_do_modulo.map(function (a) {
-                  return '<tr><td class="om-mono">' + e(a.atributo) + '</td>' +
-                      '<td class="om-mono">' + e(a.caminho) + '</td><td>' +
-                      (!a.existe ? '<span class="badge badge-danger">não existe</span>'
-                                 : (a.legivel ? '<span class="badge badge-success">legível</span>'
-                                              : '<span class="badge badge-danger">sem permissão</span>')) +
-                      '</td></tr>';
-              }).join('') + '</tbody></table></div>'
-            : '';
-
-        var pastas = (inv.pastas || []).map(function (p) {
-            if (!p.existe) return '<p class="text-muted om-mono">' + e(p.caminho) + ' — não existe</p>';
-            if (!p.listavel) return '<p class="om-mono">' + e(p.caminho) +
-                ' — <span class="badge badge-danger">' + e(p.erro || 'sem permissão') + '</span></p>';
-            return '<p class="om-mono">' + e(p.caminho) + ' — ' +
-                (p.itens || []).map(function (i) {
-                    return e(i.nome) + (i.legivel ? '' : ' <span class="badge badge-danger">sem leitura</span>');
-                }).join(', ') + '</p>';
-        }).join('');
-
-        var conteudo = (inv.conteudo || []).map(function (c) {
-            if (c.erro) return '<p class="om-mono">' + e(c.caminho) +
-                ' — <span class="badge badge-danger">' + e(c.erro) + '</span></p>';
-            if (!c.total) return '<p class="om-mono">' + e(c.caminho) +
-                ' — <span class="badge badge-warning">legível, mas sem nenhuma chave dentro</span></p>';
-            return '<p class="om-mono">' + e(c.caminho) + ' — <span class="badge badge-success">' +
-                'legível</span> ' + c.total + ' chave(s): ' + e((c.nomes || []).join(', ')) + '</p>';
-        }).join('');
-
-        var nomes = inv.sabe_listar
-            ? '<p><b>Chaves que o cofre expõe:</b> <span class="om-mono">' +
-              e((inv.nomes || []).join(', ')) + '</span></p>'
-            : '<p class="text-muted">Este cofre não sabe se listar — só responde chave por chave. ' +
-              'Por isso a sondagem de nomes abaixo.</p>';
-
-        return cab + arqs + pastas + conteudo + nomes +
-            '<p class="text-muted">Só os nomes. Valor de senha e chave não sai daqui — ' +
-            'para saber se o serviço enxerga, o nome e o tamanho bastam.</p>';
+                : '<span class="badge badge-danger">não carregado</span>') + '</p>' +
+            '<p class="text-muted">O loader responde <b>por nome</b>, uma chave de cada vez, e não ' +
+            'tem função de listar — o arquivo do cofre não é para ser aberto por quem consome. ' +
+            'Então não há como "trazer tudo" daqui: para procurar, use a sondagem por nome. ' +
+            'A ordem do loader é cofre → variável de ambiente → padrão, e é por isso que uma ' +
+            'chave pode funcionar mesmo com o cofre inacessível.</p>';
     }
 
     function alternativasHtml(lista) {
@@ -662,29 +606,19 @@ async function renderCofre(c, S) {
         host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
         try {
             var d = await S.api('/cofre/diagnostico');
-            var perm = d.permissoes_corporativo || {};
-            var dono = (perm.dono || perm.grupo || perm.modo)
-                ? '<p class="text-muted" style="margin-bottom:0">Arquivo do cofre: dono <b>' +
-                  e(perm.dono || '?') + '</b>, grupo <b>' + e(perm.grupo || '?') + '</b>, modo <b>' +
-                  e(perm.modo || '?') + '</b>. O serviço roda como <b>' + e(d.usuario_do_servico || '?') +
-                  '</b>' + ((perm.grupos_atuais || []).length
-                        ? ', nos grupos ' + e((perm.grupos_atuais || []).join(', ')) : '') + '.</p>'
-                : '';
             host.innerHTML =
                 '<p><b>Usuário do serviço:</b> <span class="om-mono">' + e(d.usuario_do_servico || '?') + '</span></p>' +
                 '<p><b>Cofre corporativo:</b> ' +
                     badge(d.corporativo_ok, 'disponível', 'indisponível') +
                     ' <span class="text-muted">' + e(d.corporativo_detalhe || '') + '</span></p>' +
-                errosHtml(d.erros) + remedioHtml(d.remedio) +
+                errosHtml(d.erros) +
                 '<div class="table-wrapper mb-3"><table class="data-table"><tbody>' +
-                    arquivo('Módulo', d.modulo_corporativo) +
-                    arquivo('Arquivo', d.arquivo_corporativo) +
                     '<tr><td><b>Cofre local</b></td><td class="om-mono">' + e(d.cofre_local || '') + '</td>' +
                     '<td>' + (d.cofre_local_existe
                         ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
                           e(d.algoritmo || '') + '</span>'
                         : '<span class="text-muted">não existe</span>') + '</td></tr>' +
-                '</tbody></table></div>' + dono + inventarioHtml(d.inventario) +
+                '</tbody></table></div>' + inventarioHtml(d.inventario) +
                 (d.grupos || []).map(function (g) {
                     return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
                         '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
@@ -698,6 +632,26 @@ async function renderCofre(c, S) {
     }
 
     document.getElementById('cf-atualizar').onclick = carregar;
+
+    document.getElementById('cf-sondar').onclick = async function () {
+        var host = document.getElementById('cf-sondagem');
+        var nomes = document.getElementById('cf-nomes').value;
+        if (!nomes.trim()) { S.toast('Informe ao menos um nome.', 'warning'); return; }
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Sondando…</div>';
+        try {
+            var d = await S.api('/cofre/sondar-varios', {
+                method: 'POST', body: JSON.stringify({ nomes: nomes })
+            });
+            host.innerHTML =
+                '<p><b>' + d.resolvidas + '</b> de ' + d.total + ' responderam.</p>' +
+                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
+                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
+                '</tr></thead><tbody>' + (d.itens || []).map(linha).join('') +
+                '</tbody></table></div>';
+        } catch (x) {
+            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
 
     document.getElementById('cf-tudo').onclick = async function () {
         var card = document.getElementById('cf-tudo-card');
@@ -718,8 +672,10 @@ async function renderCofre(c, S) {
                 '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
                 '</tr></thead><tbody id="cf-tudo-linhas">' +
                 (d.itens || []).map(linha).join('') + '</tbody></table></div>' +
-                '<p class="text-muted" style="margin-bottom:0">O ambiente do processo tem muito ' +
-                'mais que credencial. Valor só aparece quando o nome não denuncia um segredo.</p>';
+                '<p class="text-muted" style="margin-bottom:0">Só o que é enumerável: as ' +
+                'variáveis do processo e o cofre local. O cofre corporativo não entra aqui ' +
+                'porque o loader não sabe listar — para ele, use a sondagem por nome. ' +
+                'Valor só aparece quando o nome não denuncia um segredo.</p>';
             // Filtro no cliente: a lista já está toda aqui, e ir ao servidor
             // a cada tecla só serviria para deixar a tela lenta.
             var campo = document.getElementById('cf-filtro');

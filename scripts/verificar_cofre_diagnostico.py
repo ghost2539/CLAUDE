@@ -87,27 +87,20 @@ checar(por_chave.get("CORREIOS_USUARIO", {}).get("no_corporativo") is False,
 checar(por_chave.get("CORREIOS_CARTOES", {}).get("resolvida") is False,
        "chave ausente aparece como não resolvida, sem inventar valor")
 
-print("\n[3] Permissão do arquivo do cofre corporativo")
-for campo in ("modulo_corporativo", "arquivo_corporativo"):
-    a = d.get(campo) or {}
-    checar(set(("caminho", "existe", "legivel", "pasta_acessivel")) <= set(a),
-           f"{campo}: diz caminho, existência, leitura e acesso à pasta")
-checar(isinstance(d.get("permissoes_corporativo"), dict),
-       "traz dono/grupo/modo do arquivo — é onde a falha de permissão aparece")
+print("\n[3] O diagnóstico não abre arquivo nenhum")
+# O diagnóstico não pode tocar em arquivo: o cofre é consumido por
+# referência, e abrir o arquivo só produz "Permission denied" e a falsa
+# impressão de que o cofre está quebrado.
+for campo in ("modulo_corporativo", "arquivo_corporativo",
+              "permissoes_corporativo", "remedio"):
+    checar(campo not in d, f"não expõe {campo} — nada de mexer em arquivo")
 
 print("\n[3b] De onde o cofre lê, e se o nome pode ser outro")
 inv = d.get("inventario") or {}
 checar(isinstance(inv, dict) and "modulo_carregado" in inv,
        "diz se o módulo do cofre carregou")
-checar("sabe_listar" in inv and isinstance(inv.get("nomes"), list),
-       "diz se o cofre sabe listar as próprias chaves")
-checar(isinstance(inv.get("arquivos_do_modulo"), list),
-       "lista os arquivos que o próprio módulo aponta")
-pastas = {p["caminho"]: p for p in inv.get("pastas", [])}
-checar("/usr/local/lib/vcreports" in pastas and "/etc/vcreports" in pastas,
-       "olha as duas pastas do cofre corporativo")
-checar(all(set(("existe", "listavel", "itens")) <= set(v) for v in pastas.values()),
-       "de cada pasta diz se existe, se lista e o que há dentro")
+checar(inv.get("sabe_listar") is False,
+       "e que ele não sabe listar — só responde por nome")
 alt = d.get("alternativas") or []
 checar(len(alt) == 3, "sonda os apelidos de usuário, senha e endereço do EBS")
 nomes_alt = [c["chave"] for g in alt for c in g["chaves"]]
@@ -137,13 +130,10 @@ inv6 = d6.get("inventario") or {}
 checar(inv6.get("modulo_carregado") is True, "o módulo aparece como carregado")
 checar(inv6.get("funcao") == "<lambda>" or inv6.get("funcao"),
        "diz qual função do módulo é usada")
-checar(inv6.get("sabe_listar") is True and "ORACLE_EBS_SENHA" in inv6.get("nomes", []),
-       "lista os nomes que o cofre expõe")
+checar(inv6.get("sabe_listar") is False and inv6.get("nomes") == [],
+       "e diz que não sabe listar — é o contrato do loader, não uma falha")
 checar("senha-simulada-que-nao-pode-sair" not in r6.text,
        "e a senha do cofre corporativo não sai na resposta")
-apontados = {a["caminho"]: a for a in inv6.get("arquivos_do_modulo", [])}
-checar(str(FALSO) in apontados and apontados[str(FALSO)]["legivel"] is True,
-       "aponta o arquivo que o próprio módulo lê, e se dá para ler")
 alt6 = {c["chave"]: c for g in d6.get("alternativas", []) for c in g["chaves"]}
 checar(alt6["ORACLE_EBS_PASS"]["resolvida"] is False,
        "o nome de hoje continua sem resolver")
@@ -151,67 +141,6 @@ checar(alt6["ORACLE_EBS_SENHA"]["resolvida"] is True
        and alt6["ORACLE_EBS_SENHA"]["no_corporativo"] is True,
        "e o apelido certo aparece resolvido, no cofre corporativo")
 cofre._modulo, cofre._modulo_via = None, ""
-
-print("\n[3d] Os nomes que estão DENTRO do arquivo do cofre")
-# É a pergunta direta: o serviço enxerga o conteúdo? Lista cheia = enxerga;
-# erro de permissão = não enxerga. E em nenhum dos casos o valor sai.
-PHP = _TMP / "secrets.php"
-PHP.write_text(
-    "<?php\n"
-    "define('ORACLE_EBS_USUARIO', 'inframon');\n"
-    "define('ORACLE_EBS_SENHA', 'senha-do-arquivo-que-nao-pode-sair');\n"
-    "$mapa = ['CORREIOS_CHAVE' => 'chave-do-arquivo-que-nao-pode-sair'];\n",
-    encoding="utf-8")
-ENV = _TMP / "outro.env"
-ENV.write_text("# comentário\nexport SN_API_USER=conta\nMDM_SENHA='nao-pode-sair'\n",
-               encoding="utf-8")
-JSON = _TMP / "cofre_ext.json"
-JSON.write_text('{"EBS_PASS": "tambem-nao-pode-sair"}', encoding="utf-8")
-
-mod2 = types.ModuleType("vcreports_secrets")
-mod2.ARQUIVO_PHP = str(PHP)
-mod2.ARQUIVO_ENV = str(ENV)
-mod2.ARQUIVO_JSON = str(JSON)
-mod2.s = lambda nome: ""
-cofre._modulo, cofre._modulo_via = mod2, "import direto (simulado 2)"
-
-r7 = cliente.get("/api/cofre/diagnostico")
-d7 = r7.json()
-conteudo = {c["caminho"]: c for c in (d7.get("inventario") or {}).get("conteudo", [])}
-php = conteudo.get(str(PHP), {})
-checar(php.get("legivel") is True, "lê o arquivo em formato PHP")
-checar("ORACLE_EBS_USUARIO" in php.get("nomes", [])
-       and "ORACLE_EBS_SENHA" in php.get("nomes", []),
-       "pega os nomes do define()")
-checar("CORREIOS_CHAVE" in php.get("nomes", []), "e os nomes do array =>")
-env = conteudo.get(str(ENV), {})
-checar("SN_API_USER" in env.get("nomes", []) and "MDM_SENHA" in env.get("nomes", []),
-       "pega os nomes do formato env, com ou sem export")
-checar("comentário" not in str(env.get("nomes")), "e ignora comentário")
-js_ = conteudo.get(str(JSON), {})
-checar("EBS_PASS" in js_.get("nomes", []), "pega os nomes do formato JSON")
-for proibido in ("senha-do-arquivo-que-nao-pode-sair", "chave-do-arquivo-que-nao-pode-sair",
-                 "nao-pode-sair", "tambem-nao-pode-sair", "inframon"):
-    checar(proibido not in r7.text, f"nenhum valor do arquivo sai na resposta ({proibido})")
-inv7 = d7.get("inventario") or {}
-checar("ORACLE_EBS_USUARIO" in inv7.get("nomes", []),
-       "o inventário junta o que veio dos arquivos")
-
-# Arquivo sem permissão: a tela precisa dizer isso, não uma lista vazia.
-FECHADO = _TMP / "fechado.env"
-FECHADO.write_text("X=1\n", encoding="utf-8")
-os.chmod(FECHADO, 0o000)
-from routers import cofre as rc  # noqa: E402
-# Como root o chmod não impede nada, e é justamente o caso do servidor que
-# precisa estar certo — então a recusa é forçada na abertura do arquivo.
-from unittest.mock import patch  # noqa: E402
-with patch("builtins.open", side_effect=PermissionError("negado")):
-    sem = rc._nomes_no_arquivo(str(FECHADO))
-checar(sem["legivel"] is False and "permissão" in sem["erro"],
-       "arquivo sem permissão vira erro claro, não lista vazia")
-os.chmod(FECHADO, 0o600)
-checar(rc._nomes_no_arquivo(str(_TMP / "nao-existe.env"))["erro"] != "",
-       "arquivo inexistente também explica o porquê")
 
 print("\n[3e] Chave nos dois cofres com valores diferentes")
 cofre.definir("SN_API_USER", "valor-do-cofre-local")
@@ -260,48 +189,7 @@ checar(co10["CORREIOS_USUARIO"]["sombreado"] is False,
        "tirada a duplicidade, o aviso some")
 os.environ.pop("CORREIOS_CARTOES", None)
 
-print("\n[3f] Sem permissão, a tela entrega o pedido pronto")
-# O caso real do servidor: o módulo importa, mas o arquivo do cofre não é
-# legível pelo usuário do serviço. A tela precisa dizer o que pedir.
 from routers import cofre as rc2  # noqa: E402
-
-ARQ = _TMP / "secrets.env"
-ARQ.write_text("X=1\n", encoding="utf-8")
-info = rc2._arquivo(str(ARQ))
-checar(info["existe"] and info["dono"] and info["modo"],
-       "diz dono e modo do arquivo do cofre")
-checar(info["pasta"]["caminho"] == str(_TMP) and info["pasta"]["grupo"],
-       "e o dono/grupo da pasta — serve quando o arquivo não se deixa consultar")
-
-sem_leitura = dict(info, legivel=False, grupo="vcreports", dono="root")
-rem = rc2._remedio(sem_leitura, "portal")
-checar(rem["necessario"] is True, "reconhece que falta permissão")
-checar("vcreports" in rem["motivo"] and "portal" in rem["motivo"],
-       "explica com o grupo do arquivo e o usuário do serviço")
-checar(any("usermod -aG vcreports portal" in c for c in rem["comandos"]),
-       "e monta o comando com os dois nomes certos")
-checar(any("chmod g+r" in c for c in rem["comandos"]), "mais a leitura do arquivo")
-
-# O caso que engana: arquivo 644 e mesmo assim "Permission denied", porque
-# a permissão da PASTA é verificada antes do modo do arquivo.
-fora = rc2._remedio({"caminho": "/etc/vcreports/.secrets.env", "existe": False,
-                     "pasta_acessivel": False, "modo": "644",
-                     "pasta": {"caminho": "/etc/vcreports"}}, "portal")
-checar(fora["necessario"] is True, "pasta inacessível vira pedido, não silêncio")
-checar("644" in fora["motivo"] and "/etc/vcreports" in fora["motivo"],
-       "e explica por que o 644 do arquivo não resolve sozinho")
-checar(any(c == "chmod o+x /etc/vcreports" for c in fora["comandos"]),
-       "com o comando que abre a pasta")
-checar(any("setfacl" in c for c in fora["comandos"]),
-       "e a alternativa que libera só o serviço")
-
-sumido = rc2._remedio({"caminho": "/etc/vcreports/.secrets.env", "existe": False,
-                       "pasta_acessivel": True,
-                       "pasta": {"caminho": "/etc/vcreports"}}, "portal")
-checar("não está lá" in sumido["motivo"],
-       "pasta acessível e arquivo ausente é outro problema, e é dito como tal")
-checar(rc2._remedio(info, "portal")["necessario"] is False,
-       "arquivo legível, em pasta acessível, não gera pedido nenhum")
 
 print("\n[3h] Ver tudo: a lista completa, sem publicar segredo")
 os.environ["CORREIOS_CARTOES"] = "cartao-do-ambiente"
@@ -366,6 +254,28 @@ with _patch.object(rc2, "_inventario_corporativo",
 checar(r14.status_code == 200 and "erros" in r14.json(),
        "a lista completa também não morre por causa de uma parte")
 
+print("\n[3j] Sondar vários nomes: a única busca possível no cofre")
+os.environ["CORREIOS_CARTOES"] = "cartao-do-ambiente"
+r15 = cliente.post("/api/cofre/sondar-varios",
+                   json={"nomes": "correios_cartoes, NAO_EXISTE_ISSO\nCORREIOS_CHAVE"})
+checar(r15.status_code == 200, f"HTTP 200 ({r15.status_code})")
+d15 = r15.json()
+por = {i["chave"]: i for i in d15["itens"]}
+checar(d15["total"] == 3, "aceita vírgula, espaço e quebra de linha no mesmo texto")
+checar("CORREIOS_CARTOES" in por, "normaliza para maiúsculas")
+checar(por["CORREIOS_CARTOES"]["resolvida"] and por["NAO_EXISTE_ISSO"]["resolvida"] is False,
+       "separa o que responde do que não responde")
+checar(d15["resolvidas"] == 2, "e conta quantas responderam")
+checar(SEGREDO not in r15.text, "sem vazar valor de segredo")
+checar(cliente.post("/api/cofre/sondar-varios", json={"nomes": "   "}).status_code == 422,
+       "texto vazio é recusado")
+checar(cliente.post("/api/cofre/sondar-varios",
+                    json={"nomes": "a;b" * 500}).status_code == 200,
+       "lista enorme não derruba nada")
+checar(anon2.post("/api/cofre/sondar-varios", json={"nomes": "X"}).status_code in (401, 403),
+       "e exige sessão")
+os.environ.pop("CORREIOS_CARTOES", None)
+
 print("\n[4] Sondagem avulsa")
 r2 = cliente.get("/api/cofre/sondar/CORREIOS_CHAVE")
 checar(r2.status_code == 200, f"HTTP 200 ({r2.status_code})")
@@ -411,9 +321,12 @@ checar("/cofre/testar-correios" in js, "a tela chama o teste dos Correios")
 checar("em ' + (k.fontes_com_valor || []).length + ' fontes" in js,
        "a tela mostra em quantas fontes a chave está")
 checar("errosHtml" in js, "a tela mostra qual parte do diagnóstico falhou")
+checar("remedioHtml" not in js and "pasta_acessivel" not in js,
+       "e não fala mais em permissão de arquivo — o cofre é por referência")
+checar("/cofre/sondar-varios" in js and "cf-nomes" in js,
+       "a tela tem a caixa de sondagem por nome")
 checar("/cofre/tudo" in js and "cf-filtro" in js,
        "a tela tem o botão Ver tudo, com filtro por nome")
-checar("remedioHtml" in js, "a tela mostra o pedido de permissão pronto")
 checar("valores diferentes" in js, "a tela avisa quando os cofres discordam")
 checar("inventarioHtml" in js and "alternativasHtml" in js,
        "a tela mostra de onde o cofre lê e os apelidos sondados")
