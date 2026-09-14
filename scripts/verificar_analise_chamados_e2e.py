@@ -131,4 +131,20 @@ res = pd.read_excel(T / "saida.xlsx", sheet_name="Resumo")
 print("\n" + res.to_string(index=False))
 sub = pd.read_excel(T / "saida.xlsx", sheet_name="TMA por subcategoria")
 print("\n" + sub.to_string(index=False))
+
+print("\n[Linha colada] a barra invertida no meio da linha não derruba o comando")
+# É o que o shell entrega quando a `\\` é colada no meio: um argumento em
+# branco e a opção seguinte com espaço na frente.
+ac._CONTA = None
+sys.argv = ["x", str(T / "entrada.xlsx"), " ", " --grupo", "SPARE - Equipamentos",
+            " --saida", str(T / "saida2.xlsx"), "--env-file", str(ENV_E2E)]
+assert ac.main() == 0
+df2 = pd.read_excel(T / "saida2.xlsx", sheet_name="Chamados")
+assert len(df2) == 3, len(df2)
+print("  ok   mesmo resultado do comando limpo (3 chamados)")
+
+sys.argv = ["x", str(T / "nao-existe.xlsx"), "--grupo", "F", "--env-file", str(ENV_E2E)]
+assert ac.main() == 1
+print("  ok   planilha inexistente para o script antes de pedir credencial")
+
 print("\nAnálise de chamados íntegra (ponta a ponta).")

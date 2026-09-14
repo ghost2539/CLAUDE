@@ -347,6 +347,28 @@ def gravar(linhas: list[dict], resumo: dict, saida: Path) -> None:
 
 
 # ── Programa ──────────────────────────────────────────────────────
+def limpar_argumentos(bruto: list[str]) -> list[str]:
+    """Perdoa a barra invertida colada no meio da linha.
+
+    A `\\` de quebra de linha só vale no fim da linha. Colada no meio
+    (o que acontece quando o comando é copiado de uma mensagem), o shell
+    a transforma num espaço literal: aparece um argumento em branco, ou
+    um `" -g"` com espaço na frente que o argparse não reconhece. Em vez
+    de exigir que se digite tudo de novo, aqui a gente apara o espaço e
+    descarta o argumento vazio.
+    """
+    limpo: list[str] = []
+    for arg in bruto:
+        if arg.strip() in ("", "\\"):
+            continue
+        # Só apara quando sobra uma opção: um valor com espaço de
+        # propósito (o nome de uma fila, por exemplo) fica intacto.
+        if arg != arg.strip() and arg.strip().startswith("-"):
+            arg = arg.strip()
+        limpo.append(arg)
+    return limpo
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -365,8 +387,18 @@ def main() -> int:
     ap.add_argument("--env-file", "--env", "--ambiente", type=Path, dest="env_file",
                     help="arquivo de ambiente com SN_API_BASE/USER/PASS "
                          "(por padrão procura o do serviço)")
-    args = ap.parse_args()
+    args = ap.parse_args(limpar_argumentos(sys.argv[1:]))
     print(f"  script: {Path(__file__).resolve()}")
+
+    # A planilha primeiro: é o erro mais comum e não adianta pedir
+    # credencial para depois descobrir que o arquivo não está ali.
+    planilha = args.planilha.expanduser()
+    if not planilha.exists():
+        print(f"Planilha não encontrada: {planilha}")
+        print(f"  Você está em: {Path.cwd()}")
+        print("  Informe o caminho completo, por exemplo /root/chamados.xlsx")
+        return 1
+    args.planilha = planilha
 
     preparar_conta(args.env_file)
 
