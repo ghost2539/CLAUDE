@@ -33,11 +33,14 @@ def checar(c, d):
     if not c: falhas.append(d)
 
 # ── Dublês do ServiceNow ──────────────────────────────────────────
-ESCRITAS, INSERIDOS, EXISTENTES = [], [], []
+ESCRITAS, INSERIDOS, EXISTENTES, DEPRECIADOS, CONSULTAS = [], [], [], [], []
+# INDIVIDUAIS: o que a busca um-a-um (rede contra duplicidade) acha.
+INDIVIDUAIS: list[dict] = []
 sn._get_http = lambda: (None, None)
 sn._lookup_reference = lambda sessao, campo, valor, cache, BS: {
     "SPARE - CD324": "sid-cd324", "Zebra TC21": "sid-modelo",
-    "Coletor": "sid-categoria"}.get(valor, "")
+    "Coletor": "sid-categoria", "SL 5 Years": "sid-depre"}.get(valor, "")
+_hardware_records_real = sn._hardware_records
 sn._hardware_records = lambda sessao, itens: list(EXISTENTES)
 def _upd(sessao, tabela, sys_id, alteracao):
     ESCRITAS.append((sys_id, dict(alteracao))); return True
@@ -45,14 +48,24 @@ sn._sn_update = _upd
 def _ins(sessao, registro):
     INSERIDOS.append(dict(registro)); return True, "novo-sys-id", "criado"
 sn._insert_record = _ins
+sn._calculate_depreciation = lambda sessao, sys_id, BS: (
+    DEPRECIADOS.append(sys_id) or True)
+def _consulta(sessao, tabela, query, campos, limit=50, offset=0, display_value=True):
+    CONSULTAS.append(query)
+    return list(INDIVIDUAIS)
+sn._sn_query = _consulta
 
 def limpar():
-    ESCRITAS.clear(); INSERIDOS.clear(); EXISTENTES.clear()
+    for lista in (ESCRITAS, INSERIDOS, EXISTENTES, DEPRECIADOS, CONSULTAS, INDIVIDUAIS):
+        lista.clear()
 
+# Custo e DPIS fazem parte do item: sem eles o ativo não sobe.
 ITEM_NOVO = {"serial": "SN-NOVO-1", "etiqueta": "RN-NOVO-1", "modelo": "Zebra TC21",
-             "categoria": "Coletor", "numero_ativo": "900001"}
+             "categoria": "Coletor", "numero_ativo": "900001",
+             "custo": "1234,56", "dpis": "01/03/2023"}
 ITEM_EXISTE = {"serial": "SN-VELHO-1", "etiqueta": "RN-VELHO-1", "modelo": "Zebra TC21",
-               "categoria": "Coletor", "numero_ativo": "900002"}
+               "categoria": "Coletor", "numero_ativo": "900002",
+               "custo": "999.90", "dpis": "2022-07-15"}
 
 print("\n[1] Espaço e Corredor é obrigatório")
 limpar()
@@ -241,6 +254,100 @@ checar(all(m.username == "t" and m.cycle_id for m in _movs.values()),
        "movimento fica preso ao ciclo e a quem recebeu")
 checar(rec._registrar_mdm_no_ciclo(_itens, {"tentados": 0}, "t") == 0,
        "sem desfecho por série, nada é gravado")
+
+print("\n[9] Ativo que já existe NÃO é duplicado")
+limpar()
+# A consulta em lote é a real: item em dict tem de produzir termos de busca.
+sn._hardware_records = _hardware_records_real
+INDIVIDUAIS.append({"sys_id": "sys-9", "asset_tag": "RN-NOVO-1",
+                    "serial_number": "SN-NOVO-1"})
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(any("asset_tag" in q or "serial_number" in q for q in CONSULTAS),
+       f"a busca usa os identificadores do item em dict ({CONSULTAS[:1]})")
+checar(r["atualizados"] == 1 and r["criados"] == 0 and not INSERIDOS,
+       "ativo existente é atualizado, nunca duplicado")
+
+limpar()
+sn._hardware_records = _hardware_records_real
+# Índice em lote vazio (consulta do lote falhou): a busca individual salva.
+INDIVIDUAIS.append({"sys_id": "sys-10", "asset_tag": "", "serial_number": "SN-NOVO-1"})
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(r["criados"] == 0 and ESCRITAS and ESCRITAS[0][0] == "sys-10",
+       "achado só na segunda busca, é atualizado em vez de criado")
+sn._hardware_records = lambda sessao, itens: list(EXISTENTES)
+
+print("\n[10] Nunca subir pela metade: custo e depreciação são obrigatórios")
+limpar()
+sem_custo = dict(ITEM_NOVO); sem_custo["custo"] = ""
+r = sn.marcar_recebidos_em_estoque(object(), [sem_custo], aisle_space="A-1")
+checar(r["incompletos"] == 1 and not INSERIDOS and not ESCRITAS,
+       "sem custo não sobe nada")
+checar(any("custo" in f for f in r["falhas"]), f"a falha diz o que falta ({r['falhas'][:1]})")
+
+limpar()
+sem_dpis = dict(ITEM_NOVO); sem_dpis["dpis"] = ""
+r = sn.marcar_recebidos_em_estoque(object(), [sem_dpis], aisle_space="A-1")
+checar(r["incompletos"] == 1 and not INSERIDOS, "sem data de aquisição não sobe nada")
+
+limpar()
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+novo = INSERIDOS[0]
+checar(novo["cost"] == "1234.56", f"custo vai com ponto decimal ({novo.get('cost')})")
+checar(novo["depreciation"] == "sid-depre", "plano de depreciação resolvido")
+checar(novo["purchase_date"] == "2023-03-01", f"data de aquisição ({novo.get('purchase_date')})")
+checar(novo["depreciation_date"].startswith("2023-03-01"), "data da depreciação")
+checar(novo["cost.currency_type"], "moeda informada")
+checar(DEPRECIADOS == ["novo-sys-id"], "o cálculo da depreciação roda depois de criar")
+
+limpar()
+EXISTENTES.append({"sys_id": "sys-11", "asset_tag": "RN-VELHO-1", "serial_number": "SN-VELHO-1"})
+sn.marcar_recebidos_em_estoque(object(), [ITEM_EXISTE], aisle_space="B-1")
+_sid, alt = ESCRITAS[0]
+checar(alt["cost"] == "999.90" and alt["depreciation"] == "sid-depre",
+       "atualização também leva custo e depreciação")
+checar(DEPRECIADOS == ["sys-11"], "e recalcula a depreciação do que já existia")
+
+limpar()
+sn._lookup_reference = lambda sessao, campo, valor, cache, BS: {
+    "SPARE - CD324": "sid-cd324"}.get(valor, "")
+r = sn.marcar_recebidos_em_estoque(object(), [ITEM_NOVO], aisle_space="A-1")
+checar(not INSERIDOS and not ESCRITAS and any("depreciação" in f for f in r["falhas"]),
+       "sem plano de depreciação no ServiceNow, nada sobe")
+sn._lookup_reference = lambda sessao, campo, valor, cache, BS: {
+    "SPARE - CD324": "sid-cd324", "Zebra TC21": "sid-modelo",
+    "Coletor": "sid-categoria", "SL 5 Years": "sid-depre"}.get(valor, "")
+
+print("\n[11] O coletor recebido é achado no console quando o parque não tem a série")
+limpar()
+dbo.init_db()
+with dbo.SessionLocal.begin() as s:
+    s.query(dbo.Coletor).delete()
+    # Como a grade não publica a série, o parque guarda o coletor SEM ela.
+    s.add(dbo.Coletor(mdm_id="m-77", serie="", nome="ljr077_coletor",
+                      usuario="ljr077_coletor", situacao=dbo.ATIVO))
+buscas, apagados = [], []
+mdm.procurar = lambda sessao, texto, base="": (
+    buscas.append(texto) or ([{"id": "m-99"}] if texto == "SN-SEM-PARQUE" else []))
+mdm.remover_dispositivo = lambda sessao, mdm_id, base="", endpoint="", metodo="POST", campo="x": (
+    apagados.append(mdm_id) or (True, "removido"))
+ob.sessao_mdm = lambda forcar=False: object()
+dbo.gravar_config({"remover_do_mdm_no_recebimento": "1"})
+r = ob.remover_recebidos_do_mdm([{"serial": "SN-SEM-PARQUE", "etiqueta": "RN-1"}], usuario="t")
+checar(buscas and buscas[0] == "SN-SEM-PARQUE", "procura a série no console")
+checar(apagados == ["m-99"] and r["removidos"] == 1,
+       f"remove o aparelho que o console achou ({apagados})")
+
+apagados.clear(); buscas.clear()
+r = ob.remover_recebidos_do_mdm([{"serial": "NAO-EXISTE-EM-LUGAR-NENHUM"}], usuario="t")
+checar(not apagados and r["nao_encontrados"] == 1 and r["removidos"] == 0,
+       "o que não é achado fica registrado como não encontrado, sem apagar nada")
+checar("não encontrado" in r["por_serie"]["NAO-EXISTE-EM-LUGAR-NENHUM"]["detalhe"],
+       "e o motivo volta por série")
+
+apagados.clear()
+mdm.procurar = lambda sessao, texto, base="": [{"id": "a"}, {"id": "b"}]
+r = ob.remover_recebidos_do_mdm([{"serial": "AMBIGUA"}], usuario="t")
+checar(not apagados, "busca ambígua não apaga nada: deletar do MDM não tem volta")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

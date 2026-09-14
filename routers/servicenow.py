@@ -1267,7 +1267,12 @@ def _hardware_existentes(session, itens: list) -> tuple[set, set]:
 
 def _hardware_records(session, itens: list) -> list[dict]:
     """Busca no alm_hardware os registros que casam por asset_tag/serial de uma
-    lista de itens. Retorna dicts com sys_id, asset_tag, serial_number."""
+    lista de itens. Retorna dicts com sys_id, asset_tag, serial_number.
+
+    Aceita item como dict OU objeto, e nos dois casos pelos nomes que cada
+    tela usa. Ler o campo errado aqui devolve lista vazia, e lista vazia
+    faz o chamador tratar ativo existente como novo — ou seja, duplicar.
+    """
     def _chunks(lst, n):
         for i in range(0, len(lst), n):
             yield lst[i:i + n]
@@ -1277,8 +1282,8 @@ def _hardware_records(session, itens: list) -> list[dict]:
 
     out = []
     for grupo in _chunks(itens, 50):
-        tags = [str(getattr(i, "asset_tag", "") or "").strip() for i in grupo]
-        sers = [str(getattr(i, "serial_number", "") or "").strip() for i in grupo]
+        tags = [_campo_item(i, "asset_tag", "etiqueta", "tag_number") for i in grupo]
+        sers = [_campo_item(i, "serial_number", "serial", "numero_serie") for i in grupo]
         tags = [t for t in tags if t]
         sers = [s for s in sers if s]
         partes = []
@@ -1305,6 +1310,7 @@ def _hardware_records(session, itens: list) -> list[dict]:
 # configuração (Parâmetros → Configuração Módulos).
 RECEBIMENTO_STOCKROOM_PADRAO = "SPARE - CD324"
 RECEBIMENTO_STATUS_PADRAO = "6"          # In stock
+RECEBIMENTO_DEPRECIACAO_PADRAO = "SL 5 Years"
 
 
 def _campo_item(item, *nomes: str) -> str:
@@ -1316,9 +1322,51 @@ def _campo_item(item, *nomes: str) -> str:
     return ""
 
 
+def _registro_individual(session, tag: str, serie: str) -> dict | None:
+    """Procura UM ativo por etiqueta ou série. Rede contra duplicidade."""
+    partes = []
+    if tag:
+        partes.append(f"asset_tag={termo_sn(tag, 'etiqueta')}")
+    if serie:
+        partes.append(f"serial_number={termo_sn(serie, 'série')}")
+    if not partes:
+        return None
+    consulta = "^OR".join(partes)
+    try:
+        achados = _sn_query(session, HARDWARE_TABLE, consulta,
+                            "sys_id,asset_tag,serial_number", limit=1,
+                            display_value=False)
+    except Exception:  # noqa: BLE001 — sem resposta, quem chama decide
+        return None
+    if not achados:
+        return None
+
+    def _plain(v):
+        return v.get("value", "") if isinstance(v, dict) else (v or "")
+
+    r = achados[0]
+    return {"sys_id": _plain(r.get("sys_id")),
+            "asset_tag": str(_plain(r.get("asset_tag"))).strip(),
+            "serial_number": str(_plain(r.get("serial_number"))).strip()}
+
+
+def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict) -> None:
+    """Roda o cálculo de depreciação do ativo recém-escrito."""
+    if not sys_id or sys_id == "N/A":
+        return
+    try:
+        if _calculate_depreciation(session, sys_id, BS):
+            resumo["depreciados"] = resumo.get("depreciados", 0) + 1
+            return
+    except Exception as exc:  # noqa: BLE001 — o ativo já subiu; isto é aviso
+        resumo["falhas"].append(f"{rotulo}: cálculo da depreciação falhou — {exc}")
+        return
+    resumo["falhas"].append(f"{rotulo}: o ServiceNow não calculou a depreciação")
+
+
 def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                                 install_status: str = "", aisle_space: str = "",
-                                criar: bool = True) -> dict:
+                                criar: bool = True, depreciacao: str = "") -> dict:
     """Reflete no ServiceNow o que chegou fisicamente ao CD.
 
     Quem já existe é ATUALIZADO com os dados do recebimento (modelo,
@@ -1327,13 +1375,24 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
     equipamento no CD que o ServiceNow não conhece é ativo invisível, e
     esperar a Entrada de Estoque deixava a diferença aberta.
 
+    Nunca se cria ativo pela metade: **custo, data de aquisição e
+    depreciação são obrigatórios**, e o cálculo da depreciação roda logo
+    depois da escrita. Item sem esses dados não sobe — entra em `falhas`
+    dizendo o que falta, e o ativo continua fora do ServiceNow em vez de
+    entrar como registro incompleto.
+
+    Antes de criar, o ativo é procurado uma segunda vez, um a um: um
+    índice vazio (consulta em lote que falhou, campo lido errado) faria o
+    ativo existente virar duplicata, e duplicata em cadastro de
+    patrimônio dá trabalho para o resto da vida.
+
     `aisle_space` é obrigatório: gravar "em estoque" sem dizer onde é o
     que faz o inventário não fechar depois. A escrita usa a sessão de
     quem está logado — no ServiceNow o registro sai no nome de quem
     recebeu.
     """
     resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
-              "nao_encontrados": 0, "falhas": []}
+              "nao_encontrados": 0, "incompletos": 0, "falhas": []}
     if not itens:
         return resumo
 
@@ -1358,12 +1417,23 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
             f"estoque '{stockroom}' não encontrado no ServiceNow")
         return resumo
 
+    # Depreciação é obrigatória, então ela é resolvida antes: sem o plano
+    # no ServiceNow não há como subir ativo completo, e subir incompleto
+    # não é opção.
+    plano = (depreciacao or RECEBIMENTO_DEPRECIACAO_PADRAO).strip()
+    depreciation_id = _lookup_reference(session, "depreciation", plano, cache, BS)
+    if not depreciation_id:
+        resumo["falhas"].append(
+            f"plano de depreciação '{plano}' não encontrado no ServiceNow")
+        return resumo
+
     # Índice do que já existe, por etiqueta e por série.
     por_tag = {r["asset_tag"].upper(): r for r in registros if r.get("asset_tag")}
     por_serie = {r["serial_number"].upper(): r for r in registros if r.get("serial_number")}
 
     base = {"install_status": status, "stockroom": stockroom_id,
-            "aisle_space_location": aisle}
+            "aisle_space_location": aisle, "depreciation": depreciation_id,
+            "cost.currency_type": CURRENCY_MAP.get("BRL", "BRL")}
 
     for item in itens:
         tag = _campo_item(item, "etiqueta", "asset_tag", "tag_number")
@@ -1372,13 +1442,39 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
         categoria = _campo_item(item, "categoria", "category")
         rotulo = tag or serie or "(sem identificador)"
 
+        custo = _campo_item(item, "custo", "custo_asset", "cost")
+        aquisicao = _campo_item(item, "dpis", "data_aquisicao", "acquisition_date",
+                                "purchase_date")
+
         existente = por_tag.get(tag.upper()) if tag else None
         if existente is None and serie:
             existente = por_serie.get(serie.upper())
+        # Segunda busca, individual: o índice do lote pode ter vindo vazio.
+        if existente is None and (tag or serie):
+            existente = _registro_individual(session, tag, serie)
+            if existente is not None:
+                resumo["encontrados"] += 1
+
+        # Ativo incompleto não sobe. Vale para criar E para atualizar: o
+        # recebimento é o momento em que esses dados existem.
+        faltando = []
+        if not custo:
+            faltando.append("custo")
+        if not _parse_date(aquisicao):
+            faltando.append("data de aquisição (DPIS)")
+        if faltando:
+            resumo["incompletos"] += 1
+            resumo["falhas"].append(
+                f"{rotulo}: não subiu porque falta {' e '.join(faltando)}. "
+                "Custo e depreciação são obrigatórios.")
+            continue
 
         # Modelo e categoria só entram quando o ServiceNow os reconhece:
         # mandar texto livre num campo de referência apaga o valor atual.
         dados = dict(base)
+        dados["cost"] = str(custo).replace(",", ".")
+        dados["purchase_date"] = _parse_date(aquisicao)
+        dados["depreciation_date"] = _parse_date_with_time(aquisicao)
         if modelo:
             mid = _lookup_reference(session, "model", modelo, cache, BS)
             if mid:
@@ -1398,6 +1494,7 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                     alteracao["serial_number"] = serie
                 if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
                     resumo["atualizados"] += 1
+                    _depreciar(session, existente["sys_id"], BS, rotulo, resumo)
                 else:
                     resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
             elif criar:
@@ -1409,9 +1506,10 @@ def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                     registro["asset_tag"] = tag
                 if serie:
                     registro["serial_number"] = serie
-                ok, _sys_id, detalhe = _insert_record(session, registro)
+                ok, novo_sys_id, detalhe = _insert_record(session, registro)
                 if ok:
                     resumo["criados"] += 1
+                    _depreciar(session, novo_sys_id, BS, rotulo, resumo)
                 else:
                     resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
             else:

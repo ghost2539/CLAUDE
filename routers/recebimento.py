@@ -402,6 +402,15 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     "destino_entrada": destino_entrada,
                     "subcategoria": subcategoria,
                     "familia": familia,
+                    # Custo e DPIS vão junto: o ServiceNow recusa ativo pela
+                    # metade. Se não vieram na leitura, valem os da base —
+                    # é o mesmo dado do EBS, gravado numa passagem anterior.
+                    "custo": ("" if item.custo_asset in (None, "")
+                              else str(item.custo_asset)) or (
+                                  str(a.cost) if a.cost is not None else ""),
+                    "dpis": (item.dpis or "") or (
+                        a.dpis.isoformat() if a.dpis else ""),
+                    "empresa": item.empresa or "",
                 })
             except Exception as e:
                 ident = item.etiqueta or item.ativo or item.numero_serie

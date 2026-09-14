@@ -237,6 +237,29 @@ def buscar_pagina(sessao, pagina: int, base: str = "", ordenar: bool = True) -> 
     return txt
 
 
+def procurar(sessao, texto: str, base: str = "") -> list[dict]:
+    """Procura na grade pelo texto (série, etiqueta, usuário) e devolve as
+    linhas achadas.
+
+    É por aqui que o Recebimento acha o aparelho para remover: a grade não
+    publica a série nas colunas, então o parque guardado não pode ser o
+    único caminho — o console é quem sabe.
+    """
+    texto = str(texto or "").strip()
+    if not texto:
+        return []
+    from urllib.parse import quote
+    url = (base or "") + GRADE + "?Page=0&SearchText=" + quote(texto)
+    try:
+        r = sessao.get(url, headers=CABECALHOS, timeout=60)
+    except Exception:  # noqa: BLE001 — quem chama registra a falha
+        return []
+    txt = getattr(r, "text", "") or ""
+    if "DeviceGrid" not in txt:
+        return []
+    return parse_grade(txt)["coletores"]
+
+
 def varrer(sessao, base: str = "", max_paginas: int = 400, progresso=None) -> dict:
     """Percorre o parque inteiro, página a página, e devolve os coletores.
 
