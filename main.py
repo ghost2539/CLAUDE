@@ -167,6 +167,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── EBS Oracle (leitura do EBSPRD) — sem banco próprio ──────────────
+    # Aditivo e isolado: sem o driver Oracle ou sem credencial no cofre, o
+    # módulo simplesmente não carrega e o portal segue igual.
+    try:
+        from routers.ebs_oracle import router as ebs_oracle_router
+        app.include_router(ebs_oracle_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("ebs_oracle").error(
+            "Módulo EBS Oracle NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
     # Aditivo: só observa. Falha aqui nunca derruba o portal.
     try:
