@@ -211,19 +211,37 @@ def _exigir(req: Request, acao: str, registro: str = "", detalhe: str = "") -> d
     return sd
 
 
+# Caminho canônico da tela. Renomeada para -InfraCSC (Infra CSC) para
+# distinguir das demais telas de orçamento. Os caminhos antigos continuam
+# respondendo, redirecionando para cá, para não quebrar link já distribuído.
+@router.get("/controle-orcamento-InfraCSC", response_class=HTMLResponse)
+def pagina_infracsc(req: Request):
+    return _acesso_pagina(req)
+
+
+@router.get("/controle-orcamento-InfraCSC/", response_class=HTMLResponse)
+def pagina_infracsc_slash(req: Request):
+    return _acesso_pagina(req)
+
+
+def _redir_canonico(req: Request) -> RedirectResponse:
+    return RedirectResponse(f"{prefixo(req)}/controle-orcamento-InfraCSC",
+                            status_code=308)
+
+
 @router.get("/controle-orcamento", response_class=HTMLResponse)
 def pagina(req: Request):
-    return _acesso_pagina(req)
+    return _redir_canonico(req)
 
 
 @router.get("/controle-orcamento/", response_class=HTMLResponse)
 def pagina_slash(req: Request):
-    return _acesso_pagina(req)
+    return _redir_canonico(req)
 
 
 @router.get("/controle-orçamento", response_class=HTMLResponse)
 def pagina_acento(req: Request):
-    return _acesso_pagina(req)
+    return _redir_canonico(req)
 
 
 # ── Validação ─────────────────────────────────────────────────────
