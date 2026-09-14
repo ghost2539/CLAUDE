@@ -54,16 +54,16 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
 
         c.innerHTML = '';
         c.appendChild(cabecalho(d.rotulo, textoDaEstacao()));
-        c.appendChild(indicadores([
-            ['Na fila', d.aguardando.length, 'accent-gold'],
-            ['Em preparação', d.em_curso.length, 'accent-teal']
-        ]));
+        var cartoes = [['No backlog', d.aguardando.length, 'accent-gold']];
+        if (d.em_curso.length) cartoes.push(['Fluxo antigo', d.em_curso.length, 'accent-teal']);
+        c.appendChild(indicadores(cartoes));
+        if (vista.estacao === 'INTERNALIZACAO') c.appendChild(barraConferencia(c));
         c.appendChild(barraBipe(c));
         if (vista.ativo) c.appendChild(painel(c));
         c.appendChild(cartao('Aguardando', lista(d.aguardando,
             'Nenhum equipamento nesta fila.')));
         if (d.em_curso.length) {
-            c.appendChild(cartao('Em preparação agora', lista(d.em_curso, '')));
+            c.appendChild(cartao('Assumidos no fluxo antigo', lista(d.em_curso, '')));
         }
     }
 
@@ -75,6 +75,30 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         })[vista.estacao];
     }
 
+    /* Internalizado é o que o ServiceNow mostra no estoque do CD, num
+       espaço de internalização ou reparo. A tela não declara: confere. */
+    function barraConferencia(c) {
+        var corpo = S.el('div', { className: 'card-body' });
+        var linha = S.el('div', { className: 'form-row-inline' });
+        linha.appendChild(botao('Conferir a fila no ServiceNow', 'btn-primary', async function () {
+            try {
+                S.loading(true);
+                var r = await S.api('/preparacao/internalizacao/conferir', {
+                    method: 'POST', body: {}
+                });
+                var msg = r.liberados.length + ' liberado(s) para envio às lojas.';
+                if (r.pendentes.length) msg += ' ' + r.pendentes.length + ' pendente(s): ' +
+                    r.pendentes[0].motivo;
+                S.toast(msg, r.pendentes.length ? 'warning' : 'success');
+                desenhar(c);
+            } catch (e) {
+                S.toast(e.message, 'danger');
+            } finally { S.loading(false); }
+        }));
+        corpo.appendChild(linha);
+        return cartao('Conferência de estoque', corpo);
+    }
+
     function barraBipe(c) {
         var corpo = S.el('div', { className: 'card-body' });
         var campo = S.el('input', {
@@ -84,7 +108,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         });
         var linha = S.el('div', { className: 'form-row-inline' });
         linha.appendChild(campo);
-        linha.appendChild(botao('Assumir', 'btn-secondary', function () {
+        linha.appendChild(botao('Bipar', 'btn-secondary', function () {
             bipar(c, campo);
         }));
         corpo.appendChild(linha);
@@ -92,7 +116,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             if (e.key === 'Enter') { e.preventDefault(); bipar(c, campo); }
         });
         setTimeout(function () { campo.focus(); }, 60);
-        return cartao('Assumir equipamento', corpo);
+        return cartao('Bipar equipamento', corpo);
     }
 
     async function bipar(c, campo) {
@@ -100,10 +124,10 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
         if (!serie) return;
         try {
             S.loading(true);
-            vista.ativo = await S.api('/preparacao/bipar', {
-                method: 'POST',
-                body: { serial: serie, estacao: vista.estacao }
-            });
+            // O bipe só traz o equipamento para a tela; quem despacha é
+             // a conclusão da estação.
+            vista.ativo = await S.api('/preparacao/ativo/' + encodeURIComponent(serie) +
+                                      '?estacao=' + vista.estacao);
             desenhar(c);
         } catch (e) {
             S.toast(e.message, 'danger');
@@ -125,7 +149,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             concluir(c);
         }));
         corpo.appendChild(acoes);
-        return cartao(vista.ativo.serial + ' em preparação', corpo);
+        return cartao(vista.ativo.serial + ' na mão', corpo);
     }
 
     function formulario() {
@@ -172,14 +196,8 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                     '<label style="font-weight:400"><input type="radio" ' +
                       'name="prp-conf" value="nao"> Reprovou</label>' +
                   '</div></div>' +
-                '<div class="form-grid cols-2">' +
-                  '<div class="form-group"><label for="prp-endereco">' +
-                    'Endereço de estoque</label>' +
-                    '<input id="prp-endereco" class="form-control" ' +
-                           'placeholder="espaço e corredor"></div>' +
-                  '<div class="form-group"><label for="prp-obs">Observação' +
-                    '</label><input id="prp-obs" class="form-control"></div>' +
-                '</div>';
+                '<div class="form-group"><label for="prp-obs">Observação' +
+                  '</label><input id="prp-obs" class="form-control"></div>';
         }
         return f;
     }
@@ -216,7 +234,6 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             corpo.teste_funcional = marcado('prp-teste-ok');
         } else {
             corpo.conferencia_ok = marcado('prp-conf-ok');
-            corpo.endereco = v('prp-endereco');
             corpo.observacao = v('prp-obs');
         }
         try {

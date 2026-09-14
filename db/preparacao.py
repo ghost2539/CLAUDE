@@ -189,6 +189,14 @@ PADROES = {
     # como chave porque o ambiente de teste não deve escrever lá.
     "escrever_no_servicenow": "sim",
     "status_disponivel": "6",     # In stock
+    # Internalizado de verdade é o que o ServiceNow mostra no estoque do
+    # CD, num espaço de internalização ou de reparo. O portal confere; não
+    # é o operador que declara.
+    "estoque_internalizacao": "SPARE - CD324",
+    "padroes_corredor": "INA,REP",
+    # Desligar só faz sentido em ambiente sem ServiceNow: aí a conferência
+    # da tela volta a ser o aceite, e o registro diz que foi assim.
+    "conferir_no_servicenow": "sim",
 }
 
 

@@ -7,6 +7,14 @@ configurar, sled é montado, e tudo termina internalizado.
 `DISPONIVEL` é o único estado sem relógio de ninguém: o equipamento
 está no estoque esperando ser pedido, e esse tempo é do planejamento
 (G01), não de uma pessoa.
+
+**Ninguém assume equipamento aqui.** O ativo cai na fila da estação e o
+relógio corre até alguém concluir a estação — concluir é a saída.
+
+Na internalização quem dá o aceite é o ServiceNow, não a tela: o ativo
+só fica disponível quando o cadastro mostrar o estoque do CD e um espaço
+de internalização ou reparo. Enquanto não mostrar, ele continua na fila,
+com o motivo visível.
 """
 from __future__ import annotations
 
@@ -64,6 +72,8 @@ def api_fila(req: Request, estacao: str = CONFIGURACAO):
             .order_by(dbt.Intervalo.inicio)
         ).all()
 
+    # `em_curso` é resíduo do fluxo antigo, em que alguém assumia o
+    # equipamento. Não se produz mais, mas quem ficou lá precisa aparecer.
     fila, curso = [], []
     for i, a in linhas:
         item = {
@@ -93,49 +103,31 @@ def api_baselines(req: Request):
 
 
 # ══════════════════════════════════════════════════════════════════
-#  Bipe e conclusão
+#  Conclusão da estação — é ela que despacha o ativo
 # ══════════════════════════════════════════════════════════════════
 
-class BipeIn(BaseModel):
-    serial: str
-    estacao: str = CONFIGURACAO
-
-
-@router.post("/bipar")
-def api_bipar(body: BipeIn, req: Request):
-    sd = require_permission(req, "preparacao", "edit")
-    check_rate_limit(req)
-    estacao = _estacao_valida(body.estacao)
-    serial = (body.serial or "").strip().upper()
-    usuario = sd.get("username", "")
-    if not serial:
-        raise HTTPException(400, "Bipe a série do equipamento.")
-
+@router.get("/ativo/{serial}")
+def api_ativo(serial: str, req: Request, estacao: str = CONFIGURACAO):
+    """Traz o equipamento para a tela. Não move nada: quem move é a
+    conclusão da estação."""
+    require_permission(req, "preparacao", "view")
+    estacao = _estacao_valida(estacao)
+    serial = (serial or "").strip().upper()
     with dbt.SessionLocal() as s:
         ativo = s.execute(
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
         ).scalar_one_or_none()
-        if ativo is None:
-            # Equipamento anterior ao módulo é adotado aqui; o relógio começa agora.
-            ativo = garantir_ativo(s, serial, usuario=usuario, origem=_ORIGEM_ADOCAO)
-        if ativo is None:
-            raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
-                                     "automática está desligada em Configuração → Ciclo do ativo.")
-        if ativo.estado_fisico != FILA_DA_ESTACAO[estacao]:
-            raise HTTPException(
-                409, f"A série {serial} não está na fila de "
-                     f"{ROTULO_ESTACAO[estacao]} — está em "
-                     f"{ativo.estado_fisico or 'estado desconhecido'}.")
-        try:
-            mover(s, ativo, estado=TRATATIVA_DA_ESTACAO[estacao],
-                  tipo=dbt.TRATATIVA, processo=PROCESSO[estacao], usuario=usuario)
-        except TrilhaInvalida as exc:
-            raise HTTPException(409, str(exc))
-        s.commit()
-        dados = {"serial": ativo.serial, "modelo": ativo.modelo,
-                 "origem": ativo.origem, "tipo_equipamento": ativo.tipo_equipamento}
-    _log.info("preparacao: %s assumiu %s em %s", usuario, serial, estacao)
-    return dados
+    if ativo is None:
+        raise HTTPException(404, f"A série {serial} não está na trilha.")
+    if ativo.estado_fisico not in (FILA_DA_ESTACAO[estacao],
+                                   TRATATIVA_DA_ESTACAO[estacao]):
+        raise HTTPException(
+            409, f"A série {serial} não está na fila de "
+                 f"{ROTULO_ESTACAO[estacao]} — está em "
+                 f"{dbt.rotulo_estado(ativo.estado_fisico).lower()}.")
+    return {"serial": ativo.serial, "modelo": ativo.modelo,
+            "origem": ativo.origem, "tipo_equipamento": ativo.tipo_equipamento,
+            "estado_atual": ativo.estado_fisico}
 
 
 class ConclusaoIn(BaseModel):
@@ -170,6 +162,17 @@ def api_concluir(body: ConclusaoIn, req: Request):
     devolve = (estacao == INTERNALIZACAO and body.conferencia_ok is False)
     proximo = "AG_TRIAGEM" if devolve else SAIDA_DA_ESTACAO[estacao]
 
+    # Internalizar não é dizer que internalizou: é o ServiceNow mostrar o
+    # ativo no estoque do CD, num espaço de internalização ou reparo.
+    # Enquanto não mostrar, o ativo FICA na fila — recusar aqui é o que
+    # impede saldo disponível que ninguém acha na prateleira.
+    conferencia = None
+    if estacao == INTERNALIZACAO and not devolve:
+        conferencia = conferir_no_servicenow(req, serial)
+        if not conferencia.get("ok"):
+            raise HTTPException(409, conferencia.get("motivo") or
+                                "O ServiceNow ainda não mostra o ativo internalizado.")
+
     with dbt.SessionLocal() as s:
         ativo = s.execute(
             select(dbt.Ativo).where(dbt.Ativo.serial == serial)
@@ -180,8 +183,12 @@ def api_concluir(body: ConclusaoIn, req: Request):
         if ativo is None:
             raise HTTPException(404, f"A série {serial} não está na trilha e a adoção "
                                      "automática está desligada em Configuração → Ciclo do ativo.")
-        if ativo.estado_fisico != TRATATIVA_DA_ESTACAO[estacao]:
-            raise HTTPException(409, "Bipe o equipamento antes de concluir.")
+        if ativo.estado_fisico not in (FILA_DA_ESTACAO[estacao],
+                                       TRATATIVA_DA_ESTACAO[estacao]):
+            raise HTTPException(
+                409, f"A série {serial} não está na fila de "
+                     f"{ROTULO_ESTACAO[estacao]} — está em "
+                     f"{dbt.rotulo_estado(ativo.estado_fisico).lower()}.")
         try:
             mover(s, ativo, estado=proximo, tipo=dbt.FILA,
                   processo=PROCESSO[estacao], usuario=usuario,
@@ -199,7 +206,10 @@ def api_concluir(body: ConclusaoIn, req: Request):
             carcaca=(body.carcaca or "").strip().upper(),
             componentes=", ".join(c.strip().upper() for c in body.componentes if c.strip()),
             conferencia_ok=body.conferencia_ok,
-            endereco=(body.endereco or "").strip(),
+            # Na internalização o endereço é o que o ServiceNow mostrou,
+            # não o que alguém digitou.
+            endereco=((conferencia or {}).get("corredor")
+                      or (body.endereco or "").strip()),
             observacao=(body.observacao or "").strip(),
             usuario=usuario,
         )
@@ -217,13 +227,7 @@ def api_concluir(body: ConclusaoIn, req: Request):
     if estacao == MONTAGEM:
         _consumir_componentes(serial, body.componentes, usuario)
 
-    # Internalizado com endereço: o ServiceNow precisa saber onde está,
-    # senão o catálogo da Separação (que lê o corredor de lá) nunca
-    # enxerga o que a bancada produziu. Tolerante a falha: o equipamento
-    # já está na prateleira; a falha vai para o log e para a resposta.
-    no_servicenow = None
-    if estacao == INTERNALIZACAO and not devolve:
-        no_servicenow = _endereçar_no_servicenow(req, serial, body.endereco or "")
+    no_servicenow = conferencia
 
     _log.info("preparacao: %s concluiu %s em %s → %s",
               usuario, serial, estacao, proximo)
@@ -231,36 +235,139 @@ def api_concluir(body: ConclusaoIn, req: Request):
             "devolvido": devolve, "no_servicenow": no_servicenow}
 
 
-def _endereçar_no_servicenow(req: Request, serial: str, endereco: str) -> dict:
-    """Grava corredor e situação de estoque do ativo, como o usuário logado."""
+def _padroes_corredor(cfg: dict) -> list[str]:
+    return [p.strip().upper()
+            for p in (cfg.get("padroes_corredor") or "").split(",") if p.strip()]
+
+
+def corredor_aceito(corredor: str, padroes: list[str]) -> bool:
+    """O espaço/corredor diz que o ativo foi internalizado?"""
+    texto = (corredor or "").strip().upper()
+    return bool(texto) and any(p in texto for p in padroes)
+
+
+def conferir_no_servicenow(req: Request, serial: str) -> dict:
+    """Lê o ativo no ServiceNow e diz se ele está mesmo internalizado.
+
+    Internalizado = estoque do CD (`estoque_internalizacao`) e espaço/
+    corredor contendo um dos padrões (`padroes_corredor`, INA ou REP).
+    Só isso libera o ativo para envio às lojas.
+    """
     cfg = db.ler_config()
-    if (cfg.get("escrever_no_servicenow") or "").strip().lower() not in ("1", "sim", "true"):
-        return {"ativo": False}
+    if (cfg.get("conferir_no_servicenow") or "").strip().lower() not in ("1", "sim", "true"):
+        return {"ativo": False, "ok": True,
+                "motivo": "conferência no ServiceNow desligada na configuração"}
+    estoque = (cfg.get("estoque_internalizacao") or "").strip()
+    padroes = _padroes_corredor(cfg)
     try:
         from routers.servicenow import (
-            _sn_session_from_portal, _sn_query, _sn_update, HARDWARE_TABLE, termo_sn,
+            _sn_session_from_portal, _sn_query, HARDWARE_TABLE, termo_sn,
         )
         import db.separacao as dbsep
         campo = (dbsep.ler_config().get("campo_local") or "aisle_space_location").strip()
         session = _sn_session_from_portal(req)
         achados = _sn_query(session, HARDWARE_TABLE,
                             f"serial_number={termo_sn(serial, 'série')}",
-                            "sys_id,serial_number", limit=1, display_value=False)
-        if not achados:
-            return {"ativo": True, "ok": False, "motivo": "série não existe no ServiceNow"}
-        sys_id = achados[0].get("sys_id")
-        sys_id = sys_id.get("value") if isinstance(sys_id, dict) else sys_id
-        alteracao = {campo: endereco.strip().upper()}
-        status = (cfg.get("status_disponivel") or "").strip()
-        if status:
-            alteracao["install_status"] = status
-        ok = _sn_update(session, HARDWARE_TABLE, sys_id, alteracao)
-        if not ok:
-            _log.error("preparacao: %s internalizado, ServiceNow recusou o endereço", serial)
-        return {"ativo": True, "ok": bool(ok), "campos": alteracao}
-    except Exception as exc:  # noqa: BLE001
-        _log.error("preparacao: %s internalizado sem endereço no ServiceNow: %s", serial, exc)
-        return {"ativo": True, "ok": False, "motivo": str(exc)}
+                            f"sys_id,serial_number,stockroom,{campo}",
+                            limit=1, display_value=True)
+    except Exception as exc:  # noqa: BLE001 — ServiceNow fora do ar
+        _log.error("preparacao: conferência de %s não foi possível: %s", serial, exc)
+        return {"ativo": True, "ok": False,
+                "motivo": f"não foi possível consultar o ServiceNow: {exc}"}
+
+    if not achados:
+        return {"ativo": True, "ok": False,
+                "motivo": f"a série {serial} não existe no ServiceNow."}
+
+    def _texto(valor):
+        if isinstance(valor, dict):
+            valor = valor.get("display_value") or valor.get("value") or ""
+        return str(valor or "").strip()
+
+    registro = achados[0]
+    estoque_sn = _texto(registro.get("stockroom"))
+    corredor_sn = _texto(registro.get(campo))
+    dados = {"ativo": True, "estoque": estoque_sn, "corredor": corredor_sn,
+             "estoque_esperado": estoque, "padroes": padroes}
+
+    if estoque and estoque_sn.upper() != estoque.upper():
+        dados["ok"] = False
+        dados["motivo"] = (f"o ServiceNow mostra a série {serial} em "
+                           f"\"{estoque_sn or '—'}\"; ela precisa estar em "
+                           f"\"{estoque}\" para ser internalizada.")
+        return dados
+    if padroes and not corredor_aceito(corredor_sn, padroes):
+        dados["ok"] = False
+        dados["motivo"] = (f"o espaço e corredor da série {serial} é "
+                           f"\"{corredor_sn or '—'}\"; para internalizar ele "
+                           f"precisa conter {' ou '.join(padroes)}.")
+        return dados
+    dados["ok"] = True
+    return dados
+
+
+class ConferenciaIn(BaseModel):
+    serial: str = ""
+
+
+@router.post("/internalizacao/conferir")
+def api_conferir(body: ConferenciaIn, req: Request):
+    """Confere a fila de internalização contra o ServiceNow.
+
+    Sem série, varre a fila inteira: o cadastro pode ter sido ajustado
+    depois, e quem já estiver internalizado passa a disponível sem
+    ninguém precisar bipar de novo.
+    """
+    sd = require_permission(req, "preparacao", "edit")
+    usuario = sd.get("username", "")
+    alvo = (body.serial or "").strip().upper()
+
+    with dbt.SessionLocal() as s:
+        na_fila = [a.serial for _i, a in s.execute(
+            select(dbt.Intervalo, dbt.Ativo)
+            .join(dbt.Ativo, dbt.Ativo.id == dbt.Intervalo.ativo_id)
+            .where(dbt.Intervalo.fim.is_(None),
+                   dbt.Intervalo.estado == FILA_DA_ESTACAO[INTERNALIZACAO])
+            .order_by(dbt.Intervalo.inicio)
+        ).all()]
+    if alvo:
+        if alvo not in na_fila:
+            raise HTTPException(
+                409, f"A série {alvo} não está na fila de internalização.")
+        na_fila = [alvo]
+
+    liberados, pendentes = [], []
+    for serial in na_fila:
+        resultado = conferir_no_servicenow(req, serial)
+        if not resultado.get("ok"):
+            pendentes.append({"serial": serial, "motivo": resultado.get("motivo", "")})
+            continue
+        try:
+            with dbt.SessionLocal() as s:
+                ativo = s.execute(
+                    select(dbt.Ativo).where(dbt.Ativo.serial == serial)
+                ).scalar_one_or_none()
+                if ativo is None:
+                    continue
+                mover(s, ativo, estado=SAIDA_DA_ESTACAO[INTERNALIZACAO],
+                      tipo=dbt.FILA, processo=PROCESSO[INTERNALIZACAO],
+                      usuario=usuario,
+                      detalhe='{"conferido_no_servicenow": true}')
+                s.commit()
+            with SessionLocal() as s:
+                s.add(Passagem(serial=serial, estacao=INTERNALIZACAO,
+                               conferencia_ok=True,
+                               endereco=resultado.get("corredor", ""),
+                               observacao="Conferido no ServiceNow",
+                               usuario=usuario))
+                s.commit()
+            liberados.append(serial)
+        except TrilhaInvalida as exc:
+            pendentes.append({"serial": serial, "motivo": str(exc)})
+    _log.info("preparacao: conferência liberou %d e deixou %d pendente(s)",
+              len(liberados), len(pendentes))
+    return {"liberados": liberados, "pendentes": pendentes,
+            "conferidos": len(na_fila)}
 
 
 def _exigencias(estacao: str, body: ConclusaoIn) -> None:
@@ -281,10 +388,8 @@ def _exigencias(estacao: str, body: ConclusaoIn) -> None:
     elif estacao == INTERNALIZACAO:
         if body.conferencia_ok is None:
             raise HTTPException(400, "Diga se a conferência passou.")
-        if body.conferencia_ok and not (body.endereco or "").strip():
-            raise HTTPException(
-                400, "Informe o endereço de estoque: sem endereço o "
-                     "equipamento entra no saldo e some na prateleira.")
+        # O endereço não é digitado: quem diz onde o ativo está é o
+        # ServiceNow, conferido antes de liberar.
         if body.conferencia_ok is False and not (body.observacao or "").strip():
             raise HTTPException(
                 400, "Conferência reprovada exige o motivo — é o que a "
