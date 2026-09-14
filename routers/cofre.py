@@ -92,12 +92,26 @@ def _sondar(nome: str) -> dict:
     # cofre inacessível — e contabilizar isso como "veio do cofre" esconde
     # exatamente o que se quer enxergar. Quando os dois valores são iguais,
     # não há como distinguir, e a tela precisa dizer isso em vez de escolher.
-    indistinguivel = bool(corp and ambiente and corp == ambiente)
-    do_cofre = bool(corp) and not indistinguivel
+    # Se o loader diz que carregou a chave, ela É do cofre — mesmo que o
+    # valor também esteja no os.environ, porque foi o próprio loader que o
+    # exportou para lá. A heurística de comparar valores só vale quando o
+    # loader não sabe se listar.
+    from core import cofre as _cofre
+    try:
+        _nomes_loader, _ = _chaves_do_loader(_cofre._resolver_modulo())
+    except Exception:  # noqa: BLE001
+        _nomes_loader = []
+    if _nomes_loader:
+        do_cofre = nome in _nomes_loader and bool(corp)
+        indistinguivel = False
+    else:
+        indistinguivel = bool(corp and ambiente and corp == ambiente)
+        do_cofre = bool(corp) and not indistinguivel
     item = {
         "chave": nome,
         "resolvida": bool(valor),
-        "fonte": ("cofre corporativo" if do_cofre else
+        "fonte": ("cofre corporativo (loader)" if do_cofre and _nomes_loader else
+                  "cofre corporativo" if do_cofre else
                   "ambiente (pelo loader)" if indistinguivel else
                   "cofre local" if local else
                   "ambiente" if ambiente else "não definido"),
@@ -111,9 +125,13 @@ def _sondar(nome: str) -> dict:
     # que faltava enxergar quando o cofre local sombreou a credencial certa.
     # A ordem é corporativo → local → ambiente: o local ganha do ambiente,
     # então um valor velho esquecido ali derruba a variável nova em silêncio.
+    # Quando foi o próprio loader que exportou a chave para o os.environ, o
+    # "ambiente" não é uma segunda fonte — é a mesma, vista de outro lugar.
+    eco_do_loader = bool(_nomes_loader) and nome in _nomes_loader and ambiente == corp
     tem = [(rotulo, v) for rotulo, v in
            (("cofre corporativo", corp if do_cofre else ""),
-            ("cofre local", local), ("ambiente", ambiente))
+            ("cofre local", local),
+            ("ambiente", "" if eco_do_loader else ambiente))
            if v]
     item["fontes_com_valor"] = [rotulo for rotulo, _ in tem]
     item["divergente"] = len({v for _, v in tem}) > 1
@@ -128,16 +146,48 @@ def _sondar(nome: str) -> dict:
     return item
 
 
-def _inventario_corporativo() -> dict:
-    """O que dá para saber do cofre corporativo sem abrir nada.
+def _chaves_do_loader(mod) -> tuple[list[str], str]:
+    """Os NOMES que o loader do time carregou, perguntando a ele mesmo.
 
-    O loader (`/usr/local/lib/vcreports/vcreports_secrets.py`) expõe só
-    `s(chave)`: ele responde por NOME, um de cada vez. Não há função de
-    listar, e o arquivo do cofre não é para ser aberto por quem consome —
-    tentar isso só gera "Permission denied" e a falsa impressão de que o
-    cofre está quebrado. Então aqui não se lê arquivo nenhum: diz-se qual
-    loader está carregado e por qual função, e o resto é sondagem por nome.
+    A docstring do loader diz `cache = _load()` e "cache em memória por
+    processo": então existe um dicionário com tudo que ele leu do cofre.
+    Chamar `_load()` (ou achar esse dicionário) é ler o cofre DO JEITO QUE O
+    MÓDULO DO TIME LÊ — pelo loader, nunca pelo arquivo. Só nomes saem daqui.
+    Devolve também de onde a lista veio, para a tela dizer.
     """
+    if mod is None:
+        return [], ""
+    for nome_fn in ("_load", "load", "_cache", "cache", "all", "keys", "listar"):
+        fn = getattr(mod, nome_fn, None)
+        if callable(fn):
+            try:
+                dados = fn()
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("loader.%s() falhou: %s", nome_fn, exc)
+                continue
+            if isinstance(dados, dict) and dados:
+                return sorted(str(k) for k in dados), f"função {nome_fn}()"
+            if isinstance(dados, (list, tuple, set)) and dados:
+                return sorted(str(k) for k in dados), f"função {nome_fn}()"
+    # Sem função: o cache costuma ser um dicionário no próprio módulo.
+    for atributo, valor in vars(mod).items():
+        if atributo.startswith("__") or not isinstance(valor, dict) or not valor:
+            continue
+        if all(isinstance(k, str) for k in valor):
+            return sorted(valor), f"atributo {atributo}"
+    return [], ""
+
+
+def _inventario_corporativo() -> dict:
+    """O que o loader do time carregou do cofre — perguntado a ele.
+
+    Não se abre arquivo nenhum aqui. O loader (`vcreports_secrets.py`) é
+    importado e consultado: se ele leu o cofre, tem um cache, e o cache tem
+    os nomes. Lista cheia = o serviço lê o cofre pelo loader, e estes são os
+    nomes que existem lá. Lista vazia com loader carregado = o `_load()`
+    dele não conseguiu ler (é o "cofre nao legivel" do log do loader).
+    """
+    import os
     from core import cofre
     mod = None
     try:
@@ -148,18 +198,19 @@ def _inventario_corporativo() -> dict:
     if mod is not None:
         fn = cofre._funcao_do_modulo(mod)
         funcao = getattr(fn, "__name__", "") if fn else ""
+    nomes, origem = _chaves_do_loader(mod)
     return {
-        # Saída de emergência que já existe no core: quando o loader Python
-        # não alcança o cofre mas outro programa alcança (o PHP do time, por
-        # exemplo), VCREPORTS_SECRETS_CMD resolve chave por chave.
         "comando_externo": getattr(cofre, "COMANDO", ""),
         "modulo_carregado": mod is not None,
         "modulo_via": getattr(cofre, "_modulo_via", ""),
         "funcao": funcao,
-        # Falso por construção, e dito de propósito: a tela precisa explicar
-        # que a lista vazia não é falha, é o contrato do loader.
-        "sabe_listar": False,
-        "nomes": [],
+        "sabe_listar": bool(nomes),
+        "listagem_por": origem,
+        "nomes": nomes,
+        # Loaders no estilo dotenv exportam o que leram para o os.environ.
+        # Quando isso acontece, tudo que veio do cofre parece "ambiente" para
+        # quem olha só o os.environ — e foi assim que o diagnóstico errou.
+        "exporta_para_ambiente": bool(nomes) and all(n in os.environ for n in nomes),
     }
 
 
