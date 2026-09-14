@@ -156,7 +156,13 @@ def corporativo_disponivel() -> bool:
     return diagnostico_corporativo()[0]
 
 
-def diagnostico_corporativo() -> tuple[bool, str]:
+def diagnostico_corporativo(chave_teste: str = "") -> tuple[bool, str]:
+    """O cofre corporativo responde? `chave_teste` diz com qual chave provar.
+
+    Quem chama sabe de qual chave depende. Sem isso, um cofre que funciona
+    perfeitamente para o EBS seria dado como quebrado só porque a chave
+    genérica de teste não existe nele.
+    """
     if not USAR_CORPORATIVO:
         return False, "desligado por configuração (COFRE_CORPORATIVO=nao)"
     if COMANDO:
@@ -166,7 +172,7 @@ def diagnostico_corporativo() -> tuple[bool, str]:
         fn = _funcao_do_modulo(mod)
         if not fn:
             return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
-        chave = os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
+        chave = chave_teste or os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
         try:
             valor = fn(chave)
         except Exception as exc:  # noqa: BLE001
