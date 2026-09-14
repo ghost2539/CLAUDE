@@ -289,14 +289,22 @@ const Icon = {
 
 function KpiCard({ icon, label, value, sub, color }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex items-start gap-3" style={{ borderTopWidth: 3, borderTopColor: color }}>
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex items-start gap-3 overflow-hidden" style={{ borderTopWidth: 3, borderTopColor: color }}>
       <div className="shrink-0 h-9 w-9 rounded-md flex items-center justify-center" style={{ background: color + "1a", color }}>
         {icon}
       </div>
-      <div className="min-w-0">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</div>
-        <div className="text-base 2xl:text-lg font-bold text-gray-900 leading-tight whitespace-nowrap tabular-nums">{value}</div>
-        <div className="text-[11px] text-gray-500 mt-0.5 truncate">{sub}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 truncate" title={label}>{label}</div>
+        {/* O valor acompanha a largura do cartão: encolhe até 0,95rem antes
+            de faltar espaço, e nunca vaza — o título mostra o número inteiro. */}
+        <div
+          className="font-bold text-gray-900 leading-tight whitespace-nowrap tabular-nums truncate"
+          style={{ fontSize: "clamp(0.95rem, 1.1vw, 1.125rem)" }}
+          title={String(value)}
+        >
+          {value}
+        </div>
+        <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={sub}>{sub}</div>
       </div>
     </div>
   );
@@ -1289,14 +1297,17 @@ export default function App() {
   );
 
   const kpis = (
-    <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+    // Quantos cartões cabem por linha é o navegador que decide: cada um tem
+    // largura mínima e o resto quebra para a linha de baixo. Assim vale em
+    // qualquer tela, sem depender de faixas fixas.
+    <section className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(190px,1fr))]">
       <KpiCard icon={Icon.doc} color="#64748b" label="Demandas" value={totalDemandas} sub={`${emExecucao} em execução`} />
       <KpiCard icon={Icon.dollar} color="#22c55e" label="Valor Total" value={fmtBRL(totalOrcamento)} sub="Orçamento aprovado" />
       <KpiCard icon={Icon.pie} color="#2563eb" label="CAPEX Aprovado" value={fmtBRL(totalCapex)} sub={pct(totalCapex).replace("do orçamento total", "do valor total")} />
       <KpiCard icon={Icon.trend} color="#8b5cf6" label="Realizado (Acum.)" value={fmtBRL(totalRealizado)} sub={pct(totalRealizado)} />
       <KpiCard icon={Icon.clipboard} color="#f97316" label="Comprometido" value={fmtBRL(totalComprometido)} sub={pct(totalComprometido)} />
-      <KpiCard icon={Icon.target} color="#eab308" label="Em Andamento" value={fmtBRL(totalEmAndamento)} sub="ainda não comprometido, já em curso" />
-      <KpiCard icon={Icon.target} color="#06b6d4" label="Disponível" value={fmtBRL(totalDisponivel)} sub="orçamento − comprometido − em andamento − realizado" />
+      <KpiCard icon={Icon.target} color="#eab308" label="Em Andamento" value={fmtBRL(totalEmAndamento)} sub="não comprometido, em curso" />
+      <KpiCard icon={Icon.target} color="#06b6d4" label="Disponível" value={fmtBRL(totalDisponivel)} sub="saldo após os descontos" />
     </section>
   );
 
