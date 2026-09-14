@@ -382,12 +382,29 @@ else:
     d18 = cliente.post("/api/cofre/testar-php",
                        json={"loader": str(ALVO), "chave": "CORREIOS_USUARIO"}).json()
     checar(d18["ok"] is True, "o serviço executa a ponte e o PHP responde")
+    checar(d18["retirada_do_ambiente"] is False,
+           "chave que não estava no ambiente: o valor só pode ter vindo do cofre")
     checar("caracteres" in d18["detalhe"] and "conta-de-servico" not in str(d18),
            "informando só o tamanho — o valor nunca sai")
     checar(str(RAIZ / "scripts" / "cofre_php.php") in d18["comando_para_a_unit"],
            "e devolve a linha pronta para a unit")
     checar(str(ALVO) in d18["variavel_do_loader"],
            "com a variável do loader quando ele não é o padrão")
+
+    # A prova: um loader que só ecoa o ambiente NÃO pode passar no teste,
+    # senão qualquer variável do serviço se disfarça de segredo do cofre.
+    ECO = PASTA / "secrets_eco.php"
+    ECO.write_text("<?php\nfunction secret($k) { return getenv($k) ?: null; }\n",
+                   encoding="utf-8")
+    os.environ["CHAVE_SO_DO_AMBIENTE"] = "valor-que-veio-do-ambiente"
+    d18b = cliente.post("/api/cofre/testar-php",
+                        json={"loader": str(ECO), "chave": "CHAVE_SO_DO_AMBIENTE"}).json()
+    checar(d18b["ok"] is False,
+           "loader que só ecoa o ambiente NÃO passa — a chave é retirada do subprocesso")
+    checar(d18b["retirada_do_ambiente"] is True,
+           "e a tela avisa que a chave foi retirada só para o teste")
+    os.environ.pop("CHAVE_SO_DO_AMBIENTE", None)
+    ECO.unlink()
 
     d19 = cliente.post("/api/cofre/testar-php",
                        json={"loader": str(ALVO), "chave": "NAO_EXISTE"}).json()
