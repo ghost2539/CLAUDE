@@ -95,6 +95,49 @@ checar(pf.destino(req("", "/obsolescencia")) == "/obsolescencia",
 checar(pf.destino(req("/portal-spare", "/")) == "/portal-spare/",
        "a raiz do portal com prefixo")
 
+print("\n[5] Barra no fim da API não vira redirecionamento")
+import asyncio  # noqa: E402
+
+
+def passar(path, root_path=""):
+    """Roda o middleware e devolve o caminho que ele entrega adiante."""
+    visto = {}
+
+    async def app(scope, receive, send):
+        visto["path"] = scope.get("path")
+        visto["raw"] = scope.get("raw_path")
+
+    mw = pf.BarraFinalMiddleware(app)
+    scope = {"type": "http", "path": path, "root_path": root_path,
+             "raw_path": path.encode()}
+    asyncio.run(mw(scope, None, None))
+    return visto
+
+
+# Como o uvicorn entrega sob --root-path: o caminho vem COM o prefixo.
+r = passar("/portal-spare/api/auth/me/", "/portal-spare")
+checar(r["path"] == "/portal-spare/api/auth/me",
+       f"com prefixo no caminho, a barra é aparada ({r['path']})")
+checar(r["raw"] == b"/portal-spare/api/auth/me", "o raw_path acompanha")
+
+# Como o TestClient entrega: sem o prefixo.
+r = passar("/api/auth/me/", "/portal-spare")
+checar(r["path"] == "/api/auth/me", f"sem prefixo no caminho, idem ({r['path']})")
+
+# Na raiz do domínio, sem prefixo nenhum.
+r = passar("/api/auth/me/")
+checar(r["path"] == "/api/auth/me", "na raiz do domínio também")
+
+# O que NÃO pode ser tocado: as páginas têm rota própria com barra no fim.
+for caminho, raiz in (("/obsolescencia/", ""), ("/portal-spare/obsolescencia/", "/portal-spare"),
+                      ("/controle-orcamento/", ""), ("/", ""), ("/portal-spare/", "/portal-spare")):
+    r = passar(caminho, raiz)
+    checar(r["path"] == caminho, f"página intacta: {caminho}")
+
+# Caminho de API sem barra passa direto, sem mexer.
+r = passar("/portal-spare/api/auth/me", "/portal-spare")
+checar(r["path"] == "/portal-spare/api/auth/me", "sem barra, nada muda")
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))

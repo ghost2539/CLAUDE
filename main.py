@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
 from db.portal import init_db
-from core.prefixo import com_prefixo, prefixo
+from core.prefixo import BarraFinalMiddleware, com_prefixo, prefixo
 from core.security import (
     SecurityHeadersMiddleware,
     BotProtectionMiddleware,
@@ -49,6 +49,9 @@ def create_app() -> FastAPI:
     )
 
     # ── Middleware stack (order matters — last added = first executed) ──
+    # Antes de tudo: proxy que acrescenta barra no fim faria a API cair num
+    # 307 com Location absoluto — e http:// numa página https:// é bloqueado.
+    app.add_middleware(BarraFinalMiddleware)
     app.add_middleware(MaxBodyMiddleware)
     app.add_middleware(BotProtectionMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
