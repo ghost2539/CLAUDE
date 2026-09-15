@@ -71,13 +71,14 @@ class ProjetoIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     numero: str = ""
     descricao: str = ""
+    bu: str = ""
     servico: str = ""
     categoria: str = ""
     aprovado_spare: float = 0
     observacao: str = ""
     itens: list[ItemIn] = []
 
-    @field_validator("numero", "descricao", "servico", "categoria")
+    @field_validator("numero", "descricao", "bu", "servico", "categoria")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -97,6 +98,7 @@ class ProjetoIn(BaseModel):
 def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
     p.numero = body.numero
     p.descricao = body.descricao
+    p.bu = body.bu
     p.servico = body.servico
     p.categoria = body.categoria
     p.aprovado_spare = body.aprovado_spare
@@ -130,9 +132,10 @@ class CatalogoIn(BaseModel):
     ncm: str = ""
     acordo: bool = False
     acordo_numero: str = ""
+    acordo_bu: str = ""
     preco_acordo: float = 0
 
-    @field_validator("item_ebs", "descricao_item", "acordo_numero")
+    @field_validator("item_ebs", "descricao_item", "acordo_numero", "acordo_bu")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -158,6 +161,7 @@ def _aplica_catalogo(c: "db.Catalogo", body: CatalogoIn) -> None:
     c.nt = bool(info["nt"])
     c.acordo = bool(body.acordo)
     c.acordo_numero = body.acordo_numero if body.acordo else ""
+    c.acordo_bu = body.acordo_bu if body.acordo else ""
     c.preco_acordo = body.preco_acordo if body.acordo else 0
 
 
@@ -182,10 +186,11 @@ def catalogo_listar(req: Request):
 
 
 @router.get("/catalogo/item")
-def catalogo_item(req: Request, item_ebs: str = ""):
-    """Item do catálogo pelo Item EBS — para preencher a linha do projeto."""
+def catalogo_item(req: Request, item_ebs: str = "", bu: str = ""):
+    """Item do catálogo pelo Item EBS — para preencher a linha do projeto.
+    Com a BU do projeto, prefere o acordo daquela BU."""
     _exigir(req, "view")
-    return db.buscar_catalogo(item_ebs) or {}
+    return db.buscar_catalogo(item_ebs, bu) or {}
 
 
 @router.post("/catalogo", status_code=201)
