@@ -1,31 +1,30 @@
-"""Banco ISOLADO do Controle de Orçamento do SPARE (CAPEX).
+"""Banco ISOLADO do CAPEX Spare (Controle de Orçamento do SPARE).
 
-Separado do `/controle-orcamento` (execução CAPEX da vertical) e do portal:
-este é o orçamento da área SPARE, alimentado manualmente.
+Separado do `/controle-orcamento` e do portal. Modelo mestre-detalhe:
 
-Os campos ainda estão sendo definidos. Por isso o modelo tem duas partes:
+- `orc_spare_projeto`: um projeto (ID/nº do EBS, descrição, serviço, categoria),
+  com o total APROVADO puxado do EBS pelo número e a PARCELA desse aprovado que
+  é destinada ao Spare (informada à mão — o EBS não separa Spare do resto);
+- `orc_spare_item`: as linhas de item de cada projeto (Item EBS, descrição do
+  item, quantidade, valor unitário). O valor total da linha e o custo total do
+  projeto são calculados (quantidade × valor unitário).
 
-- um NÚCLEO fixo, com o que qualquer controle de orçamento precisa
-  (identificação, classificação, os quatro valores e as datas);
-- um mapa `dados` (JSON) alimentado pelas definições da tabela
-  `spare_campo`, que o administrador cadastra na tela. Assim dá para
-  acrescentar campo sem migração de banco.
-
-Quando o desenho estiver fechado, os campos que provarem valor podem virar
-coluna de verdade — a migração lê `dados` e distribui.
+Tabelas novas de propósito (nomes `orc_spare_*`), para não colidir com o
+desenho anterior do módulo (`spare_projeto`/`spare_campo`).
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, Text,
+    BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text,
     create_engine, event, func, select,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
+)
 
 import config as _config_mod
 
@@ -38,6 +37,8 @@ DATABASE_URL: str = getattr(
 
 _engine = None
 _factory = None
+_ready = False
+_init_lock = threading.Lock()
 
 
 def get_engine():
@@ -52,6 +53,7 @@ def get_engine():
             def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
                 cur = dbapi_conn.cursor()
                 cur.execute("PRAGMA journal_mode=WAL")
+                cur.execute("PRAGMA foreign_keys=ON")
                 cur.close()
     return _engine
 
@@ -76,110 +78,89 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def localnow() -> datetime:
-    return datetime.now()
-
-
 class Base(DeclarativeBase):
     pass
 
 
-TIPOS = ("CAPEX", "OPEX")
-SITUACOES = ("Planejado", "Aprovado", "Em execução", "Concluído", "Cancelado")
-
-# Tipos aceitos numa definição de campo (o front escolhe o input por aqui).
-TIPOS_CAMPO = ("texto", "numero", "moeda", "data", "lista", "booleano")
+def _f(v) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class Projeto(Base):
-    """Uma linha do orçamento do SPARE."""
-    __tablename__ = "spare_projeto"
+    __tablename__ = "orc_spare_projeto"
 
     id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
-    )
-    # ── Núcleo: identificação e classificação ───────────────────────
-    numero: Mapped[str] = mapped_column(String(40), default="", index=True)
-    nome: Mapped[str] = mapped_column(String(200), default="")
-    tipo: Mapped[str] = mapped_column(String(10), default="CAPEX")
-    categoria: Mapped[str] = mapped_column(String(60), default="")
-    situacao: Mapped[str] = mapped_column(String(20), default="Planejado", index=True)
-    responsavel: Mapped[str] = mapped_column(String(120), default="")
-
-    # ── Núcleo: valores (sempre em BRL) ─────────────────────────────
-    aprovado: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
-    comprometido: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
-    realizado: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
-    a_realizar: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
-
-    # ── Núcleo: datas e texto livre ─────────────────────────────────
-    inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
-    fim: Mapped[date | None] = mapped_column(Date, nullable=True)
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    numero: Mapped[str] = mapped_column(String(40), default="", index=True)   # ID do projeto (EBS)
+    descricao: Mapped[str] = mapped_column(String(200), default="")
+    servico: Mapped[str] = mapped_column(String(160), default="")
+    categoria: Mapped[str] = mapped_column(String(80), default="")
+    # Total aprovado do projeto no EBS (puxado pelo número) e a parcela que é do Spare.
+    aprovado_ebs: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    aprovado_spare: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     observacao: Mapped[str] = mapped_column(Text, default="")
-
-    # ── Campos ainda a definir, guardados como JSON ─────────────────
-    dados: Mapped[str] = mapped_column(Text, default="{}")
-
+    ebs_sincronizado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     ordem: Mapped[int] = mapped_column(Integer, default=0)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
-    )
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
+    itens: Mapped[list["Item"]] = relationship(
+        back_populates="projeto", cascade="all, delete-orphan", order_by="Item.id")
+
     def to_dict(self) -> dict:
-        try:
-            extras = json.loads(self.dados or "{}")
-        except ValueError:
-            extras = {}
+        itens = [i.to_dict() for i in self.itens]
+        custo = round(sum(i["valor_total"] for i in itens), 2)
+        aprovado_spare = _f(self.aprovado_spare)
         return {
-            "id": self.id, "numero": self.numero, "nome": self.nome,
-            "tipo": self.tipo, "categoria": self.categoria,
-            "situacao": self.situacao, "responsavel": self.responsavel,
-            "aprovado": float(self.aprovado or 0),
-            "comprometido": float(self.comprometido or 0),
-            "realizado": float(self.realizado or 0),
-            "a_realizar": float(self.a_realizar or 0),
-            "inicio": self.inicio.isoformat() if self.inicio else None,
-            "fim": self.fim.isoformat() if self.fim else None,
-            "observacao": self.observacao, "ordem": self.ordem,
-            "dados": extras,
+            "id": self.id,
+            "numero": self.numero or "",
+            "descricao": self.descricao or "",
+            "servico": self.servico or "",
+            "categoria": self.categoria or "",
+            "aprovado_ebs": _f(self.aprovado_ebs),
+            "aprovado_spare": aprovado_spare,
+            "observacao": self.observacao or "",
+            "ebs_sincronizado_em": self.ebs_sincronizado_em.isoformat() if self.ebs_sincronizado_em else None,
+            "custo_total": custo,
+            "saldo_spare": round(aprovado_spare - custo, 2),
+            "itens": itens,
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
-            "atualizado_por": self.atualizado_por,
+            "atualizado_por": self.atualizado_por or "",
         }
 
 
-class Campo(Base):
-    """Definição de um campo adicional, cadastrada pelo administrador.
-
-    Guardar a definição no banco (em vez de fixar no código) é o que permite
-    fechar o desenho da tela depois, sem alterar o modelo.
-    """
-    __tablename__ = "spare_campo"
+class Item(Base):
+    __tablename__ = "orc_spare_item"
 
     id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
-    )
-    chave: Mapped[str] = mapped_column(String(40), unique=True)   # nome técnico em `dados`
-    rotulo: Mapped[str] = mapped_column(String(80), default="")   # o que aparece na tela
-    tipo: Mapped[str] = mapped_column(String(12), default="texto")
-    opcoes: Mapped[str] = mapped_column(Text, default="")         # lista: valores separados por ;
-    obrigatorio: Mapped[bool] = mapped_column(Boolean, default=False)
-    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    projeto_id: Mapped[int] = mapped_column(
+        ForeignKey("orc_spare_projeto.id", ondelete="CASCADE"), index=True)
+    item_ebs: Mapped[str] = mapped_column(String(60), default="")
+    descricao_item: Mapped[str] = mapped_column(String(200), default="")
+    quantidade: Mapped[float] = mapped_column(Numeric(15, 3), default=0)
+    valor_unitario: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
+    projeto: Mapped["Projeto"] = relationship(back_populates="itens")
+
     def to_dict(self) -> dict:
+        q = _f(self.quantidade)
+        vu = _f(self.valor_unitario)
         return {
-            "id": self.id, "chave": self.chave, "rotulo": self.rotulo,
-            "tipo": self.tipo,
-            "opcoes": [o.strip() for o in (self.opcoes or "").split(";") if o.strip()],
-            "obrigatorio": bool(self.obrigatorio), "ativo": bool(self.ativo),
-            "ordem": self.ordem,
+            "id": self.id,
+            "item_ebs": self.item_ebs or "",
+            "descricao_item": self.descricao_item or "",
+            "quantidade": q,
+            "valor_unitario": vu,
+            "valor_total": round(q * vu, 2),
         }
-
-
-_init_lock = threading.Lock()
-_ready = False
 
 
 def init_db() -> None:
@@ -199,32 +180,15 @@ def ensure_db() -> None:
 # ── Consultas ───────────────────────────────────────────────────────────
 def listar_projetos() -> list[dict]:
     with SessionLocal() as s:
-        rows = s.scalars(
-            select(Projeto).order_by(Projeto.ordem, Projeto.id)
-        ).all()
-        return [r.to_dict() for r in rows]
-
-
-def listar_campos(somente_ativos: bool = False) -> list[dict]:
-    with SessionLocal() as s:
-        stmt = select(Campo).order_by(Campo.ordem, Campo.id)
-        if somente_ativos:
-            stmt = stmt.where(Campo.ativo.is_(True))
-        return [r.to_dict() for r in s.scalars(stmt).all()]
+        rows = s.scalars(select(Projeto).order_by(Projeto.ordem, Projeto.id)).all()
+        return [p.to_dict() for p in rows]
 
 
 def totais() -> dict:
-    """Somatório dos quatro valores — base do resumo da tela."""
-    with SessionLocal() as s:
-        row = s.execute(select(
-            func.coalesce(func.sum(Projeto.aprovado), 0),
-            func.coalesce(func.sum(Projeto.comprometido), 0),
-            func.coalesce(func.sum(Projeto.realizado), 0),
-            func.coalesce(func.sum(Projeto.a_realizar), 0),
-            func.count(Projeto.id),
-        )).one()
+    projetos = listar_projetos()
     return {
-        "aprovado": float(row[0]), "comprometido": float(row[1]),
-        "realizado": float(row[2]), "a_realizar": float(row[3]),
-        "projetos": int(row[4]),
+        "projetos": len(projetos),
+        "aprovado_ebs": round(sum(p["aprovado_ebs"] for p in projetos), 2),
+        "aprovado_spare": round(sum(p["aprovado_spare"] for p in projetos), 2),
+        "custo_total": round(sum(p["custo_total"] for p in projetos), 2),
     }
