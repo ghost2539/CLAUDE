@@ -13,10 +13,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, field_validator
 
 import db.orcamento_spare as db
+from core import acordos as acordos_mod
 from core import tipi
 from core.security import check_rate_limit, client_ip, require_permission
 
@@ -43,8 +44,13 @@ class ItemIn(BaseModel):
     acordo: bool = False
     acordo_numero: str = ""
     ncm: str = ""
+    solicitacao_compra: str = ""
+    pedido_compra: str = ""
+    recebido: bool = False
+    nf: str = ""
 
-    @field_validator("item_ebs", "descricao_item", "acordo_numero", "ncm")
+    @field_validator("item_ebs", "descricao_item", "acordo_numero", "ncm",
+                     "solicitacao_compra", "pedido_compra", "nf")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -116,12 +122,17 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
         if not it.acordo and float(it.valor_unitario or 0) <= 0:
             nome = it.item_ebs or it.descricao_item or ("item " + str(i + 1))
             raise HTTPException(422, f"Informe o preço do item '{nome}' (não é de acordo de compras).")
+        pedido = (it.pedido_compra or "").strip()
+        recebido = bool(it.recebido) and bool(pedido)
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
             imposto_percent=(imp or 0), status=it.status,
             acordo=bool(it.acordo), acordo_numero=(it.acordo_numero if it.acordo else ""),
-            ncm=ncm_fmt, ordem=i))
+            ncm=ncm_fmt,
+            solicitacao_compra=it.solicitacao_compra, pedido_compra=pedido,
+            recebido=recebido, nf=(it.nf if recebido else ""),
+            ordem=i))
 
 
 # ── Catálogo de itens (cadastro) ───────────────────────────────────────────
@@ -191,6 +202,65 @@ def catalogo_item(req: Request, item_ebs: str = "", bu: str = ""):
     Com a BU do projeto, prefere o acordo daquela BU."""
     _exigir(req, "view")
     return db.buscar_catalogo(item_ebs, bu) or {}
+
+
+def _bu_canonica(bu: str) -> str:
+    """Normaliza a BU da planilha (ex.: UO_CAMICADO) para o nome padrão."""
+    t = (bu or "").strip()
+    limpo = t.upper().replace("UO_", "").replace("_", " ").strip()
+    for b in db.BUS:
+        if b.upper() == limpo or b.upper() == t.upper():
+            return b
+    return t.title() if t else ""
+
+
+@router.post("/catalogo/importar")
+async def catalogo_importar(req: Request, arquivo: UploadFile = File(...)):
+    """Importa a planilha de Acordos: cria/atualiza itens de acordo por
+    Item EBS + BU, sem duplicar. NCM traz a alíquota da TIPI."""
+    sd = _exigir(req, "create")
+    check_rate_limit(req, "api")
+    try:
+        dados = await arquivo.read()
+        linhas = acordos_mod.ler_acordos(dados)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Não consegui ler a planilha: {exc}")
+    if not linhas:
+        return {"criados": 0, "atualizados": 0, "total": 0,
+                "aviso": "Nenhum acordo encontrado na planilha."}
+    criados = atualizados = 0
+    usuario = sd.get("username", "")
+    with db.SessionLocal.begin() as s:
+        for r in linhas:
+            bu = _bu_canonica(r.get("bu", ""))
+            item_ebs = (r.get("item_ebs") or "").strip()
+            info = tipi.consultar(r.get("ncm", ""))
+            existente = None
+            if item_ebs:
+                existente = s.scalars(db.select(db.Catalogo).where(
+                    db.func.lower(db.Catalogo.item_ebs) == item_ebs.lower(),
+                    db.func.lower(db.Catalogo.acordo_bu) == bu.lower())).first()
+            c = existente or db.Catalogo()
+            c.item_ebs = item_ebs
+            c.descricao_item = r.get("descricao_item", "")
+            c.ncm = info["ncm"] if info["ncm"] else (r.get("ncm", "") or "")
+            c.aliquota = (None if info["aliquota"] is None else info["aliquota"])
+            c.nt = bool(info["nt"])
+            c.acordo = True
+            c.acordo_numero = r.get("acordo_numero", "")
+            c.acordo_bu = bu
+            c.preco_acordo = r.get("preco_acordo", 0) or 0
+            c.fornecedor = r.get("fornecedor", "")
+            c.vencimento = r.get("vencimento", "")
+            c.atualizado_por = usuario
+            if existente:
+                atualizados += 1
+            else:
+                s.add(c)
+                criados += 1
+    _log.info("orcamento_spare importar acordos: %s criados, %s atualizados por=%s",
+              criados, atualizados, usuario)
+    return {"criados": criados, "atualizados": atualizados, "total": len(linhas)}
 
 
 @router.post("/catalogo", status_code=201)

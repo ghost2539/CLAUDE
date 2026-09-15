@@ -164,6 +164,11 @@ class Item(Base):
     acordo: Mapped[bool] = mapped_column(Boolean, default=False)
     acordo_numero: Mapped[str] = mapped_column(String(60), default="")
     ncm: Mapped[str] = mapped_column(String(12), default="")   # XXXX.XX.XX
+    # Execução da compra: solicitação (SC), pedido (PC), recebimento e NF.
+    solicitacao_compra: Mapped[str] = mapped_column(String(60), default="")
+    pedido_compra: Mapped[str] = mapped_column(String(60), default="")
+    recebido: Mapped[bool] = mapped_column(Boolean, default=False)
+    nf: Mapped[str] = mapped_column(String(60), default="")
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
@@ -189,6 +194,10 @@ class Item(Base):
             "acordo": bool(self.acordo),
             "acordo_numero": self.acordo_numero or "",
             "ncm": self.ncm or "",
+            "solicitacao_compra": self.solicitacao_compra or "",
+            "pedido_compra": self.pedido_compra or "",
+            "recebido": bool(self.recebido),
+            "nf": self.nf or "",
             "valor_sem_imposto": round(base, 2),
             "valor_imposto": round(valor_imposto, 2),
             "valor_total": round(base + valor_imposto, 2),
@@ -212,6 +221,8 @@ def _migrar_colunas() -> None:
 
     _add("orc_spare_projeto", "bu", "bu VARCHAR(40) DEFAULT ''")
     _add("orc_spare_catalogo", "acordo_bu", "acordo_bu VARCHAR(40) DEFAULT ''")
+    _add("orc_spare_catalogo", "fornecedor", "fornecedor VARCHAR(160) DEFAULT ''")
+    _add("orc_spare_catalogo", "vencimento", "vencimento VARCHAR(10) DEFAULT ''")
 
     try:
         cols = {c["name"] for c in inspect(eng).get_columns("orc_spare_item")}
@@ -242,6 +253,16 @@ def _migrar_colunas() -> None:
             conn.execute(text(
                 "ALTER TABLE orc_spare_item ADD COLUMN ncm VARCHAR(12) DEFAULT ''"))
         _log.info("orc_spare_item: coluna ncm adicionada")
+    for coluna, ddl in (
+        ("solicitacao_compra", "solicitacao_compra VARCHAR(60) DEFAULT ''"),
+        ("pedido_compra", "pedido_compra VARCHAR(60) DEFAULT ''"),
+        ("recebido", "recebido BOOLEAN DEFAULT 0"),
+        ("nf", "nf VARCHAR(60) DEFAULT ''"),
+    ):
+        if coluna not in cols:
+            with eng.begin() as conn:
+                conn.execute(text(f"ALTER TABLE orc_spare_item ADD COLUMN {ddl}"))
+            _log.info("orc_spare_item: coluna %s adicionada", coluna)
 
 
 class Catalogo(Base):
@@ -260,6 +281,8 @@ class Catalogo(Base):
     acordo_numero: Mapped[str] = mapped_column(String(60), default="")
     acordo_bu: Mapped[str] = mapped_column(String(40), default="")   # BU do acordo
     preco_acordo: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    fornecedor: Mapped[str] = mapped_column(String(160), default="")
+    vencimento: Mapped[str] = mapped_column(String(10), default="")   # YYYY-MM-DD
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -278,6 +301,8 @@ class Catalogo(Base):
             "acordo_numero": self.acordo_numero or "",
             "acordo_bu": self.acordo_bu or "",
             "preco_acordo": _f(self.preco_acordo),
+            "fornecedor": self.fornecedor or "",
+            "vencimento": self.vencimento or "",
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
             "atualizado_por": self.atualizado_por or "",
         }

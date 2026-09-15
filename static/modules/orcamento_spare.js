@@ -42,6 +42,10 @@ window.SPARE_MODULES.orcamento_spare = {
             try { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
             catch (x) { return 'R$ ' + v.toFixed(2); }
         }
+        function dataBR(iso) {
+            var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+            return m ? (m[3] + '/' + m[2] + '/' + m[1]) : (iso || '');
+        }
         function impostoTxt(it) {
             if (it.nt) return 'NT';
             var a = (it.imposto_percent != null ? it.imposto_percent : it.aliquota);
@@ -93,8 +97,13 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<div class="card"><div class="card-header" ' +
                         'style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
                         '<span>Cadastro de itens</span>' +
+                        '<span style="display:flex;gap:8px">' +
+                        (podeCriar ? '<button id="cat-import" class="btn btn-secondary btn-sm">Importar acordos (Excel)</button>' : '') +
                         (podeCriar ? '<button id="cat-novo" class="btn btn-primary btn-sm">Novo item</button>' : '') +
+                        '<input type="file" id="cat-file" accept=".xlsx,.xls" style="display:none">' +
+                        '</span>' +
                         '</div><div class="card-body">' +
+                        '<div id="cat-import-msg" class="text-muted mb-2"></div>' +
                         '<div class="form-group" style="max-width:360px"><label for="cat-busca">Buscar (Item EBS, descrição, NCM)</label>' +
                             '<input id="cat-busca" class="form-control" placeholder="digite para filtrar"></div>' +
                         '<div id="cat-lista" class="mt-3"></div>' +
@@ -358,13 +367,16 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<td class="text-right" style="' + padN + '">' + impostoTxt(it) + '</td>' +
                     '<td style="' + padT + ';white-space:nowrap">' + acordo + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + (it.acordo ? money(it.preco_acordo) : '—') + '</td>' +
+                    '<td style="' + padT + '">' + e(it.fornecedor || '') + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + (it.vencimento ? e(dataBR(it.vencimento)) : '') + '</td>' +
                     '<td style="' + padT + ';white-space:nowrap">' + acoes + '</td></tr>';
             }).join('');
             box.innerHTML =
-                '<div class="table-responsive"><table class="table table-sm" style="min-width:820px">' +
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:1020px">' +
                 '<thead><tr><th style="' + padT + '">Item EBS</th><th style="' + padT + '">Descrição do item</th>' +
                 '<th style="' + padT + '">NCM</th><th class="text-right" style="' + padN + '">Imposto</th>' +
                 '<th style="' + padT + '">Acordo</th><th class="text-right" style="' + padN + '">Preço acordo</th>' +
+                '<th style="' + padT + '">Fornecedor</th><th style="' + padT + '">Vencimento</th>' +
                 '<th style="' + padT + '"></th></tr></thead><tbody>' + corpo + '</tbody></table></div>';
             Array.prototype.forEach.call(box.querySelectorAll('.cat-ed'), function (b) {
                 b.onclick = function () { abrirFormCat((CAT.itens || []).filter(function (i) { return i.id == b.dataset.id; })[0]); };
@@ -488,10 +500,14 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<th style="width:120px">NCM</th><th style="width:80px">Qtd</th>' +
                     '<th style="width:120px">Valor unit.</th><th style="width:70px">% Imp.</th>' +
                     '<th style="width:150px">Situação</th>' +
+                    '<th style="width:110px">Solic. compra</th>' +
+                    '<th style="width:110px">Pedido compra</th>' +
+                    '<th style="width:70px">Recebido</th>' +
+                    '<th style="width:110px">NF</th>' +
                     '<th style="width:130px" class="text-right">Valor total</th>' +
                     (podeEditar ? '<th style="width:36px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="7" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
+                    '<tfoot><tr><td colspan="11" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
@@ -534,6 +550,10 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + (acordoOn ? ' readonly title="Preço do acordo (cadastro)"' : ro) + '></td>' +
                 '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '" readonly title="Imposto do NCM (TIPI)"></td>' +
                 '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
+                '<td><input class="form-control os-i-sc" value="' + e(it.solicitacao_compra || '') + '"' + ro + '></td>' +
+                '<td><input class="form-control os-i-pc" value="' + e(it.pedido_compra || '') + '"' + ro + '></td>' +
+                '<td style="text-align:center"><input type="checkbox" class="os-i-rec"' + (it.recebido ? ' checked' : '') + dis + '></td>' +
+                '<td><input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (it.recebido ? '' : ' disabled') + ro + '></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
             document.getElementById('os-itens').appendChild(tr);
@@ -543,6 +563,16 @@ window.SPARE_MODULES.orcamento_spare = {
                 tr.querySelector('.os-i-vu').oninput = recalc;
                 tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarCatalogo(tr); });
                 tr.querySelector('.os-i-ncm').addEventListener('change', function () { aplicarNcm(tr); });
+                var rec = tr.querySelector('.os-i-rec');
+                var nf = tr.querySelector('.os-i-nf');
+                var pc = tr.querySelector('.os-i-pc');
+                rec.onchange = function () {
+                    if (rec.checked && !pc.value.trim()) {
+                        alert('Informe o Pedido de compra antes de marcar como recebido.');
+                        rec.checked = false; return;
+                    }
+                    nf.disabled = !rec.checked; if (!rec.checked) nf.value = '';
+                };
             }
         }
 
@@ -613,7 +643,11 @@ window.SPARE_MODULES.orcamento_spare = {
                     valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
                     imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0,
                     status: tr.querySelector('.os-i-st').value || 'orcado',
-                    acordo: tr.dataset.acordo === '1'
+                    acordo: tr.dataset.acordo === '1',
+                    solicitacao_compra: tr.querySelector('.os-i-sc').value.trim(),
+                    pedido_compra: tr.querySelector('.os-i-pc').value.trim(),
+                    recebido: tr.querySelector('.os-i-rec').checked,
+                    nf: tr.querySelector('.os-i-nf').value.trim()
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.ncm) itens.push(o);
             });
@@ -672,6 +706,22 @@ window.SPARE_MODULES.orcamento_spare = {
         if (podeCriar) document.getElementById('os-novo').onclick = function () { abrirForm(); };
         if (podeEditar) document.getElementById('os-ebs').onclick = sincronizarEbs;
         if (podeCriar) document.getElementById('cat-novo').onclick = function () { abrirFormCat(); };
+        if (podeCriar) {
+            var catFile = document.getElementById('cat-file');
+            document.getElementById('cat-import').onclick = function () { catFile.value = ''; catFile.click(); };
+            catFile.onchange = async function () {
+                if (!catFile.files || !catFile.files[0]) return;
+                var msg = document.getElementById('cat-import-msg');
+                msg.textContent = 'Importando acordos…';
+                try {
+                    var fd = new FormData(); fd.append('arquivo', catFile.files[0]);
+                    var d = await S.api('/orcamento-spare/catalogo/importar', { method: 'POST', body: fd });
+                    msg.textContent = 'Importado: ' + (d.criados || 0) + ' novo(s), ' + (d.atualizados || 0) +
+                        ' atualizado(s) de ' + (d.total || 0) + ' acordo(s).' + (d.aviso ? ' ' + d.aviso : '');
+                    catCarregado = false; carregarCatalogo();
+                } catch (x) { msg.textContent = 'Falha ao importar: ' + x.message; }
+            };
+        }
         document.getElementById('os-busca').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') tabela(); });
         document.getElementById('cat-busca').addEventListener('input', tabelaCatalogo);
         document.getElementById('os-it-status').onchange = tabelaItens;
