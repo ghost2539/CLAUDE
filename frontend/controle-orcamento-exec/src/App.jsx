@@ -1075,7 +1075,9 @@ export default function App() {
     setSincBusy(true); setErro("");
     try {
       await Promise.all(Object.keys(filaRef.current).map((id) => enviar(Number(id))));
-      const r = await api(API_BASE + "/sincronizar", { method: "POST" });
+      // corpo mínimo de propósito: POST sem corpo é rebaixado por alguns
+      // proxies em subcaminho (vira GET → 405). O endpoint ignora o corpo.
+      const r = await api(API_BASE + "/sincronizar", { method: "POST", body: "{}" });
       await carregar();
       setIncMsg(
         `Sincronizado com o EBS: ${r.atualizados} projeto(s) atualizado(s).` +

@@ -1008,6 +1008,16 @@ def incluir(body: IncluirIn, req: Request):
     return {"projetos": criados, "aviso": " · ".join(partes)}
 
 
+@router.get("/api/controle-orcamento-exec/sincronizar")
+def sincronizar_get(req: Request):
+    """Rede de segurança: alguns proxies em subcaminho rebaixam o POST para GET
+    num redirect (301/302), e o botão "Atualizar (EBS)" tomava 405. Aqui o GET
+    faz o mesmo que o POST, com a MESMA permissão (edit) e o mesmo rate-limit —
+    então funciona mesmo que a requisição chegue rebaixada. O certo continua
+    sendo o proxy preservar o método (veja deploy/proxy_portal_spare.conf)."""
+    return sincronizar(req)
+
+
 @router.post("/api/controle-orcamento-exec/sincronizar")
 @_com_banco
 def sincronizar(req: Request):
