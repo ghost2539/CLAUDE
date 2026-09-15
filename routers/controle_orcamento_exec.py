@@ -59,7 +59,6 @@ from db.orcamento_exec import (
     definir_permissao_modulo, remover_permissao_modulo,
     OpexItem,
 )
-from core.prefixo import com_prefixo, destino, prefixo
 from core.security import (
     check_rate_limit, client_ip, get_session,
 )
@@ -111,16 +110,9 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page(req: Request | None = None) -> HTMLResponse:
-    """A página inteira, com o prefixo do proxy quando houver.
-
-    A tela é servida daqui, e não pelo index do portal, então o prefixo
-    precisa ser aplicado aqui também — senão, atrás do proxy num
-    subcaminho, ela busca CSS e JS na raiz do domínio e toma 404.
-    """
+def _page() -> HTMLResponse:
     html = (_DIR / "index.html").read_text(encoding="utf-8")
-    html = html.replace("{{v}}", _asset_version())
-    return HTMLResponse(com_prefixo(html, prefixo(req)))
+    return HTMLResponse(html.replace("{{v}}", _asset_version()))
 
 
 # ── Controle de acesso ────────────────────────────────────────────
@@ -138,7 +130,7 @@ p{margin:0 0 8px;line-height:1.5}a{color:#2563eb}</style>
 <div class="c"><h1>Acesso não liberado</h1>
 <p>Seu usuário está autenticado, mas não tem permissão para o Controle de
 Orçamento.</p><p>Solicite a liberação a um administrador do portal.</p>
-<p><a href="__BASE__/">Voltar ao portal</a></p></div>"""
+<p><a href="/">Voltar ao portal</a></p></div>"""
 
 
 def _acesso_pagina(req: Request):
@@ -148,9 +140,7 @@ def _acesso_pagina(req: Request):
     if not sd:
         # Leva o destino junto: depois do login o portal volta para cá, em vez
         # de largar quem digitou o endereço na tela de Bem-vindo.
-        return RedirectResponse(
-            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}",
-            status_code=302)
+        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
     try:
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
@@ -158,9 +148,9 @@ def _acesso_pagina(req: Request):
     if not _pode(sd, "view"):
         registrar_acesso(sd.get("username", ""), client_ip(req), "negado",
                          "sem acesso liberado ao módulo")
-        return HTMLResponse(_SEM_PERMISSAO.replace("__BASE__", prefixo(req)), status_code=403)
+        return HTMLResponse(_SEM_PERMISSAO, status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
-    return _page(req)
+    return _page()
 
 
 # Ações da API mapeadas ao nível mínimo próprio do módulo.
@@ -211,37 +201,19 @@ def _exigir(req: Request, acao: str, registro: str = "", detalhe: str = "") -> d
     return sd
 
 
-# Caminho canônico da tela. Renomeada para -InfraCSC (Infra CSC) para
-# distinguir das demais telas de orçamento. Os caminhos antigos continuam
-# respondendo, redirecionando para cá, para não quebrar link já distribuído.
-@router.get("/controle-orcamento-InfraCSC", response_class=HTMLResponse)
-def pagina_infracsc(req: Request):
-    return _acesso_pagina(req)
-
-
-@router.get("/controle-orcamento-InfraCSC/", response_class=HTMLResponse)
-def pagina_infracsc_slash(req: Request):
-    return _acesso_pagina(req)
-
-
-def _redir_canonico(req: Request) -> RedirectResponse:
-    return RedirectResponse(f"{prefixo(req)}/controle-orcamento-InfraCSC",
-                            status_code=308)
-
-
 @router.get("/controle-orcamento", response_class=HTMLResponse)
 def pagina(req: Request):
-    return _redir_canonico(req)
+    return _acesso_pagina(req)
 
 
 @router.get("/controle-orcamento/", response_class=HTMLResponse)
 def pagina_slash(req: Request):
-    return _redir_canonico(req)
+    return _acesso_pagina(req)
 
 
 @router.get("/controle-orçamento", response_class=HTMLResponse)
 def pagina_acento(req: Request):
-    return _redir_canonico(req)
+    return _acesso_pagina(req)
 
 
 # ── Validação ─────────────────────────────────────────────────────
@@ -663,21 +635,10 @@ def _fx_rates() -> dict:
     return rates
 
 
-def _reportado(v: Any) -> bool:
-    """True só quando o EBS realmente MANDOU um valor para o campo. Ausência
-    (chave faltando), None ou "" NÃO contam — assim uma resposta do EBS sem os
-    financeiros não zera o que já está gravado."""
-    return v is not None and v != ""
-
-
-def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) -> tuple[str, bool]:
+def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) -> str:
     """Preenche os campos financeiros do projeto a partir da linha do EBS,
     convertendo ARS/UYU→BRL quando a empresa for Argentina/Uruguai.
-
-    SÓ sobrescreve um campo quando o EBS de fato reportou aquele valor. Se a
-    linha vier sem os financeiros (ex.: EBS fora, resposta incompleta), NADA é
-    alterado — nunca zera o que o usuário já tem. NÃO altera nome/tipo/
-    categoria/área. Retorna (aviso, aplicou_algo)."""
+    NÃO altera nome/tipo/categoria/área. Retorna aviso (ou "")."""
     if rates is None:
         rates = _fx_rates()
     moeda = _moeda_empresa(linha.get("empresa"))
@@ -693,22 +654,14 @@ def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) ->
     def conv(v: Decimal) -> Decimal:
         return (v * fator).quantize(Decimal("0.01"))
 
-    aplicou = False
-    if _reportado(linha.get("saldo_inicial")):
-        p.approved_budget = conv(_valor(linha.get("saldo_inicial")))
-        aplicou = True
-    if _reportado(linha.get("comprometido")) or _reportado(linha.get("reservados")):
-        p.committed = conv(_valor(linha.get("comprometido")) + _valor(linha.get("reservados")))
-        aplicou = True
-    if _reportado(linha.get("realizado")):
-        p.realized = conv(_valor(linha.get("realizado")))
-        aplicou = True
-    if _reportado(linha.get("saldo_dia")):
-        p.a_realizar = conv(_valor_signed(linha.get("saldo_dia")))
-        aplicou = True
-    if aplicou:
-        p.synced_at = utcnow()
-    return aviso, aplicou
+    comprometido = _valor(linha.get("comprometido"))
+    reservados = _valor(linha.get("reservados"))
+    p.approved_budget = conv(_valor(linha.get("saldo_inicial")))
+    p.committed = conv(comprometido + reservados)
+    p.realized = conv(_valor(linha.get("realizado")))
+    p.a_realizar = conv(_valor_signed(linha.get("saldo_dia")))
+    p.synced_at = utcnow()
+    return aviso
 
 
 # ── API ───────────────────────────────────────────────────────────
@@ -1010,7 +963,7 @@ def incluir(body: IncluirIn, req: Request):
             )
             linha = ebs.get(numero)
             if linha:
-                av, _alg = _aplicar_ebs(p, linha, rates)
+                av = _aplicar_ebs(p, linha, rates)
                 if av:
                     avisos_fx.append(av)
             else:
@@ -1025,16 +978,6 @@ def incluir(body: IncluirIn, req: Request):
         partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
     partes.extend(avisos_fx)
     return {"projetos": criados, "aviso": " · ".join(partes)}
-
-
-@router.get("/api/controle-orcamento-exec/sincronizar")
-def sincronizar_get(req: Request):
-    """Rede de segurança: alguns proxies em subcaminho rebaixam o POST para GET
-    num redirect (301/302), e o botão "Atualizar (EBS)" tomava 405. Aqui o GET
-    faz o mesmo que o POST, com a MESMA permissão (edit) e o mesmo rate-limit —
-    então funciona mesmo que a requisição chegue rebaixada. O certo continua
-    sendo o proxy preservar o método (veja deploy/proxy_portal_spare.conf)."""
-    return sincronizar(req)
 
 
 @router.post("/api/controle-orcamento-exec/sincronizar")
@@ -1053,16 +996,10 @@ def sincronizar(req: Request):
     except ValueError as exc:
         raise HTTPException(502, str(exc))
 
-    # Guarda de segurança: se o EBS não devolveu NADA, não mexe em nada.
-    if not ebs:
-        return {"atualizados": 0, "bloqueados": 0,
-                "aviso": "O EBS não retornou dados; nada foi alterado."}
-
     autor = _autor(req)
     rates = _fx_rates()
     atualizados = 0
     bloqueados = 0
-    sem_dados = 0
     nao_encontrados: list[str] = []
     avisos_fx: list[str] = []
     with SessionLocal.begin() as s:
@@ -1073,22 +1010,16 @@ def sincronizar(req: Request):
                 continue  # projeto travado: não é alterado pelo EBS
             linha = ebs.get((p.code or "").strip())
             if linha:
-                av, aplicou = _aplicar_ebs(p, linha, rates)
+                av = _aplicar_ebs(p, linha, rates)
                 if av:
                     avisos_fx.append(av)
-                if aplicou:
-                    p.updated_by = autor
-                    atualizados += 1
-                else:
-                    # EBS trouxe a linha, mas sem financeiros: NÃO zera nada.
-                    sem_dados += 1
+                p.updated_by = autor
+                atualizados += 1
             elif p.code:
                 nao_encontrados.append(p.code)
     partes = []
     if bloqueados:
         partes.append(f"{bloqueados} projeto(s) bloqueado(s) não alterado(s)")
-    if sem_dados:
-        partes.append(f"{sem_dados} projeto(s) sem valores no EBS (mantidos como estavam)")
     if nao_encontrados:
         partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
     partes.extend(avisos_fx)
