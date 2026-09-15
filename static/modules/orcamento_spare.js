@@ -147,7 +147,17 @@ window.SPARE_MODULES.orcamento_spare = {
         }
 
         function campo(rot, ctrl) {
-            return '<div class="form-group"><label>' + e(rot) + '</label>' + ctrl + '</div>';
+            return '<div class="form-group" style="margin:0">' +
+                (rot ? '<label>' + e(rot) + '</label>' : '') + ctrl + '</div>';
+        }
+        function secao(titulo) {
+            return '<div style="font-size:.78em;font-weight:700;text-transform:uppercase;' +
+                'letter-spacing:.04em;color:#6b7280;margin:20px 0 10px;border-bottom:1px solid #e5e7eb;' +
+                'padding-bottom:5px">' + e(titulo) + '</div>';
+        }
+        function grade(cols, html) {
+            return '<div style="display:grid;grid-template-columns:' + cols +
+                ';gap:14px;align-items:end">' + html + '</div>';
         }
 
         // ── Formulário ────────────────────────────────────────────────
@@ -158,15 +168,20 @@ window.SPARE_MODULES.orcamento_spare = {
                 edit ? ('Editar projeto ' + (d.numero || ('#' + d.id))) : 'Novo projeto';
             document.getElementById('os-form-card').style.display = '';
             document.getElementById('os-form').innerHTML =
-                '<div class="form-grid cols-3">' +
+                secao('Dados do projeto') +
+                grade('minmax(140px,1fr) minmax(220px,2fr)',
                     campo('Nº do projeto (EBS)', '<input id="os-numero" class="form-control" value="' + e(d.numero || '') + '">') +
-                    campo('Descrição', '<input id="os-descricao" class="form-control" value="' + e(d.descricao || '') + '">') +
+                    campo('Descrição', '<input id="os-descricao" class="form-control" value="' + e(d.descricao || '') + '">')) +
+                '<div style="height:14px"></div>' +
+                grade('1fr 1fr',
                     campo('Serviço', '<input id="os-servico" class="form-control" value="' + e(d.servico || '') + '">') +
-                    campo('Categoria', '<input id="os-categoria" class="form-control" value="' + e(d.categoria || '') + '">') +
+                    campo('Categoria', '<input id="os-categoria" class="form-control" value="' + e(d.categoria || '') + '">')) +
+                secao('Orçamento') +
+                '<div style="max-width:520px">' + grade('1fr 1fr',
                     campo('Aprovado (EBS)', '<input class="form-control" value="' + money(d.aprovado_ebs || 0) + '" disabled title="Puxado do EBS pelo Atualizar (EBS)">') +
-                    campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">') +
+                    campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">')) +
                 '</div>' +
-                '<h3 class="mt-3">Itens</h3>' +
+                secao('Itens') +
                 '<div class="table-responsive"><table class="table table-sm" id="os-itens-tab">' +
                     '<thead><tr><th style="width:140px">Item EBS</th><th>Descrição do item</th>' +
                     '<th style="width:100px">Qtd</th><th style="width:130px">Valor unit.</th>' +
@@ -178,8 +193,9 @@ window.SPARE_MODULES.orcamento_spare = {
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
-                campo('Observação', '<textarea id="os-obs" class="form-control" rows="2">' + e(d.observacao || '') + '</textarea>') +
-                '<div class="btn-row mt-3">' +
+                secao('Observação') +
+                campo('', '<textarea id="os-obs" class="form-control" rows="2" placeholder="Anotações do projeto (opcional)">' + e(d.observacao || '') + '</textarea>') +
+                '<div class="btn-row mt-3" style="margin-top:18px">' +
                     (podeEditar ? '<button type="button" id="os-salvar" class="btn btn-primary btn-sm">' + (edit ? 'Salvar' : 'Cadastrar') + '</button> ' : '') +
                     '<button type="button" id="os-cancelar" class="btn btn-secondary btn-sm">Fechar</button>' +
                 '</div><div id="os-erro" class="alert alert-danger mt-2" hidden></div>';
