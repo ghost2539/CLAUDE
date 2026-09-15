@@ -663,10 +663,21 @@ def _fx_rates() -> dict:
     return rates
 
 
-def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) -> str:
+def _reportado(v: Any) -> bool:
+    """True só quando o EBS realmente MANDOU um valor para o campo. Ausência
+    (chave faltando), None ou "" NÃO contam — assim uma resposta do EBS sem os
+    financeiros não zera o que já está gravado."""
+    return v is not None and v != ""
+
+
+def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) -> tuple[str, bool]:
     """Preenche os campos financeiros do projeto a partir da linha do EBS,
     convertendo ARS/UYU→BRL quando a empresa for Argentina/Uruguai.
-    NÃO altera nome/tipo/categoria/área. Retorna aviso (ou "")."""
+
+    SÓ sobrescreve um campo quando o EBS de fato reportou aquele valor. Se a
+    linha vier sem os financeiros (ex.: EBS fora, resposta incompleta), NADA é
+    alterado — nunca zera o que o usuário já tem. NÃO altera nome/tipo/
+    categoria/área. Retorna (aviso, aplicou_algo)."""
     if rates is None:
         rates = _fx_rates()
     moeda = _moeda_empresa(linha.get("empresa"))
@@ -682,14 +693,22 @@ def _aplicar_ebs(p: BudgetProject, linha: dict, rates: Optional[dict] = None) ->
     def conv(v: Decimal) -> Decimal:
         return (v * fator).quantize(Decimal("0.01"))
 
-    comprometido = _valor(linha.get("comprometido"))
-    reservados = _valor(linha.get("reservados"))
-    p.approved_budget = conv(_valor(linha.get("saldo_inicial")))
-    p.committed = conv(comprometido + reservados)
-    p.realized = conv(_valor(linha.get("realizado")))
-    p.a_realizar = conv(_valor_signed(linha.get("saldo_dia")))
-    p.synced_at = utcnow()
-    return aviso
+    aplicou = False
+    if _reportado(linha.get("saldo_inicial")):
+        p.approved_budget = conv(_valor(linha.get("saldo_inicial")))
+        aplicou = True
+    if _reportado(linha.get("comprometido")) or _reportado(linha.get("reservados")):
+        p.committed = conv(_valor(linha.get("comprometido")) + _valor(linha.get("reservados")))
+        aplicou = True
+    if _reportado(linha.get("realizado")):
+        p.realized = conv(_valor(linha.get("realizado")))
+        aplicou = True
+    if _reportado(linha.get("saldo_dia")):
+        p.a_realizar = conv(_valor_signed(linha.get("saldo_dia")))
+        aplicou = True
+    if aplicou:
+        p.synced_at = utcnow()
+    return aviso, aplicou
 
 
 # ── API ───────────────────────────────────────────────────────────
@@ -991,7 +1010,7 @@ def incluir(body: IncluirIn, req: Request):
             )
             linha = ebs.get(numero)
             if linha:
-                av = _aplicar_ebs(p, linha, rates)
+                av, _alg = _aplicar_ebs(p, linha, rates)
                 if av:
                     avisos_fx.append(av)
             else:
@@ -1034,10 +1053,16 @@ def sincronizar(req: Request):
     except ValueError as exc:
         raise HTTPException(502, str(exc))
 
+    # Guarda de segurança: se o EBS não devolveu NADA, não mexe em nada.
+    if not ebs:
+        return {"atualizados": 0, "bloqueados": 0,
+                "aviso": "O EBS não retornou dados; nada foi alterado."}
+
     autor = _autor(req)
     rates = _fx_rates()
     atualizados = 0
     bloqueados = 0
+    sem_dados = 0
     nao_encontrados: list[str] = []
     avisos_fx: list[str] = []
     with SessionLocal.begin() as s:
@@ -1048,16 +1073,22 @@ def sincronizar(req: Request):
                 continue  # projeto travado: não é alterado pelo EBS
             linha = ebs.get((p.code or "").strip())
             if linha:
-                av = _aplicar_ebs(p, linha, rates)
+                av, aplicou = _aplicar_ebs(p, linha, rates)
                 if av:
                     avisos_fx.append(av)
-                p.updated_by = autor
-                atualizados += 1
+                if aplicou:
+                    p.updated_by = autor
+                    atualizados += 1
+                else:
+                    # EBS trouxe a linha, mas sem financeiros: NÃO zera nada.
+                    sem_dados += 1
             elif p.code:
                 nao_encontrados.append(p.code)
     partes = []
     if bloqueados:
         partes.append(f"{bloqueados} projeto(s) bloqueado(s) não alterado(s)")
+    if sem_dados:
+        partes.append(f"{sem_dados} projeto(s) sem valores no EBS (mantidos como estavam)")
     if nao_encontrados:
         partes.append("Não encontrado(s) no EBS: " + ", ".join(nao_encontrados))
     partes.extend(avisos_fx)
