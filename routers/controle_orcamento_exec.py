@@ -720,7 +720,7 @@ def sessao(req: Request):
     return {
         "usuario": {"username": sd.get("username"), "display_name": sd.get("display_name")},
         "nivel": _nivel_efetivo(sd),          # view | edit | admin | ""
-        "admin_modulo": _admin_portal(sd),    # pode liberar acessos deste módulo
+        "admin_modulo": _pode(sd, "admin"),   # admin do módulo OU do portal libera acessos
     }
 
 
@@ -741,9 +741,12 @@ class PermissaoIn(BaseModel):
 
 
 def _exigir_admin_modulo(req: Request) -> dict:
-    """Só o ADMIN do módulo (marcado em Parâmetros) gerencia as liberações."""
+    """Gerencia as liberações do módulo. Vale para o ADMIN DO PRÓPRIO MÓDULO
+    (nível 'admin' liberado aqui, na tela do módulo) — não depende da grade de
+    acessos do portal. O admin do portal (is_admin/can_admin) também passa, o
+    que serve para nomear o primeiro admin do módulo."""
     sd = get_session(req)
-    if not _admin_portal(sd):
+    if not _pode(sd, "admin"):
         raise HTTPException(403, "Apenas o administrador do módulo pode liberar acessos.")
     return sd
 

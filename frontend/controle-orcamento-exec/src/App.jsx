@@ -838,7 +838,7 @@ function Sidebar({ view, onView, colapsado, onToggle }) {
         })}
       </nav>
       <div className="p-3 border-t border-white/10 space-y-1">
-        <a href="/" title="Voltar ao Portal"
+        <a href={(APP_BASE || "") + "/"} title="Voltar ao Portal"
            className="w-full flex items-center gap-3 px-1 py-2 text-xs text-gray-400 hover:text-white">
           <span className="shrink-0">{Icon.back}</span>{!colapsado && <span>Portal</span>}
         </a>
