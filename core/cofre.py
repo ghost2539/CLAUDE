@@ -137,8 +137,13 @@ def _ler_arquivo_cofre() -> dict:
 
 COMANDO = os.environ.get("VCREPORTS_SECRETS_CMD", "")
 
-USAR_CORPORATIVO = os.environ.get("COFRE_CORPORATIVO", "sim").strip().lower() \
-    not in ("nao", "não", "0", "false", "off", "desligado")
+# Cofre corporativo DESLIGADO por padrão. O loader externo (vcreports_secrets /
+# /etc/vcreports/.secrets.env) fica inacessível neste servidor (Permission
+# denied) e só gera ruído no log sem entregar nada. Segredos vêm do os.environ
+# (e do cofre local). Quem tiver o cofre corporativo acessível liga com
+# COFRE_CORPORATIVO=sim.
+USAR_CORPORATIVO = os.environ.get("COFRE_CORPORATIVO", "nao").strip().lower() \
+    in ("sim", "1", "true", "on", "ligado")
 
 
 def _por_comando(nome: str) -> str:
