@@ -18,7 +18,14 @@ const corSugerida = (categorias) => {
   const usadas = new Set(categorias.map((c) => (c.cor || "").toLowerCase()));
   return PALETA_CATEGORIAS.find((c) => !usadas.has(c)) || PALETA_CATEGORIAS[categorias.length % PALETA_CATEGORIAS.length];
 };
-const API_BASE = "/api/controle-orcamento-exec";
+// Prefixo do proxy: atrás de suporte.lojasrenner.com.br/portal-spare, a API
+// mora em /portal-spare/api/... — não na raiz. O <meta name="app-base"> é
+// injetado pelo servidor (com_prefixo); sem proxy fica vazio e nada muda.
+const APP_BASE = (() => {
+  const m = document.querySelector('meta[name="app-base"]');
+  return (m && m.content ? m.content : "").replace(/\/+$/, "");
+})();
+const API_BASE = APP_BASE + "/api/controle-orcamento-exec";
 const API_CATEGORIAS = API_BASE + "/categorias";
 
 const ESTAGIOS = ["Planejamento", "Aprovação", "Em Execução", "Concluído"];
@@ -48,8 +55,24 @@ const STATUS_ESTILO = {
    pelo servidor quando a tabela está vazia (database_orcamento.SEED). */
 const API = API_BASE + "/projetos";
 
+// O Apache do host tem uma regra global que força barra no fim de toda URL
+// sem barra, com 301. Num 301 o navegador reenvia o POST como GET → 405. Se a
+// chamada JÁ vier com barra no fim (antes do "?"), a regra não dispara e o
+// método é preservado; o BarraFinalMiddleware do backend remove a barra antes
+// de rotear, então a rota casa igual. Contorno sem tocar no proxy.
+function _comBarraFinal(url) {
+  const h = url.indexOf("#");
+  const frag = h >= 0 ? url.slice(h) : "";
+  const semFrag = h >= 0 ? url.slice(0, h) : url;
+  const q = semFrag.indexOf("?");
+  let caminho = q >= 0 ? semFrag.slice(0, q) : semFrag;
+  const query = q >= 0 ? semFrag.slice(q) : "";
+  if (caminho && !caminho.endsWith("/")) caminho += "/";
+  return caminho + query + frag;
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(_comBarraFinal(path), {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
@@ -1068,7 +1091,9 @@ export default function App() {
     setSincBusy(true); setErro("");
     try {
       await Promise.all(Object.keys(filaRef.current).map((id) => enviar(Number(id))));
-      const r = await api(API_BASE + "/sincronizar", { method: "POST" });
+      // corpo mínimo de propósito: POST sem corpo é rebaixado por alguns
+      // proxies em subcaminho (vira GET → 405). O endpoint ignora o corpo.
+      const r = await api(API_BASE + "/sincronizar", { method: "POST", body: "{}" });
       await carregar();
       setIncMsg(
         `Sincronizado com o EBS: ${r.atualizados} projeto(s) atualizado(s).` +
