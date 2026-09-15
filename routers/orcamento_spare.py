@@ -38,11 +38,18 @@ class ItemIn(BaseModel):
     quantidade: float = 0
     valor_unitario: float = 0
     imposto_percent: float = 0
+    status: str = "orcado"
 
     @field_validator("item_ebs", "descricao_item")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, v: str) -> str:
+        v = (v or "orcado").strip().lower()
+        return v if v in db.STATUS_ITEM else "orcado"
 
     @field_validator("quantidade", "valor_unitario", "imposto_percent")
     @classmethod
@@ -98,7 +105,7 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
-            imposto_percent=it.imposto_percent, ordem=i))
+            imposto_percent=it.imposto_percent, status=it.status, ordem=i))
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
@@ -106,6 +113,18 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
 def listar(req: Request):
     _exigir(req, "view")
     return {"projetos": db.listar_projetos(), "totais": db.totais()}
+
+
+@router.get("/itens")
+def listar_itens(req: Request):
+    """Itens de todos os projetos (achatados) + totais por situação — a visão
+    de quais itens consomem cada projeto e do previsto/andamento/executado."""
+    _exigir(req, "view")
+    return {
+        "itens": db.listar_itens(),
+        "totais_status": db.totais_por_status(),
+        "status": [{"valor": s, "rotulo": db.STATUS_ROTULO.get(s, s)} for s in db.STATUS_ITEM],
+    }
 
 
 @router.post("/projetos", status_code=201)

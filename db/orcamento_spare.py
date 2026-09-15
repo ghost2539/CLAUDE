@@ -40,6 +40,10 @@ _factory = None
 _ready = False
 _init_lock = threading.Lock()
 
+# Situação do item no consumo do orçamento.
+STATUS_ITEM = ("orcado", "andamento", "executado")
+STATUS_ROTULO = {"orcado": "Orçado/Previsto", "andamento": "Em andamento", "executado": "Executado"}
+
 
 def get_engine():
     global _engine
@@ -149,6 +153,8 @@ class Item(Base):
     # Alíquota de imposto do item, em % (ex.: 18 = 18%). O valor total do
     # item e o custo do projeto consideram o valor COM imposto.
     imposto_percent: Mapped[float] = mapped_column(Numeric(7, 4), default=0)
+    # Situação: orcado (previsto) | andamento | executado.
+    status: Mapped[str] = mapped_column(String(20), default="orcado")
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
@@ -159,6 +165,9 @@ class Item(Base):
         imp = _f(self.imposto_percent)
         base = q * vu
         valor_imposto = base * imp / 100.0
+        st = (self.status or "orcado")
+        if st not in STATUS_ITEM:
+            st = "orcado"
         return {
             "id": self.id,
             "item_ebs": self.item_ebs or "",
@@ -166,6 +175,8 @@ class Item(Base):
             "quantidade": q,
             "valor_unitario": vu,
             "imposto_percent": imp,
+            "status": st,
+            "status_rotulo": STATUS_ROTULO.get(st, st),
             "valor_sem_imposto": round(base, 2),
             "valor_imposto": round(valor_imposto, 2),
             "valor_total": round(base + valor_imposto, 2),
@@ -185,6 +196,11 @@ def _migrar_colunas() -> None:
             conn.execute(text(
                 "ALTER TABLE orc_spare_item ADD COLUMN imposto_percent NUMERIC(7,4) DEFAULT 0"))
         _log.info("orc_spare_item: coluna imposto_percent adicionada")
+    if "status" not in cols:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE orc_spare_item ADD COLUMN status VARCHAR(20) DEFAULT 'orcado'"))
+        _log.info("orc_spare_item: coluna status adicionada")
 
 
 def init_db() -> None:
@@ -217,3 +233,33 @@ def totais() -> dict:
         "aprovado_spare": round(sum(p["aprovado_spare"] for p in projetos), 2),
         "custo_total": round(sum(p["custo_total"] for p in projetos), 2),
     }
+
+
+def listar_itens() -> list[dict]:
+    """Todos os itens (achatados), com o projeto a que pertencem. É a visão de
+    'quais itens estão consumindo o projeto' e a base da tela por situação."""
+    out: list[dict] = []
+    with SessionLocal() as s:
+        projs = s.scalars(select(Projeto).order_by(Projeto.numero, Projeto.id)).all()
+        for p in projs:
+            for it in p.itens:
+                d = it.to_dict()
+                d["projeto_id"] = p.id
+                d["projeto_numero"] = p.numero or ""
+                d["projeto_descricao"] = p.descricao or ""
+                out.append(d)
+    return out
+
+
+def totais_por_status() -> dict:
+    """Soma (com imposto) e contagem de itens por situação."""
+    r = {st: {"itens": 0, "valor": 0.0} for st in STATUS_ITEM}
+    for it in listar_itens():
+        st = it.get("status") or "orcado"
+        if st not in r:
+            st = "orcado"
+        r[st]["itens"] += 1
+        r[st]["valor"] += it["valor_total"]
+    for st in r:
+        r[st]["valor"] = round(r[st]["valor"], 2)
+    return r

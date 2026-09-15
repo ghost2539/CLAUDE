@@ -1,9 +1,11 @@
 /* ================================================================
    Módulo: CAPEX Spare — Controle de Orçamento do SPARE
-   Projetos (nº EBS, descrição, serviço, categoria) com LINHAS DE ITEM
-   (Item EBS, descrição, qtd, valor unit., valor total = qtd×unit).
-   Total aprovado puxado do EBS pelo nº do projeto; a parcela destinada
-   ao Spare é informada à mão. Dashboard: custo do projeto × Spare.
+   Aba Projetos: projetos (nº EBS, descrição, serviço, categoria) com
+   LINHAS DE ITEM (Item EBS, descrição, qtd, valor unit., % imposto,
+   valor total = qtd×unit×(1+imposto/100)). Aprovado puxado do EBS pelo
+   nº; parcela destinada ao Spare informada à mão. Gráfico custo × Spare.
+   Aba Itens: todos os itens que consomem os projetos, por situação
+   (orçado/previsto, em andamento, executado).
    Banco próprio (/api/orcamento-spare).
    ================================================================ */
 window.SPARE_MODULES = window.SPARE_MODULES || {};
@@ -16,37 +18,92 @@ window.SPARE_MODULES.orcamento_spare = {
         var podeCriar = !!(u.is_admin || pm.can_create);
         var podeEditar = !!(u.is_admin || pm.can_edit);
 
+        var STATUS = [
+            { valor: 'orcado', rotulo: 'Orçado/Previsto', cor: '#6b7280' },
+            { valor: 'andamento', rotulo: 'Em andamento', cor: '#2563eb' },
+            { valor: 'executado', rotulo: 'Executado', cor: '#16a34a' }
+        ];
+        function statusInfo(st) {
+            for (var i = 0; i < STATUS.length; i++) if (STATUS[i].valor === st) return STATUS[i];
+            return STATUS[0];
+        }
+        function statusBadge(st) {
+            var s = statusInfo(st);
+            return '<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:.72em;' +
+                'background:' + s.cor + '22;color:' + s.cor + ';border:1px solid ' + s.cor + '66">' + e(s.rotulo) + '</span>';
+        }
+
         function money(v) {
             v = Number(v || 0);
             try { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
             catch (x) { return 'R$ ' + v.toFixed(2); }
         }
-        function num(v) { return Number(v || 0).toLocaleString('pt-BR'); }
 
         container.innerHTML =
             '<h1 class="page-title">CAPEX Spare</h1>' +
-            '<div id="os-resumo" class="filter-grid" style="margin-bottom:14px"></div>' +
-            '<div class="card mb-3"><div class="card-header">Custo do projeto × orçamento destinado ao Spare</div>' +
-                '<div class="card-body"><div id="os-chart"></div></div></div>' +
-            '<div class="card" id="os-form-card" style="display:none">' +
-                '<div class="card-header" id="os-form-titulo">Novo projeto</div>' +
-                '<div class="card-body"><div id="os-form"></div></div>' +
+            '<div id="os-abas" style="display:flex;gap:6px;border-bottom:1px solid #33415533;margin-bottom:16px">' +
+                '<button class="btn btn-sm os-aba-btn" data-aba="projetos">Projetos</button>' +
+                '<button class="btn btn-sm os-aba-btn" data-aba="itens">Itens (consumo)</button>' +
             '</div>' +
-            '<div class="card"><div class="card-header" ' +
-                'style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-                '<span>Projetos</span><span style="display:flex;gap:8px">' +
-                (podeEditar ? '<button id="os-ebs" class="btn btn-secondary btn-sm">Atualizar (EBS)</button>' : '') +
-                (podeCriar ? '<button id="os-novo" class="btn btn-primary btn-sm">Novo projeto</button>' : '') +
-                '</span></div><div class="card-body">' +
-                '<div class="form-group" style="max-width:360px">' +
-                    '<label for="os-busca">Buscar (nº, descrição, serviço, categoria)</label>' +
-                    '<input id="os-busca" class="form-control" placeholder="digite e Enter"></div>' +
-                '<div id="os-msg" class="text-muted mt-2"></div>' +
-                '<div id="os-lista" class="mt-3"></div>' +
-            '</div></div>';
+            // ── Aba Projetos ──
+            '<div id="ab-projetos">' +
+                '<div id="os-resumo" class="filter-grid" style="margin-bottom:14px"></div>' +
+                '<div class="card mb-3"><div class="card-header">Custo do projeto × orçamento destinado ao Spare</div>' +
+                    '<div class="card-body"><div id="os-chart"></div></div></div>' +
+                '<div class="card" id="os-form-card" style="display:none">' +
+                    '<div class="card-header" id="os-form-titulo">Novo projeto</div>' +
+                    '<div class="card-body"><div id="os-form"></div></div>' +
+                '</div>' +
+                '<div class="card"><div class="card-header" ' +
+                    'style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+                    '<span>Projetos</span><span style="display:flex;gap:8px">' +
+                    (podeEditar ? '<button id="os-ebs" class="btn btn-secondary btn-sm">Atualizar (EBS)</button>' : '') +
+                    (podeCriar ? '<button id="os-novo" class="btn btn-primary btn-sm">Novo projeto</button>' : '') +
+                    '</span></div><div class="card-body">' +
+                    '<div class="form-group" style="max-width:360px">' +
+                        '<label for="os-busca">Buscar (nº, descrição, serviço, categoria)</label>' +
+                        '<input id="os-busca" class="form-control" placeholder="digite e Enter"></div>' +
+                    '<div id="os-msg" class="text-muted mt-2"></div>' +
+                    '<div id="os-lista" class="mt-3"></div>' +
+                '</div></div>' +
+            '</div>' +
+            // ── Aba Itens ──
+            '<div id="ab-itens" style="display:none">' +
+                '<div id="os-itens-resumo" class="filter-grid" style="margin-bottom:14px"></div>' +
+                '<div class="card"><div class="card-header">Itens que consomem os projetos</div>' +
+                    '<div class="card-body">' +
+                        '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">' +
+                            '<div class="form-group" style="margin:0;min-width:200px">' +
+                                '<label for="os-it-status">Situação</label>' +
+                                '<select id="os-it-status" class="form-control"><option value="">Todas</option>' +
+                                STATUS.map(function (s) { return '<option value="' + s.valor + '">' + e(s.rotulo) + '</option>'; }).join('') +
+                                '</select></div>' +
+                            '<div class="form-group" style="margin:0;flex:1;min-width:240px">' +
+                                '<label for="os-it-busca">Buscar (projeto, item EBS, descrição)</label>' +
+                                '<input id="os-it-busca" class="form-control" placeholder="digite para filtrar"></div>' +
+                        '</div>' +
+                        '<div id="os-itens-lista" class="mt-3"></div>' +
+                    '</div></div>' +
+            '</div>';
 
         var elLista = document.getElementById('os-lista');
         var DADOS = { projetos: [], totais: {} };
+        var ITENS = { itens: [], totais_status: {} };
+        var itensCarregados = false;
+
+        // ── Abas ──────────────────────────────────────────────────────
+        function mostrarAba(nome) {
+            document.getElementById('ab-projetos').style.display = nome === 'projetos' ? '' : 'none';
+            document.getElementById('ab-itens').style.display = nome === 'itens' ? '' : 'none';
+            Array.prototype.forEach.call(document.querySelectorAll('.os-aba-btn'), function (b) {
+                var ativo = b.dataset.aba === nome;
+                b.className = 'btn btn-sm os-aba-btn ' + (ativo ? 'btn-primary' : 'btn-secondary');
+            });
+            if (nome === 'itens') carregarItens();
+        }
+        Array.prototype.forEach.call(document.querySelectorAll('.os-aba-btn'), function (b) {
+            b.onclick = function () { mostrarAba(b.dataset.aba); };
+        });
 
         async function carregar() {
             elLista.innerHTML = '<p class="text-muted">Carregando…</p>';
@@ -55,6 +112,7 @@ window.SPARE_MODULES.orcamento_spare = {
             resumo(DADOS.totais || {});
             grafico(DADOS.projetos || []);
             tabela();
+            itensCarregados = false;   // itens podem ter mudado
         }
 
         function resumo(t) {
@@ -106,6 +164,9 @@ window.SPARE_MODULES.orcamento_spare = {
                 '</div>' + linhas;
         }
 
+        var padT = 'padding:8px 14px';
+        var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
+
         function tabela() {
             var termo = (document.getElementById('os-busca').value || '').trim().toLowerCase();
             var linhas = DADOS.projetos.filter(function (p) {
@@ -114,19 +175,20 @@ window.SPARE_MODULES.orcamento_spare = {
                 });
             });
             if (!linhas.length) { elLista.innerHTML = '<p class="text-muted">Nenhum projeto.</p>'; return; }
-            var padT = 'padding:8px 14px';
-            var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
             var corpo = linhas.map(function (p) {
                 var acoes = podeEditar
                     ? '<button class="btn btn-secondary btn-sm os-ed" data-id="' + p.id + '">Editar</button> ' +
                       '<button class="btn btn-secondary btn-sm os-rm" data-id="' + p.id + '">Excluir</button>'
                     : '';
+                var nItens = (p.itens || []).length;
                 return '<tr>' +
                     '<td style="' + padT + ';white-space:nowrap"><b>' + e(p.numero) + '</b></td>' +
                     '<td style="' + padT + '">' + e(p.descricao) + '</td>' +
                     '<td style="' + padT + '">' + e(p.servico) + '</td>' +
                     '<td style="' + padT + '">' + e(p.categoria) + '</td>' +
-                    '<td class="text-center" style="' + padT + '">' + e((p.itens || []).length) + '</td>' +
+                    '<td class="text-center" style="' + padT + '">' +
+                        (nItens ? '<a href="#" class="os-verit" data-num="' + e(p.numero) + '" title="Ver itens deste projeto">' + nItens + '</a>' : '0') +
+                    '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.aprovado_ebs) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.aprovado_spare) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.custo_total) + '</td>' +
@@ -153,8 +215,90 @@ window.SPARE_MODULES.orcamento_spare = {
             Array.prototype.forEach.call(elLista.querySelectorAll('.os-rm'), function (b) {
                 b.onclick = function () { excluir(parseInt(b.dataset.id, 10)); };
             });
+            Array.prototype.forEach.call(elLista.querySelectorAll('.os-verit'), function (a) {
+                a.onclick = function (ev) {
+                    ev.preventDefault();
+                    mostrarAba('itens');
+                    var bi = document.getElementById('os-it-busca');
+                    if (bi) { bi.value = a.dataset.num; }
+                    var st = document.getElementById('os-it-status'); if (st) st.value = '';
+                    tabelaItens();
+                };
+            });
         }
 
+        // ── Aba Itens: consumo por situação ───────────────────────────
+        async function carregarItens() {
+            if (itensCarregados) { tabelaItens(); return; }
+            var box = document.getElementById('os-itens-lista');
+            box.innerHTML = '<p class="text-muted">Carregando…</p>';
+            try { ITENS = await S.api('/orcamento-spare/itens'); }
+            catch (x) { box.innerHTML = '<p class="alert alert-danger">' + e(x.message) + '</p>'; return; }
+            itensCarregados = true;
+            resumoItens();
+            tabelaItens();
+        }
+
+        function resumoItens() {
+            var ts = ITENS.totais_status || {};
+            function card(rot, val, sub, cor) {
+                return '<div class="card" style="padding:10px 14px' + (cor ? ';border-left:3px solid ' + cor : '') + '">' +
+                    '<div class="text-muted" style="font-size:.8em">' + e(rot) + '</div>' +
+                    '<div style="font-weight:600;font-size:1.05em' + (cor ? ';color:' + cor : '') + '">' + val + '</div>' +
+                    '<div class="text-muted" style="font-size:.72em">' + e(sub) + '</div></div>';
+            }
+            var html = STATUS.map(function (s) {
+                var d = ts[s.valor] || { itens: 0, valor: 0 };
+                return card(s.rotulo, money(d.valor), (d.itens || 0) + ' item(ns)', s.cor);
+            }).join('');
+            var totalV = STATUS.reduce(function (a, s) { return a + ((ts[s.valor] || {}).valor || 0); }, 0);
+            html += card('Consumo total', money(totalV), (ITENS.itens || []).length + ' item(ns)');
+            document.getElementById('os-itens-resumo').innerHTML = html;
+        }
+
+        function tabelaItens() {
+            var box = document.getElementById('os-itens-lista');
+            var fSt = (document.getElementById('os-it-status').value || '');
+            var termo = (document.getElementById('os-it-busca').value || '').trim().toLowerCase();
+            var linhas = (ITENS.itens || []).filter(function (it) {
+                if (fSt && it.status !== fSt) return false;
+                if (!termo) return true;
+                return [it.projeto_numero, it.projeto_descricao, it.item_ebs, it.descricao_item].some(function (c) {
+                    return String(c || '').toLowerCase().indexOf(termo) !== -1;
+                });
+            });
+            if (!linhas.length) { box.innerHTML = '<p class="text-muted">Nenhum item para este filtro.</p>'; return; }
+            var totalFiltro = linhas.reduce(function (a, it) { return a + (it.valor_total || 0); }, 0);
+            var corpo = linhas.map(function (it) {
+                return '<tr>' +
+                    '<td style="' + padT + ';white-space:nowrap"><b>' + e(it.projeto_numero) + '</b>' +
+                        (it.projeto_descricao ? '<div class="text-muted" style="font-size:.75em">' + e(it.projeto_descricao) + '</div>' : '') + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + e(it.item_ebs) + '</td>' +
+                    '<td style="' + padT + '">' + e(it.descricao_item) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + (Number(it.quantidade || 0).toLocaleString('pt-BR')) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(it.valor_unitario) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + (Number(it.imposto_percent || 0)).toLocaleString('pt-BR') + '%</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(it.valor_total) + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + statusBadge(it.status) + '</td>' +
+                    '</tr>';
+            }).join('');
+            box.innerHTML =
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:900px">' +
+                '<thead><tr>' +
+                '<th style="' + padT + '">Projeto</th>' +
+                '<th style="' + padT + '">Item EBS</th>' +
+                '<th style="' + padT + '">Descrição do item</th>' +
+                '<th class="text-right" style="' + padN + '">Qtd</th>' +
+                '<th class="text-right" style="' + padN + '">Valor unit.</th>' +
+                '<th class="text-right" style="' + padN + '">% Imp.</th>' +
+                '<th class="text-right" style="' + padN + '">Valor total (c/ imp.)</th>' +
+                '<th style="' + padT + '">Situação</th></tr></thead><tbody>' + corpo + '</tbody>' +
+                '<tfoot><tr><td colspan="6" class="text-right" style="' + padT + '"><b>Total filtrado</b></td>' +
+                    '<td class="text-right" style="' + padN + '"><b>' + money(totalFiltro) + '</b></td><td></td></tr></tfoot>' +
+                '</table></div>';
+        }
+
+        // ── Formulário ────────────────────────────────────────────────
         function campo(rot, ctrl) {
             return '<div class="form-group" style="margin:0">' +
                 (rot ? '<label>' + e(rot) + '</label>' : '') + ctrl + '</div>';
@@ -169,7 +313,6 @@ window.SPARE_MODULES.orcamento_spare = {
                 ';gap:14px;align-items:end">' + html + '</div>';
         }
 
-        // ── Formulário ────────────────────────────────────────────────
         function abrirForm(d) {
             var edit = !!(d && d.id);
             d = d || {};
@@ -192,13 +335,14 @@ window.SPARE_MODULES.orcamento_spare = {
                 '</div>' +
                 secao('Itens') +
                 '<div class="table-responsive"><table class="table table-sm" id="os-itens-tab">' +
-                    '<thead><tr><th style="width:140px">Item EBS</th><th>Descrição do item</th>' +
-                    '<th style="width:100px">Qtd</th><th style="width:130px">Valor unit.</th>' +
-                    '<th style="width:90px">% Imposto</th>' +
+                    '<thead><tr><th style="width:130px">Item EBS</th><th>Descrição do item</th>' +
+                    '<th style="width:90px">Qtd</th><th style="width:120px">Valor unit.</th>' +
+                    '<th style="width:80px">% Imposto</th>' +
+                    '<th style="width:150px">Situação</th>' +
                     '<th style="width:140px" class="text-right">Valor total (c/ imposto)</th>' +
                     (podeEditar ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="5" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
+                    '<tfoot><tr><td colspan="6" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
@@ -225,6 +369,11 @@ window.SPARE_MODULES.orcamento_spare = {
         function addItem(it) {
             it = it || {};
             var ro = podeEditar ? '' : ' readonly';
+            var dis = podeEditar ? '' : ' disabled';
+            var stAtual = it.status || 'orcado';
+            var opts = STATUS.map(function (s) {
+                return '<option value="' + s.valor + '"' + (s.valor === stAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
+            }).join('');
             var tr = document.createElement('tr');
             tr.className = 'os-item';
             tr.innerHTML =
@@ -233,6 +382,7 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<td><input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '"' + ro + '></td>' +
+                '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
             document.getElementById('os-itens').appendChild(tr);
@@ -271,7 +421,8 @@ window.SPARE_MODULES.orcamento_spare = {
                     descricao_item: tr.querySelector('.os-i-desc').value.trim(),
                     quantidade: parseFloat(tr.querySelector('.os-i-qtd').value) || 0,
                     valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
-                    imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0
+                    imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0,
+                    status: tr.querySelector('.os-i-st').value || 'orcado'
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.imposto_percent) itens.push(o);
             });
@@ -321,6 +472,10 @@ window.SPARE_MODULES.orcamento_spare = {
         document.getElementById('os-busca').addEventListener('keydown', function (ev) {
             if (ev.key === 'Enter') tabela();
         });
+        document.getElementById('os-it-status').onchange = tabelaItens;
+        document.getElementById('os-it-busca').addEventListener('input', tabelaItens);
+
+        mostrarAba('projetos');
         carregar();
     }
 };
