@@ -44,6 +44,9 @@ _init_lock = threading.Lock()
 STATUS_ITEM = ("orcado", "andamento", "executado")
 STATUS_ROTULO = {"orcado": "Orçado/Previsto", "andamento": "Em andamento", "executado": "Executado"}
 
+# Unidades de negócio (BU). Acordos de compra são por BU.
+BUS = ("Renner", "Camicado", "Youcom", "Renner Argentina", "Renner Uruguai")
+
 
 def get_engine():
     global _engine
@@ -100,6 +103,7 @@ class Projeto(Base):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     numero: Mapped[str] = mapped_column(String(40), default="", index=True)   # ID do projeto (EBS)
     descricao: Mapped[str] = mapped_column(String(200), default="")
+    bu: Mapped[str] = mapped_column(String(40), default="")   # unidade de negócio
     servico: Mapped[str] = mapped_column(String(160), default="")
     categoria: Mapped[str] = mapped_column(String(80), default="")
     # Total aprovado do projeto no EBS (puxado pelo número) e a parcela que é do Spare.
@@ -125,6 +129,7 @@ class Projeto(Base):
             "id": self.id,
             "numero": self.numero or "",
             "descricao": self.descricao or "",
+            "bu": self.bu or "",
             "servico": self.servico or "",
             "categoria": self.categoria or "",
             "aprovado_ebs": _f(self.aprovado_ebs),
@@ -194,6 +199,20 @@ def _migrar_colunas() -> None:
     """Adiciona colunas novas em bancos já criados (SQLite não faz no create_all)."""
     from sqlalchemy import inspect, text
     eng = get_engine()
+
+    def _add(tabela: str, coluna: str, ddl: str) -> None:
+        try:
+            existentes = {c["name"] for c in inspect(eng).get_columns(tabela)}
+        except Exception:  # noqa: BLE001 — tabela ainda não existe: create_all cuida
+            return
+        if coluna not in existentes:
+            with eng.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {ddl}"))
+            _log.info("%s: coluna %s adicionada", tabela, coluna)
+
+    _add("orc_spare_projeto", "bu", "bu VARCHAR(40) DEFAULT ''")
+    _add("orc_spare_catalogo", "acordo_bu", "acordo_bu VARCHAR(40) DEFAULT ''")
+
     try:
         cols = {c["name"] for c in inspect(eng).get_columns("orc_spare_item")}
     except Exception:  # noqa: BLE001 — tabela ainda não existe: create_all cuida
@@ -239,6 +258,7 @@ class Catalogo(Base):
     nt: Mapped[bool] = mapped_column(Boolean, default=False)   # não tributado
     acordo: Mapped[bool] = mapped_column(Boolean, default=False)
     acordo_numero: Mapped[str] = mapped_column(String(60), default="")
+    acordo_bu: Mapped[str] = mapped_column(String(40), default="")   # BU do acordo
     preco_acordo: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
@@ -256,6 +276,7 @@ class Catalogo(Base):
             "imposto_percent": (0.0 if self.nt else (_f(self.aliquota) if self.aliquota is not None else 0.0)),
             "acordo": bool(self.acordo),
             "acordo_numero": self.acordo_numero or "",
+            "acordo_bu": self.acordo_bu or "",
             "preco_acordo": _f(self.preco_acordo),
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
             "atualizado_por": self.atualizado_por or "",
@@ -316,16 +337,26 @@ def listar_catalogo() -> list[dict]:
         return [c.to_dict() for c in rows]
 
 
-def buscar_catalogo(item_ebs: str = "") -> dict | None:
-    """Item do catálogo pelo Item EBS (para preencher a linha do projeto)."""
+def buscar_catalogo(item_ebs: str = "", bu: str = "") -> dict | None:
+    """Item do catálogo pelo Item EBS (para preencher a linha do projeto).
+
+    Como o acordo é por BU, quando a BU do projeto é informada, prefere o
+    cadastro de acordo daquela BU; senão, o mais recente."""
     item_ebs = (item_ebs or "").strip()
+    bu = (bu or "").strip()
     if not item_ebs:
         return None
     with SessionLocal() as s:
-        row = s.scalars(
+        rows = s.scalars(
             select(Catalogo).where(func.lower(Catalogo.item_ebs) == item_ebs.lower())
-            .order_by(Catalogo.id.desc())).first()
-        return row.to_dict() if row else None
+            .order_by(Catalogo.id.desc())).all()
+        if not rows:
+            return None
+        if bu:
+            for r in rows:
+                if r.acordo and (r.acordo_bu or "").strip().lower() == bu.lower():
+                    return r.to_dict()
+        return rows[0].to_dict()
 
 
 def buscar_item_acordo(item_ebs: str = "", acordo_numero: str = "") -> dict | None:
