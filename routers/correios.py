@@ -82,13 +82,27 @@ def _secret(nome: str, default: str = "") -> str:
     return os.environ.get(nome, default)
 
 
+def _limpo(nome: str, default: str = "") -> str:
+    """Lê a variável do ambiente e descarta placeholder não substituído.
+
+    Se o arquivo de environment ainda tiver algo como `@cofre:CORREIOS_CHAVE@`
+    (placeholder que nunca foi trocado pelo valor real), NÃO usamos esse texto
+    como credencial — vale o mesmo que estar em branco, para o erro sair claro
+    ("credencial ausente") em vez de autenticar com lixo.
+    """
+    v = (os.environ.get(nome, default) or "").strip()
+    if v.startswith("@") and v.endswith("@"):
+        return default
+    return v
+
+
 def _correios_creds():
     """Credenciais dos Correios do os.environ, no momento do uso."""
-    usuario = os.environ.get("CORREIOS_USUARIO", "")
-    chave = os.environ.get("CORREIOS_CHAVE", "")
-    cartoes = [c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()]
-    dr = os.environ.get("CORREIOS_DR", "64")
-    contrato = os.environ.get("CORREIOS_CONTRATO", "")
+    usuario = _limpo("CORREIOS_USUARIO")
+    chave = _limpo("CORREIOS_CHAVE")
+    cartoes = [c.strip() for c in _limpo("CORREIOS_CARTOES").split(",") if c.strip()]
+    dr = _limpo("CORREIOS_DR", "64") or "64"
+    contrato = _limpo("CORREIOS_CONTRATO")
     return usuario, chave, cartoes, dr, contrato
 
 
