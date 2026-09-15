@@ -167,6 +167,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Agendamentos de Fornecedores (menu Entrada) — banco próprio ─────
+    try:
+        import db.agendamentos_forn as _db_agf
+        _db_agf.init_db()
+        from routers.agendamentos_forn import router as agendamentos_forn_router
+        app.include_router(agendamentos_forn_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("agendamentos_forn").error(
+            "Módulo Agendamentos Forn. NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Cofre: o serviço enxerga os segredos? — só diagnóstico ──────────
     try:
         from routers.cofre import router as cofre_router

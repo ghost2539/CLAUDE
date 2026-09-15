@@ -238,6 +238,11 @@ class Settings:
         "ORCAMENTO_MANUTENCAO_DATABASE_URL",
         _sqlite("orcamento_manutencao"),
     )
+    # Agendamentos de Fornecedores (menu Entrada) — banco próprio.
+    AGENDAMENTOS_FORN_DATABASE_URL: str = os.getenv(
+        "AGENDAMENTOS_FORN_DATABASE_URL",
+        _sqlite("agendamentos_forn"),
+    )
 
     # ── Obsolescência do parque de coletores (/obsolescencia) ───────────
     # Banco PRÓPRIO; contrato em docs/MDM_OBSOLESCENCIA.md.
@@ -345,7 +350,8 @@ class Settings:
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao"
+        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
+        "agendamentos_forn", "internalizacao"
     ]
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"

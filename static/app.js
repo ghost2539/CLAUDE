@@ -38,6 +38,8 @@
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
+        agendamentos_forn: 'Agendamentos Forn.',
+        internalizacao: 'Internalização',
         status:         'Status',
         parametros:     'Parâmetros'
     };
