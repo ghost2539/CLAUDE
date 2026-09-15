@@ -114,32 +114,34 @@ _MAX_PDF = 15 * 1024 * 1024
 
 @router.post("/extrair-nf")
 async def extrair_nf(req: Request, arquivo: UploadFile = File(...)):
-    """Lê um PDF de DANFE EM MEMÓRIA e devolve os campos para pré-preencher.
+    """Lê a NF EM MEMÓRIA (PDF/DANFE ou XML da NF-e) e devolve os campos para
+    pré-preencher.
 
-    O arquivo NUNCA é gravado: os bytes entram, os campos saem, e o PDF é
-    descartado. Serve só para adiantar o cadastro — o operador confere tudo.
+    O arquivo NUNCA é gravado: os bytes entram, os campos saem, e o upload é
+    descartado. O XML é a fonte exata; o PDF é heurístico — o operador confere.
     """
     _exigir(req, "create")
     nome = (arquivo.filename or "").lower()
-    if not nome.endswith(".pdf"):
-        raise HTTPException(422, "Envie um arquivo PDF da NF (DANFE).")
+    if not (nome.endswith(".pdf") or nome.endswith(".xml")):
+        raise HTTPException(422, "Envie o PDF (DANFE) ou o XML da NF-e.")
     dados = await arquivo.read()
     if not dados:
         raise HTTPException(422, "Arquivo vazio.")
     if len(dados) > _MAX_PDF:
-        raise HTTPException(413, "PDF grande demais (máx. 15 MB).")
+        raise HTTPException(413, "Arquivo grande demais (máx. 15 MB).")
     try:
-        from core.nf_pdf import extrair_campos, SemBibliotecaPDF
+        from core.nf_pdf import extrair, SemBibliotecaPDF
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(503, f"Leitor de PDF indisponível: {exc}") from exc
+        raise HTTPException(503, f"Leitor de NF indisponível: {exc}") from exc
     try:
-        campos = extrair_campos(dados)
+        campos = extrair(dados)
     except SemBibliotecaPDF as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         _log.warning("Falha ao ler PDF da NF: %s", exc)
-        raise HTTPException(422, "Não foi possível ler este PDF. Confira se é "
-                                 "o DANFE em PDF (texto, não imagem).") from exc
+        raise HTTPException(422, "Não foi possível ler este arquivo. Envie o "
+                                 "DANFE em PDF (texto, não imagem) ou o XML da "
+                                 "NF-e.") from exc
     finally:
         # Sem persistência: garante que nada do upload fica pendurado.
         try:

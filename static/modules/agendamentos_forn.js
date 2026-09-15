@@ -60,11 +60,11 @@ window.SPARE_MODULES.agendamentos_forn = {
             host.innerHTML =
                 '<div class="card" style="background:var(--bg-input);margin-bottom:14px">' +
                   '<div class="card-body">' +
-                  '<label style="display:block;margin-bottom:6px"><b>Importar da NF (PDF)</b> ' +
-                  '<span class="text-muted">— preenche NF, PO e itens; confira antes de salvar. O PDF não é salvo no servidor.</span></label>' +
+                  '<label style="display:block;margin-bottom:6px"><b>Importar da NF (PDF ou XML)</b> ' +
+                  '<span class="text-muted">— preenche NF, PO e itens; confira antes de salvar. O arquivo não é salvo no servidor. O XML da NF-e é a fonte exata.</span></label>' +
                   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-                    '<input type="file" id="agf-pdf" accept="application/pdf,.pdf" class="form-control" style="max-width:360px">' +
-                    '<button type="button" id="agf-pdf-btn" class="btn btn-secondary btn-sm">Ler PDF</button>' +
+                    '<input type="file" id="agf-pdf" accept="application/pdf,.pdf,text/xml,application/xml,.xml" class="form-control" style="max-width:360px">' +
+                    '<button type="button" id="agf-pdf-btn" class="btn btn-secondary btn-sm">Ler NF</button>' +
                     '<span id="agf-pdf-msg" class="text-muted"></span>' +
                   '</div></div>' +
                 '</div>' +
