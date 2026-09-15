@@ -179,6 +179,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Internalização (menu Entrada) — banco próprio ───────────────────
+    try:
+        import db.internalizacao as _db_int
+        _db_int.init_db()
+        from routers.internalizacao import router as internalizacao_router
+        app.include_router(internalizacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("internalizacao").error(
+            "Módulo Internalização NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Cofre: o serviço enxerga os segredos? — só diagnóstico ──────────
     try:
         from routers.cofre import router as cofre_router

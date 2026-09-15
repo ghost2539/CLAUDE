@@ -243,6 +243,11 @@ class Settings:
         "AGENDAMENTOS_FORN_DATABASE_URL",
         _sqlite("agendamentos_forn"),
     )
+    # Internalização (menu Entrada) — banco próprio.
+    INTERNALIZACAO_DATABASE_URL: str = os.getenv(
+        "INTERNALIZACAO_DATABASE_URL",
+        _sqlite("internalizacao"),
+    )
 
     # ── Obsolescência do parque de coletores (/obsolescencia) ───────────
     # Banco PRÓPRIO; contrato em docs/MDM_OBSOLESCENCIA.md.
