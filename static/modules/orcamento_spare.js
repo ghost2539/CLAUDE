@@ -114,30 +114,39 @@ window.SPARE_MODULES.orcamento_spare = {
                 });
             });
             if (!linhas.length) { elLista.innerHTML = '<p class="text-muted">Nenhum projeto.</p>'; return; }
+            var padT = 'padding:8px 14px';
+            var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
             var corpo = linhas.map(function (p) {
                 var acoes = podeEditar
                     ? '<button class="btn btn-secondary btn-sm os-ed" data-id="' + p.id + '">Editar</button> ' +
                       '<button class="btn btn-secondary btn-sm os-rm" data-id="' + p.id + '">Excluir</button>'
                     : '';
                 return '<tr>' +
-                    '<td><b>' + e(p.numero) + '</b></td>' +
-                    '<td>' + e(p.descricao) + '</td>' +
-                    '<td>' + e(p.servico) + '</td>' +
-                    '<td>' + e(p.categoria) + '</td>' +
-                    '<td class="text-center">' + e((p.itens || []).length) + '</td>' +
-                    '<td class="text-right">' + money(p.aprovado_ebs) + '</td>' +
-                    '<td class="text-right">' + money(p.aprovado_spare) + '</td>' +
-                    '<td class="text-right">' + money(p.custo_total) + '</td>' +
-                    '<td class="text-right" style="color:' + (p.saldo_spare < 0 ? '#dc2626' : '#16a34a') + '">' + money(p.saldo_spare) + '</td>' +
-                    '<td style="white-space:nowrap">' + acoes + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap"><b>' + e(p.numero) + '</b></td>' +
+                    '<td style="' + padT + '">' + e(p.descricao) + '</td>' +
+                    '<td style="' + padT + '">' + e(p.servico) + '</td>' +
+                    '<td style="' + padT + '">' + e(p.categoria) + '</td>' +
+                    '<td class="text-center" style="' + padT + '">' + e((p.itens || []).length) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(p.aprovado_ebs) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(p.aprovado_spare) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(p.custo_total) + '</td>' +
+                    '<td class="text-right" style="' + padN + ';color:' + (p.saldo_spare < 0 ? '#dc2626' : '#16a34a') + '">' + money(p.saldo_spare) + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + acoes + '</td>' +
                     '</tr>';
             }).join('');
             elLista.innerHTML =
-                '<div class="table-responsive"><table class="table table-sm">' +
-                '<thead><tr><th>Nº projeto</th><th>Descrição</th><th>Serviço</th><th>Categoria</th>' +
-                '<th class="text-center">Itens</th><th class="text-right">Aprovado (EBS)</th>' +
-                '<th class="text-right">Destinado Spare</th><th class="text-right">Custo total</th>' +
-                '<th class="text-right">Saldo</th><th></th></tr></thead><tbody>' + corpo + '</tbody></table></div>';
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:960px">' +
+                '<thead><tr>' +
+                '<th style="' + padT + '">Nº projeto</th>' +
+                '<th style="' + padT + '">Descrição</th>' +
+                '<th style="' + padT + '">Serviço</th>' +
+                '<th style="' + padT + '">Categoria</th>' +
+                '<th class="text-center" style="' + padT + '">Itens</th>' +
+                '<th class="text-right" style="' + padN + '">Aprovado (EBS)</th>' +
+                '<th class="text-right" style="' + padN + '">Destinado Spare</th>' +
+                '<th class="text-right" style="' + padN + '">Custo total</th>' +
+                '<th class="text-right" style="' + padN + '">Saldo</th>' +
+                '<th style="' + padT + '"></th></tr></thead><tbody>' + corpo + '</tbody></table></div>';
             Array.prototype.forEach.call(elLista.querySelectorAll('.os-ed'), function (b) {
                 b.onclick = function () { abrirForm(DADOS.projetos.filter(function (p) { return p.id == b.dataset.id; })[0]); };
             });
