@@ -74,23 +74,23 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Segredo pelo caminho único do projeto (`core.cofre`): cofre
-    corporativo, cofre local cifrado e, por último, variável de ambiente.
+    """Credencial dos Correios no momento do uso.
 
-    As credenciais dos Correios NÃO devem ficar em variável de ambiente nem
-    em arquivo de configuração — só no cofre, que apenas a aplicação lê.
+    Ordem: `os.environ` PRIMEIRO (é como a produção entrega — o serviço já
+    sobe com CORREIOS_* no ambiente) e, só se faltar, o cofre do projeto
+    (corporativo → local). Ler o ambiente antes evita que uma entrada antiga
+    no cofre local sombreie a credencial correta que veio no start.
     """
+    v = os.environ.get(nome, "")
+    if v:
+        return v
     from core.cofre import obter
     return obter(nome, default)
 
 
 def _correios_creds():
     """Retorna as credenciais dos Correios no momento do uso (não guarda em
-    global), buscando do cofre a cada chamada de autenticação."""
-    # Chaves do cofre corporativo (loader oficial: `s(chave)`):
-    #     s('CORREIOS_USUARIO')
-    #     s('CORREIOS_CHAVE')
-    #     s('CORREIOS_CARTOES').split(',')
+    global), buscando a cada chamada de autenticação."""
     usuario = _secret("CORREIOS_USUARIO")
     chave = _secret("CORREIOS_CHAVE")
     cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
