@@ -58,6 +58,16 @@ window.SPARE_MODULES.agendamentos_forn = {
             var d = dado || {};
             var host = document.getElementById('agf-form');
             host.innerHTML =
+                '<div class="card" style="background:var(--bg-input);margin-bottom:14px">' +
+                  '<div class="card-body">' +
+                  '<label style="display:block;margin-bottom:6px"><b>Importar da NF (PDF)</b> ' +
+                  '<span class="text-muted">— preenche NF, PO e itens; confira antes de salvar. O PDF não é salvo no servidor.</span></label>' +
+                  '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+                    '<input type="file" id="agf-pdf" accept="application/pdf,.pdf" class="form-control" style="max-width:360px">' +
+                    '<button type="button" id="agf-pdf-btn" class="btn btn-secondary btn-sm">Ler PDF</button>' +
+                    '<span id="agf-pdf-msg" class="text-muted"></span>' +
+                  '</div></div>' +
+                '</div>' +
                 '<div class="form-grid cols-2">' +
                     campo('BU', '<select id="agf-bu" class="form-control">' + opcoesSelect(OPC.bus, d.bu, true) + '</select>') +
                     campo('Estoque destino *', '<select id="agf-destino" class="form-control">' + opcoesSelect(OPC.destinos, d.estoque_destino, true) + '</select>') +
@@ -83,7 +93,35 @@ window.SPARE_MODULES.agendamentos_forn = {
             document.getElementById('agf-add-equi').onclick = function () { addEqui(); };
             document.getElementById('agf-cancelar').onclick = fecharForm;
             document.getElementById('agf-salvar').onclick = function () { salvar(edit ? d.id : 0); };
+            document.getElementById('agf-pdf-btn').onclick = importarPdf;
             host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        async function importarPdf() {
+            var inp = document.getElementById('agf-pdf');
+            var msg = document.getElementById('agf-pdf-msg');
+            if (!inp.files || !inp.files[0]) { msg.textContent = 'Escolha um PDF primeiro.'; return; }
+            var fd = new FormData();
+            fd.append('arquivo', inp.files[0]);
+            msg.textContent = 'Lendo…';
+            try {
+                // multipart: sem Content-Type manual (o browser põe o boundary).
+                var d = await S.api('/agendamentos-forn/extrair-nf', { method: 'POST', body: fd });
+                if (d.nf) document.getElementById('agf-nf').value = d.nf;
+                if (d.po) document.getElementById('agf-po').value = d.po;
+                if (Array.isArray(d.itens) && d.itens.length) {
+                    document.getElementById('agf-equis').innerHTML = '';
+                    d.itens.forEach(addEqui);
+                }
+                var partes = [];
+                if (d.nf) partes.push('NF ' + d.nf);
+                if (d.po) partes.push('PO ' + d.po);
+                partes.push((d.itens ? d.itens.length : 0) + ' item(ns)');
+                msg.textContent = 'Lido: ' + partes.join(', ') + '. Confira e complete os campos.';
+                if (!d.confiavel) msg.textContent += ' (chave da NF não encontrada — revise com atenção)';
+            } catch (x) {
+                msg.textContent = x.message;
+            }
         }
 
         function campo(rotulo, controle) {

@@ -18,3 +18,5 @@ pydantic>=2.7,<3
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 slowapi>=0.1.9
+# Leitura de PDF (extração de campos da NF em Agendamentos Forn.)
+pypdf>=4.0
