@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator
 
 import db.orcamento_spare as db
+from core import tipi
 from core.security import check_rate_limit, client_ip, require_permission
 
 _log = logging.getLogger("orcamento_spare")
@@ -41,8 +42,9 @@ class ItemIn(BaseModel):
     status: str = "orcado"
     acordo: bool = False
     acordo_numero: str = ""
+    ncm: str = ""
 
-    @field_validator("item_ebs", "descricao_item", "acordo_numero")
+    @field_validator("item_ebs", "descricao_item", "acordo_numero", "ncm")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -102,14 +104,61 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
     p.itens.clear()
     for i, it in enumerate(body.itens):
         if not (it.item_ebs or it.descricao_item or it.quantidade
-                or it.valor_unitario or it.imposto_percent):
+                or it.valor_unitario or it.imposto_percent or it.ncm):
             continue  # linha em branco: ignora
+        # Imposto vem do NCM (TIPI). Sem NCM válido, usa o informado.
+        info = tipi.consultar(it.ncm) if it.ncm else None
+        imp = info["aliquota"] if (info and info["encontrado"] and info["aliquota"] is not None) else it.imposto_percent
+        ncm_fmt = info["ncm"] if info else (it.ncm or "")
+        # Sem acordo, o preço é obrigatório.
+        if not it.acordo and float(it.valor_unitario or 0) <= 0:
+            nome = it.item_ebs or it.descricao_item or ("item " + str(i + 1))
+            raise HTTPException(422, f"Informe o preço do item '{nome}' (não é de acordo de compras).")
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
-            imposto_percent=it.imposto_percent, status=it.status,
+            imposto_percent=(imp or 0), status=it.status,
             acordo=bool(it.acordo), acordo_numero=(it.acordo_numero if it.acordo else ""),
-            ordem=i))
+            ncm=ncm_fmt, ordem=i))
+
+
+# ── Catálogo de itens (cadastro) ───────────────────────────────────────────
+class CatalogoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    item_ebs: str = ""
+    descricao_item: str = ""
+    ncm: str = ""
+    acordo: bool = False
+    acordo_numero: str = ""
+    preco_acordo: float = 0
+
+    @field_validator("item_ebs", "descricao_item", "acordo_numero")
+    @classmethod
+    def _txt(cls, v: str) -> str:
+        return (v or "").strip()[:200]
+
+    @field_validator("preco_acordo")
+    @classmethod
+    def _preco(cls, v):
+        try:
+            v = float(v or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Preço de acordo inválido.")
+        if v < 0:
+            raise ValueError("O preço de acordo não pode ser negativo.")
+        return v
+
+
+def _aplica_catalogo(c: "db.Catalogo", body: CatalogoIn) -> None:
+    info = tipi.consultar(body.ncm)
+    c.item_ebs = body.item_ebs
+    c.descricao_item = body.descricao_item
+    c.ncm = info["ncm"]
+    c.aliquota = (None if info["aliquota"] is None else info["aliquota"])
+    c.nt = bool(info["nt"])
+    c.acordo = bool(body.acordo)
+    c.acordo_numero = body.acordo_numero if body.acordo else ""
+    c.preco_acordo = body.preco_acordo if body.acordo else 0
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
@@ -117,6 +166,67 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
 def listar(req: Request):
     _exigir(req, "view")
     return {"projetos": db.listar_projetos(), "totais": db.totais()}
+
+
+@router.get("/ncm")
+def consultar_ncm(req: Request, codigo: str = ""):
+    """Formata o NCM (XXXX.XX.XX) e devolve a alíquota da TIPI (nt = não tributado)."""
+    _exigir(req, "view")
+    return tipi.consultar(codigo)
+
+
+@router.get("/catalogo")
+def catalogo_listar(req: Request):
+    _exigir(req, "view")
+    return {"itens": db.listar_catalogo()}
+
+
+@router.get("/catalogo/item")
+def catalogo_item(req: Request, item_ebs: str = ""):
+    """Item do catálogo pelo Item EBS — para preencher a linha do projeto."""
+    _exigir(req, "view")
+    return db.buscar_catalogo(item_ebs) or {}
+
+
+@router.post("/catalogo", status_code=201)
+def catalogo_criar(body: CatalogoIn, req: Request):
+    sd = _exigir(req, "create")
+    check_rate_limit(req, "api")
+    if not body.item_ebs:
+        raise HTTPException(422, "Informe o Item EBS.")
+    with db.SessionLocal.begin() as s:
+        c = db.Catalogo(atualizado_por=sd.get("username", ""))
+        _aplica_catalogo(c, body)
+        s.add(c)
+        s.flush()
+        return c.to_dict()
+
+
+@router.put("/catalogo/{cid}")
+def catalogo_atualizar(cid: int, body: CatalogoIn, req: Request):
+    sd = _exigir(req, "edit")
+    check_rate_limit(req, "api")
+    if not body.item_ebs:
+        raise HTTPException(422, "Informe o Item EBS.")
+    with db.SessionLocal.begin() as s:
+        c = s.get(db.Catalogo, cid)
+        if not c:
+            raise HTTPException(404, "Item não encontrado.")
+        _aplica_catalogo(c, body)
+        c.atualizado_por = sd.get("username", "")
+        return c.to_dict()
+
+
+@router.delete("/catalogo/{cid}")
+def catalogo_excluir(cid: int, req: Request):
+    _exigir(req, "edit")
+    check_rate_limit(req, "api")
+    with db.SessionLocal.begin() as s:
+        c = s.get(db.Catalogo, cid)
+        if not c:
+            raise HTTPException(404, "Item não encontrado.")
+        s.delete(c)
+    return {"ok": True}
 
 
 @router.get("/item-acordo")

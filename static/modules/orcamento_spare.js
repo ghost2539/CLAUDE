@@ -1,11 +1,10 @@
 /* ================================================================
    Módulo: CAPEX Spare — Controle de Orçamento do SPARE
-   Aba Projetos: projetos (nº EBS, descrição, serviço, categoria) com
-   LINHAS DE ITEM (Item EBS, descrição, qtd, valor unit., % imposto,
-   valor total = qtd×unit×(1+imposto/100)). Aprovado puxado do EBS pelo
-   nº; parcela destinada ao Spare informada à mão. Gráfico custo × Spare.
-   Aba Itens: todos os itens que consomem os projetos, por situação
-   (orçado/previsto, em andamento, executado).
+   Aba Projetos: projetos com LINHAS DE ITEM (Item EBS, descrição, NCM,
+   qtd, valor unit., % imposto do NCM/TIPI; total = qtd×unit×(1+imposto/100)).
+   Aba Itens: Cadastro de itens (Item EBS, descrição, acordo, NCM→alíquota
+   da TIPI, preço de acordo) e Consumo por situação (orçado/andamento/exec).
+   Regra: item sem acordo exige preço ao lançar; com acordo, puxa do cadastro.
    Banco próprio (/api/orcamento-spare).
    ================================================================ */
 window.SPARE_MODULES = window.SPARE_MODULES || {};
@@ -32,18 +31,25 @@ window.SPARE_MODULES.orcamento_spare = {
             return '<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:.72em;' +
                 'background:' + s.cor + '22;color:' + s.cor + ';border:1px solid ' + s.cor + '66">' + e(s.rotulo) + '</span>';
         }
-
         function money(v) {
             v = Number(v || 0);
             try { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
             catch (x) { return 'R$ ' + v.toFixed(2); }
         }
+        function impostoTxt(it) {
+            if (it.nt) return 'NT';
+            var a = (it.imposto_percent != null ? it.imposto_percent : it.aliquota);
+            return (Number(a || 0)).toLocaleString('pt-BR') + '%';
+        }
+
+        var padT = 'padding:8px 14px';
+        var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
 
         container.innerHTML =
             '<h1 class="page-title">CAPEX Spare</h1>' +
             '<div id="os-abas" style="display:flex;gap:6px;border-bottom:1px solid #33415533;margin-bottom:16px">' +
                 '<button class="btn btn-sm os-aba-btn" data-aba="projetos">Projetos</button>' +
-                '<button class="btn btn-sm os-aba-btn" data-aba="itens">Itens (consumo)</button>' +
+                '<button class="btn btn-sm os-aba-btn" data-aba="itens">Itens</button>' +
             '</div>' +
             // ── Aba Projetos ──
             '<div id="ab-projetos">' +
@@ -67,44 +73,79 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<div id="os-lista" class="mt-3"></div>' +
                 '</div></div>' +
             '</div>' +
-            // ── Aba Itens ──
+            // ── Aba Itens (sub-abas Cadastro / Consumo) ──
             '<div id="ab-itens" style="display:none">' +
-                '<div id="os-itens-resumo" class="filter-grid" style="margin-bottom:14px"></div>' +
-                '<div class="card"><div class="card-header">Itens que consomem os projetos</div>' +
-                    '<div class="card-body">' +
-                        '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">' +
-                            '<div class="form-group" style="margin:0;min-width:200px">' +
-                                '<label for="os-it-status">Situação</label>' +
-                                '<select id="os-it-status" class="form-control"><option value="">Todas</option>' +
-                                STATUS.map(function (s) { return '<option value="' + s.valor + '">' + e(s.rotulo) + '</option>'; }).join('') +
-                                '</select></div>' +
-                            '<div class="form-group" style="margin:0;flex:1;min-width:240px">' +
-                                '<label for="os-it-busca">Buscar (projeto, item EBS, descrição)</label>' +
-                                '<input id="os-it-busca" class="form-control" placeholder="digite para filtrar"></div>' +
-                        '</div>' +
-                        '<div id="os-itens-lista" class="mt-3"></div>' +
+                '<div style="display:flex;gap:6px;margin-bottom:14px">' +
+                    '<button class="btn btn-sm os-sub-btn" data-sub="cadastro">Cadastro de itens</button>' +
+                    '<button class="btn btn-sm os-sub-btn" data-sub="consumo">Consumo (por situação)</button>' +
+                '</div>' +
+                // Sub-aba Cadastro
+                '<div id="sub-cadastro">' +
+                    '<div class="card" id="cat-form-card" style="display:none">' +
+                        '<div class="card-header" id="cat-form-titulo">Novo item</div>' +
+                        '<div class="card-body"><div id="cat-form"></div></div></div>' +
+                    '<div class="card"><div class="card-header" ' +
+                        'style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+                        '<span>Cadastro de itens</span>' +
+                        (podeCriar ? '<button id="cat-novo" class="btn btn-primary btn-sm">Novo item</button>' : '') +
+                        '</div><div class="card-body">' +
+                        '<div class="form-group" style="max-width:360px"><label for="cat-busca">Buscar (Item EBS, descrição, NCM)</label>' +
+                            '<input id="cat-busca" class="form-control" placeholder="digite para filtrar"></div>' +
+                        '<div id="cat-lista" class="mt-3"></div>' +
                     '</div></div>' +
+                '</div>' +
+                // Sub-aba Consumo
+                '<div id="sub-consumo" style="display:none">' +
+                    '<div id="os-itens-resumo" class="filter-grid" style="margin-bottom:14px"></div>' +
+                    '<div class="card"><div class="card-header">Itens que consomem os projetos</div>' +
+                        '<div class="card-body">' +
+                            '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">' +
+                                '<div class="form-group" style="margin:0;min-width:200px"><label for="os-it-status">Situação</label>' +
+                                    '<select id="os-it-status" class="form-control"><option value="">Todas</option>' +
+                                    STATUS.map(function (s) { return '<option value="' + s.valor + '">' + e(s.rotulo) + '</option>'; }).join('') +
+                                    '</select></div>' +
+                                '<div class="form-group" style="margin:0;flex:1;min-width:240px"><label for="os-it-busca">Buscar (projeto, item EBS, descrição)</label>' +
+                                    '<input id="os-it-busca" class="form-control" placeholder="digite para filtrar"></div>' +
+                            '</div>' +
+                            '<div id="os-itens-lista" class="mt-3"></div>' +
+                        '</div></div>' +
+                '</div>' +
             '</div>';
 
         var elLista = document.getElementById('os-lista');
         var DADOS = { projetos: [], totais: {} };
         var ITENS = { itens: [], totais_status: {} };
-        var itensCarregados = false;
+        var CAT = { itens: [] };
+        var consumoCarregado = false, catCarregado = false;
 
-        // ── Abas ──────────────────────────────────────────────────────
+        // ── Abas / sub-abas ───────────────────────────────────────────
         function mostrarAba(nome) {
             document.getElementById('ab-projetos').style.display = nome === 'projetos' ? '' : 'none';
             document.getElementById('ab-itens').style.display = nome === 'itens' ? '' : 'none';
             Array.prototype.forEach.call(document.querySelectorAll('.os-aba-btn'), function (b) {
-                var ativo = b.dataset.aba === nome;
-                b.className = 'btn btn-sm os-aba-btn ' + (ativo ? 'btn-primary' : 'btn-secondary');
+                b.className = 'btn btn-sm os-aba-btn ' + (b.dataset.aba === nome ? 'btn-primary' : 'btn-secondary');
             });
-            if (nome === 'itens') carregarItens();
+            if (nome === 'itens') mostrarSub(subAtual);
+        }
+        var subAtual = 'cadastro';
+        function mostrarSub(nome) {
+            subAtual = nome;
+            document.getElementById('sub-cadastro').style.display = nome === 'cadastro' ? '' : 'none';
+            document.getElementById('sub-consumo').style.display = nome === 'consumo' ? '' : 'none';
+            Array.prototype.forEach.call(document.querySelectorAll('.os-sub-btn'), function (b) {
+                b.className = 'btn btn-sm os-sub-btn ' + (b.dataset.sub === nome ? 'btn-primary' : 'btn-secondary');
+            });
+            if (nome === 'cadastro') carregarCatalogo();
+            else carregarConsumo();
         }
         Array.prototype.forEach.call(document.querySelectorAll('.os-aba-btn'), function (b) {
             b.onclick = function () { mostrarAba(b.dataset.aba); };
         });
+        Array.prototype.forEach.call(document.querySelectorAll('.os-sub-btn'), function (b) {
+            b.onclick = function () { mostrarSub(b.dataset.sub); };
+        });
 
+        // ── Projetos ──────────────────────────────────────────────────
         async function carregar() {
             elLista.innerHTML = '<p class="text-muted">Carregando…</p>';
             try { DADOS = await S.api('/orcamento-spare/projetos'); }
@@ -112,7 +153,7 @@ window.SPARE_MODULES.orcamento_spare = {
             resumo(DADOS.totais || {});
             grafico(DADOS.projetos || []);
             tabela();
-            itensCarregados = false;   // itens podem ter mudado
+            consumoCarregado = false;
         }
 
         function resumo(t) {
@@ -130,22 +171,18 @@ window.SPARE_MODULES.orcamento_spare = {
                 card('Saldo Spare', money(saldo), saldo < 0 ? '#dc2626' : '#16a34a');
         }
 
-        // ── Gráfico: custo × destinado ao Spare, por projeto (barras) ──
         function grafico(projetos) {
             var box = document.getElementById('os-chart');
             var comDado = projetos.filter(function (p) { return (p.custo_total || 0) > 0 || (p.aprovado_spare || 0) > 0; });
             if (!comDado.length) { box.innerHTML = '<p class="text-muted" style="margin:0">Sem dados para o gráfico ainda.</p>'; return; }
-            var max = Math.max.apply(null, comDado.map(function (p) {
-                return Math.max(p.custo_total || 0, p.aprovado_spare || 0);
-            })) || 1;
+            var max = Math.max.apply(null, comDado.map(function (p) { return Math.max(p.custo_total || 0, p.aprovado_spare || 0); })) || 1;
             function barra(rot, val, cor) {
                 var w = Math.max(0, Math.min(100, (val / max) * 100));
                 return '<div style="display:flex;align-items:center;gap:8px;margin:2px 0">' +
                     '<span style="width:120px;font-size:.72em;color:#6b7280">' + rot + '</span>' +
                     '<div style="flex:1;background:#f1f5f9;border-radius:4px;height:16px;overflow:hidden">' +
                         '<div style="height:100%;width:' + w + '%;background:' + cor + '"></div></div>' +
-                    '<span style="width:120px;text-align:right;font-size:.75em;font-variant-numeric:tabular-nums">' + money(val) + '</span>' +
-                    '</div>';
+                    '<span style="width:120px;text-align:right;font-size:.75em;font-variant-numeric:tabular-nums">' + money(val) + '</span></div>';
             }
             var linhas = comDado.map(function (p) {
                 var estouro = (p.custo_total || 0) > (p.aprovado_spare || 0);
@@ -153,8 +190,7 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<div style="font-size:.82em;font-weight:600;margin-bottom:2px">' +
                         e(p.numero || '(sem nº)') + (p.descricao ? ' · ' + e(p.descricao) : '') + '</div>' +
                     barra('Destinado Spare', p.aprovado_spare || 0, '#2563eb') +
-                    barra('Custo', p.custo_total || 0, estouro ? '#dc2626' : '#16a34a') +
-                    '</div>';
+                    barra('Custo', p.custo_total || 0, estouro ? '#dc2626' : '#16a34a') + '</div>';
             }).join('');
             box.innerHTML =
                 '<div style="display:flex;gap:16px;font-size:.75em;color:#6b7280;margin-bottom:8px">' +
@@ -163,9 +199,6 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:2px;margin-right:4px"></span>Custo (acima do orçado)</span>' +
                 '</div>' + linhas;
         }
-
-        var padT = 'padding:8px 14px';
-        var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
 
         function tabela() {
             var termo = (document.getElementById('os-busca').value || '').trim().toLowerCase();
@@ -187,22 +220,18 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<td style="' + padT + '">' + e(p.servico) + '</td>' +
                     '<td style="' + padT + '">' + e(p.categoria) + '</td>' +
                     '<td class="text-center" style="' + padT + '">' +
-                        (nItens ? '<a href="#" class="os-verit" data-num="' + e(p.numero) + '" title="Ver itens deste projeto">' + nItens + '</a>' : '0') +
-                    '</td>' +
+                        (nItens ? '<a href="#" class="os-verit" data-num="' + e(p.numero) + '" title="Ver itens deste projeto">' + nItens + '</a>' : '0') + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.aprovado_ebs) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.aprovado_spare) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.custo_total) + '</td>' +
                     '<td class="text-right" style="' + padN + ';color:' + (p.saldo_spare < 0 ? '#dc2626' : '#16a34a') + '">' + money(p.saldo_spare) + '</td>' +
-                    '<td style="' + padT + ';white-space:nowrap">' + acoes + '</td>' +
-                    '</tr>';
+                    '<td style="' + padT + ';white-space:nowrap">' + acoes + '</td></tr>';
             }).join('');
             elLista.innerHTML =
                 '<div class="table-responsive"><table class="table table-sm" style="min-width:960px">' +
                 '<thead><tr>' +
-                '<th style="' + padT + '">Nº projeto</th>' +
-                '<th style="' + padT + '">Descrição</th>' +
-                '<th style="' + padT + '">Serviço</th>' +
-                '<th style="' + padT + '">Categoria</th>' +
+                '<th style="' + padT + '">Nº projeto</th><th style="' + padT + '">Descrição</th>' +
+                '<th style="' + padT + '">Serviço</th><th style="' + padT + '">Categoria</th>' +
                 '<th class="text-center" style="' + padT + '">Itens</th>' +
                 '<th class="text-right" style="' + padN + '">Aprovado (EBS)</th>' +
                 '<th class="text-right" style="' + padN + '">Destinado Spare</th>' +
@@ -217,28 +246,24 @@ window.SPARE_MODULES.orcamento_spare = {
             });
             Array.prototype.forEach.call(elLista.querySelectorAll('.os-verit'), function (a) {
                 a.onclick = function (ev) {
-                    ev.preventDefault();
-                    mostrarAba('itens');
-                    var bi = document.getElementById('os-it-busca');
-                    if (bi) { bi.value = a.dataset.num; }
+                    ev.preventDefault(); mostrarAba('itens'); mostrarSub('consumo');
+                    var bi = document.getElementById('os-it-busca'); if (bi) bi.value = a.dataset.num;
                     var st = document.getElementById('os-it-status'); if (st) st.value = '';
                     tabelaItens();
                 };
             });
         }
 
-        // ── Aba Itens: consumo por situação ───────────────────────────
-        async function carregarItens() {
-            if (itensCarregados) { tabelaItens(); return; }
+        // ── Consumo (por situação) ────────────────────────────────────
+        async function carregarConsumo() {
+            if (consumoCarregado) { tabelaItens(); return; }
             var box = document.getElementById('os-itens-lista');
             box.innerHTML = '<p class="text-muted">Carregando…</p>';
             try { ITENS = await S.api('/orcamento-spare/itens'); }
             catch (x) { box.innerHTML = '<p class="alert alert-danger">' + e(x.message) + '</p>'; return; }
-            itensCarregados = true;
-            resumoItens();
-            tabelaItens();
+            consumoCarregado = true;
+            resumoItens(); tabelaItens();
         }
-
         function resumoItens() {
             var ts = ITENS.totais_status || {};
             function card(rot, val, sub, cor) {
@@ -255,7 +280,6 @@ window.SPARE_MODULES.orcamento_spare = {
             html += card('Consumo total', money(totalV), (ITENS.itens || []).length + ' item(ns)');
             document.getElementById('os-itens-resumo').innerHTML = html;
         }
-
         function tabelaItens() {
             var box = document.getElementById('os-itens-lista');
             var fSt = (document.getElementById('os-it-status').value || '');
@@ -275,44 +299,154 @@ window.SPARE_MODULES.orcamento_spare = {
                         (it.projeto_descricao ? '<div class="text-muted" style="font-size:.75em">' + e(it.projeto_descricao) + '</div>' : '') + '</td>' +
                     '<td style="' + padT + ';white-space:nowrap">' + e(it.item_ebs) + '</td>' +
                     '<td style="' + padT + '">' + e(it.descricao_item) + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + e(it.ncm || '') + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + (Number(it.quantidade || 0).toLocaleString('pt-BR')) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(it.valor_unitario) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + (Number(it.imposto_percent || 0)).toLocaleString('pt-BR') + '%</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(it.valor_total) + '</td>' +
-                    '<td style="' + padT + ';white-space:nowrap">' + statusBadge(it.status) + '</td>' +
-                    '</tr>';
+                    '<td style="' + padT + ';white-space:nowrap">' + statusBadge(it.status) + '</td></tr>';
             }).join('');
             box.innerHTML =
-                '<div class="table-responsive"><table class="table table-sm" style="min-width:900px">' +
-                '<thead><tr>' +
-                '<th style="' + padT + '">Projeto</th>' +
-                '<th style="' + padT + '">Item EBS</th>' +
-                '<th style="' + padT + '">Descrição do item</th>' +
-                '<th class="text-right" style="' + padN + '">Qtd</th>' +
-                '<th class="text-right" style="' + padN + '">Valor unit.</th>' +
-                '<th class="text-right" style="' + padN + '">% Imp.</th>' +
-                '<th class="text-right" style="' + padN + '">Valor total (c/ imp.)</th>' +
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:920px">' +
+                '<thead><tr><th style="' + padT + '">Projeto</th><th style="' + padT + '">Item EBS</th>' +
+                '<th style="' + padT + '">Descrição do item</th><th style="' + padT + '">NCM</th>' +
+                '<th class="text-right" style="' + padN + '">Qtd</th><th class="text-right" style="' + padN + '">Valor unit.</th>' +
+                '<th class="text-right" style="' + padN + '">% Imp.</th><th class="text-right" style="' + padN + '">Valor total (c/ imp.)</th>' +
                 '<th style="' + padT + '">Situação</th></tr></thead><tbody>' + corpo + '</tbody>' +
-                '<tfoot><tr><td colspan="6" class="text-right" style="' + padT + '"><b>Total filtrado</b></td>' +
-                    '<td class="text-right" style="' + padN + '"><b>' + money(totalFiltro) + '</b></td><td></td></tr></tfoot>' +
-                '</table></div>';
+                '<tfoot><tr><td colspan="7" class="text-right" style="' + padT + '"><b>Total filtrado</b></td>' +
+                    '<td class="text-right" style="' + padN + '"><b>' + money(totalFiltro) + '</b></td><td></td></tr></tfoot></table></div>';
         }
 
-        // ── Formulário ────────────────────────────────────────────────
+        // ── Cadastro de itens (catálogo) ──────────────────────────────
+        async function carregarCatalogo() {
+            if (catCarregado) { tabelaCatalogo(); return; }
+            var box = document.getElementById('cat-lista');
+            box.innerHTML = '<p class="text-muted">Carregando…</p>';
+            try { CAT = await S.api('/orcamento-spare/catalogo'); }
+            catch (x) { box.innerHTML = '<p class="alert alert-danger">' + e(x.message) + '</p>'; return; }
+            catCarregado = true;
+            tabelaCatalogo();
+        }
+        function tabelaCatalogo() {
+            var box = document.getElementById('cat-lista');
+            var termo = (document.getElementById('cat-busca').value || '').trim().toLowerCase();
+            var linhas = (CAT.itens || []).filter(function (it) {
+                return !termo || [it.item_ebs, it.descricao_item, it.ncm].some(function (c) {
+                    return String(c || '').toLowerCase().indexOf(termo) !== -1;
+                });
+            });
+            if (!linhas.length) { box.innerHTML = '<p class="text-muted">Nenhum item cadastrado.</p>'; return; }
+            var corpo = linhas.map(function (it) {
+                var acoes = podeEditar
+                    ? '<button class="btn btn-secondary btn-sm cat-ed" data-id="' + it.id + '">Editar</button> ' +
+                      '<button class="btn btn-secondary btn-sm cat-rm" data-id="' + it.id + '">Excluir</button>' : '';
+                var acordo = it.acordo ? ('Sim' + (it.acordo_numero ? ' (' + e(it.acordo_numero) + ')' : '')) : 'Não';
+                return '<tr>' +
+                    '<td style="' + padT + ';white-space:nowrap"><b>' + e(it.item_ebs) + '</b></td>' +
+                    '<td style="' + padT + '">' + e(it.descricao_item) + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + e(it.ncm) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + impostoTxt(it) + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + acordo + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + (it.acordo ? money(it.preco_acordo) : '—') + '</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + acoes + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:820px">' +
+                '<thead><tr><th style="' + padT + '">Item EBS</th><th style="' + padT + '">Descrição do item</th>' +
+                '<th style="' + padT + '">NCM</th><th class="text-right" style="' + padN + '">Imposto</th>' +
+                '<th style="' + padT + '">Acordo</th><th class="text-right" style="' + padN + '">Preço acordo</th>' +
+                '<th style="' + padT + '"></th></tr></thead><tbody>' + corpo + '</tbody></table></div>';
+            Array.prototype.forEach.call(box.querySelectorAll('.cat-ed'), function (b) {
+                b.onclick = function () { abrirFormCat((CAT.itens || []).filter(function (i) { return i.id == b.dataset.id; })[0]); };
+            });
+            Array.prototype.forEach.call(box.querySelectorAll('.cat-rm'), function (b) {
+                b.onclick = function () { excluirCat(parseInt(b.dataset.id, 10)); };
+            });
+        }
+
         function campo(rot, ctrl) {
-            return '<div class="form-group" style="margin:0">' +
-                (rot ? '<label>' + e(rot) + '</label>' : '') + ctrl + '</div>';
+            return '<div class="form-group" style="margin:0">' + (rot ? '<label>' + e(rot) + '</label>' : '') + ctrl + '</div>';
         }
         function secao(titulo) {
-            return '<div style="font-size:.78em;font-weight:700;text-transform:uppercase;' +
-                'letter-spacing:.04em;color:#6b7280;margin:20px 0 10px;border-bottom:1px solid #e5e7eb;' +
-                'padding-bottom:5px">' + e(titulo) + '</div>';
+            return '<div style="font-size:.78em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;' +
+                'color:#6b7280;margin:20px 0 10px;border-bottom:1px solid #e5e7eb;padding-bottom:5px">' + e(titulo) + '</div>';
         }
         function grade(cols, html) {
-            return '<div style="display:grid;grid-template-columns:' + cols +
-                ';gap:14px;align-items:end">' + html + '</div>';
+            return '<div style="display:grid;grid-template-columns:' + cols + ';gap:14px;align-items:end">' + html + '</div>';
         }
 
+        function abrirFormCat(d) {
+            var edit = !!(d && d.id);
+            d = d || {};
+            document.getElementById('cat-form-titulo').textContent = edit ? ('Editar item ' + (d.item_ebs || ('#' + d.id))) : 'Novo item';
+            document.getElementById('cat-form-card').style.display = '';
+            document.getElementById('cat-form').innerHTML =
+                grade('minmax(140px,1fr) minmax(220px,2fr)',
+                    campo('Item EBS', '<input id="cat-ebs" class="form-control" value="' + e(d.item_ebs || '') + '">') +
+                    campo('Descrição do item', '<input id="cat-desc" class="form-control" value="' + e(d.descricao_item || '') + '">')) +
+                '<div style="height:14px"></div>' +
+                grade('minmax(160px,1fr) minmax(160px,1fr)',
+                    campo('NCM (XXXX.XX.XX)', '<input id="cat-ncm" class="form-control" placeholder="ex.: 84713011" value="' + e(d.ncm || '') + '">') +
+                    campo('Imposto (TIPI)', '<input id="cat-imp" class="form-control" value="' + (d.ncm ? impostoTxt(d) : '') + '" disabled>')) +
+                '<div style="height:14px"></div>' +
+                '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="cat-acordo"' + (d.acordo ? ' checked' : '') + '> É de acordo de compras</label>' +
+                '<div id="cat-acordo-box" style="margin-top:12px;' + (d.acordo ? '' : 'display:none') + '">' +
+                    grade('minmax(160px,1fr) minmax(160px,1fr)',
+                        campo('Nº do acordo', '<input id="cat-acnum" class="form-control" value="' + e(d.acordo_numero || '') + '">') +
+                        campo('Preço de acordo (valor unit.)', '<input id="cat-preco" type="number" step="0.01" min="0" class="form-control" value="' + e(d.preco_acordo != null ? d.preco_acordo : '') + '">')) +
+                '</div>' +
+                '<div class="btn-row mt-3" style="margin-top:18px">' +
+                    (podeEditar ? '<button type="button" id="cat-salvar" class="btn btn-primary btn-sm">' + (edit ? 'Salvar' : 'Cadastrar') + '</button> ' : '') +
+                    '<button type="button" id="cat-cancelar" class="btn btn-secondary btn-sm">Fechar</button>' +
+                '</div><div id="cat-erro" class="alert alert-danger mt-2" hidden></div>';
+
+            var ncmEl = document.getElementById('cat-ncm');
+            var impEl = document.getElementById('cat-imp');
+            ncmEl.onchange = async function () {
+                var v = ncmEl.value.trim(); if (!v) { impEl.value = ''; return; }
+                try {
+                    var r = await S.api('/orcamento-spare/ncm?codigo=' + encodeURIComponent(v));
+                    if (r && r.ncm) ncmEl.value = r.ncm;
+                    impEl.value = r && r.encontrado ? (r.nt ? 'NT' : (Number(r.aliquota || 0)).toLocaleString('pt-BR') + '%') : 'NCM não encontrado';
+                } catch (x) { impEl.value = ''; }
+            };
+            var chk = document.getElementById('cat-acordo');
+            chk.onchange = function () { document.getElementById('cat-acordo-box').style.display = chk.checked ? '' : 'none'; };
+            if (podeEditar) document.getElementById('cat-salvar').onclick = function () { salvarCat(edit ? d.id : 0); };
+            document.getElementById('cat-cancelar').onclick = fecharFormCat;
+            document.getElementById('cat-form-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        function fecharFormCat() {
+            document.getElementById('cat-form-card').style.display = 'none';
+            document.getElementById('cat-form').innerHTML = '';
+        }
+        async function salvarCat(id) {
+            var erro = document.getElementById('cat-erro'); erro.hidden = true;
+            var acordo = document.getElementById('cat-acordo').checked;
+            var body = {
+                item_ebs: document.getElementById('cat-ebs').value.trim(),
+                descricao_item: document.getElementById('cat-desc').value.trim(),
+                ncm: document.getElementById('cat-ncm').value.trim(),
+                acordo: acordo,
+                acordo_numero: acordo ? document.getElementById('cat-acnum').value.trim() : '',
+                preco_acordo: acordo ? (parseFloat(document.getElementById('cat-preco').value) || 0) : 0
+            };
+            if (!body.item_ebs) { erro.hidden = false; erro.textContent = 'Informe o Item EBS.'; return; }
+            try {
+                if (id) await S.api('/orcamento-spare/catalogo/' + id, { method: 'PUT', body: body });
+                else await S.api('/orcamento-spare/catalogo', { method: 'POST', body: body });
+                fecharFormCat();
+                if (S.toast) S.toast('Item salvo no cadastro.');
+                catCarregado = false; carregarCatalogo();
+            } catch (x) { erro.hidden = false; erro.textContent = x.message; }
+        }
+        async function excluirCat(id) {
+            if (!confirm('Excluir este item do cadastro?')) return;
+            try { await S.api('/orcamento-spare/catalogo/' + id, { method: 'DELETE' }); catCarregado = false; carregarCatalogo(); }
+            catch (x) { alert(x.message); }
+        }
+
+        // ── Formulário de projeto ─────────────────────────────────────
         function abrirForm(d) {
             var edit = !!(d && d.id);
             d = d || {};
@@ -334,14 +468,14 @@ window.SPARE_MODULES.orcamento_spare = {
                     campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">')) +
                 '</div>' +
                 secao('Itens') +
+                '<p class="text-muted" style="font-size:.8em;margin:-4px 0 8px">Digite o Item EBS: se estiver no cadastro, puxa descrição, NCM e imposto (e o preço, se for de acordo). Sem acordo, o preço é obrigatório.</p>' +
                 '<div class="table-responsive"><table class="table table-sm" id="os-itens-tab">' +
-                    '<thead><tr><th style="width:130px">Item EBS</th><th>Descrição do item</th>' +
-                    '<th style="width:90px">Qtd</th><th style="width:120px">Valor unit.</th>' +
-                    '<th style="width:80px">% Imposto</th>' +
-                    '<th style="width:170px">Acordo de compras</th>' +
+                    '<thead><tr><th style="width:120px">Item EBS</th><th>Descrição do item</th>' +
+                    '<th style="width:120px">NCM</th><th style="width:80px">Qtd</th>' +
+                    '<th style="width:120px">Valor unit.</th><th style="width:70px">% Imp.</th>' +
                     '<th style="width:150px">Situação</th>' +
-                    '<th style="width:140px" class="text-right">Valor total (c/ imposto)</th>' +
-                    (podeEditar ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
+                    '<th style="width:130px" class="text-right">Valor total</th>' +
+                    (podeEditar ? '<th style="width:36px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
                     '<tfoot><tr><td colspan="7" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
@@ -358,7 +492,6 @@ window.SPARE_MODULES.orcamento_spare = {
             itens.forEach(addItem);
             if (!itens.length && podeEditar) addItem();
             recalc();
-
             if (podeEditar) {
                 document.getElementById('os-add-item').onclick = function () { addItem(); recalc(); };
                 document.getElementById('os-salvar').onclick = function () { salvar(edit ? d.id : 0); };
@@ -375,19 +508,17 @@ window.SPARE_MODULES.orcamento_spare = {
             var opts = STATUS.map(function (s) {
                 return '<option value="' + s.valor + '"' + (s.valor === stAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
             }).join('');
+            var acordoOn = !!it.acordo;
             var tr = document.createElement('tr');
             tr.className = 'os-item';
+            tr.dataset.acordo = acordoOn ? '1' : '0';
             tr.innerHTML =
                 '<td><input class="form-control os-i-ebs" value="' + e(it.item_ebs || '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-desc" value="' + e(it.descricao_item || '') + '"' + ro + '></td>' +
+                '<td><input class="form-control os-i-ncm" placeholder="XXXX.XX.XX" value="' + e(it.ncm || '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '"' + ro + '></td>' +
-                '<td style="white-space:nowrap">' +
-                    '<label style="display:flex;align-items:center;gap:5px;font-size:.8em;cursor:pointer">' +
-                        '<input type="checkbox" class="os-i-acordo"' + (it.acordo ? ' checked' : '') + dis + '> É de acordo</label>' +
-                    '<input class="form-control os-i-acnum" placeholder="Nº do acordo" value="' + e(it.acordo_numero || '') + '"' +
-                        ' style="margin-top:4px;' + (it.acordo ? '' : 'display:none') + '"' + ro + '></td>' +
+                '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + (acordoOn ? ' readonly title="Preço do acordo (cadastro)"' : ro) + '></td>' +
+                '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '" readonly title="Imposto do NCM (TIPI)"></td>' +
                 '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
@@ -396,37 +527,43 @@ window.SPARE_MODULES.orcamento_spare = {
                 tr.querySelector('.os-i-rm').onclick = function () { tr.remove(); recalc(); };
                 tr.querySelector('.os-i-qtd').oninput = recalc;
                 tr.querySelector('.os-i-vu').oninput = recalc;
-                tr.querySelector('.os-i-imp').oninput = recalc;
-                var chk = tr.querySelector('.os-i-acordo');
-                var acn = tr.querySelector('.os-i-acnum');
-                chk.onchange = function () {
-                    acn.style.display = chk.checked ? '' : 'none';
-                    if (chk.checked) puxarAcordo(tr);
-                };
-                acn.onchange = function () { puxarAcordo(tr); };
-                tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarAcordo(tr); });
+                tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarCatalogo(tr); });
+                tr.querySelector('.os-i-ncm').addEventListener('change', function () { aplicarNcm(tr); });
             }
         }
 
-        // Reaproveita descrição/valor/imposto de um item de acordo já cadastrado.
-        async function puxarAcordo(tr) {
-            var chk = tr.querySelector('.os-i-acordo');
-            if (!chk || !chk.checked) return;
+        // Item EBS no cadastro → puxa descrição, NCM, imposto e (se acordo) preço.
+        async function puxarCatalogo(tr) {
             var ebs = tr.querySelector('.os-i-ebs').value.trim();
-            var acn = tr.querySelector('.os-i-acnum').value.trim();
-            if (!ebs && !acn) return;
+            if (!ebs) return;
             try {
-                var q = '/orcamento-spare/item-acordo?item_ebs=' + encodeURIComponent(ebs) +
-                    (acn ? '&acordo=' + encodeURIComponent(acn) : '');
-                var d = await S.api(q);
-                if (!d || !(d.descricao_item || d.valor_unitario || d.imposto_percent || d.acordo_numero)) return;
+                var d = await S.api('/orcamento-spare/catalogo/item?item_ebs=' + encodeURIComponent(ebs));
+                if (!d || !d.item_ebs) return;   // não cadastrado: preenche manual
                 if (d.descricao_item) tr.querySelector('.os-i-desc').value = d.descricao_item;
-                if (d.valor_unitario != null && d.valor_unitario !== '') tr.querySelector('.os-i-vu').value = d.valor_unitario;
-                if (d.imposto_percent != null && d.imposto_percent !== '') tr.querySelector('.os-i-imp').value = d.imposto_percent;
-                if (!acn && d.acordo_numero) tr.querySelector('.os-i-acnum').value = d.acordo_numero;
+                if (d.ncm) tr.querySelector('.os-i-ncm').value = d.ncm;
+                if (d.imposto_percent != null) tr.querySelector('.os-i-imp').value = d.imposto_percent;
+                var vu = tr.querySelector('.os-i-vu');
+                tr.dataset.acordo = d.acordo ? '1' : '0';
+                if (d.acordo) {
+                    vu.value = (d.preco_acordo != null ? d.preco_acordo : '');
+                    vu.readOnly = true; vu.title = 'Preço do acordo (cadastro)';
+                } else {
+                    vu.readOnly = false; vu.title = '';
+                }
                 recalc();
-                if (S.toast) S.toast('Dados do acordo aplicados ao item.');
-            } catch (x) { /* silencioso: sem correspondência, segue manual */ }
+                if (S.toast) S.toast('Item do cadastro aplicado' + (d.acordo ? ' (preço do acordo).' : '.'));
+            } catch (x) { /* silencioso */ }
+        }
+
+        // NCM digitado manual → formata e busca alíquota da TIPI.
+        async function aplicarNcm(tr) {
+            var el = tr.querySelector('.os-i-ncm'); var v = el.value.trim();
+            if (!v) return;
+            try {
+                var d = await S.api('/orcamento-spare/ncm?codigo=' + encodeURIComponent(v));
+                if (d && d.ncm) el.value = d.ncm;
+                if (d && d.encontrado) { tr.querySelector('.os-i-imp').value = (d.aliquota != null ? d.aliquota : 0); recalc(); }
+            } catch (x) { /* silencioso */ }
         }
 
         function recalc() {
@@ -454,14 +591,14 @@ window.SPARE_MODULES.orcamento_spare = {
                 var o = {
                     item_ebs: tr.querySelector('.os-i-ebs').value.trim(),
                     descricao_item: tr.querySelector('.os-i-desc').value.trim(),
+                    ncm: tr.querySelector('.os-i-ncm').value.trim(),
                     quantidade: parseFloat(tr.querySelector('.os-i-qtd').value) || 0,
                     valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
                     imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0,
                     status: tr.querySelector('.os-i-st').value || 'orcado',
-                    acordo: tr.querySelector('.os-i-acordo').checked,
-                    acordo_numero: tr.querySelector('.os-i-acnum').value.trim()
+                    acordo: tr.dataset.acordo === '1'
                 };
-                if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.imposto_percent) itens.push(o);
+                if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.ncm) itens.push(o);
             });
             var av = document.getElementById('os-aprovspare').value;
             return {
@@ -478,6 +615,15 @@ window.SPARE_MODULES.orcamento_spare = {
         async function salvar(id) {
             var erro = document.getElementById('os-erro'); erro.hidden = true;
             var body = coletar();
+            // Sem acordo, o preço é obrigatório (checa antes de enviar).
+            for (var i = 0; i < body.itens.length; i++) {
+                var it = body.itens[i];
+                if (!it.acordo && (!it.valor_unitario || it.valor_unitario <= 0)) {
+                    erro.hidden = false;
+                    erro.textContent = 'Informe o preço do item "' + (it.item_ebs || it.descricao_item || ('linha ' + (i + 1))) + '" (não é de acordo de compras).';
+                    return;
+                }
+            }
             try {
                 if (id) await S.api('/orcamento-spare/projetos/' + id, { method: 'PUT', body: body });
                 else await S.api('/orcamento-spare/projetos', { method: 'POST', body: body });
@@ -506,9 +652,9 @@ window.SPARE_MODULES.orcamento_spare = {
         // ── Eventos ───────────────────────────────────────────────────
         if (podeCriar) document.getElementById('os-novo').onclick = function () { abrirForm(); };
         if (podeEditar) document.getElementById('os-ebs').onclick = sincronizarEbs;
-        document.getElementById('os-busca').addEventListener('keydown', function (ev) {
-            if (ev.key === 'Enter') tabela();
-        });
+        if (podeCriar) document.getElementById('cat-novo').onclick = function () { abrirFormCat(); };
+        document.getElementById('os-busca').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') tabela(); });
+        document.getElementById('cat-busca').addEventListener('input', tabelaCatalogo);
         document.getElementById('os-it-status').onchange = tabelaItens;
         document.getElementById('os-it-busca').addEventListener('input', tabelaItens);
 
