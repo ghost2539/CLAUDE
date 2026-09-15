@@ -499,24 +499,14 @@ window.SPARE_MODULES.orcamento_spare = {
                     campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">')) +
                 '</div>' +
                 secao('Itens') +
-                '<p class="text-muted" style="font-size:.8em;margin:-4px 0 8px">Digite o Item EBS: se estiver no cadastro, puxa descrição, NCM e imposto (e o preço, se for de acordo). Sem acordo, o preço é obrigatório.</p>' +
-                '<div class="table-responsive"><table class="table table-sm" id="os-itens-tab">' +
-                    '<thead><tr><th style="width:120px">Item EBS</th><th>Descrição do item</th>' +
-                    '<th style="width:120px">NCM</th><th style="width:80px">Qtd</th>' +
-                    '<th style="width:120px">Valor unit.</th><th style="width:70px">% Imp.</th>' +
-                    '<th style="width:150px">Situação</th>' +
-                    '<th style="width:110px">Solic. compra</th>' +
-                    '<th style="width:110px">Pedido compra</th>' +
-                    '<th style="width:140px">Status entrega</th>' +
-                    '<th style="width:130px">Agendamento</th>' +
-                    '<th style="width:110px">NF</th>' +
-                    '<th style="width:130px" class="text-right">Valor total</th>' +
-                    (podeEditar ? '<th style="width:36px"></th>' : '') + '</tr></thead>' +
-                    '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="12" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
-                        '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
-                '</table></div>' +
-                (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
+                '<p class="text-muted" style="font-size:.8em;margin:-4px 0 10px">Digite o Item EBS: se estiver no cadastro, puxa descrição, NCM e imposto (e o preço, se for de acordo). Sem acordo, o preço é obrigatório.</p>' +
+                '<div id="os-itens"></div>' +
+                (podeEditar ? '<div class="btn-row mt-1"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
+                '<div style="display:flex;justify-content:flex-end;align-items:baseline;gap:10px;margin-top:12px;' +
+                    'padding-top:10px;border-top:2px solid #64748b33">' +
+                    '<span class="text-muted" style="font-size:.85em">Custo total (c/ imposto)</span>' +
+                    '<span id="os-custo" style="font-weight:700;font-size:1.15em">R$ 0,00</span>' +
+                '</div>' +
                 secao('Observação') +
                 campo('', '<textarea id="os-obs" class="form-control" rows="2" placeholder="Anotações do projeto (opcional)">' + e(d.observacao || '') + '</textarea>') +
                 '<div class="btn-row mt-3" style="margin-top:18px">' +
@@ -549,24 +539,40 @@ window.SPARE_MODULES.orcamento_spare = {
             var optsEnt = ENTREGA.map(function (s) {
                 return '<option value="' + s.valor + '"' + (s.valor === entAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
             }).join('');
-            var tr = document.createElement('tr');
+            function fld(rot, ctrl) {
+                return '<div style="min-width:0"><label style="display:block;font-size:11px;color:#94a3b8;' +
+                    'margin-bottom:3px;white-space:nowrap">' + e(rot) + '</label>' + ctrl + '</div>';
+            }
+            var tr = document.createElement('div');
             tr.className = 'os-item';
             tr.dataset.acordo = acordoOn ? '1' : '0';
+            tr.style.cssText = 'border:1px solid #64748b40;border-radius:10px;padding:14px 16px;margin-bottom:12px';
             tr.innerHTML =
-                '<td><input class="form-control os-i-ebs" value="' + e(it.item_ebs || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-desc" value="' + e(it.descricao_item || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-ncm" placeholder="XXXX.XX.XX" value="' + e(it.ncm || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + (acordoOn ? ' readonly title="Preço do acordo (cadastro)"' : ro) + '></td>' +
-                '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '" readonly title="Imposto do NCM (TIPI)"></td>' +
-                '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
-                '<td><input class="form-control os-i-sc" value="' + e(it.solicitacao_compra || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-pc" value="' + e(it.pedido_compra || '') + '"' + ro + '></td>' +
-                '<td><select class="form-control os-i-ent"' + dis + '>' + optsEnt + '</select></td>' +
-                '<td><input class="form-control os-i-ag" type="date" value="' + e(it.data_agendamento || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (entAtual === 'entregue' ? '' : ' disabled') + ro + '></td>' +
-                '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
-                (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
+                // Linha 1 — identidade
+                '<div style="display:grid;grid-template-columns:150px 1fr ' + (podeEditar ? '32px' : '') +
+                    ';gap:12px;align-items:end">' +
+                    fld('Item EBS', '<input class="form-control os-i-ebs" value="' + e(it.item_ebs || '') + '"' + ro + '>') +
+                    fld('Descrição do item', '<input class="form-control os-i-desc" value="' + e(it.descricao_item || '') + '"' + ro + '>') +
+                    (podeEditar ? '<button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover item" style="height:34px">&times;</button>' : '') +
+                '</div>' +
+                // Linha 2 — valores
+                '<div style="display:grid;grid-template-columns:130px 90px 1fr 80px 1fr auto;gap:12px;align-items:end;margin-top:12px">' +
+                    fld('NCM', '<input class="form-control os-i-ncm" placeholder="XXXX.XX.XX" value="' + e(it.ncm || '') + '"' + ro + '>') +
+                    fld('Qtd', '<input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '>') +
+                    fld('Valor unit.', '<input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + (acordoOn ? ' readonly title="Preço do acordo (cadastro)"' : ro) + '>') +
+                    fld('% Imp.', '<input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '" readonly title="Imposto do NCM (TIPI)">') +
+                    fld('Situação', '<select class="form-control os-i-st"' + dis + '>' + opts + '</select>') +
+                    '<div style="text-align:right;min-width:120px"><div style="font-size:11px;color:#94a3b8;margin-bottom:3px">Valor total</div>' +
+                        '<div class="os-i-vt" style="font-weight:700;font-size:1.05em;font-variant-numeric:tabular-nums;white-space:nowrap">R$ 0,00</div></div>' +
+                '</div>' +
+                // divisória + Linha 3 — execução
+                '<div style="border-top:1px dashed #64748b40;margin:14px 0 12px"></div>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:end">' +
+                    fld('RC (Solic. compra)', '<input class="form-control os-i-sc" placeholder="Nº RC" value="' + e(it.solicitacao_compra || '') + '"' + ro + '>') +
+                    fld('PO (Pedido compra)', '<input class="form-control os-i-pc" placeholder="Nº PO" value="' + e(it.pedido_compra || '') + '"' + ro + '>') +
+                    fld('Status entrega', '<select class="form-control os-i-ent"' + dis + '>' + optsEnt + '</select>') +
+                    fld('NF', '<input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (entAtual === 'entregue' ? '' : ' disabled') + ro + '>') +
+                '</div>';
             document.getElementById('os-itens').appendChild(tr);
             if (podeEditar) {
                 tr.querySelector('.os-i-rm').onclick = function () { tr.remove(); recalc(); };
@@ -659,7 +665,6 @@ window.SPARE_MODULES.orcamento_spare = {
                     solicitacao_compra: tr.querySelector('.os-i-sc').value.trim(),
                     pedido_compra: tr.querySelector('.os-i-pc').value.trim(),
                     entrega_status: tr.querySelector('.os-i-ent').value || 'pendente',
-                    data_agendamento: tr.querySelector('.os-i-ag').value || '',
                     nf: tr.querySelector('.os-i-nf').value.trim()
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.ncm) itens.push(o);
