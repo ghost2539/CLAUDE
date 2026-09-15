@@ -74,28 +74,21 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Credencial dos Correios no momento do uso.
+    """Credencial dos Correios lida DIRETO do ambiente (os.environ).
 
-    Ordem: `os.environ` PRIMEIRO (é como a produção entrega — o serviço já
-    sobe com CORREIOS_* no ambiente) e, só se faltar, o cofre do projeto
-    (corporativo → local). Ler o ambiente antes evita que uma entrada antiga
-    no cofre local sombreie a credencial correta que veio no start.
+    Sem cofre: o serviço já sobe com CORREIOS_USUARIO/CHAVE/CARTOES no
+    ambiente (é como a produção entrega, no start). É só ler daqui.
     """
-    v = os.environ.get(nome, "")
-    if v:
-        return v
-    from core.cofre import obter
-    return obter(nome, default)
+    return os.environ.get(nome, default)
 
 
 def _correios_creds():
-    """Retorna as credenciais dos Correios no momento do uso (não guarda em
-    global), buscando a cada chamada de autenticação."""
-    usuario = _secret("CORREIOS_USUARIO")
-    chave = _secret("CORREIOS_CHAVE")
-    cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
-    dr = _secret("CORREIOS_DR", "64")
-    contrato = _secret("CORREIOS_CONTRATO", "")
+    """Credenciais dos Correios do os.environ, no momento do uso."""
+    usuario = os.environ.get("CORREIOS_USUARIO", "")
+    chave = os.environ.get("CORREIOS_CHAVE", "")
+    cartoes = [c.strip() for c in os.environ.get("CORREIOS_CARTOES", "").split(",") if c.strip()]
+    dr = os.environ.get("CORREIOS_DR", "64")
+    contrato = os.environ.get("CORREIOS_CONTRATO", "")
     return usuario, chave, cartoes, dr, contrato
 
 
@@ -136,9 +129,10 @@ def _check_credenciais():
     if not usuario or not chave:
         raise HTTPException(
             500,
-            "Credenciais dos Correios ausentes. Elas vêm do cofre corporativo "
-            "(chaves CORREIOS_USUARIO, CORREIOS_CHAVE, "
-            "CORREIOS_CARTOES). Confira com: python3 scripts/cofre.py conferir",
+            "Credenciais dos Correios ausentes. Elas vêm do ambiente do "
+            "serviço (variáveis CORREIOS_USUARIO, CORREIOS_CHAVE, "
+            "CORREIOS_CARTOES). Confira que elas estão no environment com que "
+            "o portal-spare sobe.",
         )
 
 
