@@ -40,6 +40,7 @@
         orcamento_manutencao: 'Orçamento',
         agendamentos_forn: 'Agendamentos Forn.',
         internalizacao: 'Internalização',
+        orcamento_spare: 'CAPEX Spare',
         status:         'Status',
         parametros:     'Parâmetros'
     };
