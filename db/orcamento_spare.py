@@ -146,6 +146,9 @@ class Item(Base):
     descricao_item: Mapped[str] = mapped_column(String(200), default="")
     quantidade: Mapped[float] = mapped_column(Numeric(15, 3), default=0)
     valor_unitario: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    # Alíquota de imposto do item, em % (ex.: 18 = 18%). O valor total do
+    # item e o custo do projeto consideram o valor COM imposto.
+    imposto_percent: Mapped[float] = mapped_column(Numeric(7, 4), default=0)
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
@@ -153,14 +156,35 @@ class Item(Base):
     def to_dict(self) -> dict:
         q = _f(self.quantidade)
         vu = _f(self.valor_unitario)
+        imp = _f(self.imposto_percent)
+        base = q * vu
+        valor_imposto = base * imp / 100.0
         return {
             "id": self.id,
             "item_ebs": self.item_ebs or "",
             "descricao_item": self.descricao_item or "",
             "quantidade": q,
             "valor_unitario": vu,
-            "valor_total": round(q * vu, 2),
+            "imposto_percent": imp,
+            "valor_sem_imposto": round(base, 2),
+            "valor_imposto": round(valor_imposto, 2),
+            "valor_total": round(base + valor_imposto, 2),
         }
+
+
+def _migrar_colunas() -> None:
+    """Adiciona colunas novas em bancos já criados (SQLite não faz no create_all)."""
+    from sqlalchemy import inspect, text
+    eng = get_engine()
+    try:
+        cols = {c["name"] for c in inspect(eng).get_columns("orc_spare_item")}
+    except Exception:  # noqa: BLE001 — tabela ainda não existe: create_all cuida
+        return
+    if "imposto_percent" not in cols:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE orc_spare_item ADD COLUMN imposto_percent NUMERIC(7,4) DEFAULT 0"))
+        _log.info("orc_spare_item: coluna imposto_percent adicionada")
 
 
 def init_db() -> None:
@@ -169,6 +193,7 @@ def init_db() -> None:
         if _ready:
             return
         Base.metadata.create_all(get_engine())
+        _migrar_colunas()
         _ready = True
 
 
