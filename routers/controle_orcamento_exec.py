@@ -1098,7 +1098,7 @@ def sincronizar(req: Request):
 @router.post("/api/controle-orcamento-exec/projetos", status_code=201)
 @_com_banco
 def criar_projeto(body: ProjetoIn, req: Request):
-    _exigir(req, "create", "incluir", f"projeto {body.numero or body.nome or ''}")
+    _exigir(req, "create", "incluir", f"projeto {body.codigo or body.nome or ''}")
     check_rate_limit(req, "api")
     dados = body.model_dump(exclude_none=True)
     with SessionLocal.begin() as s:
