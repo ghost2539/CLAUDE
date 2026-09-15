@@ -74,35 +74,24 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Credencial dos Correios lida DIRETO do ambiente (os.environ).
-
-    Sem cofre: o serviço já sobe com CORREIOS_USUARIO/CHAVE/CARTOES no
-    ambiente (é como a produção entrega, no start). É só ler daqui.
-    """
+    """Credencial dos Correios lida DIRETO do ambiente (os.environ)."""
     return os.environ.get(nome, default)
 
 
-def _limpo(nome: str, default: str = "") -> str:
-    """Lê a variável do ambiente e descarta placeholder não substituído.
-
-    Se o arquivo de environment ainda tiver algo como `@cofre:CORREIOS_CHAVE@`
-    (placeholder que nunca foi trocado pelo valor real), NÃO usamos esse texto
-    como credencial — vale o mesmo que estar em branco, para o erro sair claro
-    ("credencial ausente") em vez de autenticar com lixo.
-    """
-    v = (os.environ.get(nome, default) or "").strip()
-    if v.startswith("@") and v.endswith("@"):
-        return default
-    return v
-
-
 def _correios_creds():
-    """Credenciais dos Correios do os.environ, no momento do uso."""
-    usuario = _limpo("CORREIOS_USUARIO")
-    chave = _limpo("CORREIOS_CHAVE")
-    cartoes = [c.strip() for c in _limpo("CORREIOS_CARTOES").split(",") if c.strip()]
-    dr = _limpo("CORREIOS_DR", "64") or "64"
-    contrato = _limpo("CORREIOS_CONTRATO")
+    """Credenciais dos Correios lidas do ambiente, exatamente como o dev passou.
+
+        import os
+        usuario = os.environ['CORREIOS_USUARIO']
+        chave   = os.environ['CORREIOS_CHAVE']
+        cartoes = os.environ['CORREIOS_CARTOES'].split(',')
+    """
+    import os
+    usuario = os.environ['CORREIOS_USUARIO']
+    chave = os.environ['CORREIOS_CHAVE']
+    cartoes = os.environ['CORREIOS_CARTOES'].split(',')
+    dr = os.environ.get('CORREIOS_DR', '64')
+    contrato = os.environ.get('CORREIOS_CONTRATO', '')
     return usuario, chave, cartoes, dr, contrato
 
 
@@ -138,23 +127,27 @@ def _correios_request(method: str, url: str, **kwargs):
     raise HTTPException(502, "Erro ao conectar com Correios — " + " | ".join(erros))
 
 
+_MSG_CREDS = (
+    "Credenciais dos Correios ausentes. Elas vêm do ambiente do "
+    "serviço (variáveis CORREIOS_USUARIO, CORREIOS_CHAVE, "
+    "CORREIOS_CARTOES). Confira que elas estão no environment com que "
+    "o portal-spare sobe."
+)
+
+
 def _check_credenciais():
-    usuario, chave, *_ = _correios_creds()
+    try:
+        usuario, chave, *_ = _correios_creds()
+    except KeyError:
+        raise HTTPException(500, _MSG_CREDS)
     if not usuario or not chave:
-        raise HTTPException(
-            500,
-            "Credenciais dos Correios ausentes. Elas vêm do ambiente do "
-            "serviço (variáveis CORREIOS_USUARIO, CORREIOS_CHAVE, "
-            "CORREIOS_CARTOES). Confira que elas estão no environment com que "
-            "o portal-spare sobe.",
-        )
+        raise HTTPException(500, _MSG_CREDS)
 
 
 def _correios_authenticate() -> str:
     """Autentica com Correios em duas etapas: token básico + cartão de postagem."""
+    _check_credenciais()
     usuario, chave, cartoes, dr, contrato = _correios_creds()
-    if not usuario or not chave:
-        _check_credenciais()
 
     cached = _correios_token_cache.get("token")
     cached_at = _correios_token_cache.get("obtained_at", 0)
