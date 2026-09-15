@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, field_validator
 
 import db.agendamentos_forn as db
@@ -108,6 +108,47 @@ def _exigir(req: Request, acao: str) -> dict:
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
+# Teto de tamanho do PDF lido em memória: NF é pequena; acima disso é engano.
+_MAX_PDF = 15 * 1024 * 1024
+
+
+@router.post("/extrair-nf")
+async def extrair_nf(req: Request, arquivo: UploadFile = File(...)):
+    """Lê um PDF de DANFE EM MEMÓRIA e devolve os campos para pré-preencher.
+
+    O arquivo NUNCA é gravado: os bytes entram, os campos saem, e o PDF é
+    descartado. Serve só para adiantar o cadastro — o operador confere tudo.
+    """
+    _exigir(req, "create")
+    nome = (arquivo.filename or "").lower()
+    if not nome.endswith(".pdf"):
+        raise HTTPException(422, "Envie um arquivo PDF da NF (DANFE).")
+    dados = await arquivo.read()
+    if not dados:
+        raise HTTPException(422, "Arquivo vazio.")
+    if len(dados) > _MAX_PDF:
+        raise HTTPException(413, "PDF grande demais (máx. 15 MB).")
+    try:
+        from core.nf_pdf import extrair_campos, SemBibliotecaPDF
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, f"Leitor de PDF indisponível: {exc}") from exc
+    try:
+        campos = extrair_campos(dados)
+    except SemBibliotecaPDF as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Falha ao ler PDF da NF: %s", exc)
+        raise HTTPException(422, "Não foi possível ler este PDF. Confira se é "
+                                 "o DANFE em PDF (texto, não imagem).") from exc
+    finally:
+        # Sem persistência: garante que nada do upload fica pendurado.
+        try:
+            await arquivo.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return campos
+
+
 @router.get("/opcoes")
 def opcoes(req: Request):
     """Listas fixas para os selects da tela."""
