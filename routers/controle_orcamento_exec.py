@@ -138,7 +138,7 @@ p{margin:0 0 8px;line-height:1.5}a{color:#2563eb}</style>
 <div class="c"><h1>Acesso não liberado</h1>
 <p>Seu usuário está autenticado, mas não tem permissão para o Controle de
 Orçamento.</p><p>Solicite a liberação a um administrador do portal.</p>
-<p><a href="/">Voltar ao portal</a></p></div>"""
+<p><a href="__BASE__/">Voltar ao portal</a></p></div>"""
 
 
 def _acesso_pagina(req: Request):
@@ -158,7 +158,7 @@ def _acesso_pagina(req: Request):
     if not _pode(sd, "view"):
         registrar_acesso(sd.get("username", ""), client_ip(req), "negado",
                          "sem acesso liberado ao módulo")
-        return HTMLResponse(_SEM_PERMISSAO, status_code=403)
+        return HTMLResponse(_SEM_PERMISSAO.replace("__BASE__", prefixo(req)), status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
     return _page(req)
 

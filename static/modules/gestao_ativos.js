@@ -55,7 +55,7 @@ function _gaCarregarTelas() {
     if (_gaCarregando) return _gaCarregando;
     _gaCarregando = new Promise(function (ok, falhou) {
         var s = document.createElement('script');
-        s.src = '/static/modules/servicenow.js?v=' + Date.now();
+        s.src = ((window.SPARE && window.SPARE.base) || '') + '/static/modules/servicenow.js?v=' + Date.now();
         s.onload = function () { _gaCarregando = null; ok(); };
         s.onerror = function () {
             _gaCarregando = null;
