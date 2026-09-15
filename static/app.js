@@ -399,20 +399,6 @@
             var algum = $$('.sidebar-item', g).some(function (i) { return i.style.display !== 'none'; });
             g.style.display = algum ? '' : 'none';
         });
-        // Grupos recolhíveis; o estado fica no navegador de cada usuário.
-        var fechados = [];
-        try { fechados = JSON.parse(localStorage.getItem('spare.menu.fechados') || '[]'); } catch (_) {}
-        $$('.sidebar-grupo-titulo').forEach(function (titulo) {
-            var g = titulo.parentNode;
-            var nome = titulo.textContent.trim();
-            if (fechados.indexOf(nome) >= 0) g.classList.add('fechado');
-            titulo.onclick = function () {
-                g.classList.toggle('fechado');
-                var lista = $$('.sidebar-grupo.fechado .sidebar-grupo-titulo')
-                    .map(function (t) { return t.textContent.trim(); });
-                try { localStorage.setItem('spare.menu.fechados', JSON.stringify(lista)); } catch (_) {}
-            };
-        });
     }
 
     // ── Module loader (lazy) ───────────────────────────────────────
@@ -453,9 +439,8 @@
         $$('.sidebar-item').forEach(function (x) {
             x.classList.toggle('active', x.dataset.route === module);
         });
-        // O grupo do item ativo abre, mesmo que estivesse recolhido.
-        var _ativo = $('.sidebar-item.active');
-        if (_ativo && _ativo.parentNode) _ativo.parentNode.classList.remove('fechado');
+        // No celular, escolher um item fecha a gaveta.
+        document.body.classList.remove('menu-aberto');
 
         // Clear sub-tabs and content
         $('#sub-tabs').hidden = true;
@@ -560,6 +545,24 @@
     };
 
     // ── Init ───────────────────────────────────────────────────────
+    function setupMenu() {
+        // Estado recolhido persiste por usuário no navegador.
+        try {
+            if (localStorage.getItem('spare.menu.recolhido') === '1') {
+                document.body.classList.add('menu-recolhido');
+            }
+        } catch (_) {}
+        var recolher = $('#menu-recolher');
+        if (recolher) recolher.onclick = function () {
+            var on = document.body.classList.toggle('menu-recolhido');
+            try { localStorage.setItem('spare.menu.recolhido', on ? '1' : '0'); } catch (_) {}
+        };
+        var abrir = $('#menu-abrir');
+        if (abrir) abrir.onclick = function () { document.body.classList.toggle('menu-aberto'); };
+        var overlay = $('#menu-overlay');
+        if (overlay) overlay.onclick = function () { document.body.classList.remove('menu-aberto'); };
+    }
+
     function init() {
         // Login form
         var form = $('#login-form');
@@ -609,6 +612,9 @@
         $('#modal-overlay').onclick = function (e) {
             if (e.target.classList.contains('modal-backdrop')) closeModal();
         };
+
+        // Menu: recolher (desktop, com memória) e gaveta (mobile)
+        setupMenu();
 
         // Global search
         setupGlobalSearch();

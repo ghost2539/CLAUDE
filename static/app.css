@@ -67,16 +67,16 @@ button, input, select, textarea { font: inherit; }
 .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: var(--sidebar-collapsed);
+    width: var(--sidebar-expanded);
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border-subtle);
     z-index: 1000;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: width .25s;
+    transition: width .2s ease, transform .2s ease;
 }
-.sidebar:hover { width: var(--sidebar-expanded); }
+body.menu-recolhido .sidebar { width: var(--sidebar-collapsed); }
 
 .sidebar-header {
     height: var(--topbar-h);
@@ -86,6 +86,15 @@ button, input, select, textarea { font: inherit; }
     padding: 0 16px;
     border-bottom: 1px solid var(--border-subtle);
 }
+.menu-recolher {
+    margin-left: auto; background: none; border: 0; color: var(--text-secondary);
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 6px 8px;
+    border-radius: var(--radius); transition: transform .2s, color .15s, background .15s;
+}
+.menu-recolher:hover { color: var(--text-primary); background: rgba(255,255,255,.06); }
+body.menu-recolhido .menu-recolher { transform: rotate(180deg); }
+body.menu-recolhido .sidebar-brand-icon { display: none; }
+body.menu-recolhido .sidebar-header { justify-content: center; padding: 0 8px; }
 
 .sidebar-brand-icon {
     width: 28px;
@@ -100,12 +109,16 @@ button, input, select, textarea { font: inherit; }
 
 .sidebar-brand-text,
 .sidebar-label {
-    opacity: 0;
     white-space: nowrap;
-    transition: opacity .2s;
 }
-.sidebar:hover .sidebar-brand-text,
-.sidebar:hover .sidebar-label { opacity: 1; }
+/* Recolhida: some rótulos e títulos de grupo, sobram só os ícones. */
+body.menu-recolhido .sidebar-brand-text,
+body.menu-recolhido .sidebar-label,
+body.menu-recolhido .sidebar-grupo-titulo { display: none; }
+body.menu-recolhido .sidebar-item {
+    justify-content: center; gap: 0; padding-left: 0; padding-right: 0;
+}
+body.menu-recolhido .sidebar-logout-btn { justify-content: center; }
 
 .sidebar-menu { flex: 1; padding: 8px 0; }
 
@@ -163,24 +176,18 @@ button, input, select, textarea { font: inherit; }
 
 /* ── Sidebar: grupos ─────────────────────────────────────────────── */
 .sidebar-grupo { padding: 2px 0; }
-.sidebar-grupo + .sidebar-grupo { border-top: 1px solid rgba(255,255,255,.05); }
+.sidebar-grupo + .sidebar-grupo { border-top: 1px solid rgba(255, 255, 255, .05); }
 .sidebar-grupo-titulo {
-    cursor: pointer; user-select: none;
-    display: flex; justify-content: space-between; align-items: center;
     padding: 8px 16px 4px; font-size: 10.5px; letter-spacing: .08em;
     text-transform: uppercase; color: var(--text-muted);
 }
-.sidebar-grupo-titulo::after {
-    content: '\25BE'; font-size: 10px; opacity: .6; transition: transform .15s;
-}
-.sidebar-grupo.fechado .sidebar-grupo-titulo::after { transform: rotate(-90deg); }
-.sidebar-grupo.fechado .sidebar-item { display: none !important; }
 
 /* ── Topbar ─────────────────────────────────────────────────────── */
 .topbar {
     position: fixed;
     top: 0;
-    left: var(--sidebar-collapsed);
+    left: var(--sidebar-expanded);
+    transition: left .2s ease;
     right: 0;
     height: var(--topbar-h);
     background: var(--bg-sidebar);
@@ -190,6 +197,7 @@ button, input, select, textarea { font: inherit; }
     padding: 0 24px;
     z-index: 900;
 }
+body.menu-recolhido .topbar { left: var(--sidebar-collapsed); }
 
 .topbar-left { display: flex; }
 .topbar-center { flex: 1; display: flex; justify-content: center; }
@@ -238,10 +246,17 @@ button, input, select, textarea { font: inherit; }
 /* ── Main Content ───────────────────────────────────────────────── */
 .main-content {
     flex: 1;
-    margin-left: var(--sidebar-collapsed);
+    margin-left: var(--sidebar-expanded);
     padding-top: var(--topbar-h);
     min-width: 0;
+    transition: margin-left .2s ease;
 }
+body.menu-recolhido .main-content { margin-left: var(--sidebar-collapsed); }
+
+/* Hambúrguer (mobile) e overlay da gaveta */
+.menu-abrir { display: none; background: none; border: 0; color: var(--text-primary);
+    font-size: 20px; line-height: 1; cursor: pointer; margin-right: 12px; padding: 4px 6px; }
+.menu-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 950; }
 
 .page-content {
     padding: 20px 24px;
@@ -815,13 +830,21 @@ select.form-control-inline { padding-right: 26px; }
 
 /* ── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 767px) {
-    :root {
-        --sidebar-collapsed: 0;
-    }
-    .sidebar { width: 0; }
-    .sidebar:hover { width: 220px; }
-    .topbar { left: 0; }
-    .main-content { margin-left: 0; }
+    /* No celular a sidebar vira gaveta: escondida, entra por cima ao abrir. */
+    .sidebar { width: var(--sidebar-expanded); transform: translateX(-100%); }
+    body.menu-aberto .sidebar { transform: none; }
+    /* Recolher não se aplica no celular: a gaveta é sempre cheia. */
+    body.menu-recolhido .sidebar { width: var(--sidebar-expanded); }
+    body.menu-recolhido .sidebar-brand-text,
+    body.menu-recolhido .sidebar-label,
+    body.menu-recolhido .sidebar-grupo-titulo { display: ''; }
+    body.menu-recolhido .sidebar-brand-icon { display: ''; }
+    body.menu-recolhido .sidebar-item { justify-content: flex-start; gap: 12px; padding: 9px 16px; }
+    .topbar, body.menu-recolhido .topbar { left: 0; }
+    .main-content, body.menu-recolhido .main-content { margin-left: 0; }
+    .menu-recolher { display: none; }
+    .menu-abrir { display: inline-flex; align-items: center; }
+    body.menu-aberto .menu-overlay { display: block; }
     .page-content { padding: 14px; }
     .topbar-center { display: none; }
     .form-grid.cols-2 { grid-template-columns: 1fr; }
