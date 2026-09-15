@@ -394,6 +394,25 @@
                 nav(route);
             };
         });
+        // Grupo sem nenhum item visível (por permissão) some junto.
+        $$('.sidebar-grupo').forEach(function (g) {
+            var algum = $$('.sidebar-item', g).some(function (i) { return i.style.display !== 'none'; });
+            g.style.display = algum ? '' : 'none';
+        });
+        // Grupos recolhíveis; o estado fica no navegador de cada usuário.
+        var fechados = [];
+        try { fechados = JSON.parse(localStorage.getItem('spare.menu.fechados') || '[]'); } catch (_) {}
+        $$('.sidebar-grupo-titulo').forEach(function (titulo) {
+            var g = titulo.parentNode;
+            var nome = titulo.textContent.trim();
+            if (fechados.indexOf(nome) >= 0) g.classList.add('fechado');
+            titulo.onclick = function () {
+                g.classList.toggle('fechado');
+                var lista = $$('.sidebar-grupo.fechado .sidebar-grupo-titulo')
+                    .map(function (t) { return t.textContent.trim(); });
+                try { localStorage.setItem('spare.menu.fechados', JSON.stringify(lista)); } catch (_) {}
+            };
+        });
     }
 
     // ── Module loader (lazy) ───────────────────────────────────────
@@ -434,6 +453,9 @@
         $$('.sidebar-item').forEach(function (x) {
             x.classList.toggle('active', x.dataset.route === module);
         });
+        // O grupo do item ativo abre, mesmo que estivesse recolhido.
+        var _ativo = $('.sidebar-item.active');
+        if (_ativo && _ativo.parentNode) _ativo.parentNode.classList.remove('fechado');
 
         // Clear sub-tabs and content
         $('#sub-tabs').hidden = true;
