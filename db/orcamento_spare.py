@@ -158,6 +158,7 @@ class Item(Base):
     # Item de acordo de compras (preço/imposto acordados) e o nº do acordo.
     acordo: Mapped[bool] = mapped_column(Boolean, default=False)
     acordo_numero: Mapped[str] = mapped_column(String(60), default="")
+    ncm: Mapped[str] = mapped_column(String(12), default="")   # XXXX.XX.XX
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
@@ -182,6 +183,7 @@ class Item(Base):
             "status_rotulo": STATUS_ROTULO.get(st, st),
             "acordo": bool(self.acordo),
             "acordo_numero": self.acordo_numero or "",
+            "ncm": self.ncm or "",
             "valor_sem_imposto": round(base, 2),
             "valor_imposto": round(valor_imposto, 2),
             "valor_total": round(base + valor_imposto, 2),
@@ -216,6 +218,48 @@ def _migrar_colunas() -> None:
             conn.execute(text(
                 "ALTER TABLE orc_spare_item ADD COLUMN acordo_numero VARCHAR(60) DEFAULT ''"))
         _log.info("orc_spare_item: coluna acordo_numero adicionada")
+    if "ncm" not in cols:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE orc_spare_item ADD COLUMN ncm VARCHAR(12) DEFAULT ''"))
+        _log.info("orc_spare_item: coluna ncm adicionada")
+
+
+class Catalogo(Base):
+    """Cadastro (mestre) de itens: Item EBS, descrição, se é de acordo de
+    compras (com preço acordado), e o NCM (com a alíquota da TIPI)."""
+    __tablename__ = "orc_spare_catalogo"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    item_ebs: Mapped[str] = mapped_column(String(60), default="", index=True)
+    descricao_item: Mapped[str] = mapped_column(String(200), default="")
+    ncm: Mapped[str] = mapped_column(String(12), default="")   # XXXX.XX.XX
+    aliquota: Mapped[float | None] = mapped_column(Numeric(7, 4), nullable=True)
+    nt: Mapped[bool] = mapped_column(Boolean, default=False)   # não tributado
+    acordo: Mapped[bool] = mapped_column(Boolean, default=False)
+    acordo_numero: Mapped[str] = mapped_column(String(60), default="")
+    preco_acordo: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    atualizado_por: Mapped[str] = mapped_column(String(120), default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "item_ebs": self.item_ebs or "",
+            "descricao_item": self.descricao_item or "",
+            "ncm": self.ncm or "",
+            "aliquota": (None if self.aliquota is None else _f(self.aliquota)),
+            "nt": bool(self.nt),
+            "imposto_percent": (0.0 if self.nt else (_f(self.aliquota) if self.aliquota is not None else 0.0)),
+            "acordo": bool(self.acordo),
+            "acordo_numero": self.acordo_numero or "",
+            "preco_acordo": _f(self.preco_acordo),
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
+            "atualizado_por": self.atualizado_por or "",
+        }
 
 
 def init_db() -> None:
@@ -264,6 +308,24 @@ def listar_itens() -> list[dict]:
                 d["projeto_descricao"] = p.descricao or ""
                 out.append(d)
     return out
+
+
+def listar_catalogo() -> list[dict]:
+    with SessionLocal() as s:
+        rows = s.scalars(select(Catalogo).order_by(Catalogo.item_ebs, Catalogo.id)).all()
+        return [c.to_dict() for c in rows]
+
+
+def buscar_catalogo(item_ebs: str = "") -> dict | None:
+    """Item do catálogo pelo Item EBS (para preencher a linha do projeto)."""
+    item_ebs = (item_ebs or "").strip()
+    if not item_ebs:
+        return None
+    with SessionLocal() as s:
+        row = s.scalars(
+            select(Catalogo).where(func.lower(Catalogo.item_ebs) == item_ebs.lower())
+            .order_by(Catalogo.id.desc())).first()
+        return row.to_dict() if row else None
 
 
 def buscar_item_acordo(item_ebs: str = "", acordo_numero: str = "") -> dict | None:
