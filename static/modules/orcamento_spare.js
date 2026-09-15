@@ -169,11 +169,12 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<h3 class="mt-3">Itens</h3>' +
                 '<div class="table-responsive"><table class="table table-sm" id="os-itens-tab">' +
                     '<thead><tr><th style="width:140px">Item EBS</th><th>Descrição do item</th>' +
-                    '<th style="width:110px">Qtd</th><th style="width:140px">Valor unit.</th>' +
-                    '<th style="width:140px" class="text-right">Valor total</th>' +
+                    '<th style="width:100px">Qtd</th><th style="width:130px">Valor unit.</th>' +
+                    '<th style="width:90px">% Imposto</th>' +
+                    '<th style="width:140px" class="text-right">Valor total (c/ imposto)</th>' +
                     (podeEditar ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="4" class="text-right"><b>Custo total</b></td>' +
+                    '<tfoot><tr><td colspan="5" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
@@ -206,6 +207,7 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<td><input class="form-control os-i-desc" value="' + e(it.descricao_item || '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + ro + '></td>' +
+                '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '"' + ro + '></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
             document.getElementById('os-itens').appendChild(tr);
@@ -213,6 +215,7 @@ window.SPARE_MODULES.orcamento_spare = {
                 tr.querySelector('.os-i-rm').onclick = function () { tr.remove(); recalc(); };
                 tr.querySelector('.os-i-qtd').oninput = recalc;
                 tr.querySelector('.os-i-vu').oninput = recalc;
+                tr.querySelector('.os-i-imp').oninput = recalc;
             }
         }
 
@@ -221,7 +224,8 @@ window.SPARE_MODULES.orcamento_spare = {
             Array.prototype.forEach.call(document.querySelectorAll('.os-item'), function (tr) {
                 var q = parseFloat(tr.querySelector('.os-i-qtd').value) || 0;
                 var vu = parseFloat(tr.querySelector('.os-i-vu').value) || 0;
-                var vt = q * vu;
+                var imp = parseFloat(tr.querySelector('.os-i-imp').value) || 0;
+                var vt = q * vu * (1 + imp / 100);
                 tr.querySelector('.os-i-vt').textContent = money(vt);
                 total += vt;
             });
@@ -241,9 +245,10 @@ window.SPARE_MODULES.orcamento_spare = {
                     item_ebs: tr.querySelector('.os-i-ebs').value.trim(),
                     descricao_item: tr.querySelector('.os-i-desc').value.trim(),
                     quantidade: parseFloat(tr.querySelector('.os-i-qtd').value) || 0,
-                    valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0
+                    valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
+                    imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0
                 };
-                if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario) itens.push(o);
+                if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.imposto_percent) itens.push(o);
             });
             var av = document.getElementById('os-aprovspare').value;
             return {

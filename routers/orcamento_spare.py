@@ -37,13 +37,14 @@ class ItemIn(BaseModel):
     descricao_item: str = ""
     quantidade: float = 0
     valor_unitario: float = 0
+    imposto_percent: float = 0
 
     @field_validator("item_ebs", "descricao_item")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
 
-    @field_validator("quantidade", "valor_unitario")
+    @field_validator("quantidade", "valor_unitario", "imposto_percent")
     @classmethod
     def _naoneg(cls, v):
         try:
@@ -91,11 +92,13 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
     p.observacao = (body.observacao or "").strip()
     p.itens.clear()
     for i, it in enumerate(body.itens):
-        if not (it.item_ebs or it.descricao_item or it.quantidade or it.valor_unitario):
+        if not (it.item_ebs or it.descricao_item or it.quantidade
+                or it.valor_unitario or it.imposto_percent):
             continue  # linha em branco: ignora
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
-            quantidade=it.quantidade, valor_unitario=it.valor_unitario, ordem=i))
+            quantidade=it.quantidade, valor_unitario=it.valor_unitario,
+            imposto_percent=it.imposto_percent, ordem=i))
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
