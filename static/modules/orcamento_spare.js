@@ -22,6 +22,11 @@ window.SPARE_MODULES.orcamento_spare = {
             { valor: 'andamento', rotulo: 'Em andamento', cor: '#2563eb' },
             { valor: 'executado', rotulo: 'Executado', cor: '#16a34a' }
         ];
+        var ENTREGA = [
+            { valor: 'pendente', rotulo: 'Pendente entrega' },
+            { valor: 'agendado', rotulo: 'Agendado' },
+            { valor: 'entregue', rotulo: 'Entregue' }
+        ];
         var BUS = ['Renner', 'Camicado', 'Youcom', 'Renner Argentina', 'Renner Uruguai'];
         function opcoesBU(sel) {
             return '<option value="">— selecione —</option>' + BUS.map(function (b) {
@@ -502,12 +507,13 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<th style="width:150px">Situação</th>' +
                     '<th style="width:110px">Solic. compra</th>' +
                     '<th style="width:110px">Pedido compra</th>' +
-                    '<th style="width:70px">Recebido</th>' +
+                    '<th style="width:140px">Status entrega</th>' +
+                    '<th style="width:130px">Agendamento</th>' +
                     '<th style="width:110px">NF</th>' +
                     '<th style="width:130px" class="text-right">Valor total</th>' +
                     (podeEditar ? '<th style="width:36px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="11" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
+                    '<tfoot><tr><td colspan="12" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
@@ -539,6 +545,10 @@ window.SPARE_MODULES.orcamento_spare = {
                 return '<option value="' + s.valor + '"' + (s.valor === stAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
             }).join('');
             var acordoOn = !!it.acordo;
+            var entAtual = it.entrega_status || 'pendente';
+            var optsEnt = ENTREGA.map(function (s) {
+                return '<option value="' + s.valor + '"' + (s.valor === entAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
+            }).join('');
             var tr = document.createElement('tr');
             tr.className = 'os-item';
             tr.dataset.acordo = acordoOn ? '1' : '0';
@@ -552,8 +562,9 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
                 '<td><input class="form-control os-i-sc" value="' + e(it.solicitacao_compra || '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-pc" value="' + e(it.pedido_compra || '') + '"' + ro + '></td>' +
-                '<td style="text-align:center"><input type="checkbox" class="os-i-rec"' + (it.recebido ? ' checked' : '') + dis + '></td>' +
-                '<td><input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (it.recebido ? '' : ' disabled') + ro + '></td>' +
+                '<td><select class="form-control os-i-ent"' + dis + '>' + optsEnt + '</select></td>' +
+                '<td><input class="form-control os-i-ag" type="date" value="' + e(it.data_agendamento || '') + '"' + ro + '></td>' +
+                '<td><input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (entAtual === 'entregue' ? '' : ' disabled') + ro + '></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
             document.getElementById('os-itens').appendChild(tr);
@@ -563,15 +574,16 @@ window.SPARE_MODULES.orcamento_spare = {
                 tr.querySelector('.os-i-vu').oninput = recalc;
                 tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarCatalogo(tr); });
                 tr.querySelector('.os-i-ncm').addEventListener('change', function () { aplicarNcm(tr); });
-                var rec = tr.querySelector('.os-i-rec');
+                var ent = tr.querySelector('.os-i-ent');
                 var nf = tr.querySelector('.os-i-nf');
                 var pc = tr.querySelector('.os-i-pc');
-                rec.onchange = function () {
-                    if (rec.checked && !pc.value.trim()) {
-                        alert('Informe o Pedido de compra antes de marcar como recebido.');
-                        rec.checked = false; return;
+                ent.onchange = function () {
+                    if (ent.value !== 'pendente' && !pc.value.trim()) {
+                        alert('Informe o Pedido de compra antes de agendar/entregar.');
+                        ent.value = 'pendente';
                     }
-                    nf.disabled = !rec.checked; if (!rec.checked) nf.value = '';
+                    var entregue = ent.value === 'entregue';
+                    nf.disabled = !entregue; if (!entregue) nf.value = '';
                 };
             }
         }
@@ -646,7 +658,8 @@ window.SPARE_MODULES.orcamento_spare = {
                     acordo: tr.dataset.acordo === '1',
                     solicitacao_compra: tr.querySelector('.os-i-sc').value.trim(),
                     pedido_compra: tr.querySelector('.os-i-pc').value.trim(),
-                    recebido: tr.querySelector('.os-i-rec').checked,
+                    entrega_status: tr.querySelector('.os-i-ent').value || 'pendente',
+                    data_agendamento: tr.querySelector('.os-i-ag').value || '',
                     nf: tr.querySelector('.os-i-nf').value.trim()
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.ncm) itens.push(o);

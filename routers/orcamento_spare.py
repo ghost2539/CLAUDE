@@ -46,14 +46,22 @@ class ItemIn(BaseModel):
     ncm: str = ""
     solicitacao_compra: str = ""
     pedido_compra: str = ""
+    entrega_status: str = "pendente"
+    data_agendamento: str = ""
     recebido: bool = False
     nf: str = ""
 
     @field_validator("item_ebs", "descricao_item", "acordo_numero", "ncm",
-                     "solicitacao_compra", "pedido_compra", "nf")
+                     "solicitacao_compra", "pedido_compra", "data_agendamento", "nf")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
+
+    @field_validator("entrega_status")
+    @classmethod
+    def _entrega(cls, v: str) -> str:
+        v = (v or "pendente").strip().lower()
+        return v if v in db.ENTREGA_STATUS else "pendente"
 
     @field_validator("status")
     @classmethod
@@ -123,7 +131,9 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
             nome = it.item_ebs or it.descricao_item or ("item " + str(i + 1))
             raise HTTPException(422, f"Informe o preço do item '{nome}' (não é de acordo de compras).")
         pedido = (it.pedido_compra or "").strip()
-        recebido = bool(it.recebido) and bool(pedido)
+        # Status de entrega só vale com pedido; entregue = recebido; NF só se entregue.
+        entrega = it.entrega_status if pedido else "pendente"
+        entregue = entrega == "entregue"
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
@@ -131,7 +141,8 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
             acordo=bool(it.acordo), acordo_numero=(it.acordo_numero if it.acordo else ""),
             ncm=ncm_fmt,
             solicitacao_compra=it.solicitacao_compra, pedido_compra=pedido,
-            recebido=recebido, nf=(it.nf if recebido else ""),
+            entrega_status=entrega, data_agendamento=it.data_agendamento,
+            recebido=entregue, nf=(it.nf if entregue else ""),
             ordem=i))
 
 

@@ -47,6 +47,10 @@ STATUS_ROTULO = {"orcado": "Orçado/Previsto", "andamento": "Em andamento", "exe
 # Unidades de negócio (BU). Acordos de compra são por BU.
 BUS = ("Renner", "Camicado", "Youcom", "Renner Argentina", "Renner Uruguai")
 
+# Status de entrega do item (após o pedido de compra).
+ENTREGA_STATUS = ("pendente", "agendado", "entregue")
+ENTREGA_ROTULO = {"pendente": "Pendente entrega", "agendado": "Agendado", "entregue": "Entregue"}
+
 
 def get_engine():
     global _engine
@@ -167,6 +171,8 @@ class Item(Base):
     # Execução da compra: solicitação (SC), pedido (PC), recebimento e NF.
     solicitacao_compra: Mapped[str] = mapped_column(String(60), default="")
     pedido_compra: Mapped[str] = mapped_column(String(60), default="")
+    entrega_status: Mapped[str] = mapped_column(String(20), default="pendente")
+    data_agendamento: Mapped[str] = mapped_column(String(10), default="")   # YYYY-MM-DD
     recebido: Mapped[bool] = mapped_column(Boolean, default=False)
     nf: Mapped[str] = mapped_column(String(60), default="")
     ordem: Mapped[int] = mapped_column(Integer, default=0)
@@ -196,6 +202,9 @@ class Item(Base):
             "ncm": self.ncm or "",
             "solicitacao_compra": self.solicitacao_compra or "",
             "pedido_compra": self.pedido_compra or "",
+            "entrega_status": (self.entrega_status or "pendente"),
+            "entrega_rotulo": ENTREGA_ROTULO.get(self.entrega_status or "pendente", "Pendente entrega"),
+            "data_agendamento": self.data_agendamento or "",
             "recebido": bool(self.recebido),
             "nf": self.nf or "",
             "valor_sem_imposto": round(base, 2),
@@ -256,6 +265,8 @@ def _migrar_colunas() -> None:
     for coluna, ddl in (
         ("solicitacao_compra", "solicitacao_compra VARCHAR(60) DEFAULT ''"),
         ("pedido_compra", "pedido_compra VARCHAR(60) DEFAULT ''"),
+        ("entrega_status", "entrega_status VARCHAR(20) DEFAULT 'pendente'"),
+        ("data_agendamento", "data_agendamento VARCHAR(10) DEFAULT ''"),
         ("recebido", "recebido BOOLEAN DEFAULT 0"),
         ("nf", "nf VARCHAR(60) DEFAULT ''"),
     ):
