@@ -39,8 +39,10 @@ class ItemIn(BaseModel):
     valor_unitario: float = 0
     imposto_percent: float = 0
     status: str = "orcado"
+    acordo: bool = False
+    acordo_numero: str = ""
 
-    @field_validator("item_ebs", "descricao_item")
+    @field_validator("item_ebs", "descricao_item", "acordo_numero")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -105,7 +107,9 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
-            imposto_percent=it.imposto_percent, status=it.status, ordem=i))
+            imposto_percent=it.imposto_percent, status=it.status,
+            acordo=bool(it.acordo), acordo_numero=(it.acordo_numero if it.acordo else ""),
+            ordem=i))
 
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
@@ -113,6 +117,14 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
 def listar(req: Request):
     _exigir(req, "view")
     return {"projetos": db.listar_projetos(), "totais": db.totais()}
+
+
+@router.get("/item-acordo")
+def item_acordo(req: Request, item_ebs: str = "", acordo: str = ""):
+    """Dados de um item DE ACORDO já cadastrado (descrição, valor unit., %
+    imposto), para reaproveitar ao lançar o mesmo item em outro projeto."""
+    _exigir(req, "view")
+    return db.buscar_item_acordo(item_ebs, acordo) or {}
 
 
 @router.get("/itens")

@@ -338,11 +338,12 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<thead><tr><th style="width:130px">Item EBS</th><th>Descrição do item</th>' +
                     '<th style="width:90px">Qtd</th><th style="width:120px">Valor unit.</th>' +
                     '<th style="width:80px">% Imposto</th>' +
+                    '<th style="width:170px">Acordo de compras</th>' +
                     '<th style="width:150px">Situação</th>' +
                     '<th style="width:140px" class="text-right">Valor total (c/ imposto)</th>' +
                     (podeEditar ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="os-itens"></tbody>' +
-                    '<tfoot><tr><td colspan="6" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
+                    '<tfoot><tr><td colspan="7" class="text-right"><b>Custo total (c/ imposto)</b></td>' +
                         '<td class="text-right"><b id="os-custo">R$ 0,00</b></td>' + (podeEditar ? '<td></td>' : '') + '</tr></tfoot>' +
                 '</table></div>' +
                 (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="os-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>' : '') +
@@ -382,6 +383,11 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<td><input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + ro + '></td>' +
                 '<td><input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '"' + ro + '></td>' +
+                '<td style="white-space:nowrap">' +
+                    '<label style="display:flex;align-items:center;gap:5px;font-size:.8em;cursor:pointer">' +
+                        '<input type="checkbox" class="os-i-acordo"' + (it.acordo ? ' checked' : '') + dis + '> É de acordo</label>' +
+                    '<input class="form-control os-i-acnum" placeholder="Nº do acordo" value="' + e(it.acordo_numero || '') + '"' +
+                        ' style="margin-top:4px;' + (it.acordo ? '' : 'display:none') + '"' + ro + '></td>' +
                 '<td><select class="form-control os-i-st"' + dis + '>' + opts + '</select></td>' +
                 '<td class="text-right os-i-vt" style="font-variant-numeric:tabular-nums">R$ 0,00</td>' +
                 (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover">&times;</button></td>' : '');
@@ -391,7 +397,36 @@ window.SPARE_MODULES.orcamento_spare = {
                 tr.querySelector('.os-i-qtd').oninput = recalc;
                 tr.querySelector('.os-i-vu').oninput = recalc;
                 tr.querySelector('.os-i-imp').oninput = recalc;
+                var chk = tr.querySelector('.os-i-acordo');
+                var acn = tr.querySelector('.os-i-acnum');
+                chk.onchange = function () {
+                    acn.style.display = chk.checked ? '' : 'none';
+                    if (chk.checked) puxarAcordo(tr);
+                };
+                acn.onchange = function () { puxarAcordo(tr); };
+                tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarAcordo(tr); });
             }
+        }
+
+        // Reaproveita descrição/valor/imposto de um item de acordo já cadastrado.
+        async function puxarAcordo(tr) {
+            var chk = tr.querySelector('.os-i-acordo');
+            if (!chk || !chk.checked) return;
+            var ebs = tr.querySelector('.os-i-ebs').value.trim();
+            var acn = tr.querySelector('.os-i-acnum').value.trim();
+            if (!ebs && !acn) return;
+            try {
+                var q = '/orcamento-spare/item-acordo?item_ebs=' + encodeURIComponent(ebs) +
+                    (acn ? '&acordo=' + encodeURIComponent(acn) : '');
+                var d = await S.api(q);
+                if (!d || !(d.descricao_item || d.valor_unitario || d.imposto_percent || d.acordo_numero)) return;
+                if (d.descricao_item) tr.querySelector('.os-i-desc').value = d.descricao_item;
+                if (d.valor_unitario != null && d.valor_unitario !== '') tr.querySelector('.os-i-vu').value = d.valor_unitario;
+                if (d.imposto_percent != null && d.imposto_percent !== '') tr.querySelector('.os-i-imp').value = d.imposto_percent;
+                if (!acn && d.acordo_numero) tr.querySelector('.os-i-acnum').value = d.acordo_numero;
+                recalc();
+                if (S.toast) S.toast('Dados do acordo aplicados ao item.');
+            } catch (x) { /* silencioso: sem correspondência, segue manual */ }
         }
 
         function recalc() {
@@ -422,7 +457,9 @@ window.SPARE_MODULES.orcamento_spare = {
                     quantidade: parseFloat(tr.querySelector('.os-i-qtd').value) || 0,
                     valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
                     imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0,
-                    status: tr.querySelector('.os-i-st').value || 'orcado'
+                    status: tr.querySelector('.os-i-st').value || 'orcado',
+                    acordo: tr.querySelector('.os-i-acordo').checked,
+                    acordo_numero: tr.querySelector('.os-i-acnum').value.trim()
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.imposto_percent) itens.push(o);
             });

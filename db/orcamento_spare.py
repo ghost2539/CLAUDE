@@ -19,7 +19,7 @@ import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text,
+    BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text,
     create_engine, event, func, select,
 )
 from sqlalchemy.orm import (
@@ -155,6 +155,9 @@ class Item(Base):
     imposto_percent: Mapped[float] = mapped_column(Numeric(7, 4), default=0)
     # Situação: orcado (previsto) | andamento | executado.
     status: Mapped[str] = mapped_column(String(20), default="orcado")
+    # Item de acordo de compras (preço/imposto acordados) e o nº do acordo.
+    acordo: Mapped[bool] = mapped_column(Boolean, default=False)
+    acordo_numero: Mapped[str] = mapped_column(String(60), default="")
     ordem: Mapped[int] = mapped_column(Integer, default=0)
 
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
@@ -177,6 +180,8 @@ class Item(Base):
             "imposto_percent": imp,
             "status": st,
             "status_rotulo": STATUS_ROTULO.get(st, st),
+            "acordo": bool(self.acordo),
+            "acordo_numero": self.acordo_numero or "",
             "valor_sem_imposto": round(base, 2),
             "valor_imposto": round(valor_imposto, 2),
             "valor_total": round(base + valor_imposto, 2),
@@ -201,6 +206,16 @@ def _migrar_colunas() -> None:
             conn.execute(text(
                 "ALTER TABLE orc_spare_item ADD COLUMN status VARCHAR(20) DEFAULT 'orcado'"))
         _log.info("orc_spare_item: coluna status adicionada")
+    if "acordo" not in cols:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE orc_spare_item ADD COLUMN acordo BOOLEAN DEFAULT 0"))
+        _log.info("orc_spare_item: coluna acordo adicionada")
+    if "acordo_numero" not in cols:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE orc_spare_item ADD COLUMN acordo_numero VARCHAR(60) DEFAULT ''"))
+        _log.info("orc_spare_item: coluna acordo_numero adicionada")
 
 
 def init_db() -> None:
@@ -249,6 +264,39 @@ def listar_itens() -> list[dict]:
                 d["projeto_descricao"] = p.descricao or ""
                 out.append(d)
     return out
+
+
+def buscar_item_acordo(item_ebs: str = "", acordo_numero: str = "") -> dict | None:
+    """Procura um item DE ACORDO já cadastrado (em qualquer projeto) para
+    reaproveitar descrição, valor unitário e % de imposto. Casa pelo Item EBS
+    (o mesmo item), preferindo o mesmo nº de acordo; devolve o mais recente."""
+    item_ebs = (item_ebs or "").strip()
+    acordo_numero = (acordo_numero or "").strip()
+    if not item_ebs and not acordo_numero:
+        return None
+    with SessionLocal() as s:
+        q = select(Item).where(Item.acordo == True)  # noqa: E712
+        if item_ebs:
+            q = q.where(func.lower(Item.item_ebs) == item_ebs.lower())
+        if acordo_numero and not item_ebs:
+            q = q.where(func.lower(Item.acordo_numero) == acordo_numero.lower())
+        rows = s.scalars(q.order_by(Item.id.desc())).all()
+        if not rows:
+            return None
+        escolhido = None
+        if acordo_numero:
+            for r in rows:
+                if (r.acordo_numero or "").strip().lower() == acordo_numero.lower():
+                    escolhido = r
+                    break
+        escolhido = escolhido or rows[0]
+        d = escolhido.to_dict()
+        return {
+            "descricao_item": d["descricao_item"],
+            "valor_unitario": d["valor_unitario"],
+            "imposto_percent": d["imposto_percent"],
+            "acordo_numero": escolhido.acordo_numero or "",
+        }
 
 
 def totais_por_status() -> dict:
