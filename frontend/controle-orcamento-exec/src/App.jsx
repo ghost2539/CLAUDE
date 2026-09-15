@@ -1374,18 +1374,18 @@ export default function App() {
         <table className="min-w-[1200px] w-full text-[12px] border-collapse">
           <thead className="bg-gray-50 text-gray-600">
             <tr className="text-[11px]">
-              <th rowSpan={2} className="th">ID</th>
-              <th rowSpan={2} className="th text-left">Projeto / Demanda</th>
-              <th rowSpan={2} className="th">Tipo</th>
-              <th rowSpan={2} className="th">Categoria</th>
-              <th rowSpan={2} className="th text-left">Área Responsável</th>
-              <th rowSpan={2} className="th">Estágio</th>
-              <th rowSpan={2} className="th">Prioridade</th>
+              <th rowSpan={2} className="th align-bottom">ID</th>
+              <th rowSpan={2} className="th align-bottom text-left">Projeto / Demanda</th>
+              <th rowSpan={2} className="th align-bottom">Tipo</th>
+              <th rowSpan={2} className="th align-bottom">Categoria</th>
+              <th rowSpan={2} className="th align-bottom text-left">Área Responsável</th>
+              <th rowSpan={2} className="th align-bottom">Estágio</th>
+              <th rowSpan={2} className="th align-bottom">Prioridade</th>
               <th colSpan={5} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
-              <th rowSpan={2} className="th text-right">% Realizado</th>
-              <th rowSpan={2} className="th">Vencimento Previsto</th>
-              <th rowSpan={2} className="th">Status</th>
-              <th rowSpan={2} className="th">Ações</th>
+              <th rowSpan={2} className="th align-bottom text-right">% Realizado</th>
+              <th rowSpan={2} className="th align-bottom">Vencimento Previsto</th>
+              <th rowSpan={2} className="th align-bottom">Status</th>
+              <th rowSpan={2} className="th align-bottom">Ações</th>
             </tr>
             <tr className="text-[11px]">
               <th className="th text-right">Orçamento Aprovado</th>
