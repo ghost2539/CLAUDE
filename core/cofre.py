@@ -22,311 +22,76 @@ ARQ_COFRE = DIR / "cofre.json"
 _REF = re.compile(r"@cofre:([A-Za-z0-9_.-]{1,64})@")
 MARCADOR = "@cofre:"
 
-CAMINHO_MODULO = os.environ.get(
-    "VCREPORTS_SECRETS_MODULE", "/usr/local/lib/vcreports/vcreports_secrets.py")
-CAMINHO_ARQUIVO = os.environ.get(
-    "VCREPORTS_SECRETS_FILE", "/etc/vcreports/.secrets.env")
 
-# Diretório extra no sys.path (alternativa a recriar o venv).
-_EXTRA = os.environ.get("VCREPORTS_SECRETS_PATH", "")
-if _EXTRA and _EXTRA not in sys.path:
-    sys.path.append(_EXTRA)
+# ── Cofre corporativo REMOVIDO ──────────────────────────────────────────
+# O loader externo (vcreports_secrets / /etc/vcreports/.secrets.env) foi
+# removido do código. Ele ficava inacessível neste servidor (Permission
+# denied) e só gerava ruído no log sem entregar nada. Os segredos passam a
+# vir do cofre LOCAL e do os.environ.
+#
+# As funções abaixo são stubs inertes: existem apenas para as telas/rotas de
+# diagnóstico (routers/cofre.py) e scripts continuarem importando sem quebrar.
+# Nenhuma delas importa `vcreports_secrets` nem lê `/etc/vcreports/.secrets.env`.
+USAR_CORPORATIVO = False
+_MSG_REMOVIDO = ("cofre corporativo removido do código — os segredos vêm do "
+                 "os.environ e do cofre local")
 
-_modulo = None         
-_modulo_via = ""        
-_arquivo_cache: dict | None = None
+
+def _corporativo(nome: str) -> str:
+    return ""
 
 
-def _funcao_do_modulo(mod):
-    for nome in ("s", "secret", "vcreports_secret"):
-        fn = getattr(mod, nome, None)
-        if callable(fn):
-            return fn
+def _somente_cofre(nome: str) -> str:
+    return ""
+
+
+def _resolver_modulo():
+    return None
+
+
+def _cache_do_loader(mod=None) -> dict | None:
+    return None
+
+
+def _funcao_do_modulo(mod=None):
     return None
 
 
 def caminho_do_loader() -> str:
-    """O arquivo que o loader do time vai ler — a mesma regra dele.
-
-    Os três loaders (py, sh, php) honram VCREPORTS_SECRETS_FILE e caem em
-    /etc/vcreports/.secrets.env. É a única forma sancionada de apontar o
-    portal para um cofre próprio, com só as chaves a que ele tem direito.
-    """
-    return os.environ.get("VCREPORTS_SECRETS_FILE", "/etc/vcreports/.secrets.env")
-
-
-def _cache_do_loader(mod) -> dict | None:
-    """O que o loader LEU do cofre — perguntando a ele. None = loader sem `_load()`.
-
-    `s(chave)` do loader cai no os.environ quando o cache não tem a chave;
-    por isso "s() devolveu valor" nunca provou que o valor veio do cofre.
-    O cache, sim: só tem o que foi lido do arquivo.
-    """
-    if mod is None or not callable(getattr(mod, "_load", None)):
-        return None
-    try:
-        dados = mod._load()
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("loader do cofre: _load() falhou: %s", exc)
-        return {}
-    return dict(dados) if isinstance(dados, dict) else {}
+    return ""
 
 
 def reler_loader() -> int:
-    """Faz o loader ler o arquivo de novo e devolve quantas chaves vieram.
-
-    O cache dele é fixo por processo, INCLUSIVE quando a primeira leitura
-    falha. Liberou-se a permissão depois que o serviço subiu? Sem isto, só
-    reiniciando. Zerar `_cache` é o gesto mínimo que o próprio loader faz
-    para começar limpo.
-    """
-    mod = _resolver_modulo()
-    if mod is None:
-        return 0
-    if hasattr(mod, "_cache"):
-        mod._cache = None
-    global _arquivo_cache
-    _arquivo_cache = None
-    return len(_cache_do_loader(mod) or {})
-
-
-def _resolver_modulo():
-    global _modulo, _modulo_via
-    if _modulo is not None:
-        return _modulo
-    try:
-        import vcreports_secrets as mod  # type: ignore
-        _modulo, _modulo_via = mod, f"import direto ({getattr(mod, '__file__', '?')})"
-        return _modulo
-    except Exception:  # noqa: BLE001
-        pass
-    if os.path.isfile(CAMINHO_MODULO):
-        try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("vcreports_secrets", CAMINHO_MODULO)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                _modulo, _modulo_via = mod, f"carregado por caminho ({CAMINHO_MODULO})"
-                return _modulo
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("Falha ao carregar o cofre por caminho (%s): %s", CAMINHO_MODULO, exc)
-    return None
-
-
-def _ler_arquivo_cofre() -> dict:
-    global _arquivo_cache
-    if _arquivo_cache is not None:
-        return _arquivo_cache
-    dados: dict[str, str] = {}
-    try:
-        with open(CAMINHO_ARQUIVO, "r", encoding="utf-8") as f:
-            for bruto in f:
-                linha = bruto.strip()
-                if not linha or linha.startswith("#") or "=" not in linha:
-                    continue
-                k, _, v = linha.partition("=")
-                k, v = k.strip(), v.strip()
-                if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
-                    v = v[1:-1]
-                dados[k] = v
-    except OSError:
-        pass   # sem permissão ou inexistente: os outros caminhos assumem
-    _arquivo_cache = dados
-    return dados
-
-COMANDO = os.environ.get("VCREPORTS_SECRETS_CMD", "")
-
-# Cofre corporativo DESLIGADO por padrão. O loader externo (vcreports_secrets /
-# /etc/vcreports/.secrets.env) fica inacessível neste servidor (Permission
-# denied) e só gera ruído no log sem entregar nada. Segredos vêm do os.environ
-# (e do cofre local). Quem tiver o cofre corporativo acessível liga com
-# COFRE_CORPORATIVO=sim.
-USAR_CORPORATIVO = os.environ.get("COFRE_CORPORATIVO", "nao").strip().lower() \
-    in ("sim", "1", "true", "on", "ligado")
-
-
-def _por_comando(nome: str) -> str:
-    if not COMANDO:
-        return ""
-    import shlex
-    import subprocess
-    try:
-        argv = [p.replace("{chave}", nome) for p in shlex.split(COMANDO)]
-        if not any("{chave}" in p for p in shlex.split(COMANDO)):
-            argv.append(nome)
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=10)
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("Comando do cofre falhou para '%s': %s", nome, exc)
-        return ""
-
-
-def _corporativo(nome: str) -> str:
-    if not USAR_CORPORATIVO:
-        return ""
-    v = _por_comando(nome)
-    if v:
-        return v
-    mod = _resolver_modulo()
-    if mod is not None:
-        cache = _cache_do_loader(mod)
-        if cache is not None:
-            # Loader do time: "do cofre" é o que está no cache dele. O que
-            # s() devolveria a mais vem do os.environ, e o os.environ tem a
-            # vez dele depois do cofre local — na ordem documentada.
-            return str(cache.get(nome, "") or "")
-        fn = _funcao_do_modulo(mod)
-        if fn:
-            try:
-                v = fn(nome)
-                if v:
-                    return str(v)
-            except Exception:  # noqa: BLE001
-                pass
-    return _ler_arquivo_cofre().get(nome, "")
-
-
-def _somente_cofre(nome: str) -> str:  # noqa: D401
-
-    if not USAR_CORPORATIVO:
-        return ""
-    arq = _ler_arquivo_cofre()
-    if arq:
-        return arq.get(nome, "")
-    return _corporativo(nome)
+    return 0
 
 
 def arquivo_legivel() -> bool:
-    return bool(_ler_arquivo_cofre())
+    return False
 
 
-def chaves_corporativas() -> list[str]:  # noqa: D401
-   
-    if not USAR_CORPORATIVO:
-        return []
-    return sorted(_ler_arquivo_cofre().keys())
+def chaves_corporativas() -> list[str]:
+    return []
 
 
 def corporativo_disponivel() -> bool:
-    return diagnostico_corporativo()[0]
+    return False
 
 
 def diagnostico_corporativo(chave_teste: str = "") -> tuple[bool, str]:
-    """O cofre corporativo responde? `chave_teste` diz com qual chave provar.
-
-    Quem chama sabe de qual chave depende. Sem isso, um cofre que funciona
-    perfeitamente para o EBS seria dado como quebrado só porque a chave
-    genérica de teste não existe nele.
-    """
-    if not USAR_CORPORATIVO:
-        return False, "desligado por configuração (COFRE_CORPORATIVO=nao)"
-    if COMANDO:
-        # Dizer "configurado" sem testar é pior que não dizer nada: some com a
-        # única pergunta que interessa. Então o comando é executado de fato,
-        # com a chave de prova, e o resultado é o que se relata.
-        chave = chave_teste or os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
-        if _por_comando(chave):
-            return True, (f"comando externo respondeu para '{chave}': {COMANDO}")
-        return False, (f"comando externo configurado, mas não devolveu valor para "
-                       f"'{chave}': {COMANDO}")
-    mod = _resolver_modulo()
-    if mod is not None:
-        fn = _funcao_do_modulo(mod)
-        if not fn:
-            return False, f"módulo encontrado ({_modulo_via}), mas sem função s()/secret()"
-        chave = chave_teste or os.environ.get("COFRE_CHAVE_TESTE", "CORREIOS_USUARIO")
-        cache = _cache_do_loader(mod)
-        if cache is not None:
-            # O loader do time tem cache: a prova é o cache, não o s().
-            arquivo = caminho_do_loader()
-            if not cache:
-                return False, (
-                    f"{_modulo_via}: o _load() do loader não leu {arquivo} para este "
-                    f"usuário (é o 'cofre nao legivel' do log). O cache dele é fixo "
-                    f"por processo — depois de liberar a leitura, use Reler ou "
-                    f"reinicie o serviço.")
-            tem = chave in cache
-            return True, (
-                f"{_modulo_via}: o loader leu {len(cache)} chave(s) de {arquivo}; "
-                f"'{chave}' " + ("está entre elas" if tem else
-                                 "NÃO está entre elas — nome errado ou chave não "
-                                 "provisionada neste cofre"))
-        try:
-            valor = fn(chave)
-        except Exception as exc:  # noqa: BLE001
-            return False, f"{_modulo_via}, mas {fn.__name__}('{chave}') falhou: {exc}"
-        if valor:
-            # O loader resolve cofre -> os.environ -> default. Se o valor que
-            # ele devolveu é igual ao da variável de ambiente, ele pode ter
-            # vindo do ambiente e não do cofre — e dar isso como "cofre
-            # disponível" é justamente o falso positivo que apaga o problema.
-            if os.environ.get(chave, "") == valor:
-                return False, (
-                    f"{_modulo_via}, função {fn.__name__}() devolveu valor para "
-                    f"'{chave}', mas idêntico ao da variável de ambiente. O loader "
-                    f"resolve cofre → ambiente, então isto NÃO prova que o cofre "
-                    f"respondeu. Para provar, use uma chave que não esteja no "
-                    f"ambiente: COFRE_CHAVE_TESTE=NOME")
-            return True, (f"{_modulo_via}, função {fn.__name__}() — leitura "
-                          f"confirmada com a chave '{chave}'")
-        return False, (
-            f"{_modulo_via}, função {fn.__name__}(), mas não devolveu valor para "
-            f"'{chave}'. Ou a chave tem outro nome (python3 scripts/cofre.py sondar), "
-            f"ou este usuário não alcança o cofre. Para testar com outra chave: "
-            f"COFRE_CHAVE_TESTE=NOME python3 scripts/cofre.py acesso"
-        )
-    if _ler_arquivo_cofre():
-        return True, f"arquivo lido direto ({CAMINHO_ARQUIVO})"
-    if os.path.exists(CAMINHO_ARQUIVO):
-        return False, f"{CAMINHO_ARQUIVO} existe mas não é legível por este usuário"
-    return False, (f"módulo não importável e {CAMINHO_MODULO} / {CAMINHO_ARQUIVO} "
-                   f"não encontrados")
+    return False, _MSG_REMOVIDO
 
 
 def acesso_ao_arquivo() -> dict:
-    import grp
-    import pwd
-
-    info: dict = {
-        "caminho": CAMINHO_ARQUIVO,
-        "existe": False, "legivel": False,
+    return {
+        "caminho": "", "existe": False, "legivel": False,
         "dono": "", "grupo": "", "modo": "",
         "usuario_atual": "", "grupos_atuais": [],
-        "erro": "",
+        "erro": _MSG_REMOVIDO,
     }
-    try:
-        info["usuario_atual"] = pwd.getpwuid(os.getuid()).pw_name
-        info["grupos_atuais"] = sorted(
-            g.gr_name for g in grp.getgrall() if info["usuario_atual"] in g.gr_mem
-        ) + [grp.getgrgid(os.getgid()).gr_name]
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
-        st = os.stat(CAMINHO_ARQUIVO)
-        info["existe"] = True
-        info["modo"] = oct(stat.S_IMODE(st.st_mode))[2:]
-        try:
-            info["dono"] = pwd.getpwuid(st.st_uid).pw_name
-        except Exception:  # noqa: BLE001
-            info["dono"] = str(st.st_uid)
-        try:
-            info["grupo"] = grp.getgrgid(st.st_gid).gr_name
-        except Exception:  # noqa: BLE001
-            info["grupo"] = str(st.st_gid)
-        info["legivel"] = os.access(CAMINHO_ARQUIVO, os.R_OK)
-    except PermissionError as exc:
-        info["erro"] = f"sem permissão nem para consultar o arquivo: {exc}"
-    except FileNotFoundError:
-        info["erro"] = "arquivo não encontrado neste caminho"
-    except OSError as exc:
-        info["erro"] = str(exc)
-    return info
 
 
 def onde_procura() -> list[str]:
-    """Diretórios em que o Python procura o módulo."""
+    """Diretórios em que o Python procura módulos (informativo)."""
     return [p for p in sys.path if p]
 
 
@@ -444,11 +209,10 @@ def _local(nome: str) -> str:
 
 # ── API pública ─────────────────────────────────────────────────────────
 def obter(nome: str, default: str = "") -> str:
-    for origem in (_corporativo, _local):
-        v = origem(nome)
-        if v:
-            return v
-
+    """Segredo: cofre local → os.environ → default. Sem cofre corporativo."""
+    v = _local(nome)
+    if v:
+        return v
     v = os.environ.get(nome, "")
     if v and MARCADOR not in v:
         return v
@@ -456,8 +220,6 @@ def obter(nome: str, default: str = "") -> str:
 
 
 def fonte(nome: str) -> str:
-    if USAR_CORPORATIVO and _corporativo(nome):
-        return "cofre corporativo"
     if _local(nome):
         return "cofre local"
     if os.environ.get(nome):
