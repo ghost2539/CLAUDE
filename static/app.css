@@ -161,6 +161,21 @@ button, input, select, textarea { font: inherit; }
     cursor: pointer;
 }
 
+/* ── Sidebar: grupos ─────────────────────────────────────────────── */
+.sidebar-grupo { padding: 2px 0; }
+.sidebar-grupo + .sidebar-grupo { border-top: 1px solid rgba(255,255,255,.05); }
+.sidebar-grupo-titulo {
+    cursor: pointer; user-select: none;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 16px 4px; font-size: 10.5px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.sidebar-grupo-titulo::after {
+    content: '\25BE'; font-size: 10px; opacity: .6; transition: transform .15s;
+}
+.sidebar-grupo.fechado .sidebar-grupo-titulo::after { transform: rotate(-90deg); }
+.sidebar-grupo.fechado .sidebar-item { display: none !important; }
+
 /* ── Topbar ─────────────────────────────────────────────────────── */
 .topbar {
     position: fixed;

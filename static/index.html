@@ -48,46 +48,67 @@
             <div class="sidebar-brand-text">SPARE</div>
         </div>
         <nav class="sidebar-menu">
-            <a class="sidebar-item" data-route="bemvindo">
-                <span class="sidebar-icon">&#x2302;</span>
-                <span class="sidebar-label">Bem-vindo</span>
-            </a>
-            <a class="sidebar-item" data-route="consulta">
-                <span class="sidebar-icon">&#x2315;</span>
-                <span class="sidebar-label">Consulta</span>
-            </a>
-            <a class="sidebar-item" data-route="recebimento">
-                <span class="sidebar-icon">&#x25A3;</span>
-                <span class="sidebar-label">Recebimento</span>
-            </a>
-            <a class="sidebar-item" data-route="identificacao">
-                <span class="sidebar-icon">&#x2399;</span>
-                <span class="sidebar-label">Identificação</span>
-            </a>
-            <a class="sidebar-item" data-route="gestao_ativos" data-perm="servicenow">
-                <span class="sidebar-icon">&#x21C4;</span>
-                <span class="sidebar-label">Gestão de Ativos</span>
-            </a>
-            <a class="sidebar-item" data-route="rastreio">
-                <span class="sidebar-icon">&#x1F4E6;</span>
-                <span class="sidebar-label">Correios</span>
-            </a>
-            <a class="sidebar-item" data-route="reparos">
-                <span class="sidebar-icon">&#x2692;</span>
-                <span class="sidebar-label">Central de Reparos</span>
-            </a>
-            <a class="sidebar-item" data-route="orcamento_manutencao">
-                <span class="sidebar-icon">&#x1F4B0;</span>
-                <span class="sidebar-label">Orçamento</span>
-            </a>
-            <a class="sidebar-item" data-route="status">
-                <span class="sidebar-icon">&#x2301;</span>
-                <span class="sidebar-label">Status</span>
-            </a>
-            <a class="sidebar-item" data-route="parametros">
-                <span class="sidebar-icon">&#x2699;</span>
-                <span class="sidebar-label">Parâmetros</span>
-            </a>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Início</div>
+                <a class="sidebar-item" data-route="bemvindo">
+                    <span class="sidebar-icon">&#x2302;</span>
+                    <span class="sidebar-label">Bem-vindo</span>
+                </a>
+                <a class="sidebar-item" data-route="consulta">
+                    <span class="sidebar-icon">&#x2315;</span>
+                    <span class="sidebar-label">Consulta</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Entrada</div>
+                <a class="sidebar-item" data-route="recebimento">
+                    <span class="sidebar-icon">&#x25A3;</span>
+                    <span class="sidebar-label">Recebimento</span>
+                </a>
+                <a class="sidebar-item" data-route="identificacao">
+                    <span class="sidebar-icon">&#x2399;</span>
+                    <span class="sidebar-label">Identificação</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Central de Reparos</div>
+                <a class="sidebar-item" data-route="reparos">
+                    <span class="sidebar-icon">&#x2692;</span>
+                    <span class="sidebar-label">Central de Reparos</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Saída</div>
+                <a class="sidebar-item" data-route="rastreio">
+                    <span class="sidebar-icon">&#x1F4E6;</span>
+                    <span class="sidebar-label">Correios</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Gestão de Ativos</div>
+                <a class="sidebar-item" data-route="gestao_ativos" data-perm="servicenow">
+                    <span class="sidebar-icon">&#x21C4;</span>
+                    <span class="sidebar-label">Gestão de Ativos</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Gestão de Fornecedores</div>
+                <a class="sidebar-item" data-route="orcamento_manutencao">
+                    <span class="sidebar-icon">&#x1F4B0;</span>
+                    <span class="sidebar-label">Orçamento</span>
+                </a>
+            </div>
+            <div class="sidebar-grupo">
+                <div class="sidebar-grupo-titulo">Sistema</div>
+                <a class="sidebar-item" data-route="status">
+                    <span class="sidebar-icon">&#x2301;</span>
+                    <span class="sidebar-label">Status</span>
+                </a>
+                <a class="sidebar-item" data-route="parametros">
+                    <span class="sidebar-icon">&#x2699;</span>
+                    <span class="sidebar-label">Parâmetros</span>
+                </a>
+            </div>
         </nav>
         <div class="sidebar-bottom">
             <button id="logout-btn" class="sidebar-logout-btn">
