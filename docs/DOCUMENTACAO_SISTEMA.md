@@ -52,8 +52,12 @@ telas seguem a mesma biblioteca de `static/app.css`:
   (mais os derivados de hover/contraste). Nenhum hex fora da tabela nos módulos:
   as cores entram por token `--sp-*` (os nomes antigos `--color-*`/`--bg-*`
   são apelidos para os tokens).
-- Tipografia: **Arial** para títulos, rótulos e botões; **IBM Plex Mono** para
-  números, matrícula, status, versão e rótulos técnicos em caixa-alta.
+- Tipografia: **Inter** para títulos, texto, botões e rótulos; **Roboto Mono**
+  só onde alinhar dígito importa (patrimônio, série, matrícula, versão, valor
+  de KPI, coluna numérica). As duas são **servidas pelo próprio portal**
+  (`static/fonts/`, declaradas em `static/fonts/fontes.css`, que toda tela
+  carrega): na rede interna o CDN do Google pode não responder, e a fonte de
+  sistema que entrava no lugar deixava a tela dura.
 - Forma: cantos retos (`border-radius: 0`), sem sombra; separação é borda de
   1px. Grades de KPI e tabela com divisor no próprio `gap`.
 - Shell: sidebar fixa de 236px, **preta nos dois temas**, itens numerados
@@ -78,8 +82,8 @@ claro; KPIs, donut, barras, curva S; tabela editável.
 **⚠️ Regra de CSP (importante para novas telas):** o portal envia
 `Content-Security-Policy: script-src 'self'`. Isso **bloqueia `<script>` inline** —
 todo JS de página tem que estar em **arquivo externo** (`/static/.../app.js`).
-CSS inline é permitido (`style-src 'unsafe-inline'`). Recursos externos só de
-`fonts.googleapis.com`/`fonts.gstatic.com`.
+CSS inline é permitido (`style-src 'unsafe-inline'`). **Nenhum recurso
+externo**: fonte, script e folha de estilo vêm todos do próprio portal.
 
 ---
 

@@ -24,8 +24,9 @@ Regra: acento nunca preenche área grande; é ação, linha ou borda. Um só ace
 
 ## 2. Tipografia
 
-- **Arial** (institucional Renner) para títulos, rótulos de UI e botões.
-- **IBM Plex Mono** para números, patrimônio, matrícula, status, versão e labels técnicos em caixa-alta com `letter-spacing: .14em`.
+- **Inter** para títulos, texto, botões e rótulos de UI — inclusive os rótulos técnicos em caixa-alta com `letter-spacing: .14em` (token `--sp-label`). Em monoespaçada eles ficavam duros.
+- **Roboto Mono** só onde alinhar dígito importa: números, patrimônio, série, matrícula, versão, valor de KPI e coluna numérica (token `--sp-mono`).
+- As duas são servidas pelo portal (`static/fonts/`, declaradas em `static/fonts/fontes.css`), nunca por CDN — a rede interna pode bloqueá-lo.
 - Escala: página 26px bold · seção 18px bold · corpo 13–14px · label 9–10px mono caixa-alta.
 - `font-variant-numeric: tabular-nums` em toda coluna numérica.
 

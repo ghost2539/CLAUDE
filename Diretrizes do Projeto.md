@@ -55,7 +55,8 @@ normativo.
 11. **Tela nova segue o padrão de UI SPARE** (`docs/PADRAO_UI_SPARE.md`):
    usa o shell e as classes de `static/app.css`, nenhum hex fora da paleta
    (cor entra por token `--sp-*`), cantos retos, sem sombra, números em
-   IBM Plex Mono e funciona nos temas claro e escuro.
+   Roboto Mono e funciona nos temas claro e escuro. Fonte nova entra em
+   `static/fonts/` — a política de conteúdo não libera CDN.
 
 ## Segurança
 

@@ -1,9 +1,12 @@
 /* ================================================================
    Portal de Operações SPARE — folha de estilo
-   Padrão de UI SPARE (handoff CSC TI): paleta LRSA 2025, Arial +
-   IBM Plex Mono, cantos retos, sem sombra, sidebar preta nos dois
+   Padrão de UI SPARE (handoff CSC TI): paleta LRSA 2025, Inter +
+   Roboto Mono, cantos retos, sem sombra, sidebar preta nos dois
    temas. Os módulos consomem esta biblioteca, não copiam estilo.
    ================================================================ */
+
+/* Fontes: Inter (texto e rótulos) e Roboto Mono (números e códigos)
+   vêm de static/fonts/fontes.css, que toda tela carrega. */
 
 /* ── Tokens ─────────────────────────────────────────────────────── */
 :root {
@@ -20,8 +23,14 @@
     --sp-sand: #E9D39B;
     --sp-teal: #246F68;
 
-    --sp-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-    --sp-sans: Arial, Helvetica, sans-serif;
+    /* Três papéis de texto: o corpo e os títulos em Inter; os rótulos
+       técnicos em caixa-alta também em Inter (em monoespaçada ficavam
+       duros); e a monoespaçada só onde alinhar dígito importa —
+       patrimônio, série, matrícula, versão, valor de KPI, coluna
+       numérica. */
+    --sp-sans: Inter, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
+    --sp-mono: 'Roboto Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --sp-label: var(--sp-sans);
 
     --sp-sidebar-w: 236px;
     --sp-header-h: 62px;
@@ -215,7 +224,7 @@ a:hover { text-decoration: underline; }
     color: var(--sp-white);
 }
 .sidebar-brand-sub {
-    font: 500 8px/1 var(--sp-mono);
+    font: 500 8px/1 var(--sp-label);
     letter-spacing: .16em;
     text-transform: uppercase;
     color: #8C8C8C;
@@ -234,7 +243,7 @@ a:hover { text-decoration: underline; }
     justify-content: space-between;
     align-items: center;
     padding: 8px 10px 6px;
-    font: 500 9px/1 var(--sp-mono);
+    font: 500 9px/1 var(--sp-label);
     letter-spacing: .16em;
     text-transform: uppercase;
     color: #6E6E6E;
@@ -375,7 +384,7 @@ a:hover { text-decoration: underline; }
     background: var(--sp-input-bg);
     border: 1px solid var(--sp-input-border);
     color: var(--sp-text);
-    font: 400 12px/1.2 var(--sp-mono);
+    font: 400 13px/1.2 var(--sp-sans);
     transition: border-color .14s;
 }
 .topbar-search-input::placeholder { color: var(--sp-faint); }
@@ -388,7 +397,7 @@ a:hover { text-decoration: underline; }
     border: 0;
     background: transparent;
     color: var(--sp-muted);
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-label);
     letter-spacing: .12em;
     text-transform: uppercase;
     cursor: pointer;
@@ -402,7 +411,7 @@ a:hover { text-decoration: underline; }
     gap: 8px;
     padding: 6px 11px;
     border: 1px solid var(--sp-border);
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-label);
     letter-spacing: .12em;
     text-transform: uppercase;
     color: var(--sp-teal-text);
@@ -449,7 +458,7 @@ a:hover { text-decoration: underline; }
 .portal-rodape {
     padding: 14px 32px;
     border-top: 1px solid var(--sp-border);
-    font: 400 10px/1.4 var(--sp-mono);
+    font: 400 11px/1.4 var(--sp-label);
     color: var(--sp-faint);
 }
 
@@ -471,7 +480,7 @@ a:hover { text-decoration: underline; }
     margin-bottom: -1px;
     background: none;
     color: var(--sp-muted);
-    font: 500 11px/1 var(--sp-mono);
+    font: 500 11px/1 var(--sp-label);
     letter-spacing: .06em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -492,7 +501,7 @@ h2.page-title { font-size: 18px; margin-bottom: 16px; }
 .kicker {
     display: block;
     margin-bottom: 8px;
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-label);
     letter-spacing: .16em;
     text-transform: uppercase;
     color: var(--sp-kicker);
@@ -526,7 +535,7 @@ h2.page-title { font-size: 18px; margin-bottom: 16px; }
 /* ── Campos ─────────────────────────────────────────────────────── */
 .form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-group label, .form-label {
-    font: 500 10px/1.3 var(--sp-mono);
+    font: 500 10px/1.3 var(--sp-label);
     letter-spacing: .14em;
     text-transform: uppercase;
     color: var(--sp-muted);
@@ -635,7 +644,7 @@ select.form-control-inline { padding-right: 26px; }
     background: var(--sp-th-bg);
     padding: 11px 14px;
     text-align: left;
-    font: 500 10px/1.2 var(--sp-mono);
+    font: 500 10px/1.2 var(--sp-label);
     letter-spacing: .12em;
     text-transform: uppercase;
     color: var(--sp-faint);
@@ -657,7 +666,7 @@ select.form-control-inline { padding-right: 26px; }
 .empty-row {
     text-align: center;
     color: var(--sp-faint);
-    font: 400 13px/1.4 var(--sp-mono);
+    font: 400 13px/1.4 var(--sp-label);
     padding: 28px !important;
 }
 
@@ -665,7 +674,7 @@ select.form-control-inline { padding-right: 26px; }
 .badge {
     display: inline-block;
     padding: 5px 9px;
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-label);
     letter-spacing: .06em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -702,7 +711,7 @@ select.form-control-inline { padding-right: 26px; }
     overflow-wrap: anywhere;
 }
 .stat-label {
-    font: 500 9px/1.3 var(--sp-mono);
+    font: 500 9px/1.3 var(--sp-label);
     letter-spacing: .14em;
     text-transform: uppercase;
     color: var(--sp-faint);
@@ -812,7 +821,7 @@ select.form-control-inline { padding-right: 26px; }
 .lg-monograma { color: var(--sp-accent); display: block; flex: none; }
 .lg-marca { display: flex; flex-direction: column; gap: 5px; }
 .lg-marca-nome { font: bold 19px/1 var(--sp-sans); letter-spacing: .26em; color: var(--sp-white); }
-.lg-marca-sub  { font: 500 10px/1 var(--sp-mono); letter-spacing: .2em; text-transform: uppercase; color: #8C8C8C; }
+.lg-marca-sub  { font: 500 10px/1 var(--sp-label); letter-spacing: .2em; text-transform: uppercase; color: #8C8C8C; }
 .lg-divisor { width: 1px; height: 34px; background: #2B2B2B; }
 .lg-empresa { font: bold 11px/1.4 var(--sp-sans); letter-spacing: .16em; text-transform: uppercase; color: #BDBDBD; }
 
@@ -820,13 +829,13 @@ select.form-control-inline { padding-right: 26px; }
 .lg-selo {
     display: inline-flex; align-items: center; gap: 9px; align-self: flex-start;
     padding: 7px 13px; border: 1px solid #AB480780; background: #AB48071F;
-    font: 500 10px/1 var(--sp-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--sp-sand);
+    font: 500 10px/1 var(--sp-label); letter-spacing: .16em; text-transform: uppercase; color: var(--sp-sand);
 }
 .lg-selo-ponto { width: 6px; height: 6px; border-radius: 50%; background: var(--sp-accent-hi); animation: lgPulse 2.4s ease-in-out infinite; }
 .lg-titulo { margin: 0; font: bold 54px/1.04 var(--sp-sans); letter-spacing: -.03em; color: var(--sp-white); text-wrap: pretty; }
 
 .lg-ciclo { display: flex; flex-direction: column; gap: 18px; }
-.lg-ciclo-label { font: 500 10px/1.4 var(--sp-mono); letter-spacing: .18em; text-transform: uppercase; color: #8C8C8C; }
+.lg-ciclo-label { font: 500 10px/1.4 var(--sp-label); letter-spacing: .18em; text-transform: uppercase; color: #8C8C8C; }
 .lg-ciclo-grade {
     list-style: none; margin: 0; padding: 1px;
     display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -851,7 +860,7 @@ select.form-control-inline { padding-right: 26px; }
 .lg-ambiente-linha { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .lg-ambiente {
     display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--sp-teal-border);
-    font: 500 10px/1 var(--sp-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-teal-text);
+    font: 500 10px/1 var(--sp-label); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-teal-text);
 }
 .lg-ambiente-ponto { width: 6px; height: 6px; border-radius: 50%; background: var(--sp-teal); }
 
@@ -861,7 +870,7 @@ select.form-control-inline { padding-right: 26px; }
 .lg-form-cabeca p  { margin: 0; font: 400 14px/1.55 var(--sp-sans); color: #525252; }
 
 .lg-campo { display: flex; flex-direction: column; gap: 7px; }
-.lg-campo label { font: 500 10px/1 var(--sp-mono); letter-spacing: .14em; text-transform: uppercase; color: #616161; }
+.lg-campo label { font: 500 10px/1 var(--sp-label); letter-spacing: .14em; text-transform: uppercase; color: #616161; }
 .lg-campo input {
     width: 100%; padding: 14px 15px; border: 1px solid #CFCFCF; border-radius: 0; background: var(--sp-white);
     font: 400 15px/1.2 var(--sp-mono); color: var(--sp-black); outline: none;
@@ -883,13 +892,13 @@ select.form-control-inline { padding-right: 26px; }
 
 .lg-erro {
     padding: 11px 13px; border: 1px solid var(--sp-accent); background: #AB48070F;
-    font: 500 11px/1.5 var(--sp-mono); color: var(--sp-accent-lo);
+    font: 500 11px/1.5 var(--sp-label); color: var(--sp-accent-lo);
 }
 .lg-ajuda { margin: 0; font: 400 12px/1.6 var(--sp-sans); color: #6E6E6E; text-wrap: pretty; }
 
 .lg-rodape { display: flex; flex-direction: column; gap: 12px; padding-top: 18px; border-top: 1px solid #E5E5E5; }
 .lg-rodape-linha { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font: 400 11px/1.4 var(--sp-mono); color: #757575; }
-.lg-aviso { font: 400 11px/1.5 var(--sp-mono); color: #8F8F8F; text-wrap: pretty; }
+.lg-aviso { font: 400 11px/1.5 var(--sp-label); color: #8F8F8F; text-wrap: pretty; }
 
 /* fluido: os painéis empilham por flex-wrap; abaixo disso só reduzem respiro */
 @media (max-width: 939px) {
@@ -975,7 +984,7 @@ select.form-control-inline { padding-right: 26px; }
 .loading-text {
     display: block;
     margin-top: 12px;
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-label);
     letter-spacing: .12em;
     text-transform: uppercase;
     color: var(--sp-muted);
