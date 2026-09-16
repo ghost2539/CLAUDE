@@ -26,7 +26,7 @@ import db.trilha as dbt
 from db.externo import (
     Envio, SessionLocal, ASSISTENCIA, DEVOLUCAO, ESPECIES, ROTULO_ESPECIE,
     PROCESSO, FILA, FORA, CONFERENCIA,
-    REPARADO, SUBSTITUIDO, SEM_REPARO, RESULTADOS, ROTULO_RESULTADO,
+    SUBSTITUIDO, SEM_REPARO, RESULTADOS, ROTULO_RESULTADO,
 )
 from core.security import require_permission, check_rate_limit
 from routers.trilha import (

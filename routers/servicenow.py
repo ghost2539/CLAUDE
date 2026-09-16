@@ -49,9 +49,6 @@ SUBSTATUS_MAP = {
     "pre-allocated": "pre_allocated", "pre-alocado": "pre_allocated",
 }
 
-REFERENCE_FIELDS = [
-    "model", "model_category", "company", "stockroom", "depreciation",
-]
 
 REFERENCE_TABLE_MAP = {
     "model": "cmdb_model",
@@ -1198,16 +1195,6 @@ def _sn_session_from_portal(req):
     return session
 
 
-def _sn_session_from_cookies(sn_cookies: dict):
-    """Monta uma requests.Session a partir de cookies SN salvos (usada pela
-    rotina automática, fora de um request). Retorna None se sem cookies."""
-    if not sn_cookies:
-        return None
-    _req, _ = _get_http()
-    session = _sn_sessao(json=True)
-    session.cookies.update(sn_cookies)
-    return session
-
 
 def _sn_session_valida(session) -> bool:
     """Confere se a sessão SN ainda responde (não caiu no login)."""
@@ -2021,8 +2008,6 @@ def hardware_exists(body: ExisteIn, req: Request):
 # SAÍDA DE ESTOQUE — busca e movimentação de ativos no alm_hardware
 # ═══════════════════════════════════════════════════════════════════
 
-VALID_STOCKROOMS = ["SPARE-ADM15", "SPARE-CD324", "SPARE-CD504"]
-
 
 # Listas que as telas de Entrada, Saída e Movimentação interna oferecem.
 # Vêm de Configuração → Configuração Módulos (chave gestao_ativos) e
@@ -2049,13 +2034,6 @@ def config_gestao_ativos() -> dict:
 def gestao_ativos_config(req: Request):
     require_permission(req, "servicenow", "view")
     return config_gestao_ativos()
-
-BU_MAP = {
-    "renner": "Renner Brasil",
-    "youcom": "Youcom",
-    "camicado": "Camicado",
-    "ashua": "Ashua",
-}
 
 
 class SaidaSearchIn(BaseModel):

@@ -14,7 +14,6 @@ Fluxo de encerramento (exigência do ServiceNow):
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
 
 from core.security import require_permission
 from routers.servicenow import (

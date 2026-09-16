@@ -34,8 +34,8 @@ from db.bancada import (
     Reparo, Causa, SessionLocal,
     BANCADAS, ROTULO_BANCADA, PROCESSO,
     FILA_DA_BANCADA, TRATATIVA_DA_BANCADA,
-    VENDA, AGUARDANDO_PECAS, ASSISTENCIA, INTERNALIZACAO, DESTINOS,
-    ROTULO_DESTINO, PROXIMO_ESTADO, FROTA, LOJA, CONECTIVIDADE,
+    VENDA, AGUARDANDO_PECAS, ASSISTENCIA, DESTINOS,
+    ROTULO_DESTINO, PROXIMO_ESTADO, FROTA,
 )
 from core.security import require_permission, check_rate_limit
 from routers.trilha import (

@@ -21,7 +21,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
 
 import config as _config_mod
 import db.monitoramento as db

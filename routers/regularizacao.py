@@ -31,7 +31,7 @@ from db.regularizacao import (
     Divergencia, SessionLocal, ORIGENS, TIPOS, ROTULO_TIPO, ROTULO_ESTADO,
     RESOLUCOES, AG_TRATATIVA, EX_TRATATIVA, RESOLVIDA, CANCELADA, ESTADOS_FINAIS,
 )
-from core.security import require_permission, check_rate_limit, get_session
+from core.security import require_permission, check_rate_limit
 from routers.trilha import (
     Calendario, duracao_util, prazo_util, mover, encerrar, abrir_ativo,
     TrilhaInvalida, _utc,

@@ -173,10 +173,6 @@ ativos. Fallback: base local (`local_assets`).
 `CORREIOS_CHAVE`, `CORREIOS_CARTOES`, `CORREIOS_DR`, `CORREIOS_CONTRATO`), com
 fallback para env na transição.
 
-**EBS via Oracle direto** — `ebs_oracle.py` (camada de acesso só-leitura ao
-Oracle EBS; `SET TRANSACTION READ ONLY`, timeout, teto de linhas). Credenciais
-no cofre (`ORACLE_EBS_USER/PASS/DSN`, `ORACLE_CLIENT_LIB_DIR`). Consultas ainda
-a configurar. Doc: `docs/EBS_ORACLE_BASE.md`.
 
 ---
 
@@ -207,7 +203,7 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 | `TRUSTED_PROXIES` | 127.0.0.1,::1 | Proxies cujos `X-Forwarded-For`/`X-Forwarded-Proto` são aceitos (IP do IP real e do esquema). |
 | `PORTAL_CA_BUNDLE` | "" | PEM com a CA corporativa (+ CA do proxy interceptador) para verificar o TLS de saída. |
 | `PUBLIC_ASSETS_TOKEN` | "" (cofre) | Token do cabeçalho `X-Api-Key` da conversão EBS → ServiceNow. Sem ele, só sessão com `consulta:view`. |
-| `INITIAL_ADMIN_LOGIN` / `INITIAL_ADMIN_PASSWORD` | "" | Admin inicial. |
+| `INITIAL_ADMIN_LOGIN` | "" | Login de rede do administrador inicial (a senha é a do AD). |
 | `HOST` / `PORT` / `WORKERS` | 0.0.0.0 / **8901** / 1 | Servidor. |
 | `UPLOAD_MAX_MB` | 50 | Upload máximo. |
 | `RATE_LIMIT_LOGIN` / `RATE_LIMIT_API` | 5/minute / 120/minute | Limites. |
@@ -269,7 +265,7 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 - `/api/recebimento* · /recebimentos* · /lotes*` — recebimento e lotes.
 - `/api/identificacao/*` — etiquetas e impressoras.
 - `/api/servicenow/*` — entrada, saída (search/search_lote/move), incidentes, relatórios, Correios, encerramento.
-- `/api/reparos*` — reparos e dashboard.
+
 - `/api/parametros/*` — administração.
 - `/api/status · /dashboard/summary` — status e resumo.
 - `/api/controle-orcamento-exec/*` (/controle-orcamento) · `/api/indicadores/*` — módulos isolados.
@@ -313,4 +309,4 @@ Mudança de `.py`/config → **reiniciar o serviço**.
 | `docs/EBS_ORACLE_BASE.md` | Camada de acesso Oracle EBS + catálogo de tabelas padrão. |
 | `docs/CORREIOS_SERVICENOW.md` | Integração Correios/ServiceNow. |
 | `docs/CONTROLE_ORCAMENTO.md` | Módulo Controle de Orçamento. |
-| `docs/DOCUMENTACAO_SISTEMA.html` | Versão HTML navegável desta documentação. |
+

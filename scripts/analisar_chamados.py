@@ -35,7 +35,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from scripts.chamados_nucleo import (  # noqa: E402
-    MODELOS_PADRAO, TIPOS_PADRAO, analisar, resumir,
+    MODELOS_PADRAO, analisar, resumir,
 )
 
 LOTE = 60          # números por consulta; a query do SN tem limite de tamanho

@@ -1,17 +1,16 @@
 from __future__ import annotations
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
     create_engine, String, Text, Boolean, DateTime, Date,
     Integer, BigInteger, Numeric, ForeignKey, UniqueConstraint,
-    Index, JSON, func, select, text,
+    Index, JSON, select,
 )
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
-import bcrypt
 
 from config import get_settings
 
@@ -36,19 +35,6 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
-
-
-def verify_password(plain: str, hashed: str | None) -> bool:
-    if not hashed:
-        return False
-    try:
-        return bcrypt.checkpw(plain.encode(), hashed.encode())
-    except Exception:
-        return False
-
-
 # ── ORM Models ──────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
@@ -60,8 +46,11 @@ class User(Base):
     id: Mapped[int] = mapped_column(_PK, primary_key=True)
     login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(180), default="")
+    # Sem senha no portal: a autenticação é sempre pelo SSO corporativo.
+    # `password_hash` e `must_change_password` ficam mapeadas só porque a
+    # tabela em produção as tem (NOT NULL); nada mais as lê.
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    auth_source: Mapped[str] = mapped_column(String(12), default="LOCAL")
+    auth_source: Mapped[str] = mapped_column(String(12), default="SSO")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     allowed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
@@ -388,14 +377,13 @@ def init_db() -> None:
             return
         u = s.scalar(select(User).where(User.login == admin_login))
         if not u:
-            password = _cfg.INITIAL_ADMIN_PASSWORD.strip()
             u = User(
                 login=admin_login,
                 display_name="Administrador Principal",
-                auth_source="LOCAL" if password else "AD",
+                auth_source="SSO",
                 is_admin=True,
                 active=True,
-                password_hash=hash_password(password) if password else None,
+                allowed=True,
                 must_change_password=False,
             )
             s.add(u)

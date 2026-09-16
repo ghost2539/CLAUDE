@@ -20,9 +20,9 @@ from config import get_settings
 from db.portal import (
     SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot, Setting,
 )
-from core.security import get_session, require_permission, check_rate_limit
+from core.security import require_permission, check_rate_limit
 from routers.helpers import (
-    classify, apply_class, find_asset, upsert_asset, asset_dict, cycle_dict,
+    apply_class, upsert_asset, asset_dict, cycle_dict,
     local_search_one,
 )
 from routers.consulta import _query_single, _query_assets, QueryIn

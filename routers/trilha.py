@@ -28,9 +28,9 @@ from sqlalchemy import select, func
 import db.trilha as db
 from db.trilha import (
     Ativo, Movimentacao, Intervalo, SessionLocal,
-    FISICA, ADMINISTRATIVA, TRILHAS,
-    FILA, TRATATIVA, EXTERNO, TIPOS,
-    PORTAL, ADMIN, AUTOMACAO, ORIGENS,
+    FISICA, TRILHAS,
+    FILA, TRATATIVA, TIPOS,
+    PORTAL, ADMIN, ORIGENS,
 )
 from core.security import require_permission, check_rate_limit
 

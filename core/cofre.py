@@ -212,9 +212,6 @@ def _somente_cofre(nome: str) -> str:  # noqa: D401
     return _corporativo(nome)
 
 
-def arquivo_legivel() -> bool:
-    return bool(_ler_arquivo_cofre())
-
 
 def chaves_corporativas() -> list[str]:  # noqa: D401
     """Nomes das chaves do cofre corporativo, quando o arquivo é legível.
@@ -300,10 +297,6 @@ def acesso_ao_arquivo() -> dict:
         info["erro"] = str(exc)
     return info
 
-
-def onde_procura() -> list[str]:
-    """Diretórios em que o Python procura o módulo."""
-    return [p for p in sys.path if p]
 
 
 # ── Arquivos e permissões ───────────────────────────────────────────────

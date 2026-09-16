@@ -13,8 +13,7 @@
 #         - SQLite (data/db/*.db): cópia consistente com sqlite3 .backup;
 #         - uploads, branding e referências;
 #    4. gera o arquivo de ambiente do teste a partir do de produção, trocando
-#       porta, bancos e ligando AMBIENTE=testes (agendador de automações e
-#       e-mails desligados);
+#       porta, bancos e ligando AMBIENTE=testes (e-mails de alerta desligados);
 #    5. cria o serviço "portal-spare-testes" e sobe na porta 8999.
 #
 #  Nada é escrito nos bancos nem nos arquivos da produção: a produção só é
@@ -376,7 +375,7 @@ SEGREDO="$("$TEST_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_u
     # Herda tudo da produção, menos o que identifica a instância.
     # CREDENTIALS_DIRECTORY também fica de fora: é o diretório privado do
     # serviço de produção; o systemd define o do serviço de testes sozinho.
-    grep -vE '^\s*(#|$)' "$PROD_ENVFILE" | grep -vE '^(DATABASE_URL|[A-Z_]*_DATABASE_URL|PORT|HOST|WORKERS|AMBIENTE|CONSULTA_TIMES_PORTA|CONSULTA_TIMES_HOST|SSL_CERTFILE|SSL_KEYFILE|PORTAL_SESSION_SECRET|SMTP_HOST|ALERTA_EMAIL_TO|CREDENTIALS_DIRECTORY)='
+    grep -vE '^\s*(#|$)' "$PROD_ENVFILE" | grep -vE '^(DATABASE_URL|[A-Z_]*_DATABASE_URL|PORT|HOST|WORKERS|AMBIENTE|SSL_CERTFILE|SSL_KEYFILE|PORTAL_SESSION_SECRET|SMTP_HOST|ALERTA_EMAIL_TO|CREDENTIALS_DIRECTORY)='
     echo ""
     echo "AMBIENTE=testes"
     printf "DATABASE_URL='%s'\n" "$(printf '%s' "$TEST_DATABASE_URL" | sed "s/'/'\\\\''/g")"
@@ -384,7 +383,7 @@ SEGREDO="$("$TEST_DIR/venv/bin/python" -c 'import secrets; print(secrets.token_u
     echo "HOST=0.0.0.0"
     echo "PORT=$TEST_PORT"
     echo "WORKERS=1"
-    echo "CONSULTA_TIMES_PORTA=0"
+
     echo "SMTP_HOST="
     echo "ALERTA_EMAIL_TO="
 } > "$TEST_ENVFILE"
@@ -524,7 +523,7 @@ cat <<EOF
   atualizar:    rode este script de novo (só o código; --recopiar-bancos para refazer os bancos)
   desligar:     $COMO_PARAR
 
-  Em testes: agendador de automações e e-mails desligados; Consulta Times sem
+  Em testes: e-mails de alerta desligados; Consulta Times sem
   segundo listener. ServiceNow, EBS, MDM e Correios continuam reais — o que
   for gravado neles é gravado de verdade.
 EOF

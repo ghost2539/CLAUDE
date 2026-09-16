@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, ForeignKey, Index,
-    UniqueConstraint, create_engine, event, select,
+    create_engine, event, select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 

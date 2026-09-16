@@ -32,7 +32,7 @@ from db.preparacao import (
     FILA_DA_ESTACAO, TRATATIVA_DA_ESTACAO, SAIDA_DA_ESTACAO,
     CONFIGURACAO, MONTAGEM, INTERNALIZACAO,
 )
-from core.security import require_permission, check_rate_limit
+from core.security import require_permission
 from routers.trilha import (Calendario, duracao_util, mover, TrilhaInvalida,
                             garantir_ativo, _utc)
 

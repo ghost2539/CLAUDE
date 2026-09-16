@@ -30,8 +30,8 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, Integer, Boolean, DateTime, ForeignKey, Index,
-    create_engine, event, select, func,
+    String, Text, Integer, DateTime, ForeignKey, Index,
+    create_engine, event, select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 

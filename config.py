@@ -63,22 +63,17 @@ class Settings:
     CREDENTIALS_DIRECTORY: str = os.getenv("CREDENTIALS_DIRECTORY", "")
 
     # AMBIENTE=testes numa instância que roda ao lado da produção com cópia
-    # dos bancos: desliga o que age no mundo sozinho (agendador de
-    # automações, e-mails de alerta) e marca o nome da aplicação.
+    # dos bancos: desliga o que age no mundo sozinho (e-mails de alerta) e
+    # marca o nome da aplicação.
     AMBIENTE: str = os.getenv("AMBIENTE", "producao").strip().lower()
     TESTES: bool = AMBIENTE in ("testes", "teste", "homologacao", "homolog")
 
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8901"))
-    # A tela Consulta de Ativos — Times atendia em :8502 no aplicativo antigo.
-    # O mesmo processo abre esse segundo listener só para ela; 0 desliga.
-    CONSULTA_TIMES_PORTA: int = int(os.getenv("CONSULTA_TIMES_PORTA", "8502"))
-    CONSULTA_TIMES_HOST: str = os.getenv("CONSULTA_TIMES_HOST", "")
     WORKERS: int = int(os.getenv("WORKERS", "1"))
 
     DEFAULT_HOURLY_RATE: float = float(os.getenv("DEFAULT_VALOR_HORA", "150"))
     INITIAL_ADMIN_LOGIN: str = os.getenv("INITIAL_ADMIN_LOGIN", "")
-    INITIAL_ADMIN_PASSWORD: str = _env("INITIAL_ADMIN_PASSWORD", "")
     # Admin geral: o único que altera identidade do portal (ícone). Em
     # branco, vale o INITIAL_ADMIN_LOGIN.
     ADMIN_GERAL_LOGIN: str = os.getenv("ADMIN_GERAL_LOGIN", "")
@@ -171,8 +166,6 @@ class Settings:
         "AUTOMACOES_DATABASE_URL",
         _sqlite("automacoes"),
     )
-    # Horários (hora local) em que a rotina roda sozinha. CSV de horas.
-    AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
 
     # ── Monitoramento (saúde e falhas) — módulo isolado ─────────────────
     MONITORAMENTO_DATABASE_URL: str = _env(
@@ -191,12 +184,6 @@ class Settings:
     SMTP_REMETENTE: str = os.getenv("SMTP_REMETENTE", "portal-spare@lojasrenner.com.br")
     ALERTA_EMAIL_TO: str = os.getenv("ALERTA_EMAIL_TO", "")
 
-    # ── Orçamento do SPARE (CAPEX da área) — módulo isolado ─────────────
-    # Banco PRÓPRIO, separado do /controle-orcamento e do portal.
-    ORCAMENTO_SPARE_DATABASE_URL: str = _env(
-        "ORCAMENTO_SPARE_DATABASE_URL",
-        _sqlite("orcamento_spare"),
-    )
 
     # ── Orçamento de Manutenção (reparo de coletores e SLEDs) — módulo isolado
     # Banco PRÓPRIO; contrato em docs/ORCAMENTO_MANUTENCAO.md.

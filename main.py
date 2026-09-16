@@ -1,10 +1,8 @@
 from __future__ import annotations
 import logging
-import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -73,7 +71,6 @@ def create_app() -> FastAPI:
     from routers.auth import router as auth_router
     from routers.consulta import router as consulta_router
     from routers.recebimento import router as recebimento_router
-    from routers.reparos import router as reparos_router
     from routers.parametros import router as parametros_router
     from routers.status import router as status_router
     from routers.public_assets import router as public_assets_router
@@ -88,7 +85,6 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(consulta_router)
     app.include_router(recebimento_router)
-    app.include_router(reparos_router)
     app.include_router(parametros_router)
     app.include_router(status_router)
     app.include_router(public_assets_router)
@@ -139,7 +135,6 @@ def create_app() -> FastAPI:
 
     # ── Orçamento Spare — a tela do Infra CSC com banco e permissão próprios
     # (permissão "orcamento_spare", liberação por login na própria tela).
-    # O módulo antigo orcamento_spare (API sem tela) foi aposentado.
     try:
         from routers.orcamento_spare_exec import router as orcamento_spare_router, init_db as _init_osp
         _init_osp()
@@ -191,14 +186,13 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── Automações (encerramento/encaminhamento) — banco próprio ────────
+    # ── Automações (encerramento/encaminhamento pelo botão) — banco próprio
     # Carregamento isolado (nunca derruba o portal).
     try:
         import db.automacoes as _db_autom
         _db_autom.init_db()
-        from routers.automacoes import router as automacoes_router, start_scheduler as _autom_sched
+        from routers.automacoes import router as automacoes_router
         app.include_router(automacoes_router)
-        _autom_sched()  # rotina agendada (07/12/16 por padrão)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("automacoes").error(
             "Módulo Automações NÃO carregado (portal segue sem ele): %s",

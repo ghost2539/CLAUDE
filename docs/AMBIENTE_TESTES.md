@@ -32,14 +32,12 @@ Variáveis opcionais: `PROD_DIR`, `PROD_ENVFILE`, `TEST_DIR`, `TEST_PORT`,
    `data/referencias`.
 3. Gera o arquivo de ambiente do teste a partir do de produção, trocando
    `DATABASE_URL`, porta, segredo de sessão e ligando `AMBIENTE=testes`.
-   Segundo listener da Consulta Times desligado (`CONSULTA_TIMES_PORTA=0`).
 4. Marca o nome da aplicação com **[TESTES]** no banco do teste.
 5. Cria o serviço `portal-spare-testes` (systemd do sistema, do usuário,
    ou `deploy/portal.sh` com nohup) e sobe.
 
 ## O que muda com `AMBIENTE=testes`
 
-- O agendador das automações (Correios) não roda. O botão manual continua.
 - E-mails de alerta não são enviados (ficam no log).
 - Nome da aplicação com o sufixo [TESTES].
 

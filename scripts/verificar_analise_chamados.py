@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.chamados_nucleo import (  # noqa: E402
-    analisar, achar_envio, achar_equipamento, achar_tipo, e_nossa,
+    analisar, achar_equipamento, achar_tipo, e_nossa,
     periodos_de_fila, passagens_do_time, resumir, ler_data,
 )
 

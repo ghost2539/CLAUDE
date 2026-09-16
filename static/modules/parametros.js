@@ -142,7 +142,7 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
-            '<div class="card-header">EBS — API de consulta e banco Oracle</div>' +
+            '<div class="card-header">EBS — API de consulta</div>' +
             '<div class="card-body" id="cm-ebs"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
         '</div>' +
 
@@ -210,51 +210,29 @@ function renderConfigModulos(c, S) {
     };
 }
 
-/* EBS: URLs da API e conexão Oracle. Aplicado na próxima consulta, sem reiniciar. */
+/* EBS: URLs da API de consulta. Aplicado na próxima consulta, sem reiniciar. */
 async function _renderEbs(S) {
     var host = document.getElementById('cm-ebs');
     if (!host) return;
     var d;
     try { d = await S.api('/parametros/ebs'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
-    var o = d.oracle, a = d.api;
-    function campo(id, rotulo, val, extra) {
+    var a = d.api || {};
+    function campo(id, rotulo, val) {
         return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
-            '<input id="' + id + '" class="form-control" value="' + S.esc(val || '') + '"' + (extra || '') + '></div>';
+            '<input id="' + id + '" class="form-control" value="' + S.esc(val || '') + '" placeholder="https://…"></div>';
     }
     host.innerHTML =
         '<div class="form-grid cols-2">' +
             campo('ebs-login', 'API — URL de login', a.login_url) +
             campo('ebs-search', 'API — URL de busca', a.search_url) +
         '</div>' +
-        '<div class="form-grid cols-2 mt-2">' +
-            campo('ebs-host', 'Oracle — host (SCAN)', o.host) +
-            campo('ebs-porta', 'Porta', o.porta) +
-            campo('ebs-servico', 'Service name', o.servico) +
-            campo('ebs-usuario', 'Usuário', o.usuario) +
-            campo('ebs-senha', 'Senha' + (o.senha_definida ? ' (definida — ' + S.esc(o.senha_fonte) + ')' : ''), '',
-                  ' type="password" autocomplete="new-password" placeholder="' + (o.senha_definida ? 'em branco mantém' : 'obrigatória') + '"' + (o.cofre_disponivel ? ' disabled title="Vem do cofre"' : '')) +
-            campo('ebs-lib', 'Instant Client (lib_dir)', o.lib_dir) +
-            campo('ebs-cofre', 'Chave da senha no cofre' + (o.cofre_disponivel ? ' (encontrada)' : ' (não encontrada)'), o.cofre_chave) +
-        '</div>' +
-        '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button>' +
-        '<button id="ebs-testar" class="btn btn-outline">Testar conexão</button><span id="ebs-res" class="text-muted"></span></div>';
+        '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button></div>';
     var v = function (id) { return document.getElementById(id).value.trim(); };
     document.getElementById('ebs-salvar').onclick = async function () {
         try {
-            await S.api('/parametros/ebs', { method: 'PUT', body: {
-                host: v('ebs-host'), porta: v('ebs-porta'), servico: v('ebs-servico'), usuario: v('ebs-usuario'),
-                lib_dir: v('ebs-lib'), cofre_chave: v('ebs-cofre'), senha: document.getElementById('ebs-senha').value || null,
-                login_url: v('ebs-login'), search_url: v('ebs-search') } });
+            await S.api('/parametros/ebs', { method: 'PUT', body: { login_url: v('ebs-login'), search_url: v('ebs-search') } });
             S.toast('EBS reconfigurado. Vale na próxima consulta.', 'success'); _renderEbs(S);
         } catch (e) { S.toast(e.message, 'error'); }
-    };
-    document.getElementById('ebs-testar').onclick = async function () {
-        var res = document.getElementById('ebs-res'); res.textContent = 'Testando…';
-        try {
-            var r = await S.api('/parametros/ebs/testar', { method: 'POST' });
-            res.textContent = r.ok ? 'Conectou em ' + r.ms + ' ms (' + r.dsn + ')' : 'Falhou: ' + r.erro;
-            res.style.color = r.ok ? 'var(--color-teal)' : 'var(--color-danger)';
-        } catch (e) { res.textContent = e.message; }
     };
 }
 
@@ -447,15 +425,15 @@ async function _renderIndicadoresConfig(S) {
 async function renderAutomacoes(c, S) {
     // A aba é de todos, e as REGRAS também: qualquer usuário cria, edita e
     // exclui regra, e roda a rotina (que age no ServiceNow com a sessão de
-    // quem clicou). Só a CONFIGURAÇÃO da rotina — horários, cofre, credencial
-    // — pede "Administrar" no módulo Automações.
+    // quem clicou). Só a CONFIGURAÇÃO (campo do rastreio) pede "Administrar"
+    // no módulo Automações.
     var usuario = S.user() || {};
     var permAutom = (usuario.permission_map || {}).automacoes || {};
     var ehAdmin = !!(usuario.is_admin || permAutom.can_admin);
     c.innerHTML =
         '<h1 class="page-title">Automações</h1>' +
         '<div class="card mb-3"><div class="card-header">' +
-            (ehAdmin ? 'Configuração da rotina' : 'Situação da rotina') + '</div>' +
+            (ehAdmin ? 'Configuração da rotina' : 'Rotina') + '</div>' +
             '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
             '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -471,84 +449,47 @@ async function renderAutomacoes(c, S) {
             '<div class="card-body" id="au-logs"></div></div>';
 
     // ── Config ──
+    // Não há agendador nem conta de serviço: a rotina só roda pelo botão,
+    // com a sessão de quem clicou, e os apontamentos saem em nome dele.
     async function loadCfg() {
         var cfg = await S.api('/automacoes/config');
         var host = document.getElementById('au-cfg');
+        var ultima = cfg.ultima_execucao
+            ? (S.esc(cfg.ultima_execucao) + (cfg.ultimo_usuario ? ' por ' + S.esc(cfg.ultimo_usuario) : ''))
+            : '—';
+        var aviso =
+            '<p class="text-muted" style="margin:0 0 12px;font-size:.85rem">' +
+            'A rotina busca os rastreios dos chamados da fila e aplica as regras ' +
+            '<strong>com o seu usuário do ServiceNow</strong>: encerramentos e ' +
+            'encaminhamentos ficam registrados em seu nome. Não há execução automática.</p>';
         if (cfg.somente_leitura) {
-            host.innerHTML =
+            host.innerHTML = aviso +
                 '<div class="form-grid cols-2">' +
-                    '<div class="form-group"><label>Rotina automática</label>' +
-                        '<div style="padding-top:6px;font-weight:600">' +
-                        (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</div></div>' +
-                    '<div class="form-group"><label>Horários</label>' +
-                        '<div style="padding-top:6px">' + S.esc(cfg.horarios || '') + '</div></div>' +
-                    '<div class="form-group"><label>Sessão para a rotina</label>' +
-                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
-                        (cfg.tem_sessao ? ('Ativa (conta de serviço ' + S.esc(cfg.usuario || '') + ')') : 'Sem sessão da conta de serviço — o login acontece no próximo horário, com a credencial do cofre') +
-                        '</div></div>' +
+                    '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
+                        '<div style="padding-top:6px">' + S.esc(cfg.tracking_field || 'sys_tags') + '</div></div>' +
                     '<div class="form-group"><label>Última execução</label>' +
-                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
-                        S.esc(cfg.ultima_execucao || '—') + '</div></div>' +
+                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' + ultima + '</div></div>' +
                 '</div>' +
-                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Exec Now</button>' +
-                '</div>';
+                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Executar agora</button></div>';
             ligarBotaoRodar();
             return;
         }
-        var modo100 = cfg.cofre_disponivel
-            ? '<span style="color:#16a34a;font-weight:600">Cofre disponível</span> — a rotina roda 100% automática.'
-            : (cfg.tem_credencial
-                ? '<span style="color:#16a34a;font-weight:600">Credencial salva</span> (usuário ' + S.esc(cfg.credencial_usuario || '') + ') — roda 100% automática.'
-                : '<span style="color:#d97706;font-weight:600">Sem credencial</span> — a rotina só roda quando há sessão sua ativa.');
-        host.innerHTML =
+        host.innerHTML = aviso +
             '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
-                    '<input type="checkbox" id="au-enabled"' + (cfg.enabled ? ' checked' : '') + '> ' +
-                    '<strong>Rotina automática ' + (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</strong></label></div>' +
-                '<div class="form-group"><label>Horários (horas, separadas por vírgula)</label>' +
-                    '<input id="au-horarios" class="form-control" value="' + S.esc(cfg.horarios || '7,12,16') + '"></div>' +
                 '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
                     '<input id="au-tfield" class="form-control" value="' + S.esc(cfg.tracking_field || 'sys_tags') + '">' +
                     '<small class="text-muted">padrão: sys_tags</small></div>' +
-                '<div class="form-group"><label>Sessão para a rotina</label>' +
-                    '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' +
-                    (cfg.tem_sessao ? ('Ativa (conta de serviço ' + S.esc(cfg.usuario || '') + ')') : 'Sem sessão da conta de serviço — o login acontece no próximo horário, com a credencial do cofre') +
-                    (cfg.ultima_execucao ? ('<br>Última execução: ' + S.esc(cfg.ultima_execucao)) : '') +
-                    '</div></div>' +
+                '<div class="form-group"><label>Última execução</label>' +
+                    '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' + ultima + '</div></div>' +
             '</div>' +
-            '<hr style="border-color:var(--border-color);margin:14px 0">' +
-            '<div style="font-weight:600;margin-bottom:4px">Automação 100% (sem depender de login)</div>' +
-            '<div style="font-size:.85rem;margin-bottom:8px">' + modo100 + '</div>' +
-            '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label>Chave do usuário no cofre</label>' +
-                    '<input id="au-cofre-user-key" class="form-control" value="' + S.esc(cfg.cofre_user_key || 'SN_AUTOMACAO_USUARIO') + '"></div>' +
-                '<div class="form-group"><label>Chave da senha no cofre</label>' +
-                    '<input id="au-cofre-pass-key" class="form-control" value="' + S.esc(cfg.cofre_pass_key || 'SN_AUTOMACAO_SENHA') + '"></div>' +
-            '</div>' +
-            '<div style="font-size:.8rem;color:var(--text-secondary);margin-bottom:8px">' +
-                'No servidor novo, grave a credencial no cofre com essas chaves — ela tem prioridade. ' +
-                'Enquanto o cofre não existir, informe abaixo para guardar criptografado.</div>' +
-            '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label>Usuário (AD) para a automação</label>' +
-                    '<input id="au-cred-user" class="form-control" value="' + S.esc(cfg.credencial_usuario || '') + '" placeholder="seu usuário de rede"></div>' +
-                '<div class="form-group"><label>Senha (AD)</label>' +
-                    '<input id="au-cred-senha" type="password" class="form-control" placeholder="' +
-                    (cfg.tem_credencial ? '•••••• (salva)' : 'informe para guardar') + '"></div>' +
-            '</div>' +
-            '<div class="mt-2"><button id="au-cfg-save" class="btn btn-primary">Salvar configuração</button> ' +
-            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Exec Now</button> ' +
+            '<div class="mt-2"><button id="au-cfg-save" class="btn btn-secondary">Salvar configuração</button> ' +
+            '<button id="au-run" class="btn btn-primary" style="margin-left:8px">Executar agora</button> ' +
             '<span id="au-cfg-msg" class="text-muted" style="margin-left:10px"></span></div>';
 
         document.getElementById('au-cfg-save').onclick = async function () {
             try {
                 await S.api('/automacoes/config', { method: 'PUT', body: {
-                    enabled: document.getElementById('au-enabled').checked,
-                    horarios: document.getElementById('au-horarios').value.trim(),
-                    tracking_field: document.getElementById('au-tfield').value.trim(),
-                    cofre_user_key: document.getElementById('au-cofre-user-key').value.trim(),
-                    cofre_pass_key: document.getElementById('au-cofre-pass-key').value.trim(),
-                    cred_user: document.getElementById('au-cred-user').value.trim(),
-                    cred_senha: document.getElementById('au-cred-senha').value
+                    tracking_field: document.getElementById('au-tfield').value.trim()
                 }});
                 document.getElementById('au-cfg-msg').textContent = 'Configuração salva.';
                 S.toast('Configuração salva.', 'success');
@@ -562,7 +503,7 @@ async function renderAutomacoes(c, S) {
         var btn = document.getElementById('au-run');
         if (!btn) return;
         btn.onclick = async function () {
-            if (!confirm('Rodar a rotina agora com o seu usuário?')) return;
+            if (!confirm('Executar a rotina agora com o SEU usuário do ServiceNow? Os apontamentos sairão em seu nome.')) return;
             var b = this; b.disabled = true; var t = b.textContent; b.textContent = 'Rodando…';
             try {
                 var d = await S.api('/automacoes/run', { method: 'POST' });
@@ -1516,15 +1457,6 @@ async function renderPermissions(c, S) {
     document.getElementById('pm-user-add').onclick = function () {
         var f = S.el('div');
 
-        var tipoWrap = S.el('div', { style: 'margin-bottom:10px' });
-        tipoWrap.innerHTML =
-            '<label style="display:block;font-size:.85rem;margin-bottom:4px">Tipo de acesso</label>' +
-            '<select id="pm-utype" class="form-control">' +
-                '<option value="LOCAL">Local (senha gerada no portal)</option>' +
-                '<option value="SSO">Rede / AD (senha do AD)</option>' +
-            '</select>';
-        f.appendChild(tipoWrap);
-
         [
             ['Login (usuário de rede)', 'pm-ul', ''],
             ['Nome',  'pm-un', '']
@@ -1537,15 +1469,13 @@ async function renderPermissions(c, S) {
         saveBtn.onclick = async function () {
             var login = document.getElementById('pm-ul').value.trim();
             if (!login) { S.toast('Informe o login.', 'warning'); return; }
-            var tipo = document.getElementById('pm-utype').value;
-            var r;
             try {
-                r = await S.api('/parametros/usuarios', {
+                await S.api('/parametros/usuarios', {
                     method: 'POST',
                     body: {
                         login:        login,
                         display_name: document.getElementById('pm-un').value,
-                        auth_source:  tipo
+                        auth_source:  'SSO'
                     }
                 });
             } catch (e) {
@@ -1554,42 +1484,11 @@ async function renderPermissions(c, S) {
             }
             S.closeModal();
             load();
-
-            if (tipo !== 'LOCAL') {
-                S.toast('Usuário de rede "' + login + '" liberado para acesso via SSO.', 'success');
-                return;
-            }
-
-            // LOCAL: mostra a senha temporária gerada para o admin repassar.
-            var box = S.el('div');
-            box.innerHTML =
-                '<p>Usuário <strong>' + S.esc(r.login) + '</strong> criado.</p>' +
-                '<p style="margin:8px 0 4px">Senha temporária (copie e repasse ao usuário — ' +
-                'ele terá que trocá-la no primeiro acesso):</p>' +
-                '<div style="display:flex;gap:8px;align-items:center">' +
-                '<code id="pm-temp-pass" style="font-size:1.1rem;padding:8px 12px;' +
-                'background:var(--bg-secondary);border-radius:6px;user-select:all">' +
-                S.esc(r.senha_temporaria || '') + '</code></div>';
-            var copyBtn = S.el('button', { className: 'btn btn-outline', textContent: 'Copiar senha' });
-            copyBtn.onclick = function () {
-                try {
-                    navigator.clipboard.writeText(r.senha_temporaria || '');
-                    S.toast('Senha copiada.', 'success');
-                } catch (_) { S.toast('Copie manualmente.', 'info'); }
-            };
-            S.openModal('Usuário criado', box, [copyBtn]);
+            S.toast('Usuário de rede "' + login + '" liberado para acesso via SSO.', 'success');
         };
 
+        aviso.textContent = 'Login validado pelo SSO corporativo (loginsso). Sem senha no portal — a senha é a do AD. O usuário já entra liberado.';
         S.openModal('Novo usuário', f, [saveBtn]);
-
-        function refreshAviso() {
-            var t = document.getElementById('pm-utype').value;
-            aviso.textContent = (t === 'LOCAL')
-                ? 'Uma senha temporária será gerada automaticamente. O usuário troca no primeiro acesso.'
-                : 'Login validado pelo SSO corporativo (loginsso). Sem senha no portal — a senha é a do AD. O usuário já entra liberado.';
-        }
-        refreshAviso();
-        document.getElementById('pm-utype').addEventListener('change', refreshAviso);
     };
 
     load();

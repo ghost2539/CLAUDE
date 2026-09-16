@@ -246,24 +246,31 @@ checar(_config._env("URL_TESTE_COFRE") == "pg://portal:s3gr3d0@host/base",
        "config expande @cofre:NOME@ (DATABASE_URL pode ficar sem senha no environment)")
 from routers import automacoes as au  # noqa: E402
 import db.automacoes as dbau  # noqa: E402
-checar(au._chave_cofre_valida("SN_AUTOMACAO_SENHA") and not au._chave_cofre_valida("DATABASE_URL")
-       and not au._chave_cofre_valida("PORTAL_SESSION_SECRET"), "chave do cofre da automação só SN_AUTOMACAO_*")
-_, cookie_adm_sn = sec.create_session({"username": "admin.teste", "is_admin": True, "role": "ADMIN",
-                                       "permissions": ["admin"], "permission_map": {}, "user_id": 1,
-                                       "ebs_auth": None, "sn_cookies": {"glide_user": "x"}})
-ADM_SN = {COOKIE: cookie_adm_sn}
-r = c.put("/api/automacoes/config", json={"enabled": False, "cofre_pass_key": "DATABASE_URL"}, cookies=ADM_SN)
-checar(r.status_code == 400, "PUT config recusa chave de cofre fora de SN_AUTOMACAO_*")
-r = c.put("/api/automacoes/config", json={"enabled": False, "horarios": "7,12"}, cookies=ADM_SN)
-checar(r.status_code == 200 and not dbau.obter_config().get("sn_cookies"),
-       "salvar a configuração não grava mais os cookies SSO do admin no banco")
-dbau.salvar_config({"sn_cookies": {"glide_user": "antigo"}})
-au.purgar_cookies_gravados()
-checar(not dbau.obter_config().get("sn_cookies"), "cookies gravados por versões antigas são purgados")
-checar(c.get("/api/automacoes/config", cookies=ADM_SN).json()["tem_sessao"] is False,
-       "tem_sessao reflete a sessão da conta de serviço, não a de usuários")
-s_rot, u_rot = au._sessao_para_rotina()
-checar(s_rot is None, "sem credencial de serviço, a rotina não pega sessão de usuário nenhum")
+checar(not hasattr(au, "start_scheduler") and not hasattr(au, "_login_fresh") and not hasattr(au, "_creds_para_login"),
+       "automação sem agendador e sem credencial de serviço")
+dbau.salvar_config({"sn_cookies": {"glide_user": "antigo"}, "cred_blob": "x", "enabled": True, "horarios": "7"})
+dbau.limpar_config_legada()
+cfg_au = dbau.obter_config()
+checar(not any(k in cfg_au for k in ("sn_cookies", "cred_blob", "enabled", "horarios")),
+       "cookies SSO, credencial e agendador gravados por versões antigas são purgados")
+r = c.get("/api/automacoes/config", cookies=ADMIN).json()
+checar(set(r) == {"tracking_field", "ultima_execucao", "ultimo_usuario", "somente_leitura"},
+       "config da automação só tem o campo do rastreio e a última execução")
+checar(c.put("/api/automacoes/config", json={"tracking_field": "x;DROP"}, cookies=ADMIN).status_code == 400,
+       "campo do rastreio validado")
+checar(c.post("/api/automacoes/run", cookies=ADMIN).status_code == 409,
+       "executar sem sessão do ServiceNow do próprio usuário → 409 (nunca com outra conta)")
+
+print("-- login só pelo SSO corporativo")
+checar(c.post("/api/auth/change-password", json={"current_password": "a", "new_password": "b" * 8},
+              cookies=ADMIN).status_code in (404, 405), "não existe mais troca de senha no portal")
+checar(c.post("/api/parametros/usuarios", json={"login": "local.x", "auth_source": "LOCAL"},
+              cookies=ADMIN).status_code == 422, "não se cria usuário com senha local")
+import db.portal as dbp  # noqa: E402
+checar(not hasattr(dbp, "hash_password") and not hasattr(dbp, "verify_password"), "sem hash de senha no código")
+checar(c.put("/api/parametros/ebs", json={"login_url": "http://ebs/login", "search_url": ""},
+             cookies=ADMIN).status_code == 422, "URL da API do EBS só em https")
+checar(c.get("/api/reparos/dashboard", cookies=ADMIN).status_code == 404, "router de reparos aposentado saiu")
 
 print("-- EBS Forms: processos filhos")
 from integracoes import ebs_forms as ef  # noqa: E402
@@ -272,6 +279,32 @@ checar("PORTAL_SESSION_SECRET" not in amb and "DATABASE_URL" not in amb and "PAT
        "JVM e compositor não herdam segredos do portal")
 checar(ef.SOCKET_COMPOSITOR.endswith("-testes") and ef._DISPLAY_PADRAO == ":98",
        "socket e display próprios do ambiente de testes")
+
+
+class _HttpFalso:
+    def __init__(self, ok):
+        self.ok = ok
+
+    def get(self, url, **kw):
+        if not self.ok:
+            import requests
+            raise requests.ConnectionError("recusado")
+
+        class R:
+            def close(self):
+                pass
+        return R()
+
+
+ef._ESQUEMA_EBS.clear()
+checar(ef.url_ebs_preferindo_https("http://ebs.teste/OA_HTML/x", _HttpFalso(True)) == "https://ebs.teste/OA_HTML/x",
+       "EBS que atende em https é usado por TLS")
+ef._ESQUEMA_EBS.clear()
+checar(ef.url_ebs_preferindo_https("http://ebs.teste/OA_HTML/x", _HttpFalso(False)) == "http://ebs.teste/OA_HTML/x",
+       "EBS sem https continua em http (com aviso no log)")
+checar(ef.url_ebs_preferindo_https("http://ebs.teste/outra", _HttpFalso(True)) == "http://ebs.teste/outra",
+       "decisão por host é cacheada no processo")
+ef._ESQUEMA_EBS.clear()
 
 print("-- consultas ao ServiceNow codificadas")
 

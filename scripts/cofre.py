@@ -35,9 +35,7 @@ PADRAO_SEGREDO = re.compile(
 # entrega metade do caminho a quem estiver olhando o arquivo.
 SEMPRE_COFRE = {
     "SN_API_USER", "SN_API_USUARIO",
-    "SN_AUTOMACAO_USUARIO",
-    "INITIAL_ADMIN_LOGIN", "INITIAL_ADMIN_PASSWORD",
-    "ORACLE_EBS_USER",
+    "INITIAL_ADMIN_LOGIN",
     "EBS_CAPEX_USER", "EBS_FORMS_USER",
     "SMTP_USUARIO",
     "CORREIOS_USUARIO", "CORREIOS_CARTOES", "CORREIOS_CONTRATO",
@@ -76,9 +74,8 @@ CANDIDATOS: dict[str, list[str]] = {
         "SNOW_SENHA", "SNOW_PASSWORD",
         "SN_TOKEN", "SERVICENOW_TOKEN",
     ],
-    "EBS / Oracle": [
-        "ORACLE_EBS_USER", "ORACLE_EBS_USUARIO", "ORACLE_EBS_PASS",
-        "ORACLE_EBS_SENHA", "EBS_USER", "EBS_USUARIO", "EBS_SENHA",
+    "EBS": [
+        "EBS_USER", "EBS_USUARIO", "EBS_SENHA",
         "EBS_PASSWORD", "EBS_CAPEX_USER", "EBS_CAPEX_PASS", "EBS_CAPEX_TOKEN",
     ],
     "E-mail": ["SMTP_USUARIO", "SMTP_USER", "SMTP_SENHA", "SMTP_PASSWORD"],

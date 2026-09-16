@@ -7,10 +7,8 @@ entrada e a configuração.
 
 **Tudo roda num processo só**, na porta 8901: o servidor novo não tem root,
 então manter vários serviços não é opção. Telas que antes eram aplicativos
-separados (Consulta de Ativos dos times, na 8502) viraram router do portal.
-Para não quebrar os endereços salvos pelos times, o mesmo processo abre um
-segundo *listener* na 8502 servindo **só** essa tela (`CONSULTA_TIMES_PORTA`;
-0 desliga). Continua sendo um processo, um serviço e um deploy.
+separados (Consulta de Ativos dos times) viraram router do portal. É um
+processo, um serviço e um deploy.
 
 ```
 main.py                  Ponto de entrada do portal (uvicorn main:app)
@@ -28,7 +26,7 @@ db/                      Camada de dados — um módulo por banco, todos isolado
   automacoes.py          Regras, logs e configuração das automações
   monitoramento.py       Eventos de saúde/falha e configuração de alertas
   orcamento_exec.py      Controle de Orçamento — execução CAPEX
-  orcamento_spare.py     Orçamento do SPARE (CAPEX da área)
+
 
 routers/                 As APIs do portal — uma por área funcional
   auth · consulta · recebimento · reparos · status · parametros
@@ -39,7 +37,7 @@ routers/                 As APIs do portal — uma por área funcional
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_service.py         API REST do EBS
-  ebs_oracle.py          Consultas diretas na base Oracle do EBS
+
   ebs_logged.py          Raspagem autenticada do EBS
 
 static/                  Front-end servido ao navegador (público por definição)
@@ -78,7 +76,7 @@ docs/                    Documentação
 | Automações | `data/db/automacoes.db` | `AUTOMACOES_DATABASE_URL` |
 | Monitoramento | `data/db/monitoramento.db` | `MONITORAMENTO_DATABASE_URL` |
 | Controle de Orçamento — CAPEX | `data/db/controle_orcamento_exec.db` | `ORCAMENTO_EXEC_DATABASE_URL` |
-| Orçamento do SPARE | `data/db/orcamento_spare.db` | `ORCAMENTO_SPARE_DATABASE_URL` |
+
 | Orçamento de Manutenção | `data/db/orcamento_manutencao.db` | `ORCAMENTO_MANUTENCAO_DATABASE_URL` |
 | Obsolescência do parque (MDM) | `data/db/obsolescencia.db` | `OBSOLESCENCIA_DATABASE_URL` |
 | EBS Forms | `data/db/ebs_forms.db` | `EBS_FORMS_DATABASE_URL` |
@@ -119,7 +117,7 @@ Todas sob o prefixo `/api`, uma por área, definidas em `routers/`:
 | `/api/auth` | auth | `/api/servicenow` | servicenow |
 | `/api/consulta` | consulta | `/api/identificacao` | identificacao |
 | `/api/recebimento(s)` | recebimento | `/api/indicadores` | indicadores |
-| `/api/reparos` | reparos | `/api/automacoes` | automacoes |
+| `/api/automacoes` | automacoes | | |
 | `/api/status` | status | `/api/monitor` | monitoramento |
 | `/api/parametros` | parametros | `/api/public-assets` | public_assets |
 | `/api/lotes` `/api/dashboard` | helpers | `/api/controle-orcamento-exec` | controle_orcamento_exec |
@@ -186,8 +184,7 @@ muda.
   para os dois.
 - **Central de Reparos**: a tela é `static/modules/reparos.js` (bancadas +
   dashboard medido pelo núcleo); a API continua em `/api/bancada`, com a
-  permissão `reparos`. O registro manual de reparo saiu; o dashboard antigo
-  (`/api/reparos/dashboard`) fica só para o histórico.
+  permissão `reparos`.
 
 ### Ícone do portal (favicon)
 

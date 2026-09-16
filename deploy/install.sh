@@ -30,7 +30,6 @@ cp -r . "$INSTALL_DIR/"
  
 if [ ! -f "$CONFIG_DIR/environment" ]; then
     SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(64))")
-    INITPASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
     cat > "$CONFIG_DIR/environment" <<ENVEOF
 DATABASE_URL=postgresql+psycopg://portal_spare_app:ALTERAR@127.0.0.1:5432/portal_operacoes_spare_db
 PORTAL_SESSION_SECRET=${SESSION_SECRET}
@@ -49,7 +48,6 @@ PORT=${PORT}
 WORKERS=1
 DEFAULT_VALOR_HORA=150.00
 INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
-INITIAL_ADMIN_PASSWORD=${INITPASS}
 UPLOAD_MAX_MB=50
 RATE_LIMIT_LOGIN=5/minute
 RATE_LIMIT_API=120/minute
@@ -57,8 +55,7 @@ ENVEOF
     chmod 600 "$CONFIG_DIR/environment"
     echo ""
     echo "Arquivo de ambiente criado em $CONFIG_DIR/environment"
-    echo "Senha temporária do admin: $INITPASS"
-    echo "ALTERE DATABASE_URL e INITIAL_ADMIN_LOGIN antes de iniciar."
+    echo "ALTERE DATABASE_URL e INITIAL_ADMIN_LOGIN (login de rede do administrador) antes de iniciar."
 fi
  
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
@@ -80,4 +77,4 @@ echo "Próximos passos:"
 echo "  1. Edite $CONFIG_DIR/environment (DATABASE_URL, INITIAL_ADMIN_LOGIN)"
 echo "  2. Configure credenciais EBS em $CONFIG_DIR/credentials/"
 echo "  3. systemctl start portal_spare.service"
-echo "  4. Troque a senha do admin no primeiro acesso."
+echo "  4. Entre com o login de rede do INITIAL_ADMIN_LOGIN (a senha é a do AD)."

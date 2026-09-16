@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,7 +23,7 @@ os.environ.setdefault("PORTAL_SESSION_SECRET", "verificacao-local")
 os.environ["TRILHA_DATABASE_URL"] = f"sqlite:///{_TEMP}/trilha.db"
 
 import db.trilha as dbt  # noqa: E402
-from db.trilha import FILA, TRATATIVA  # noqa: E402
+from db.trilha import FILA  # noqa: E402
 from routers.trilha import abrir_ativo, mover, encerrar  # noqa: E402
 from routers.trilha import api_config_gravar, ConfigIn  # noqa: E402
 import routers.torre as torre  # noqa: E402

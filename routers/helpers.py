@@ -14,7 +14,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from db.portal import (
-    Asset, Classification, LocalAsset, ReceiptCycle, StorageLocation,
+    Asset, Classification, LocalAsset, ReceiptCycle,
 )
 
 

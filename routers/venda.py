@@ -21,13 +21,13 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 import db.venda as db
 import db.trilha as dbt
 from db.venda import (
     Ciclo, Item, SessionLocal, trimestre_de,
-    ABERTO, NEGOCIACAO, CONCLUIDO, CANCELADO, ESTADOS_CICLO, ROTULO_CICLO,
+    ABERTO, NEGOCIACAO, CONCLUIDO, CANCELADO, ROTULO_CICLO,
     DA_ENTRADA, DO_REPARO,
 )
 from core.security import require_permission, check_rate_limit

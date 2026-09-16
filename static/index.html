@@ -5,37 +5,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Portal de Operações - SPARE</title>
     <link rel="icon" href="/favicon.ico">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <script defer src="/static/app.js"></script>
 </head>
 <body>
 
-<!-- ── Login screen ─────────────────────────────────────────── -->
-<div id="login-screen" class="login-screen">
-    <main class="login-card">
-        <div class="login-marca" aria-hidden="true">SP</div>
-        <h1 class="login-title">Portal de Operações</h1>
+<!-- ── Tela de login (Login SPARE v2: sempre escura) ───────────── -->
+<div id="login-screen" class="lg">
+    <section class="lg-marca-painel">
+        <div class="lg-grade" aria-hidden="true"></div>
+        <div class="lg-halo" aria-hidden="true"></div>
 
-        <form id="login-form" class="login-form">
-            <div class="campo">
-                <label for="login-username">Usuário da rede</label>
-                <input id="login-username" name="username" class="form-control"
+        <div class="lg-topo lg-anima">
+            <svg class="lg-monograma" viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+                <path d="M6 6 L40 6 L47 10 L40 14 L14 14 L14 20 L42 20 L42 42 L8 42 L1 38 L8 34 L34 34 L34 28 L6 28 Z" fill="currentColor"></path>
+            </svg>
+            <div class="lg-marca">
+                <span class="lg-marca-nome">SPARE</span>
+                <span class="lg-marca-sub">Operações de TI CSC</span>
+            </div>
+            <span class="lg-divisor" aria-hidden="true"></span>
+            <span class="lg-empresa">Lojas Renner S.A.</span>
+        </div>
+
+        <div class="lg-meio lg-anima">
+            <div class="lg-selo">
+                <span class="lg-selo-ponto" aria-hidden="true"></span>
+                <span>Sistema interno · acesso restrito</span>
+            </div>
+            <h1 class="lg-titulo">Portal de Operações Spare</h1>
+        </div>
+
+        <div class="lg-ciclo lg-anima">
+            <div class="lg-ciclo-label">Ciclo do ativo</div>
+            <ol class="lg-ciclo-grade">
+                <li><span class="lg-ciclo-n">01</span><span class="lg-ciclo-nome">Recebimento</span></li>
+                <li><span class="lg-ciclo-n">02</span><span class="lg-ciclo-nome">Internalização</span></li>
+                <li><span class="lg-ciclo-n">03</span><span class="lg-ciclo-nome">Manutenção</span></li>
+                <li><span class="lg-ciclo-n">04</span><span class="lg-ciclo-nome">Reparo</span></li>
+                <li><span class="lg-ciclo-n">05</span><span class="lg-ciclo-nome">Devolução</span></li>
+            </ol>
+        </div>
+    </section>
+
+    <section class="lg-form-painel">
+        <div class="lg-ambiente-linha">
+            <div class="lg-ambiente">
+                <span class="lg-ambiente-ponto" aria-hidden="true"></span>
+                <span id="login-ambiente-texto">Produção · rede interna</span>
+            </div>
+        </div>
+
+        <form id="login-form" class="lg-form" autocomplete="on">
+            <div class="lg-form-cabeca">
+                <h2>Acessar o portal</h2>
+                <p>Use sua matrícula e senha da rede corporativa.</p>
+            </div>
+            <div class="lg-campo">
+                <label for="login-username">Matrícula</label>
+                <input id="login-username" name="username"
                        autocomplete="username" autocapitalize="none" spellcheck="false"
                        autofocus required>
             </div>
-            <div class="campo">
-                <label for="login-password">Senha</label>
-                <input id="login-password" name="password" type="password" class="form-control"
+            <div class="lg-campo">
+                <label for="login-password">Senha de rede</label>
+                <input id="login-password" name="password" type="password"
                        autocomplete="current-password" required>
             </div>
-            <button id="login-submit" class="login-submit-btn" type="submit">Entrar</button>
+            <button id="login-submit" class="lg-entrar" type="submit">Entrar</button>
+            <div id="login-error" class="lg-erro" role="alert" aria-live="polite" hidden>
+                <span id="login-error-text"></span>
+            </div>
+            <p class="lg-ajuda">Problemas de acesso? Abra um chamado no Service Desk ou ligue no ramal 4120.</p>
         </form>
 
-        <div id="login-error" class="login-error" role="alert" aria-live="polite" hidden>
-            <span id="login-error-text"></span>
-        </div>
-
-    </main>
+        <footer class="lg-rodape">
+            <div class="lg-rodape-linha">
+                <span id="login-versao">Portal de Operações</span>
+                <span>Suporte TI · ramal 4120</span>
+            </div>
+            <span class="lg-aviso">Uso exclusivo de colaboradores Lojas Renner S.A. Acessos são registrados e monitorados.</span>
+        </footer>
+    </section>
 </div>
 
 <!-- ── App wrapper ──────────────────────────────────────────── -->

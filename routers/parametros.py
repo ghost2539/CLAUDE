@@ -4,7 +4,6 @@ hourly rate, visual/tv config, permissions, users, base-local upload.
 from __future__ import annotations
 
 import io
-import os
 import re
 import unicodedata
 from datetime import date
@@ -12,15 +11,14 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func
 
 from config import get_settings
 from db.portal import (
     SessionLocal, Setting, Classification, StorageLocation,
     User, Permission, LotSequence, LocalAsset, LoadHistory,
-    AccessLog, hash_password,
+    AccessLog,
 )
 from core.security import (get_session, require_permission, client_ip, check_rate_limit,
                            require_admin_geral, is_admin_geral, require_admin,
@@ -84,8 +82,7 @@ class HourlyRateIn(BaseModel):
 class UserCreateIn(BaseModel):
     login: str
     display_name: str = ""
-    password: str = ""
-    auth_source: str = "LOCAL"
+    auth_source: str = "SSO"
     is_admin: bool = False
 
     @field_validator("login")
@@ -102,8 +99,8 @@ class UserCreateIn(BaseModel):
     @classmethod
     def validate_source(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("LOCAL", "AD", "SN", "SSO"):
-            raise ValueError("auth_source deve ser LOCAL, AD, SN ou SSO.")
+        if v not in ("AD", "SN", "SSO"):
+            raise ValueError("auth_source deve ser AD, SN ou SSO (a senha é sempre a da rede).")
         return v
 
 
@@ -302,8 +299,6 @@ def put_setting(key: str, payload: dict, req: Request):
 
 # ── Ícone do portal (favicon) — só o admin geral altera ──────────────
 FAVICON_DIR = _cfg.DATA / "branding"
-FAVICON_TIPOS = {"image/svg+xml": ".svg", "image/png": ".png",
-                 "image/x-icon": ".ico", "image/vnd.microsoft.icon": ".ico"}
 FAVICON_MAX = 256 * 1024
 
 
@@ -393,46 +388,34 @@ def favicon_restaurar(req: Request):
 @router.get("/ebs")
 def ebs_ler(req: Request):
     require_permission(req, "parametros", "admin")
-    import integracoes.ebs_oracle as _ora
     import db.monitoramento as _mon
     api = _mon.obter_config("ebs_api") or {}
-    return {"oracle": _ora.config_publica(),
-            "api": {"login_url": api.get("login_url") or _cfg.EBS_LOGIN_URL,
+    return {"api": {"login_url": api.get("login_url") or _cfg.EBS_LOGIN_URL,
                     "search_url": api.get("search_url") or _cfg.EBS_SEARCH_URL}}
 
 
 class EbsIn(BaseModel):
-    host: str = ""
-    porta: str = "1521"
-    servico: str = ""
-    usuario: str = ""
-    lib_dir: str = ""
-    cofre_chave: str = ""
-    senha: str | None = None
     login_url: str = ""
     search_url: str = ""
+
+    @field_validator("login_url", "search_url")
+    @classmethod
+    def _so_https_ou_vazio(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not v.lower().startswith("https://"):
+            raise ValueError("A URL da API do EBS precisa começar com https://.")
+        return v
 
 
 @router.put("/ebs")
 def ebs_gravar(body: EbsIn, req: Request):
     sd = require_permission(req, "parametros", "admin")
     check_rate_limit(req)
-    import integracoes.ebs_oracle as _ora
     import db.monitoramento as _mon
-    _ora.salvar_configuracao(body.model_dump(), senha=(body.senha or None))
-    _mon.salvar_config({"login_url": body.login_url.strip(), "search_url": body.search_url.strip()}, "ebs_api")
+    _mon.salvar_config({"login_url": body.login_url, "search_url": body.search_url}, "ebs_api")
     import logging as _lg
-    _lg.getLogger("parametros").info("EBS reconfigurado por %s (senha %s)",
-                                     sd.get("username", "?"), "alterada" if body.senha else "mantida")
+    _lg.getLogger("parametros").info("URLs da API do EBS reconfiguradas por %s", sd.get("username", "?"))
     return ebs_ler(req)
-
-
-@router.post("/ebs/testar")
-def ebs_testar(req: Request):
-    require_permission(req, "parametros", "admin")
-    check_rate_limit(req)
-    import integracoes.ebs_oracle as _ora
-    return _ora.testar_conexao()
 
 
 @router.post("/visual/reset")
@@ -552,7 +535,7 @@ def permissions_set(login: str, body: PermissoesIn, req: Request):
 
         s.add(AccessLog(
             login=sd["username"],
-            auth_source=sd.get("auth_source", "LOCAL"),
+            auth_source=sd.get("auth_source", "SSO"),
             success=True,
             ip=client_ip(req),
             detail=(f"Permissões atualizadas para {u.login}"
@@ -588,51 +571,30 @@ def access_control_set(payload: dict, req: Request):
 
 # ── User creation ─────────────────────────────────────────────────
 
-def _gerar_senha_temporaria() -> str:
-    """Senha temporária legível e forte para primeiro acesso."""
-    import secrets
-    import string
-    alfabeto = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alfabeto) for _ in range(12))
-
-
 @router.post("/usuarios")
 def user_create(body: UserCreateIn, req: Request):
+    """Libera um login de rede antes do primeiro acesso. Sem senha no portal:
+    quem autentica é o SSO corporativo."""
     require_admin(req)
     check_rate_limit(req)
 
-    senha_temporaria = None
     with SessionLocal.begin() as s:
         existing = s.scalar(
             select(User).where(func.lower(User.login) == body.login.lower())
         )
         if existing:
             raise HTTPException(409, "Usuário já existe.")
-
-        if body.auth_source == "LOCAL":
-            # Usuário local: gera uma senha temporária para o admin repassar.
-            # A troca obrigatória no primeiro acesso foi desativada.
-            senha_temporaria = _gerar_senha_temporaria()
-            pwd_hash = hash_password(senha_temporaria)
-            must_change = False
-        else:
-            # AD/SN: autenticação externa, sem senha local.
-            pwd_hash = None
-            must_change = False
-
         u = User(
             login=body.login,
             display_name=body.display_name.strip() or body.login,
-            password_hash=pwd_hash,
             auth_source=body.auth_source,
             is_admin=body.is_admin,
             active=True,
-            must_change_password=must_change,
-            # Usuário externo (AD/SN/SSO) criado pelo admin já entra liberado.
-            allowed=(body.auth_source != "LOCAL"),
+            must_change_password=False,
+            allowed=True,
         )
         s.add(u)
-    return {"ok": True, "login": body.login, "senha_temporaria": senha_temporaria}
+    return {"ok": True, "login": body.login}
 
 
 @router.delete("/usuarios/{login}")
@@ -655,7 +617,7 @@ def user_delete(login: str, req: Request):
         s.delete(u)
         s.add(AccessLog(
             login=sd["username"],
-            auth_source=sd.get("auth_source", "LOCAL"),
+            auth_source=sd.get("auth_source", "SSO"),
             success=True,
             ip=client_ip(req),
             detail=f"Usuário excluído: {login}"[:500],

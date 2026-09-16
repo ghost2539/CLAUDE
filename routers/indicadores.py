@@ -198,17 +198,11 @@ def _mv(v):
     return v if v is not None else ""
 
 
-def _is_true(v) -> bool:
-    return str(_mv(v)).strip().lower() in ("true", "1", "sim", "yes")
-
 
 def _mes(dt_str: str) -> str:
     s = str(dt_str or "")
     return s[:7] if len(s) >= 7 else ""
 
-
-def _meses_do_ano(ano: int) -> list[str]:
-    return [f"{ano}-{m:02d}" for m in range(1, 13)]
 
 
 def _mes_janela(ano: int, mes: int) -> str:

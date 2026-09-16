@@ -233,6 +233,28 @@
     function showLogin() {
         $('#login-screen').hidden = false;
         $('#app-wrapper').hidden = true;
+        preencherRodapeLogin();
+    }
+
+    // Selo de ambiente e versão no login vêm de /api/versao (público, só o
+    // essencial). Uma vez por carga; se falhar, fica o texto padrão do HTML.
+    var _rodapeLoginPronto = false;
+    function preencherRodapeLogin() {
+        if (_rodapeLoginPronto) return;
+        _rodapeLoginPronto = true;
+        fetch(API + '/versao', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (v) {
+                if (!v) return;
+                var amb = String(v.ambiente || 'producao').toLowerCase();
+                var rotulo = { producao: 'Produção', testes: 'Testes', teste: 'Testes',
+                               homologacao: 'Homologação', homolog: 'Homologação' }[amb] || amb;
+                var selo = $('#login-ambiente-texto');
+                if (selo) selo.textContent = rotulo + ' · rede interna';
+                var ver = $('#login-versao');
+                if (ver && v.commit_curto) ver.textContent = 'Portal de Operações · ' + v.commit_curto;
+            })
+            .catch(function () {});
     }
 
     // Keep-alive global do ServiceNow: enquanto o portal estiver logado, mantém
@@ -260,12 +282,6 @@
         var name = state.user.display_name || state.user.username;
         $('#topbar-user-name').textContent = name;
         $('#topbar-user-avatar').textContent = name[0].toUpperCase();
-        // Troca obrigatória só para usuários LOCAIS no primeiro acesso.
-        // AD/SN autenticam externamente e não trocam senha aqui.
-        if (state.user.must_change_password && state.user.auth_source === 'LOCAL') {
-            forcePasswordChange();
-            return;
-        }
         var destino = destinoPedido();
         if (destino) { location.replace(destino); return; }
         nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
@@ -283,55 +299,6 @@
         return /^\/[^/\\]/.test(next) ? next : '';
     }
 
-    // Troca de senha obrigatória no primeiro acesso (bloqueia o portal).
-    function forcePasswordChange() {
-        var existing = document.getElementById('force-pass-overlay');
-        if (existing) existing.remove();
-        var ov = el('div', { id: 'force-pass-overlay' });
-        ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);' +
-            'display:flex;align-items:center;justify-content:center;padding:16px';
-        ov.innerHTML =
-            '<div style="background:var(--bg-primary,#fff);max-width:420px;width:100%;' +
-            'border-radius:12px;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
-            '<h2 style="margin:0 0 6px;font-size:1.2rem">Defina uma nova senha</h2>' +
-            '<p style="color:var(--text-secondary);margin:0 0 16px;font-size:.9rem">' +
-            'Primeiro acesso: por segurança, troque a senha temporária antes de continuar.</p>' +
-            '<div class="form-group"><label>Senha temporária</label>' +
-            '<input id="fp-old" type="password" class="form-control" autocomplete="current-password"></div>' +
-            '<div class="form-group"><label>Nova senha</label>' +
-            '<input id="fp-new" type="password" class="form-control" autocomplete="new-password"></div>' +
-            '<div class="form-group"><label>Confirmar nova senha</label>' +
-            '<input id="fp-new2" type="password" class="form-control" autocomplete="new-password"></div>' +
-            '<div id="fp-err" style="color:#dc2626;font-size:.85rem;margin:6px 0" hidden></div>' +
-            '<button id="fp-save" class="btn btn-primary" style="width:100%;margin-top:8px">Salvar e entrar</button>' +
-            '</div>';
-        document.body.appendChild(ov);
-
-        function erro(msg) {
-            var e = document.getElementById('fp-err');
-            e.textContent = msg; e.hidden = false;
-        }
-        document.getElementById('fp-save').onclick = async function () {
-            var old = document.getElementById('fp-old').value;
-            var nova = document.getElementById('fp-new').value;
-            var nova2 = document.getElementById('fp-new2').value;
-            if (!old || !nova) { erro('Preencha todos os campos.'); return; }
-            if (nova.length < 6) { erro('A nova senha deve ter ao menos 6 caracteres.'); return; }
-            if (nova !== nova2) { erro('A confirmação não confere.'); return; }
-            if (nova === old) { erro('A nova senha deve ser diferente da temporária.'); return; }
-            try {
-                await api('/auth/change-password', {
-                    method: 'POST',
-                    body: { current_password: old, new_password: nova }
-                });
-                state.user.must_change_password = false;
-                ov.remove();
-                nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
-            } catch (x) {
-                erro(x.message || 'Falha ao alterar a senha.');
-            }
-        };
-    }
 
     // ── Session check ──────────────────────────────────────────────
     async function checkSession() {

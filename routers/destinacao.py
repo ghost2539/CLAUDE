@@ -29,8 +29,8 @@ import db.trilha as dbt
 from db.destinacao import (
     Descaracterizacao, Lote, LoteItem, Anexo, SessionLocal,
     VENDA, DESCARTE, DOACAO, DESTINOS, ROTULO_DESTINO, PROCESSO_DO_DESTINO,
-    ABERTO, AG_TRATATIVA, EM_TRATATIVA, CONCLUIDO, ROTULO_ESTADO,
-    REMOCAO_FISICA, LAUDO_ERS, SEM_MIDIA, METODOS, ROTULO_METODO,
+    AG_TRATATIVA, CONCLUIDO, ROTULO_ESTADO,
+    SEM_MIDIA, METODOS,
 )
 from config import get_settings
 from core.security import require_permission, check_rate_limit

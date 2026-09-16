@@ -1,8 +1,10 @@
-"""Authentication router — login, logout, session, password change."""
+"""Autenticação — login pelo SSO corporativo, sessão e logout.
+
+Não existe senha no portal: a credencial é sempre a da rede (AD via OAM).
+"""
 from __future__ import annotations
 
 import logging
-import os
 
 log = logging.getLogger(__name__)
 
@@ -13,12 +15,11 @@ from sqlalchemy import select, func
 
 from config import get_settings
 from db.portal import (
-    SessionLocal, User, Permission, AccessLog, Setting,
-    hash_password, verify_password, utcnow,
+    SessionLocal, User, Permission, AccessLog, Setting, utcnow,
 )
 from core.security import (
     get_session, client_ip, check_rate_limit,
-    create_session, set_session_cookie, delete_session, SESSIONS,
+    create_session, set_session_cookie, delete_session,
 )
 
 _cfg = get_settings()
@@ -50,17 +51,6 @@ class LoginIn(BaseModel):
             raise ValueError("auth_type deve ser SN ou SSO.")
         return v
 
-
-class PasswordChangeIn(BaseModel):
-    current_password: str
-    new_password: str
-
-    @field_validator("new_password")
-    @classmethod
-    def validate_new_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("A nova senha deve possuir ao menos 8 caracteres.")
-        return v
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -124,8 +114,6 @@ def _user_payload(u: User, perms: dict) -> dict:
         "role": "ADMIN" if u.is_admin else "USUÁRIO",
         "is_admin": u.is_admin,
         "auth_source": u.auth_source,
-        # Troca de senha obrigatória desativada: nunca força a troca no acesso.
-        "must_change_password": False,
         "permissions": (
             ["admin"] if u.is_admin
             else [k for k, v in perms.items() if v.get("can_view")]
@@ -400,19 +388,3 @@ def alterar_meu_nome(body: MeuNomeIn, req: Request):
         u.display_name = nome
     sd["display_name"] = nome          # a sessão em memória acompanha
     return {"ok": True, "display_name": nome}
-
-
-@router.post("/change-password")
-def change_password(body: PasswordChangeIn, req: Request):
-    sd = get_session(req)
-    with SessionLocal.begin() as s:
-        u = s.get(User, sd["user_id"])
-        if not u:
-            raise HTTPException(404, "Usuário não encontrado.")
-        if u.auth_source != "LOCAL":
-            raise HTTPException(400, "Disponível somente para Logon Local.")
-        if not verify_password(body.current_password, u.password_hash):
-            raise HTTPException(400, "Senha atual incorreta.")
-        u.password_hash = hash_password(body.new_password)
-        u.must_change_password = False
-    return {"ok": True}

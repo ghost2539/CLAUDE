@@ -291,5 +291,5 @@ não é preciso mudar código, só cadastrar as chaves:
 | Chave no cofre | Para quê |
 |---|---|
 | `CORREIOS_USUARIO`, `CORREIOS_CHAVE` | rastreio dos Correios |
-| `SN_AUTOMACAO_USUARIO`, `SN_AUTOMACAO_SENHA` | automação de encerramento |
+
 | `SMTP_USUARIO`, `SMTP_SENHA` | alertas por e-mail |

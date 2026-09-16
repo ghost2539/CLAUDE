@@ -82,6 +82,36 @@ def _ambiente_minimo() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k in _ENV_HERDADO}
 
 
+# O EBS corporativo é publicado em http://. Antes de mandar a senha do robô
+# em claro, tentamos o mesmo endereço em https://; se o servidor responder,
+# é ele que fica. Decidido uma vez por host, por processo.
+_ESQUEMA_EBS: dict[str, str] = {}
+
+
+def url_ebs_preferindo_https(url: str, http: requests.Session, timeout: int = 8) -> str:
+    if not (url or "").lower().startswith("http://"):
+        return url
+    host = urlparse(url).netloc
+    if host not in _ESQUEMA_EBS:
+        candidata = "https://" + url[len("http://"):]
+        try:
+            r = http.get(candidata, allow_redirects=True, timeout=timeout, stream=True)
+            r.close()
+            _ESQUEMA_EBS[host] = "https"
+            _log.info("EBS %s responde em https; a sessão do robô vai por TLS", host)
+        except requests.exceptions.SSLError as exc:
+            _ESQUEMA_EBS[host] = "http"
+            _log.warning("EBS %s respondeu em https mas o certificado não foi aceito (%s); "
+                         "mantendo http:// — configure PORTAL_CA_BUNDLE para usar TLS", host, exc)
+        except requests.RequestException as exc:
+            _ESQUEMA_EBS[host] = "http"
+            _log.warning("EBS %s não atende em https (%s); mantendo http:// — "
+                         "a senha do robô trafega sem TLS nesta rede", host, type(exc).__name__)
+    if _ESQUEMA_EBS[host] == "https":
+        return "https://" + url[len("http://"):]
+    return url
+
+
 class ErroForms(RuntimeError):
     """Falha esperável do RPA (login, jnlp, JVM, roteiro) — vai para o log da execução."""
 
@@ -157,12 +187,11 @@ class Sessao:
             self.http.proxies = {"http": proxy, "https": proxy}
         else:
             self.http.trust_env = False
-        self.home = _c("EBS_FORMS_HOME_URL",
-                       "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE")
-        if self.home.lower().startswith("http://"):
-            # A senha do robô sai no POST de login: sem TLS ela cruza a rede em claro.
-            _log.warning("EBS_FORMS_HOME_URL em http:// — a senha do robô trafega sem TLS; use https://")
         self.timeout = int(_c("EBS_FORMS_TIMEOUT", "40"))
+        self.home = url_ebs_preferindo_https(
+            _c("EBS_FORMS_HOME_URL",
+               "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE"),
+            self.http)
         self._registrar = registrar or (lambda m: _log.info("%s", m))
         self.jnlp_pronto: str = ""
         self.url_jnlp: str = ""
@@ -197,7 +226,9 @@ class Sessao:
         return "oa_html" in caminho or "/forms/" in caminho
 
     def entrar(self) -> None:
-        inicio = _c("EBS_FORMS_LOGIN_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/AppsLogin")
+        inicio = url_ebs_preferindo_https(
+            _c("EBS_FORMS_LOGIN_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/AppsLogin"),
+            self.http)
         self._registrar(f"SSO: abrindo {inicio}")
         r = self.http.get(inicio, allow_redirects=True, timeout=self.timeout)
         enviou_senha = False
@@ -982,18 +1013,6 @@ def montar_ativo(principal: dict, atribuicoes: dict, origem: dict, criterio: str
     }
 
 
-def resumo_do_ativo(lido: dict) -> dict:  # noqa: D401
-    """A primeira linha da grade de ativos, achatada em nome → valor.
-
-    É o formato que o portal consome; `tela` continua no resultado para quem
-    precisar do detalhe completo (todos os quadros, campos e o rodapé).
-    """
-    for grade in _grades(lido):
-        for linha in grade.get("linhas", []):
-            if any(str(v).strip() for v in linha.values()):
-                return {k: v for k, v in linha.items() if str(v).strip()}
-    return {}
-
 
 def variaveis_da_tela() -> dict[str, str]:
     """Nomes de componentes da tela, ajustáveis sem tocar no roteiro.
@@ -1361,9 +1380,3 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
             fechar_sessao()
         _trava.release()
 
-
-def ler_json(caminho: Path, padrao: Any) -> Any:
-    try:
-        return json.loads(caminho.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return padrao

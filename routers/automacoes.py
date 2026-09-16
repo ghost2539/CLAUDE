@@ -1,6 +1,7 @@
 """Automação de encerramento/encaminhamento de chamados entregues.
 
-- Roda 3x ao dia (config AUTOMACOES_HORARIOS) e/ou por botão na aba Correios.
+- Roda SÓ pelo botão, com a sessão SSO de quem clicou: os apontamentos nos
+  chamados saem em nome do usuário. Não há agendador nem conta de serviço.
 - Só age em chamados cujo ÚLTIMO evento de rastreio é ENTREGUE (evita fechar
   entregas com problema que o portal marca como entregue).
 - Casa a subcategoria com as REGRAS configuráveis (Parâmetros → Automações) e
@@ -15,13 +16,8 @@ Carregado de forma isolada no main.py: erro aqui não derruba o portal.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
-import os
 import re
-import threading
-import time
 from datetime import datetime
 
 from fastapi import APIRouter, Request, HTTPException
@@ -29,11 +25,10 @@ from pydantic import BaseModel
 
 import config as _config_mod
 import db.automacoes as db
-from core.security import require_permission, get_session
+from core.security import require_permission, get_session, check_rate_limit
 from routers.servicenow import (
-    _sn_session_from_portal, _sn_session_from_cookies, _sn_session_valida,
+    _sn_session_from_portal,
     _sn_query, _sn_query_all, _sn_update, _extract_tracking_code, _TRACKING_RE,
-    _get_http, _login_sso, _sn_sessao, SN_PROXY,
     INCIDENT_TABLE, DEFAULT_QUEUE,
 )
 from routers.encerramento import FIELDS as ENC_FIELDS, _estado_canonico, CLOSE_CODE, _display
@@ -48,148 +43,6 @@ router = APIRouter(prefix="/api/automacoes", tags=["Automações"])
 # BDE/BDI/BDR **com o tipo de entrega ao destinatário**. Aqui ficava só a
 # lista de códigos, e por isso "Objeto ainda não chegou à unidade" (mesmo
 # código, outro tipo) era lido como entregue e o chamado era encerrado.
-
-
-# ── Credencial para a rotina 100% automática ────────────────────────────
-# Preferência: cofre (core.cofre — corporativo, local ou ambiente). Sem
-# cofre, a senha fica CIFRADA no banco de automações. Nunca em texto puro.
-# A rotina roda SEMPRE com essa conta de serviço: nunca com a sessão SSO
-# de um usuário do portal.
-def _secret(nome: str, default: str = "") -> str:
-    from core import cofre
-    return cofre.obter(nome) or default
-
-
-DEFAULT_COFRE_USER_KEY = "SN_AUTOMACAO_USUARIO"
-DEFAULT_COFRE_PASS_KEY = "SN_AUTOMACAO_SENHA"
-# Só chaves da automação: sem isto, o admin do módulo apontaria a "senha"
-# para qualquer variável do ambiente (DATABASE_URL, PORTAL_SESSION_SECRET).
-_CHAVE_COFRE_RE = re.compile(r"^SN_AUTOMACAO_[A-Z0-9_]{1,40}$")
-
-
-def _chave_cofre_valida(chave: str) -> bool:
-    return bool(_CHAVE_COFRE_RE.match(chave or ""))
-
-
-def _cofre_keys() -> tuple[str, str]:
-    cfg = db.obter_config()
-    uk = cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY
-    pk = cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY
-    return (uk if _chave_cofre_valida(uk) else DEFAULT_COFRE_USER_KEY,
-            pk if _chave_cofre_valida(pk) else DEFAULT_COFRE_PASS_KEY)
-
-
-def _cofre_disponivel() -> bool:
-    uk, pk = _cofre_keys()
-    return bool(_secret(uk) and _secret(pk))
-
-
-def _fernet():
-    """Fernet quando a lib estiver sã; None quando faltar ou estiver quebrada.
-
-    O import de `cryptography` pode falhar com PanicException (binding Rust),
-    que não é `Exception` — daí a captura ampla, preservando só interrupção
-    e término do processo. Sem cripto, o fallback XOR assume."""
-    try:
-        from cryptography.fernet import Fernet  # type: ignore
-        key = base64.urlsafe_b64encode(hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest())
-        return Fernet(key)
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except BaseException:  # noqa: BLE001
-        return None
-
-
-def _xor(txt: str) -> str:
-    k = hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest()
-    b = txt.encode("utf-8")
-    out = bytes(c ^ k[i % len(k)] for i, c in enumerate(b))
-    return base64.b64encode(out).decode()
-
-
-def _xor_dec(blob: str) -> str:
-    k = hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest()
-    b = base64.b64decode(blob.encode())
-    return bytes(c ^ k[i % len(k)] for i, c in enumerate(b)).decode("utf-8", "ignore")
-
-
-def _encrypt(txt: str) -> tuple[str, str]:
-    f = _fernet()
-    if f:
-        return "fernet", f.encrypt(txt.encode()).decode()
-    return "xor", _xor(txt)
-
-
-def _decrypt(algo: str, blob: str) -> str:
-    if not blob:
-        return ""
-    if algo == "fernet":
-        f = _fernet()
-        if not f:
-            return ""
-        try:
-            return f.decrypt(blob.encode()).decode()
-        except Exception:  # noqa: BLE001
-            return ""
-    if algo == "xor":
-        try:
-            return _xor_dec(blob)
-        except Exception:  # noqa: BLE001
-            return ""
-    return ""
-
-
-def _creds_para_login() -> tuple[str, str, str]:
-    """(usuario, senha, fonte) — cofre tem prioridade; senão o store cifrado."""
-    uk, pk = _cofre_keys()
-    u = _secret(uk)
-    p = _secret(pk)
-    if u and p:
-        return u, p, "cofre"
-    cfg = db.obter_config()
-    if cfg.get("cred_user") and cfg.get("cred_blob"):
-        senha = _decrypt(cfg.get("cred_algo", "fernet"), cfg.get("cred_blob", ""))
-        if senha:
-            return cfg["cred_user"], senha, "store"
-    return "", "", ""
-
-
-# Sessão da conta de serviço, só em memória: cookies de SSO não vão para o
-# banco (entrariam no backup) e não se usa a sessão de nenhum usuário.
-_SESSAO_ROTINA: dict = {"session": None, "usuario": ""}
-
-
-def _login_fresh():
-    """Faz login SSO fresco com a credencial (cofre/store) e devolve a sessão."""
-    usuario, senha, fonte = _creds_para_login()
-    if not usuario or not senha:
-        return None, ""
-    _req, BS = _get_http()
-    s = _sn_sessao()
-    try:
-        ok = _login_sso(s, usuario, senha, _req, BS)
-    except Exception as exc:  # noqa: BLE001 — a rotina registra a falha
-        _log.warning("automação: login SSO da conta de serviço falhou: %s", exc)
-        return None, usuario
-    if ok:
-        _SESSAO_ROTINA.update(session=s, usuario=usuario)
-        return s, usuario
-    return None, usuario
-
-
-def _tem_sessao_rotina() -> bool:
-    return _SESSAO_ROTINA.get("session") is not None
-
-
-def purgar_cookies_gravados() -> None:
-    """Versões anteriores guardavam cookies SSO de usuários no banco. Limpa."""
-    try:
-        cfg = db.obter_config()
-        if cfg.get("sn_cookies"):
-            db.salvar_config({"sn_cookies": None})
-            _log.info("automação: cookies SSO antigos removidos do banco")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("automação: não limpei cookies antigos: %s", exc)
 
 
 def _monitor(alvo: str, detalhe: str, usuario: str = "", severidade: str = "erro") -> None:
@@ -398,9 +251,9 @@ class RegraIn(BaseModel):
 
 
 def _admin_automacoes(req: Request) -> dict:
-    """Quem mexe na CONFIGURAÇÃO da rotina (horários, cofre, credencial):
-    marcado em 'Administrar' no módulo Automações, ou administrador do portal.
-    Ver a aba e manter as REGRAS não exige permissão — é trabalho do time."""
+    """Quem mexe na CONFIGURAÇÃO da rotina (campo do rastreio): marcado em
+    'Administrar' no módulo Automações, ou administrador do portal. Ver a
+    aba e manter as REGRAS não exige permissão — é trabalho do time."""
     return require_permission(req, "automacoes", "admin")
 
 
@@ -450,159 +303,49 @@ def logs_list(req: Request, origem: str = "", q: str = "", limit: int = 500):
 
 @router.get("/config")
 def config_get(req: Request):
-    """Situação da rotina. Todo usuário vê o essencial; quem tem "Administrar"
-    em Automações recebe (e altera) o que envolve credencial e cofre."""
+    """Situação da rotina. Não há mais agendador nem credencial de serviço:
+    a rotina só roda pelo botão, com a sessão de quem clicou."""
     get_session(req)
     cfg = db.obter_config()
-    if not _pode_administrar(req):
-        return {
-            "enabled": bool(cfg.get("enabled", False)),
-            "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
-            "tem_sessao": _tem_sessao_rotina(),
-            "usuario": _SESSAO_ROTINA.get("usuario", ""),
-            "ultima_execucao": cfg.get("ultima_execucao", ""),
-            "somente_leitura": True,
-        }
     return {
-        "enabled": bool(cfg.get("enabled", False)),
-        "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
         "tracking_field": cfg.get("tracking_field") or DEFAULT_TRACKING_FIELD,
-        "usuario": _SESSAO_ROTINA.get("usuario", ""),
-        "tem_sessao": _tem_sessao_rotina(),
         "ultima_execucao": cfg.get("ultima_execucao", ""),
-        # 100% automático:
-        "cofre_disponivel": _cofre_disponivel(),
-        "cofre_user_key": cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY,
-        "cofre_pass_key": cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY,
-        "tem_credencial": bool(cfg.get("cred_user") and cfg.get("cred_blob")),
-        "credencial_usuario": cfg.get("cred_user", ""),
-        "somente_leitura": False,
+        "ultimo_usuario": cfg.get("ultimo_usuario", ""),
+        "somente_leitura": not _pode_administrar(req),
     }
 
 
 class ConfigIn(BaseModel):
-    enabled: bool = False
-    horarios: str = ""
     tracking_field: str = ""
-    cred_user: str = ""
-    cred_senha: str = ""
-    limpar_credencial: bool = False
-    cofre_user_key: str = ""
-    cofre_pass_key: str = ""
 
 
 @router.put("/config")
 def config_put(body: ConfigIn, req: Request):
-    sd = _admin_automacoes(req)
-    dados = {"enabled": bool(body.enabled)}
-    if body.horarios.strip():
-        dados["horarios"] = body.horarios.strip()
-    if body.tracking_field.strip():
-        dados["tracking_field"] = body.tracking_field.strip()
-    for campo in ("cofre_user_key", "cofre_pass_key"):
-        valor = getattr(body, campo).strip()
-        if valor:
-            if not _chave_cofre_valida(valor):
-                raise HTTPException(400, f"{campo}: use uma chave SN_AUTOMACAO_... (letras, números e _).")
-            dados[campo] = valor
-    # Credencial para automação 100% (guardada CRIPTOGRAFADA; no servidor novo,
-    # prefira o cofre: SN_AUTOMACAO_USUARIO / SN_AUTOMACAO_SENHA).
-    if body.limpar_credencial:
-        dados["cred_user"] = ""
-        dados["cred_blob"] = ""
-        dados["cred_algo"] = ""
-    elif body.cred_senha.strip():
-        algo, blob = _encrypt(body.cred_senha)
-        dados["cred_user"] = (body.cred_user.strip() or sd.get("username", ""))
-        dados["cred_algo"] = algo
-        dados["cred_blob"] = blob
-    db.salvar_config(dados)
+    _admin_automacoes(req)
+    campo = body.tracking_field.strip()
+    if campo and not re.fullmatch(r"[a-z0-9_.]{1,80}", campo):
+        raise HTTPException(400, "Campo do rastreio: só letras minúsculas, números, _ e ponto.")
+    db.salvar_config({"tracking_field": campo or DEFAULT_TRACKING_FIELD})
     return {"ok": True}
 
 
 # ── Executar (botão) ────────────────────────────────────────────────────
 @router.post("/run")
 def run_now(req: Request):
-    """Roda a rotina AGORA, com a sessão do usuário logado (botão).
+    """Roda a rotina AGORA, com a sessão SSO de quem clicou.
 
-    Basta estar autenticado: a rotina escreve no ServiceNow COMO o usuário —
-    quem não pode encerrar um chamado lá também não consegue por aqui."""
+    É a única forma de execução: os apontamentos e encerramentos no
+    ServiceNow saem em nome do usuário, como exige a governança. Basta
+    estar autenticado — quem não pode encerrar um chamado lá também não
+    consegue por aqui. A sessão do usuário não é guardada em lugar nenhum."""
     sd = get_session(req)
+    check_rate_limit(req)
     session = _sn_session_from_portal(req)
-    resumo = _rodar(session, origem="botao", usuario=sd.get("username", ""))
+    usuario = sd.get("username", "")
+    resumo = _rodar(session, origem="botao", usuario=usuario)
+    try:
+        db.salvar_config({"ultima_execucao": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                          "ultimo_usuario": usuario})
+    except Exception as exc:  # noqa: BLE001 — carimbo é informativo
+        _log.warning("automação: não gravei a última execução: %s", exc)
     return {"ok": True, "resumo": resumo}
-
-
-# ── Agendador ───────────────────────────────────────────────────────────
-_scheduler_started = False
-
-
-def _horarios() -> set[int]:
-    cfg = db.obter_config()
-    txt = cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS
-    horas = set()
-    for p in str(txt).split(","):
-        p = p.strip()
-        if p.isdigit():
-            horas.add(int(p))
-    return horas
-
-
-def _sessao_para_rotina():
-    """Sessão SN da rotina agendada: a da conta de serviço, mantida em memória
-    enquanto válida; senão um login SSO fresco com a credencial do cofre/store.
-    Retorna (session, usuario) ou (None, '')."""
-    s = _SESSAO_ROTINA.get("session")
-    if s is not None and _sn_session_valida(s):
-        return s, _SESSAO_ROTINA.get("usuario", "")
-    _SESSAO_ROTINA.update(session=None)
-    s, u = _login_fresh()
-    if s:
-        return s, u
-    return None, u
-
-
-def _scheduler_loop() -> None:
-    time.sleep(30)
-    ultima_hora = None
-    while True:
-        try:
-            agora = datetime.now()
-            cfg = db.obter_config()
-            if cfg.get("enabled") and agora.minute == 0 and agora.hour in _horarios():
-                marca = agora.strftime("%Y-%m-%d %H")
-                if marca != ultima_hora:
-                    ultima_hora = marca
-                    session, usuario = _sessao_para_rotina()
-                    if session is None:
-                        db.add_log(origem="agendador", usuario=usuario or "", number="",
-                                   sys_id="", subcategoria="", acao="ignorado",
-                                   fila_origem="", fila_destino="", resultado="adiado",
-                                   detalhe="Sem sessão do ServiceNow válida no horário.")
-                        _monitor("automacao/agendador", "Execução adiada: sem sessão "
-                                 "do ServiceNow válida no horário.", usuario or "", "alerta")
-                    else:
-                        resumo = _rodar(session, origem="agendador", usuario=usuario or "")
-                        db.salvar_config({"ultima_execucao": agora.strftime("%d/%m/%Y %H:%M")})
-                        _log.info("Automação (agendador): %s", resumo)
-        except Exception as exc:  # noqa: BLE001
-            _log.error("Agendador de automações falhou: %s", exc, exc_info=True)
-            _monitor("automacao/agendador", str(exc)[:400])
-        time.sleep(30)
-
-
-def start_scheduler() -> None:
-    global _scheduler_started
-    if _scheduler_started:
-        return
-    purgar_cookies_gravados()
-    if getattr(_cfg, "TESTES", False):
-        # Ambiente de testes com cópia da configuração de produção: o
-        # agendador rodaria a rotina dos Correios em dobro no ServiceNow.
-        _log.warning("Automações: agendador DESLIGADO (AMBIENTE=testes). O botão manual continua.")
-        _scheduler_started = True
-        return
-    _scheduler_started = True
-    th = threading.Thread(target=_scheduler_loop, daemon=True, name="automacoes-scheduler")
-    th.start()
-    _log.info("Automações: agendador iniciado (horas %s).", _cfg.AUTOMACOES_HORARIOS)

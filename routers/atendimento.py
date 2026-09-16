@@ -26,10 +26,10 @@ import db.atendimento as db
 import db.trilha as dbt
 from db.atendimento import (
     Chamado, Movimentacao, Intervalo, Vinculo, SessionLocal,
-    LOJA, FROTA, FRENTES, ROTULO_FRENTE, ROTULO_ESTADO,
+    LOJA, FROTA, ROTULO_FRENTE, ROTULO_ESTADO,
     AG_ATENDIMENTO, EX_ATENDIMENTO, AG_TERCEIRO, AG_EQUIPAMENTO, RESOLVIDO,
     FILA, TRATATIVA, EXTERNO, TIPO_DO_ESTADO,
-    SERIAL, REMESSA, PROJETO, ESPECIES,
+    SERIAL, REMESSA, ESPECIES,
 )
 from core.security import require_permission, check_rate_limit
 from routers.trilha import Calendario, duracao_util, prazo_util, _utc

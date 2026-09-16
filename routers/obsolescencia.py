@@ -182,7 +182,6 @@ LIMITE_SEM_VER = 30      # dias sem comunicar
 # sem acento e sem caixa: "EF500" casa com "Bluebird EF500" e "EF500R".
 # ATENÇÃO: NÃO casa com "EF501R", que é o que aparece nas amostras do parque
 # — são strings diferentes. Se o EF501R também for EOL, precisa entrar aqui.
-MODELOS_EOL = ("EF500", "EF500R")
 
 MODO_TODOS = "todos"
 MODO_QUALQUER = "qualquer"
@@ -998,18 +997,6 @@ def traduzir_pdv(reg: dict) -> dict:
     }
 
 
-def coletar_pdvs(sessao_sn) -> list[dict]:
-    """Todos os PDVs instalados, por local. Somente leitura."""
-    from routers.servicenow import _sn_query_all
-    import db.obsolescencia as _db
-
-    cfg = _db.ler_config()
-    registros = _sn_query_all(
-        sessao_sn, cfg.get("pdv_tabela", "cmdb_ci_computer"),
-        query=cfg.get("pdv_query", ""), fields=CAMPOS_PDV,
-        page_size=500, max_records=100000)
-    return [traduzir_pdv(r) for r in registros]
-
 
 # ── Agregações do painel ──────────────────────────────────────────
 def resumo_parque() -> dict:
@@ -1197,7 +1184,6 @@ def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
     if not itens:
         return resumo
     import db.obsolescencia as _db
-    from sqlalchemy import select as _select
     from integracoes import mdm_airwatch as mdm
 
     cfg = _db.ler_config()
