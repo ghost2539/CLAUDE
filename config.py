@@ -48,7 +48,13 @@ class Settings:
 
     DATABASE_URL: str = _env("DATABASE_URL", os.environ["DATABASE_URL"])
     SESSION_SECRET: str = _env("PORTAL_SESSION_SECRET", os.environ["PORTAL_SESSION_SECRET"])
+    # Ociosidade: a sessão cai depois deste tempo SEM uso. Cada pedido
+    # autenticado reinicia a contagem — antes o prazo corria desde o login
+    # e derrubava quem estava trabalhando.
     SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
+    # Teto absoluto: por mais que se use, a sessão não passa disto. É o que
+    # impede uma aba esquecida (ou um cookie roubado) de valer para sempre.
+    SESSION_MAX: int = int(os.getenv("SESSION_MAX_HOURS", "24")) * 3600
 
     EBS_LOGIN_URL: str = os.getenv("EBS_LOGIN_URL", "")
     EBS_SEARCH_URL: str = os.getenv("EBS_SEARCH_URL", "")

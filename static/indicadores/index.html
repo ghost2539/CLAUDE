@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Indicadores SPARE — RMR</title>
     <link rel="icon" href="/favicon.ico">
-    <link rel="stylesheet" href="/static/fonts/fontes.css">
     <style>
         /* Painel executivo: sempre escuro, na paleta do padrão de UI SPARE
            (LRSA 2025). Cantos retos, sem sombra, mono nos números. */
@@ -16,8 +15,8 @@
             --accent:#AB4807; --accent2:#C05B12;
             --c1:#C05B12; --c2:#2F8079; --c3:#C79105; --c4:#E9D39B; --c5:#5FB8AC; --c6:#6E6E6E;
             --good:#5FB8AC; --warn:#C79105; --bad:#E0782F; --grid:#1F1F1F;
-            --mono:'Roboto Mono','SFMono-Regular',Consolas,monospace;
-            --sans:Inter,'Segoe UI',Roboto,Arial,Helvetica,sans-serif;
+            --sans:Arial,Helvetica,sans-serif;
+            --mono:var(--sans);
         }
         *{box-sizing:border-box}
         html,body{margin:0}

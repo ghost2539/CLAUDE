@@ -52,18 +52,17 @@ telas seguem a mesma biblioteca de `static/app.css`:
   (mais os derivados de hover/contraste). Nenhum hex fora da tabela nos módulos:
   as cores entram por token `--sp-*` (os nomes antigos `--color-*`/`--bg-*`
   são apelidos para os tokens).
-- Tipografia: **Inter** para títulos, texto, botões e rótulos; **Roboto Mono**
-  só onde alinhar dígito importa (patrimônio, série, matrícula, versão, valor
-  de KPI, coluna numérica). As duas são **servidas pelo próprio portal**
-  (`static/fonts/`, declaradas em `static/fonts/fontes.css`, que toda tela
-  carrega): na rede interna o CDN do Google pode não responder, e a fonte de
-  sistema que entrava no lugar deixava a tela dura.
-- Forma: cantos retos (`border-radius: 0`), sem sombra; separação é borda de
-  1px. Grades de KPI e tabela com divisor no próprio `gap`.
+- Tipografia: **Arial** em todo o sistema — títulos, texto, botões, rótulos e
+  números. É a fonte institucional e não depende de CDN nenhum; o alinhamento
+  de dígito vem de `font-variant-numeric: tabular-nums`.
+- Forma: estrutura reta (cartões, tabelas, KPIs e shell sem raio) com
+  **controles arredondados** — botões 7px, campos 6px, chips 6px, badges 5px.
+  A única sombra do sistema é a do botão primário. Separação é borda de 1px;
+  no KPI, cada célula leva `outline` e o divisor se forma no `gap`.
 - Shell: sidebar fixa de 236px, **preta nos dois temas**, itens numerados
   01…N, rodapé com versão/ambiente e "CSC TI - Spare"; header de 62px com
-  trilha (grupo / tela), busca global, alternador **Claro/Escuro**, pílula de
-  status do ServiceNow e avatar quadrado com iniciais + matrícula.
+  trilha (grupo / tela), busca global, **toggle de tema** (`role="switch"`),
+  pílula de status do ServiceNow e avatar quadrado com iniciais + matrícula.
 - Tema: o login é sempre escuro; nos módulos o usuário escolhe. A preferência
   fica no perfil (`settings`, chave `pref:<login>`, via
   `PUT /api/auth/preferencias`) e o `localStorage['spare-tema']` é só cache.
@@ -96,7 +95,9 @@ não é guardada em lugar nenhum. **Só entra quem um admin liberou** (`allowed`
 
 Regras:
 - **Sessão** por cookie assinado (`itsdangerous`), `HttpOnly`, `Secure` em HTTPS
-  (`SESSION_COOKIE_SECURE`), TTL 480 min. Sessões em memória do processo,
+  (`SESSION_COOKIE_SECURE`). A sessão cai por **ociosidade** —
+  `SESSION_TTL_MINUTES` (480) contados do último pedido, não do login — com
+  teto absoluto em `SESSION_MAX_HOURS` (24). Sessões em memória do processo,
   indexadas por login: mudança de permissão vale na hora; desativar,
   tirar a liberação ou excluir derruba as sessões vivas.
 - **Bloqueado no SSO fica salvo como pendente** (Permitido=Não) e aparece em *Parâmetros → Usuários e Permissões* para o admin liberar (marcar "Acesso permitido"), ou criar antes via **Novo usuário → Rede/SSO** (entra já liberado; senha é a do AD).
@@ -216,7 +217,8 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 |---|---|---|
 | `DATABASE_URL` | — (obrigatório) | Banco do portal. PostgreSQL hoje / MySQL (`mysql+pymysql://...`) no servidor novo. |
 | `PORTAL_SESSION_SECRET` | — (obrigatório) | Segredo de assinatura da sessão. |
-| `SESSION_TTL_MINUTES` | 480 | Duração da sessão. |
+| `SESSION_TTL_MINUTES` | 480 | Ociosidade: a sessão cai depois deste tempo **sem uso**; cada pedido reinicia a contagem. |
+| `SESSION_MAX_HOURS` | 24 | Teto absoluto da sessão, por mais que se use. |
 | `SESSION_COOKIE_SECURE` | auto | Cookie só em HTTPS: `auto` (liga quando o pedido chega por https, direto ou via proxy confiável), `true`, `false`. |
 | `TRUSTED_PROXIES` | 127.0.0.1,::1 | Proxies cujos `X-Forwarded-For`/`X-Forwarded-Proto` são aceitos (IP do IP real e do esquema). |
 | `PORTAL_CA_BUNDLE` | "" | PEM com a CA corporativa (+ CA do proxy interceptador) para verificar o TLS de saída. |

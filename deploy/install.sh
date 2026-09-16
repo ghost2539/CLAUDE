@@ -34,6 +34,7 @@ if [ ! -f "$CONFIG_DIR/environment" ]; then
 DATABASE_URL=postgresql+psycopg://portal_spare_app:ALTERAR@127.0.0.1:5432/portal_operacoes_spare_db
 PORTAL_SESSION_SECRET=${SESSION_SECRET}
 SESSION_TTL_MINUTES=480
+SESSION_MAX_HOURS=24
 EBS_LOGIN_URL=https://suporte.lojasrenner.com.br/ebs/api/auth/login
 EBS_SEARCH_URL=https://suporte.lojasrenner.com.br/ebs/api/estoque/busca-imobilizado
 VERIFY_SSL=true

@@ -328,7 +328,8 @@ def auth_me(req: Request):
         visual = visual_row.value if visual_row else {}
         tema = tema_preferido(s, sd.get("username", ""))
     return {
-        **{k: v for k, v in sd.items() if k not in ("ebs_auth", "permission_map", "sn_cookies")},
+        **{k: v for k, v in sd.items()
+           if k not in ("ebs_auth", "permission_map", "sn_cookies", "visto_em")},
         "permission_map": sd.get("permission_map", {}),
         "visual_config": visual,
         "sn_active": bool(sd.get("sn_cookies")),

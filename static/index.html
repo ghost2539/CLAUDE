@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Portal de Operações - SPARE</title>
     <link rel="icon" href="/favicon.ico">
-    <link rel="stylesheet" href="/static/fonts/fontes.css">
     <link rel="stylesheet" href="/static/app.css">
     <script defer src="/static/app.js"></script>
 </head>
@@ -230,10 +229,14 @@
                 </div>
             </div>
             <div class="topbar-right">
-                <div class="tema-seg" role="group" aria-label="Tema">
-                    <button type="button" data-tema="claro" aria-pressed="true">Claro</button>
-                    <button type="button" data-tema="escuro" aria-pressed="false">Escuro</button>
-                </div>
+                <button id="tema-toggle" class="tema-toggle" type="button" role="switch"
+                        aria-checked="false" aria-label="Alternar tema escuro"
+                        title="Mudar para tema escuro">
+                    <span class="tema-toggle-knob">
+                        <svg class="tema-toggle-sol" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="#AB4807"></circle><g stroke="#AB4807" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="1.2" x2="8" y2="2.9"></line><line x1="8" y1="13.1" x2="8" y2="14.8"></line><line x1="1.2" y1="8" x2="2.9" y2="8"></line><line x1="13.1" y1="8" x2="14.8" y2="8"></line><line x1="3.2" y1="3.2" x2="4.4" y2="4.4"></line><line x1="11.6" y1="11.6" x2="12.8" y2="12.8"></line><line x1="3.2" y1="12.8" x2="4.4" y2="11.6"></line><line x1="11.6" y1="4.4" x2="12.8" y2="3.2"></line></g></svg>
+                        <svg class="tema-toggle-lua" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M9.4 1.6a6.4 6.4 0 1 0 5 9.9A5.2 5.2 0 0 1 9.4 1.6z" fill="#FFFFFF"></path></svg>
+                    </span>
+                </button>
                 <div id="topbar-integ" class="integ-pilula" title="Sessão do ServiceNow">
                     <span class="dot dot-muted"></span>
                     <span id="topbar-integ-texto">ServiceNow</span>

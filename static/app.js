@@ -270,19 +270,38 @@
     // a sessão do SN viva em segundo plano (o login do portal já autentica no
     // SN). Roda independente da tela aberta.
     var _snKeepAlive = null;
+    var _snUltimoPing = 0;
+
+    function snPing() {
+        _snUltimoPing = Date.now();
+        return fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) marcarIntegracao(!!d.active); })
+            .catch(function () {});
+    }
+
+    // O relógio do navegador não é confiável para isto: aba em segundo
+    // plano tem os temporizadores represados, e máquina suspensa não conta
+    // tempo nenhum. Por isso o ping também sai quando a aba reaparece e
+    // quando a rede volta — aí a resposta chega antes de o usuário clicar.
     function startSnKeepAlive() {
         if (_snKeepAlive) return;
-        var ping = function () {
-            fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { if (d) marcarIntegracao(!!d.active); })
-                .catch(function () {});
-        };
-        ping();
-        _snKeepAlive = setInterval(ping, 3 * 60 * 1000);   // 3 min
+        snPing();
+        _snKeepAlive = setInterval(snPing, 3 * 60 * 1000);   // 3 min
+        document.addEventListener('visibilitychange', _snAoVoltar);
+        window.addEventListener('online', _snAoVoltar);
+    }
+    function _snAoVoltar() {
+        if (!_snKeepAlive) return;
+        if (document.visibilityState === 'hidden') return;
+        // Sem repetir à toa quando a pessoa alterna de aba a cada instante.
+        if (Date.now() - _snUltimoPing < 30 * 1000) return;
+        snPing();
     }
     function stopSnKeepAlive() {
         if (_snKeepAlive) { clearInterval(_snKeepAlive); _snKeepAlive = null; }
+        document.removeEventListener('visibilitychange', _snAoVoltar);
+        window.removeEventListener('online', _snAoVoltar);
     }
 
     function showApp() {
@@ -358,11 +377,17 @@
         var mudou = document.documentElement.dataset.tema !== tema;
         document.documentElement.dataset.tema = tema;
         try { localStorage.setItem(TEMA_CHAVE, tema); } catch (_) {}
-        $$('.tema-seg button').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.dataset.tema === tema));
-        });
+        var botao = $('#tema-toggle');
+        if (botao) {
+            var escuro = tema === 'escuro';
+            botao.setAttribute('aria-checked', String(escuro));
+            botao.title = escuro ? 'Mudar para tema claro' : 'Mudar para tema escuro';
+        }
         if (salvar) {
-            api('/auth/preferencias', { method: 'PUT', body: { tema: tema } }).catch(function () {});
+            // Se o perfil não aceitar a troca, o usuário precisa saber:
+            // senão a escolha some no próximo login sem explicação.
+            api('/auth/preferencias', { method: 'PUT', body: { tema: tema } })
+                .catch(function () { toast('Não consegui guardar a preferência de tema.', 'warning'); });
             // A tela aberta redesenha para os gráficos lerem os tokens novos.
             if (mudou && state.current) nav(location.hash.slice(1) || state.current);
         }
@@ -690,9 +715,9 @@
         // tela não piscar; quando /auth/me responde, a preferência do
         // perfil assume.
         aplicarTema(temaGuardado(), false);
-        $$('.tema-seg button').forEach(function (b) {
-            b.onclick = function () { aplicarTema(b.dataset.tema, true); };
-        });
+        $('#tema-toggle').onclick = function () {
+            aplicarTema(temaAtual() === 'escuro' ? 'claro' : 'escuro', true);
+        };
 
         // Global search
         setupGlobalSearch();

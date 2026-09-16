@@ -33,8 +33,6 @@ window.SPARE_MODULES.servicenow = {
    SN Login Bar — componente reutilizável de login ServiceNow
    ================================================================ */
 
-var _snKeepAliveTimer = null;
-
 /* A partir da unificação do login (Logon AD via ServiceNow), a sessão do SN
    já vem do próprio login do portal. Estas telas não pedem mais usuário/senha:
    mostram apenas o status da conexão e mantêm a sessão viva (keep-alive). */
@@ -78,28 +76,18 @@ function _snSetBadge(active) {
     }
 }
 
+/* Só confere e mostra o status. Quem renova a sessão do ServiceNow é o
+   keep-alive global do portal (app.js), que roda em qualquer tela e volta
+   a pingar quando a aba reaparece. O temporizador que existia aqui era um
+   segundo ping para o mesmo endpoint e desligava de vez no primeiro
+   "inativo" — bastava um falso negativo para a renovação parar. */
 function _snCheckSession(S, onSuccess) {
     S.api('/servicenow/session-status')
         .then(function (d) {
             _snSetBadge(d.active);
-            if (d.active) { _snStartKeepAlive(S); if (onSuccess) onSuccess(); }
+            if (d.active && onSuccess) onSuccess();
         })
         .catch(function () { _snSetBadge(false); });
-}
-
-function _snStartKeepAlive(S) {
-    if (_snKeepAliveTimer) return;
-    // Renova a sessão do ServiceNow a cada 5 minutos enquanto a tela estiver
-    // aberta (o endpoint session-status atualiza os cookies no servidor).
-    _snKeepAliveTimer = setInterval(function () {
-        S.api('/servicenow/session-status')
-            .then(function (d) { _snSetBadge(d.active); if (!d.active) _snStopKeepAlive(); })
-            .catch(function () {});
-    }, 5 * 60 * 1000);
-}
-
-function _snStopKeepAlive() {
-    if (_snKeepAliveTimer) { clearInterval(_snKeepAliveTimer); _snKeepAliveTimer = null; }
 }
 
 

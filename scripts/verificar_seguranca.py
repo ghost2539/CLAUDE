@@ -186,6 +186,33 @@ checar(c.delete("/api/parametros/usuarios/op.teste", cookies=ADMIN).status_code 
        and c.get("/api/auth/me", cookies={COOKIE: cookie_op2}).status_code == 401,
        "excluir derruba a sessão viva")
 
+print("-- sessão: janela deslizante com teto absoluto")
+# Antes o prazo corria desde o login: quem passava o dia no portal era
+# derrubado no meio do trabalho. Agora conta do último pedido.
+_sid_desl, _ck_desl = sec.create_session({"username": "desliza.teste", "is_admin": True,
+                                          "permissions": ["admin"], "permission_map": {},
+                                          "user_id": 90, "ebs_auth": None})
+_CK = {COOKIE: _ck_desl}
+checar(sec.SESSIONS[_sid_desl].get("visto_em") is not None, "a sessão nasce com marca de uso")
+import time as _t
+_antes = sec.SESSIONS[_sid_desl]["visto_em"]
+_t.sleep(0.01)
+checar(c.get("/api/auth/me", cookies=_CK).status_code == 200
+       and sec.SESSIONS[_sid_desl]["visto_em"] > _antes,
+       "cada pedido reinicia a contagem de ociosidade")
+checar("visto_em" not in c.get("/api/auth/me", cookies=_CK).json(),
+       "a marca de uso não vaza para o navegador")
+sec.SESSIONS[_sid_desl]["visto_em"] = _t.monotonic() - sec._cfg.SESSION_TTL - 1
+checar(c.get("/api/auth/me", cookies=_CK).status_code == 401, "parada longa derruba a sessão")
+checar(_sid_desl not in sec.SESSIONS, "e a sessão vencida sai da memória")
+checar(sec._cfg.SESSION_MAX > sec._cfg.SESSION_TTL,
+       "o teto absoluto é maior que a janela de ociosidade")
+_sid_teto, _ck_teto = sec.create_session({"username": "teto.teste", "is_admin": True,
+                                          "permissions": ["admin"], "permission_map": {},
+                                          "user_id": 91, "ebs_auth": None})
+checar(sec._serializer.loads(_ck_teto, max_age=sec._cfg.SESSION_MAX) == _sid_teto,
+       "o cookie é assinado para o teto absoluto, não para a ociosidade")
+
 print("-- conversão EBS (/api/public-assets)")
 corpo = {"identificadores": ["ABC123"]}
 checar(c.post("/api/public-assets/convert", json=corpo).status_code == 401, "sem sessão nem token → 401")

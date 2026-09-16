@@ -54,9 +54,9 @@ normativo.
    custo.
 11. **Tela nova segue o padrão de UI SPARE** (`docs/PADRAO_UI_SPARE.md`):
    usa o shell e as classes de `static/app.css`, nenhum hex fora da paleta
-   (cor entra por token `--sp-*`), cantos retos, sem sombra, números em
-   Roboto Mono e funciona nos temas claro e escuro. Fonte nova entra em
-   `static/fonts/` — a política de conteúdo não libera CDN.
+   (cor entra por token `--sp-*`), Arial, estrutura reta com controles
+   arredondados e funciona nos temas claro e escuro. Nada de fonte, script
+   ou folha externa: a política de conteúdo só libera o próprio domínio.
 
 ## Segurança
 

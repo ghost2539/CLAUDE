@@ -198,7 +198,7 @@ import requests as _rq
 mdm.varrer = lambda sessao, base="", progresso=None, **k: (_ for _ in ()).throw(_rq.exceptions.SSLError("x"))
 try:
     ob.coletar(REQ)
-except HTTPException as e:
+except HTTPException:
     pass
 f = ob.coleta_progresso(REQ)
 checar(not f["rodando"] and f["fase"] == "Falhou" and "certificado" in f["erro"], "falha encerra o progresso com o motivo")

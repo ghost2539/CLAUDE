@@ -29,6 +29,7 @@ def _login_de(data: dict) -> str:
 
 def create_session(data: dict) -> tuple[str, str]:
     sid = secrets.token_urlsafe(32)
+    data["visto_em"] = time.monotonic()
     SESSIONS[sid] = data
     _SESSOES_POR_LOGIN[_login_de(data)].add(sid)
     cookie_value = _serializer.dumps(sid)
@@ -68,7 +69,9 @@ def set_session_cookie(resp: Response, cookie_value: str, req: Request | None = 
         httponly=True,
         samesite="lax",
         secure=cookie_seguro(req),
-        max_age=_cfg.SESSION_TTL,
+        # O cookie vale o teto absoluto; quem derruba por ociosidade é o
+        # servidor, que sabe quando foi o último pedido.
+        max_age=_cfg.SESSION_MAX,
         path="/",
     )
 
@@ -90,15 +93,43 @@ def get_session(req: Request, required: bool = True) -> dict | None:
             raise HTTPException(401, "Sessão não autenticada.")
         return None
     try:
-        sid = _serializer.loads(cookie, max_age=_cfg.SESSION_TTL)
+        sid = _serializer.loads(cookie, max_age=_cfg.SESSION_MAX)
     except (BadSignature, SignatureExpired):
         if required:
             raise HTTPException(401, "Sessão expirada.")
         return None
     data = SESSIONS.get(sid)
+    if data is not None:
+        # Janela deslizante: o prazo conta do último pedido, não do login.
+        # Quem está trabalhando não é interrompido; quem parou, cai.
+        agora = time.monotonic()
+        if agora - data.get("visto_em", agora) > _cfg.SESSION_TTL:
+            _remover_sessao(sid)
+            data = None
+        else:
+            data["visto_em"] = agora
+            _limpar_sessoes_ociosas()
     if not data and required:
         raise HTTPException(401, "Sessão expirada.")
     return data
+
+
+# Sessão vencida ocupa memória e continua listada por login. A varredura é
+# barata e rara: a cada minuto, no máximo, e só quando alguém usa o portal.
+_ULTIMA_VARREDURA = 0.0
+
+
+def _limpar_sessoes_ociosas() -> int:
+    global _ULTIMA_VARREDURA
+    agora = time.monotonic()
+    if agora - _ULTIMA_VARREDURA < 60:
+        return 0
+    _ULTIMA_VARREDURA = agora
+    vencidas = [sid for sid, d in SESSIONS.items()
+                if agora - d.get("visto_em", agora) > _cfg.SESSION_TTL]
+    for sid in vencidas:
+        _remover_sessao(sid)
+    return len(vencidas)
 
 
 # ── Permissões ───────────────────────────────────────────────────

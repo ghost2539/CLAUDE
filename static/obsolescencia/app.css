@@ -25,12 +25,12 @@
 .obs-marca { color: var(--sp-accent); display: block; flex: none; }
 
 .obs-titulo { margin: 0; font: bold 18px/1.2 var(--sp-sans); letter-spacing: -.01em; }
-.obs-sub    { margin: 4px 0 0; font: 500 9px/1 var(--sp-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-faint); }
+.obs-sub    { margin: 4px 0 0; font: 500 9px/1 var(--sp-num); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-faint); }
 
 .obs-topo-dir { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .obs-chip {
-    font: 500 10px/1 var(--sp-mono);
+    font: 500 10px/1 var(--sp-num);
     letter-spacing: .12em;
     text-transform: uppercase;
     padding: 6px 11px;
@@ -40,7 +40,7 @@
     white-space: nowrap;
 }
 
-.obs-usuario { font: 400 12px/1 var(--sp-mono); color: var(--sp-muted); }
+.obs-usuario { font: 400 12px/1 var(--sp-num); color: var(--sp-muted); }
 
 .obs-voltar {
     font-size: .82rem;
@@ -116,11 +116,11 @@
 .obs-kpi--alerta  { border-left: 3px solid var(--status-alerta); }
 
 .obs-kpi-valor {
-    font: 400 26px/1.1 var(--sp-mono);
+    font: 400 26px/1.1 var(--sp-num);
     font-variant-numeric: tabular-nums;
 }
-.obs-kpi-rotulo { margin-top: 8px; font: 500 9px/1.3 var(--sp-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-faint); }
-.obs-kpi-nota   { margin-top: 4px; font: 400 11px/1.4 var(--sp-mono); color: var(--sp-faint); }
+.obs-kpi-rotulo { margin-top: 8px; font: 500 9px/1.3 var(--sp-num); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-faint); }
+.obs-kpi-nota   { margin-top: 4px; font: 400 11px/1.4 var(--sp-num); color: var(--sp-faint); }
 
 .obs-grid2 {
     display: grid;
@@ -170,7 +170,7 @@
 .obs-tabela { width: 100%; border-collapse: collapse; font-size: .82rem; }
 .obs-tabela th {
     text-align: left;
-    font: 500 10px/1.2 var(--sp-mono);
+    font: 500 10px/1.2 var(--sp-num);
     letter-spacing: .12em;
     text-transform: uppercase;
     color: var(--sp-faint);
@@ -185,7 +185,7 @@
 
 .obs-etq {
     display: inline-flex; align-items: center; gap: 5px;
-    font: 500 10px/1 var(--sp-mono); letter-spacing: .06em; text-transform: uppercase;
+    font: 500 10px/1 var(--sp-num); letter-spacing: .06em; text-transform: uppercase;
     padding: 5px 9px; background: var(--sp-badge-neutro-bg); color: var(--sp-badge-neutro-fg);
     white-space: nowrap;
 }
@@ -210,7 +210,7 @@
 /* ── Credencial ───────────────────────────────────────────────── */
 .obs-cred-card { max-width: 620px; margin-bottom: 20px; border-left: 3px solid var(--color-gold); }
 .obs-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.obs-campos label { display: flex; flex-direction: column; gap: 6px; font: 500 10px/1.3 var(--sp-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-muted); }
+.obs-campos label { display: flex; flex-direction: column; gap: 6px; font: 500 10px/1.3 var(--sp-num); letter-spacing: .14em; text-transform: uppercase; color: var(--sp-muted); }
 .obs-campos input {
     background: var(--sp-input-bg);
     border: 1px solid var(--sp-input-border);
