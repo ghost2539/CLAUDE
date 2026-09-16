@@ -184,7 +184,6 @@ def revogar(login: str, req: Request):
 class ListasIn(BaseModel):
     estoques: list[str] = []
     corredores: list[str] = []
-    anotacoes: list[str] = []
 
 
 @router.get("/api/consulta-times/gestao-ativos")
@@ -198,8 +197,7 @@ def listas_ler(req: Request):
 def listas_gravar(body: ListasIn, req: Request):
     """Configuração exclusiva do espaço: gravar aqui não mexe no portal."""
     sd = _exigir(req, "admin")
-    dbct.gravar_listas({"estoques": body.estoques, "corredores": body.corredores,
-                        "anotacoes": body.anotacoes})
+    dbct.gravar_listas({"estoques": body.estoques, "corredores": body.corredores})
     dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "configurar", "listas do ServiceNow")
     return listas_ler(req)
 

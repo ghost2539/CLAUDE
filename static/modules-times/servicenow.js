@@ -669,8 +669,8 @@ function _snRenderSaida(container, S) {
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
                         '<label>Observações <span style="color:var(--sp-alerta)">*</span> (nº do chamado ou motivo)</label>' +
-                        '<input id="sa-notes" class="form-control" list="ga-anotacoes" placeholder="Ex.: INC0012345 ou devolução de estoque" autocomplete="off">' +
-                        '<datalist id="ga-anotacoes"></datalist></div>' +
+                        '<input id="sa-notes" class="form-control" placeholder="Ex.: INC0012345 ou devolução de estoque" autocomplete="off">' +
+                        '</div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
                     '<button class="btn btn-primary" id="sa-search">Buscar ativos</button></div>' +
@@ -970,17 +970,13 @@ function _saMoveAll(S) {
 
 var _miStockrooms = [];   // vêm da configuração do espaço (alm_stockroom, sem SPARE)
 var _gaCorredores = [];
-var _gaAnotacoes = [];
-/* Estoques, corredores e anotações vêm de Configuração; aplicados na hora. */
+/* Estoques e corredores vêm do Acesso Consulta Times; aplicados na hora. */
 function _gaCarregarConfig(S) {
     return S.api('/consulta-times/gestao-ativos').then(function (c) {
         if (c.estoques && c.estoques.length) _miStockrooms = c.estoques;
         _gaCorredores = c.corredores || [];
-        _gaAnotacoes = c.anotacoes || [];
         var dl = document.getElementById('ga-corredores');
         if (dl) dl.innerHTML = _gaCorredores.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
-        var da = document.getElementById('ga-anotacoes');
-        if (da) da.innerHTML = _gaAnotacoes.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
         var st = document.getElementById('sn-stockroom');
         if (st && st.tagName === 'SELECT') {
             var atual = st.value;

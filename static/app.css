@@ -1289,7 +1289,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--sp-accent); }
 /* ── Consulta Times: escolha dos estoques vindos do ServiceNow ──── */
 .ct-estoques { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .35rem .9rem;
                max-height: 220px; overflow: auto; padding: .5rem; border: 1px solid var(--sp-border); }
-.ct-estoque { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
+/* Nome de estoque é dado, não rótulo: sai do caixa-alta que `.form-group
+   label` aplica, senão não bate com o registro do ServiceNow. */
+.ct-estoques .ct-estoque { display: flex; align-items: center; gap: .4rem; min-width: 0;
+              font: 400 13px/1.4 var(--sp-sans); letter-spacing: 0;
+              text-transform: none; color: var(--sp-text); cursor: pointer; }
+.ct-estoques .ct-estoque span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Foco de teclado (global): sempre o acento, nunca o anel azul ── */
 .btn:focus-visible, .sub-tab:focus-visible, .sidebar-item:focus-visible,

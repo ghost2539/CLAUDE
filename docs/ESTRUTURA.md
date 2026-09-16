@@ -244,9 +244,16 @@ O espaço em `/consulta-times` é independente do portal, por decisão da
   wrappers. `app.js` carrega dessa pasta quando `body[data-espaco=times]`.
   O preço da independência é que uma correção válida para os dois espaços
   precisa ser aplicada nos dois arquivos.
-- **Configuração**: estoques, corredores e anotações ficam em `ct_config`,
-  no banco do próprio espaço. A chave `gestao_ativos` do portal não é
-  lida nem escrita aqui.
+- **Configuração**: estoques e corredores ficam em `ct_config`, no banco
+  do próprio espaço. A chave `gestao_ativos` do portal não é lida nem
+  escrita aqui.
+- **Tela Acesso Consulta Times**: quatro blocos e só estes — liberação de
+  acesso (usuário de rede, nome, nível), usuários liberados e quem
+  liberou, estoques/corredores/espaços das telas de Entrada, Saída e
+  Movimentação, e trilha de acesso. A tela busca tudo antes de montar
+  (`Promise.all`) e guarda os elementos em variáveis: montar por partes
+  entre `await`s duplicava blocos quando duas renderizações corriam
+  juntas.
 - **Estoques**: escolhidos numa lista vinda do ServiceNow
   (`GET /api/consulta-times/stockrooms`, tabela `alm_stockroom`), sem os
   que têm "Spare" no nome — esses são da área SPARE.

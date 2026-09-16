@@ -106,7 +106,7 @@ class Config(Base):
 
 # Listas do espaço Times. Começam vazias: os estoques dos outros times não
 # são os do SPARE, e quem administra o espaço escolhe os dele.
-PADROES = {"estoques": [], "corredores": [], "anotacoes": []}
+PADROES = {"estoques": [], "corredores": []}
 
 
 def ler_listas() -> dict:

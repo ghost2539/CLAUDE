@@ -491,7 +491,17 @@
         if (!ROUTES[module]) module = 'bemvindo';
         if (!rotaPermitida(module)) { module = 'consulta'; route = 'consulta'; }
         state.current = module;
-        location.hash = route;
+        // Trocar o hash dispara `hashchange`, que chamaria nav() de novo:
+        // duas renderizações da mesma tela correndo juntas, cada uma
+        // anexando os blocos dela entre um `await` e outro. A marca faz o
+        // ouvinte ignorar a troca que saiu daqui.
+        if (location.hash.slice(1) !== route) {
+            _hashInterno = true;
+            location.hash = route;
+            // Se o evento não vier, a marca não pode ficar pendurada e
+            // engolir a próxima navegação pelo botão voltar.
+            setTimeout(function () { _hashInterno = false; }, 0);
+        }
         // Modal é global: um erro deixado aberto numa tela não pode
         // acompanhar o usuário para a próxima.
         closeModal();
@@ -507,11 +517,17 @@
         if (ativo) { var g = ativo.closest('.sidebar-grupo'); if (g) g.classList.remove('fechado'); }
         atualizarTrilha(ativo, module);
 
-        // Clear sub-tabs and content
+        // Sub-abas e conteúdo. O conteúdo não é só esvaziado: o nó é
+        // trocado por um novo. Assim um render anterior que ainda esteja
+        // no meio de um `await` termina escrevendo num nó já fora da
+        // tela, em vez de somar os blocos dele aos da tela nova.
         $('#sub-tabs').hidden = true;
         $('#sub-tabs').innerHTML = '';
-        var content = $('#page-content');
+        var content = document.createElement('section');
+        content.id = 'page-content';
+        content.className = 'page-content';
         content.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando...</div>';
+        $('#page-content').replaceWith(content);
 
         try {
             await loadModule(module);
@@ -539,7 +555,9 @@
         });
     }
 
+    var _hashInterno = false;
     window.addEventListener('hashchange', function () {
+        if (_hashInterno) { _hashInterno = false; return; }
         nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
     });
 
@@ -668,7 +686,10 @@
             if (e.target.classList.contains('modal-backdrop')) closeModal();
         };
 
-        // Tema claro/escuro
+        // Tema claro/escuro. O que está no cache vale desde já, para a
+        // tela não piscar; quando /auth/me responde, a preferência do
+        // perfil assume.
+        aplicarTema(temaGuardado(), false);
         $$('.tema-seg button').forEach(function (b) {
             b.onclick = function () { aplicarTema(b.dataset.tema, true); };
         });

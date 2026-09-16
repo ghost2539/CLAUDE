@@ -50,10 +50,10 @@ dbp.init_db()
 
 # ── 1. Configuração do espaço é do espaço ──────────────────────────
 print("\n[1] Configuração isolada do portal")
-checar(rct.listas_ler(REQ) == {"estoques": [], "corredores": [], "anotacoes": []},
+checar(rct.listas_ler(REQ) == {"estoques": [], "corredores": []},
        "o espaço começa sem estoques (os do SPARE não são dele)")
 portal_antes = config_gestao_ativos()
-rct.listas_gravar(rct.ListasIn(estoques=["LOJA 101", "LOJA 102"], corredores=["A-1"], anotacoes=["Troca"]), REQ)
+rct.listas_gravar(rct.ListasIn(estoques=["LOJA 101", "LOJA 102"], corredores=["A-1"]), REQ)
 checar(rct.listas_ler(REQ)["estoques"] == ["LOJA 101", "LOJA 102"], "gravou no banco do espaço")
 checar(config_gestao_ativos() == portal_antes, "o portal NÃO mudou")
 
@@ -65,7 +65,7 @@ with PS.begin() as s:
 checar(config_gestao_ativos()["estoques"] == ["SPARE - CD324", "SPARE-ADM15"], "portal alterado")
 checar(rct.listas_ler(REQ)["estoques"] == ["LOJA 101", "LOJA 102"], "o espaço NÃO mudou")
 
-rct.listas_gravar(rct.ListasIn(estoques=[" LOJA 103 ", "", "LOJA 103"], corredores=[], anotacoes=[]), REQ)
+rct.listas_gravar(rct.ListasIn(estoques=[" LOJA 103 ", "", "LOJA 103"], corredores=[]), REQ)
 checar(rct.listas_ler(REQ)["estoques"] == ["LOJA 103", "LOJA 103"], "espaços em branco removidos ao gravar")
 
 # ── 2. Estoques do ServiceNow sem os do SPARE ──────────────────────
@@ -100,6 +100,29 @@ checar("/servicenow/gestao-ativos/config" in (portal_dir / "servicenow.js").read
 checar("SPARE - CD324" not in snt, "nenhum estoque do SPARE embutido no espaço")
 app_js = (RAIZ / "static/app.js").read_text()
 checar("'/static/modules-times/'" in app_js, "o carregador aponta para a pasta do espaço")
+
+# ── 3b. Acesso Consulta Times: quatro blocos, montados de uma vez ──
+print("\n[3b] Tela Acesso Consulta Times")
+for lado, caminho in (("portal", portal_dir), ("times", times_dir)):
+    ct = (caminho / "consulta_times.js").read_text()
+    for titulo in ("Liberação de acesso", "Usuários liberados",
+                   "Estoques, corredores e espaços", "Trilha de acesso"):
+        checar(f"cartao('{titulo}'" in ct, f"{lado}: bloco {titulo}")
+    titulos = sorted(set(re.findall(r"cartao\('([^']+)'", ct)))
+    checar(titulos == ["Estoques, corredores e espaços", "Liberação de acesso",
+                       "Trilha de acesso", "Usuários liberados"],
+           f"{lado}: só esses quatro blocos, nada mais")
+    checar("Anotações sugeridas" not in ct and "anotacoes" not in ct,
+           f"{lado}: sem anotações sugeridas")
+    # Montar por partes entre awaits era o que duplicava blocos na tela.
+    checar("Promise.all" in ct, f"{lado}: busca os dados antes de montar")
+    checar("document.getElementById" not in ct, f"{lado}: usa referência de elemento, não id")
+
+# O hash não pode disparar uma segunda navegação da mesma tela.
+checar("_hashInterno" in app_js and "if (_hashInterno) { _hashInterno = false; return; }" in app_js,
+       "hashchange ignora a troca de hash feita pelo próprio nav()")
+checar("$('#page-content').replaceWith(content)" in app_js,
+       "cada navegação troca o nó do conteúdo, isolando render antigo")
 
 # ── 4. Rótulo Espaço e Corredor ────────────────────────────────────
 print("\n[4] Espaço e Corredor")
