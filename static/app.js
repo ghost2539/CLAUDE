@@ -50,6 +50,9 @@
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
+        capex_spare:    'CAPEX Spare',
+        agendamentos_forn: 'Agendamentos Forn.',
+        internalizacao: 'Internalização',
         status:         'Status',
         parametros:     'Configuração'
     };

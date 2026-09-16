@@ -19,6 +19,8 @@ window.SPARE_MODULES.parametros = {
             ['config-modulos',  'Configuração Módulos'],
             ['separacao',       'Ciclo do ativo'],
             ['automacoes',      'Automações'],
+            ['cofre',           'Cofre de segredos'],
+            ['compras',         'Gestão de Compras'],
             ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
             ['dashboards',      'Dashboards'],
@@ -29,7 +31,8 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'separacao', 'monitoramento', 'acessos', 'dashboards'];
+                         'separacao', 'monitoramento', 'cofre', 'compras', 'acessos',
+                         'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -49,6 +52,8 @@ window.SPARE_MODULES.parametros = {
             'config-modulos': renderConfigModulos,
             separacao:      renderSeparacaoConfig,
             automacoes:     renderAutomacoes,
+            cofre:          renderCofre,
+            compras:        renderCompras,
             monitoramento:  renderMonitoramento,
             acessos:        renderAcessos,
             dashboards:     renderDashboards,
@@ -623,6 +628,332 @@ async function renderAutomacoes(c, S) {
 }
 
 /* ── Monitoramento (saúde e falhas) ─────────────────────────────── */
+/* ── Cofre de segredos ──────────────────────────────────────────────
+   O que o PROCESSO do portal alcança. Rodar o CLI no terminal responde
+   sobre o seu usuário, não sobre o serviço — são ambientes diferentes, e
+   no servidor só o serviço lê o cofre corporativo. Nenhum valor de
+   segredo aparece: de cada chave se diz apenas se resolveu, de onde veio
+   e quantos caracteres tem. */
+async function renderCofre(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Cofre de segredos</h1>' +
+        '<p class="text-muted">O que o <b>processo do portal</b> alcança. ' +
+            'Nenhum valor de segredo aparece aqui, só de onde veio e o tamanho.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="cf-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+            '<div class="card-footer btn-row">' +
+                '<button id="cf-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="cf-correios" class="btn btn-primary btn-sm" type="button">Testar Correios</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Sondar nomes</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted" style="margin-top:0">O cofre corporativo responde por ' +
+                    'nome, uma chave de cada vez — não dá para listar. Cole os nomes ' +
+                    'candidatos (vírgula, espaço ou um por linha) e veja quais respondem.</p>' +
+                '<div class="form-group"><label for="cf-nomes">Nomes</label>' +
+                    '<textarea id="cf-nomes" class="form-control" rows="3" ' +
+                    'placeholder="CORREIOS_USUARIO, SN_API_USER"></textarea></div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="cf-sondar" class="btn btn-primary" type="button">Sondar</button>' +
+                '</div>' +
+                '<div id="cf-sondagem" class="mt-3"></div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card" id="cf-teste-card" hidden>' +
+            '<div class="card-header">Teste dos Correios</div>' +
+            '<div class="card-body" id="cf-teste"></div>' +
+        '</div>';
+
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
+    }
+
+    function tabelaChaves(itens) {
+        return S.table([
+            { key: 'chave', label: 'Chave' },
+            { key: 'resolvida', label: 'Resolveu', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } },
+            { key: 'fonte', label: 'De onde veio' },
+            { key: 'tamanho', label: 'Tamanho', render: function (v) { return v || '—'; } },
+            { key: 'sombreado', label: '', html: true, render: function (v) {
+                // Sombreamento é a falha silenciosa clássica: uma fonte
+                // responde antes e a que alguém acabou de configurar nunca
+                // é consultada.
+                return v ? '<span class="badge badge-warning" title="A chave existe em mais de uma fonte; ' +
+                    'vence a primeira da ordem">sombreada</span>' : '';
+            } }
+        ], itens);
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('cf-situacao');
+        var d;
+        try { d = await S.api('/cofre/diagnostico'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        var topo = S.el('div', { className: 'stats-grid mb-3' });
+        [['Cofre corporativo', d.corporativo_ok ? 'alcança' : 'não alcança', d.corporativo_ok],
+         ['Usuário do serviço', d.usuario_do_servico || '—', true],
+         ['Cofre local', d.cofre_local_existe ? 'existe' : 'ausente', d.cofre_local_existe]
+        ].forEach(function (x) {
+            var cartao = S.el('div', { className: 'stat-card' + (x[2] ? '' : ' accent-orange') });
+            cartao.appendChild(S.el('div', { className: 'stat-value', textContent: x[1] }));
+            cartao.appendChild(S.el('div', { className: 'stat-label', textContent: x[0] }));
+            topo.appendChild(cartao);
+        });
+        alvo.innerHTML = '';
+        alvo.appendChild(topo);
+        if (d.corporativo_detalhe) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-info mb-3',
+                textContent: d.corporativo_detalhe }));
+        }
+        // Quando o cofre não alcança, o que resolve é permissão de arquivo:
+        // dono, grupo e modo dizem exatamente o que pedir ao time. Quando
+        // alcança, a lista de nomes responde "a chave existe com outro nome?".
+        var inv = d.inventario || {};
+        var ac = inv.acesso || {};
+        if (ac.caminho) {
+            var linhas = [
+                ['Arquivo do cofre', ac.caminho],
+                ['Situação', !ac.existe ? 'não existe neste caminho'
+                    : (ac.legivel ? 'legível por este serviço' : 'existe, mas sem permissão de leitura')],
+                ['Dono / grupo / modo', ac.existe
+                    ? (ac.dono || '?') + ' / ' + (ac.grupo || '?') + ' / ' + (ac.modo || '?') : '—'],
+                ['Serviço roda como', (ac.usuario_atual || '—') +
+                    ((ac.grupos_atuais || []).length ? ' (' + ac.grupos_atuais.join(', ') + ')' : '')],
+                ['Nomes no cofre', inv.sabe_listar ? (inv.nomes || []).join(', ')
+                    : 'não dá para listar daqui — sonde por nome abaixo']
+            ];
+            var dl = S.el('div', { className: 'card mb-3' });
+            dl.appendChild(S.el('div', { className: 'card-header', textContent: 'Acesso ao cofre corporativo' }));
+            var corpo = S.el('div', { className: 'card-body' });
+            corpo.appendChild(S.table([
+                { key: 'o', label: 'O quê' },
+                { key: 'q', label: 'Qual' }
+            ], linhas.map(function (l) { return { o: l[0], q: l[1] }; })));
+            if (ac.erro) {
+                corpo.appendChild(S.el('div', { className: 'alert alert-warning mt-3', textContent: ac.erro }));
+            }
+            dl.appendChild(corpo);
+            alvo.appendChild(dl);
+        }
+        (d.grupos || []).forEach(function (g) {
+            alvo.appendChild(S.el('h2', { className: 'page-title', style: 'font-size:15px;margin:18px 0 8px',
+                textContent: g.nome }));
+            alvo.appendChild(tabelaChaves(g.chaves || []));
+        });
+        var erros = Object.keys(d.erros || {});
+        if (erros.length) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-warning mt-3',
+                textContent: 'Não consegui checar: ' + erros.join(', ') }));
+        }
+    }
+
+    document.getElementById('cf-atualizar').onclick = carregar;
+
+    document.getElementById('cf-sondar').onclick = async function () {
+        var nomes = document.getElementById('cf-nomes').value;
+        var saida = document.getElementById('cf-sondagem');
+        if (!nomes.trim()) { S.toast('Informe ao menos um nome.', 'warning'); return; }
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Sondando…</div>';
+        try {
+            var d = await S.api('/cofre/sondar-varios', { method: 'POST', body: { nomes: nomes } });
+            saida.innerHTML = '';
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.resolvidas + ' de ' + d.total + ' responderam.' }));
+            saida.appendChild(tabelaChaves(d.itens || []));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    document.getElementById('cf-correios').onclick = async function () {
+        var card = document.getElementById('cf-teste-card');
+        var saida = document.getElementById('cf-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Testando…</div>';
+        try {
+            var d = await S.api('/cofre/testar-correios', { method: 'POST' });
+            saida.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
+                e(d.detalhe || (d.ok ? 'Credencial aceita.' : 'Credencial recusada.')) + '</div>';
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    carregar();
+}
+
+
+/* ── Gestão de Compras ──────────────────────────────────────────────
+   O portal não fala com a base do EBS: quem fala é o módulo
+   /gestao_compras (Apache), que já expõe PO, projetos e acordos por
+   HTTP. Aqui o portal é cliente dele — e esta tela é o lugar de
+   conferir se a credencial do cofre abre a sessão de lá.
+   ─────────────────────────────────────────────────────────────────── */
+async function renderCompras(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Gestão de Compras</h1>' +
+        '<p class="text-muted">O portal consulta PO, projetos e acordos pelo módulo ' +
+            '<span class="om-mono">/gestao_compras</span>, como cliente HTTP. ' +
+            'A credencial vem do cofre — nada é digitado nesta tela.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="gc-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+            '<div class="card-footer btn-row">' +
+                '<button id="gc-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="gc-testar" class="btn btn-primary btn-sm" type="button">Testar login</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3" id="gc-teste-card" hidden>' +
+            '<div class="card-header">Resultado do teste</div>' +
+            '<div class="card-body" id="gc-teste"></div>' +
+        '</div>' +
+        '<div class="card">' +
+            '<div class="card-header">Consulta</div>' +
+            '<div class="card-body">' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="gc-acao">Ação</label>' +
+                        '<select id="gc-acao" class="form-control"></select></div>' +
+                    '<div class="form-group" data-gc="project"><label for="gc-project">Projeto (segment1)</label>' +
+                        '<input id="gc-project" class="form-control" placeholder="ex.: 26.0123"></div>' +
+                    '<div class="form-group" data-gc="po"><label for="gc-po">Número da PO</label>' +
+                        '<input id="gc-po" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="line"><label for="gc-line">Linha (opcional)</label>' +
+                        '<input id="gc-line" class="form-control" type="number" min="1"></div>' +
+                    '<div class="form-group" data-gc="vendor"><label for="gc-vendor">Fornecedor</label>' +
+                        '<input id="gc-vendor" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="days"><label for="gc-days">Dias até vencer</label>' +
+                        '<input id="gc-days" class="form-control" type="number" value="90" min="1"></div>' +
+                    '<div class="form-group" data-gc="org"><label for="gc-org">Unidade (opcional)</label>' +
+                        '<input id="gc-org" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="projects"><label for="gc-projects">Projetos (vírgula)</label>' +
+                        '<input id="gc-projects" class="form-control"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="gc-consultar" class="btn btn-primary" type="button">Consultar</button>' +
+                '</div>' +
+                '<div id="gc-resultado" class="mt-3"></div>' +
+            '</div>' +
+        '</div>';
+
+    var acoes = {};
+
+    // Cada ação tem os próprios parâmetros; os campos que não servem somem,
+    // em vez de ficarem lá convidando a preencher o que o módulo ignora.
+    function mostrarCampos() {
+        var usados = acoes[document.getElementById('gc-acao').value] || [];
+        Array.prototype.forEach.call(c.querySelectorAll('[data-gc]'), function (el) {
+            el.hidden = usados.indexOf(el.getAttribute('data-gc')) === -1;
+        });
+    }
+
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('gc-situacao');
+        var d;
+        try { d = await S.api('/gestao-compras/situacao'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        var cr = d.credenciais || {};
+        acoes = d.acoes || {};
+        var sel = document.getElementById('gc-acao');
+        sel.innerHTML = Object.keys(acoes).map(function (a) {
+            return '<option value="' + e(a) + '">' + e(a) + '</option>';
+        }).join('');
+        sel.onchange = mostrarCampos;
+        mostrarCampos();
+
+        alvo.innerHTML =
+            '<p><b>Módulo:</b> <span class="om-mono">' + e(d.url) + '</span> ' +
+                '<span class="text-muted">— timeout ' + e(d.timeout) + ' s, TLS ' +
+                (d.verify_ssl ? 'verificado' : 'sem verificação') +
+                (d.proxy ? ', proxy ' + e(d.proxy) : ', saída direta') + '</span></p>' +
+            '<p><b>Usuário:</b> ' + (cr.usuario
+                ? '<span class="om-mono">' + e(cr.usuario) + '</span> <span class="text-muted">(' +
+                  e(cr.usuario_chave) + ', ' + e(cr.usuario_fonte) + ')</span>'
+                : selo(false, '', 'não definido')) +
+            ' &nbsp; <b>Senha:</b> ' + (cr.senha_definida
+                ? selo(true, 'definida', '') + ' <span class="text-muted">(' +
+                  e(cr.senha_chave) + ', ' + e(cr.senha_fonte) + ')</span>'
+                : selo(false, '', 'não definida')) + '</p>' +
+            (cr.usuario && cr.senha_definida ? '' :
+                '<div class="alert alert-warning mb-0">Grave no cofre: ' +
+                '<span class="om-mono">python3 scripts/cofre.py definir GESTAO_COMPRAS_USER</span> ' +
+                'e <span class="om-mono">GESTAO_COMPRAS_PASS</span>.</div>');
+    }
+
+    document.getElementById('gc-atualizar').onclick = carregar;
+
+    document.getElementById('gc-testar').onclick = async function () {
+        var card = document.getElementById('gc-teste-card');
+        var saida = document.getElementById('gc-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Entrando no módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/testar', { method: 'POST' });
+            var u = d.usuario || {};
+            saida.innerHTML = '<div class="alert alert-success">Sessão aberta como <b>' +
+                e(u.username || '?') + '</b>' + (u.role ? ' (' + e(u.role) + ')' : '') + '.</div>';
+            S.toast('O módulo aceitou a credencial.', 'success');
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('gc-consultar').onclick = async function () {
+        var saida = document.getElementById('gc-resultado');
+        var acao = document.getElementById('gc-acao').value;
+        if (!acao) { S.toast('Escolha uma ação.', 'warning'); return; }
+        var q = { acao: acao };
+        (acoes[acao] || []).forEach(function (nome) {
+            var campo = document.getElementById('gc-' + nome);
+            var v = campo ? String(campo.value).trim() : '';
+            if (v) q[nome] = v;
+        });
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando pelo módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/consultar?' + new URLSearchParams(q).toString());
+            saida.innerHTML = '';
+            if (!d.total) {
+                saida.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
+                return;
+            }
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.total + ' linha(s) em ' + d.ms + ' ms, pela API do módulo.' }));
+            saida.appendChild(S.table(d.colunas.map(function (col) {
+                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
+            }), d.linhas));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    carregar();
+}
+
+
 async function renderMonitoramento(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Monitoramento</h1>' +

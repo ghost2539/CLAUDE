@@ -152,6 +152,68 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── CAPEX Spare — projetos e itens de investimento, banco e permissão
+    # próprios ("capex_spare"). Outro produto que a tela acima: aqui são
+    # projetos com linhas de item, catálogo, acordo de compra e NCM/TIPI.
+    try:
+        import db.capex_spare as _db_capex
+        _db_capex.init_db()
+        from routers.capex_spare import router as capex_spare_router
+        app.include_router(capex_spare_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("capex_spare").error(
+            "Módulo CAPEX Spare NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # Gestão de Compras: PO e projetos do EBS por HTTP. O portal é cliente;
+    # o cofre fica do lado de lá, com quem pode lê-lo.
+    try:
+        from routers.gestao_compras import router as gestao_compras_router
+        app.include_router(gestao_compras_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("gestao_compras").error(
+            "Módulo Gestão de Compras NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # Agendamento de entrega do fornecedor: o que vem, quando e em quantos
+    # volumes. Banco próprio.
+    try:
+        import db.agendamentos_forn as _db_agf
+        _db_agf.init_db()
+        from routers.agendamentos_forn import router as agendamentos_forn_router
+        app.include_router(agendamentos_forn_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("agendamentos_forn").error(
+            "Módulo Agendamentos Fornecedor NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # Internalização: a conferência do que chegou contra o agendamento.
+    try:
+        import db.internalizacao as _db_int
+        _db_int.init_db()
+        from routers.internalizacao import router as internalizacao_router
+        app.include_router(internalizacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("internalizacao").error(
+            "Módulo Internalização NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Cofre: o serviço enxerga os segredos? — só diagnóstico, nenhum
+    # valor sai daqui. Rodar o CLI no terminal responde sobre o usuário do
+    # shell, não sobre o processo do portal.
+    try:
+        from routers.cofre import router as cofre_router
+        app.include_router(cofre_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("cofre_diag").error(
+            "Diagnóstico do cofre NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # Planejamento de compras: aba do Orçamento Spare, banco próprio.
     try:
         import db.planejamento as _db_pln

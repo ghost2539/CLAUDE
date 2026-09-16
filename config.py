@@ -19,6 +19,22 @@ def _env(nome: str, padrao: str = "") -> str:
     return v
 
 
+def _proxy(*nomes: str) -> str:
+    """Primeiro proxy definido na ordem dada.
+
+    Uma variável DECLARADA e vazia é uma decisão ("aqui não tem proxy") e
+    encerra a busca; só a ausência total continua procurando. Sem isso, um
+    `https_proxy` exportado no perfil do servidor entraria no portal sem
+    ninguém ter configurado — e toda chamada de API iria para um endereço
+    que talvez nem exista no destino. É por isso que o `environment` do
+    servidor declara HTTPS_PROXY, SN_PROXY e SN_API_PROXY vazios.
+    """
+    for nome in nomes:
+        if nome in os.environ:
+            return _env(nome, "").strip()
+    return ""
+
+
 def _sqlite(nome: str) -> str:
     """URL do banco SQLite `nome`, guardado em `data/db/`.
 
@@ -121,17 +137,11 @@ class Settings:
     SN_API_BASE: str = os.getenv("SN_API_BASE", "https://renner.service-now.com")
     SN_API_USER: str = os.getenv("SN_API_USER", "")
     SN_API_PASS: str = _env("SN_API_PASS", "")
-    # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
-    # https_proxy do ambiente se não houver um específico.
-    # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
-    # (SN_PROXY) — que é o que funciona neste servidor. Cai para https_proxy
-    # do ambiente se nada específico for definido.
-    SN_API_PROXY: str = (
-        os.getenv("SN_API_PROXY", "")
-        or os.getenv("SN_PROXY", "")
-        or os.getenv("https_proxy", "")
-        or os.getenv("HTTPS_PROXY", "")
-    )
+    # Proxy de saída (com a senha do @ escapada como %40). Usa, por padrão,
+    # o MESMO proxy que o portal já usa para o ServiceNow (SN_PROXY) — que é
+    # o que funciona neste servidor —, depois o https_proxy do ambiente.
+    # Declarar a variável vazia encerra a busca: é "aqui não tem proxy".
+    SN_API_PROXY: str = _proxy("SN_API_PROXY", "SN_PROXY", "https_proxy", "HTTPS_PROXY")
     # Fila / grupo de atribuição dos indicadores.
     SN_INDIC_QUEUE: str = os.getenv("SN_INDIC_QUEUE", "TI_N2_FLD_RNR_LOJAS_SPARE")
     # Campo de início do TMA ("Data Bouncing"). Configurável porque o nome
@@ -317,6 +327,24 @@ class Settings:
     )
     # ── Orçamento Spare (CAPEX + OPEX da área) — mesma tela do Infra CSC,
     #    banco e permissão próprios ─────────────────────────────────────
+    CAPEX_SPARE_DATABASE_URL: str = _env(
+        "CAPEX_SPARE_DATABASE_URL", _sqlite("capex_spare"))
+    AGENDAMENTOS_FORN_DATABASE_URL: str = _env(
+        "AGENDAMENTOS_FORN_DATABASE_URL", _sqlite("agendamentos_forn"))
+    INTERNALIZACAO_DATABASE_URL: str = _env(
+        "INTERNALIZACAO_DATABASE_URL", _sqlite("internalizacao"))
+    # Gestão de Compras: PO e projetos do EBS, por HTTP. O portal é cliente;
+    # o cofre fica do lado de lá, lido por quem pode lê-lo.
+    GESTAO_COMPRAS_URL: str = _env(
+        "GESTAO_COMPRAS_URL", "https://suporte.lojasrenner.com.br/gestao_compras/"
+    ).rstrip("/") + "/"
+    # A consulta do outro lado leva dezenas de segundos; curto demais só
+    # produz timeout falso.
+    GESTAO_COMPRAS_TIMEOUT: int = int(_env("GESTAO_COMPRAS_TIMEOUT", "90"))
+    # TLS verificado, como toda saída do portal. Vazio segue VERIFY_SSL.
+    GESTAO_COMPRAS_VERIFY: str = _env("GESTAO_COMPRAS_VERIFY", "")
+    GESTAO_COMPRAS_PROXY: str = _proxy("GESTAO_COMPRAS_PROXY", "HTTPS_PROXY", "https_proxy")
+
     ORCAMENTO_SPARE_EXEC_DATABASE_URL: str = _env(
         "ORCAMENTO_SPARE_EXEC_DATABASE_URL",
         _sqlite("orcamento_spare_exec"),
@@ -416,6 +444,13 @@ class Settings:
         "rastreio": ("view", "edit"),
         "orcamento": ("view", "edit", "admin"),            # /controle-orcamento
         "orcamento_spare": ("view", "edit", "admin"),
+        # CAPEX Spare é outro produto: projetos e itens de investimento,
+        # com catálogo e acordo de compra. A tela clonada do Controle de
+        # Orçamento continua sendo "orcamento_spare".
+        "capex_spare": ("view", "create", "edit", "admin"),
+        # Agenda de entrega do fornecedor e a conferência do que chegou.
+        "agendamentos_forn": ("view", "create", "edit", "export", "admin"),
+        "internalizacao": ("view", "create", "edit", "export", "admin"),
         "ebs_forms": ("view", "create", "admin"),
         "automacoes": ("view", "admin"),
         "orcamento_manutencao": ("view", "create", "edit", "export", "admin"),
