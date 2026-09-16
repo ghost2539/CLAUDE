@@ -31,6 +31,13 @@ import time
 import unicodedata
 from datetime import datetime, timedelta
 
+# Garante que a RAIZ do projeto esteja no path (import routers/core funciona
+# mesmo rodando "venv/bin/python scripts/tma_chamados.py", quando o Python
+# coloca scripts/ no path em vez da raiz).
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _RAIZ not in sys.path:
+    sys.path.insert(0, _RAIZ)
+
 SPARE_GRUPO = "TI_N2_FLD_RNR_LOJAS_SPARE"
 APONTAMENTOS = ("modalidade de envio", "modalidade envio")
 
