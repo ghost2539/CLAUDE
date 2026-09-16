@@ -185,6 +185,16 @@ def _build_box_zpl(
 
     y = mx + hdr_h + 30
 
+    # ── Tipo do lote (TRIAGEM / VENDA) — GRANDE e centralizado, no lugar
+    #    onde antes saía o número. Fonte adaptada para nunca ultrapassar. ──
+    tipo_fs = _fit_font(tipo_upper, inner - 40, max_fs=120)
+    zpl += f"^FO{mx},{y}^A0N,{tipo_fs},{tipo_fs}^FB{inner},1,0,C^FD{tipo_upper}^FS"
+    y += tipo_fs + 25
+
+    # ── Separador ──
+    zpl += f"^FO{mx + 10},{y}^GB{inner - 20},3,3^FS"
+    y += 25
+
     # ── Barcode Code 128 — centralizado; módulo se adapta à largura ──
     bc_data_len = len(box_number)
     bc_module = 2
@@ -192,7 +202,7 @@ def _build_box_zpl(
         if ((bc_data_len + 3) * 11 + 2) * m <= inner - 20:
             bc_module = m
             break
-    bc_height = 250
+    bc_height = 220
     bc_w = ((bc_data_len + 3) * 11 + 2) * bc_module
     bc_x = max(mx + 10, (w - bc_w) // 2)
     zpl += f"^FO{bc_x},{y}^BY{bc_module}^BCN,{bc_height},N,N,N^FD{box_number}^FS"
@@ -223,8 +233,8 @@ def _build_box_zpl(
     # ── Quantidade — ENORME ──
     zpl += f"^FO{label_x},{y}^A0N,35,35^FDQUANTIDADE^FS"
     y += 45
-    zpl += f"^FO{mx},{y}^A0N,140,140^FB{inner},1,0,C^FD{quantidade}^FS"
-    y += 160
+    zpl += f"^FO{mx},{y}^A0N,120,120^FB{inner},1,0,C^FD{quantidade}^FS"
+    y += 140
 
     # ── Lote da venda (só para venda) ──
     if lote_venda:
