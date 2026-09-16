@@ -137,22 +137,24 @@ function derive(p) {
   const orcamento = toNumber(p.orcamento);
   const comprometido = toNumber(p.comprometido);
   const realizado = toNumber(p.realizado);
-  // A Realizar: para projetos vindos do EBS usa o saldo do dia (saldo_dia);
-  // para projetos manuais (sem sincronização) calcula na tela.
-  const aRealizar = p.sincronizado_em != null
-    ? toNumber(p.a_realizar)
-    : orcamento - (comprometido + realizado);
+  // Em andamento é digitado na tela: o que ainda NÃO está comprometido no
+  // EBS mas já está em curso (uma PO aguardando aprovação, por exemplo).
+  const emAndamento = toNumber(p.em_andamento);
+  // Disponível é o que sobra do orçamento: comprometido, em andamento e
+  // realizado descontam dele. É a única leitura de saldo da tela.
+  const disponivel = orcamento - comprometido - emAndamento - realizado;
   const pctRealizado = orcamento > 0 ? realizado / orcamento : 0;
 
   let status = "No Prazo";
   if (p.estagio === "Concluído") status = "Concluído";
   else if (p.vencimento && p.vencimento < todayISO()) status = "Atrasado";
-  else if (aRealizar < 0) status = "Atenção";
+  else if (disponivel < 0) status = "Atenção";
   else if (p.vencimento) {
     const dias = (new Date(p.vencimento) - new Date(todayISO())) / 86400000;
     if (dias <= 30) status = "Atenção";
   }
-  return { ...p, orcamento, comprometido, realizado, aRealizar, pctRealizado, status };
+  return { ...p, orcamento, comprometido, realizado, emAndamento,
+           disponivel, pctRealizado, status };
 }
 
 const sumBy = (arr, key) => arr.reduce((acc, p) => acc + toNumber(p[key]), 0);
@@ -296,14 +298,22 @@ const Icon = {
 
 function KpiCard({ icon, label, value, sub, color }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex items-start gap-3" style={{ borderTopWidth: 3, borderTopColor: color }}>
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 flex items-start gap-3 overflow-hidden" style={{ borderTopWidth: 3, borderTopColor: color }}>
       <div className="shrink-0 h-9 w-9 rounded-md flex items-center justify-center" style={{ background: color + "1a", color }}>
         {icon}
       </div>
-      <div className="min-w-0">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</div>
-        <div className="text-base 2xl:text-lg font-bold text-gray-900 leading-tight whitespace-nowrap tabular-nums">{value}</div>
-        <div className="text-[11px] text-gray-500 mt-0.5 truncate">{sub}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 truncate" title={label}>{label}</div>
+        {/* O valor acompanha a largura do cartão: encolhe até 0,95rem antes
+            de faltar espaço, e nunca vaza — o título mostra o número inteiro. */}
+        <div
+          className="font-bold text-gray-900 leading-tight whitespace-nowrap tabular-nums truncate"
+          style={{ fontSize: "clamp(0.95rem, 1.1vw, 1.125rem)" }}
+          title={String(value)}
+        >
+          {value}
+        </div>
+        <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={sub}>{sub}</div>
       </div>
     </div>
   );
@@ -1141,7 +1151,8 @@ export default function App() {
   const totalCapex = sumBy(visiveis.filter((p) => p.tipo === "CAPEX"), "orcamento");
   const totalRealizado = sumBy(visiveis, "realizado");
   const totalComprometido = sumBy(visiveis, "comprometido");
-  const totalARealizar = sumBy(visiveis, "aRealizar");
+  const totalEmAndamento = sumBy(visiveis, "emAndamento");
+  const totalDisponivel = sumBy(visiveis, "disponivel");
   const emExecucao = visiveis.filter((p) => p.estagio === "Em Execução").length;
   const pct = (v) => (totalOrcamento > 0 ? fmtPct(v / totalOrcamento) : "0,0%") + " do orçamento total";
 
@@ -1173,14 +1184,18 @@ export default function App() {
 
   const maxPrioridade = Math.max(0, ...porPrioridade.map((d) => d.value));
 
-  /* Situação do Orçamento: as três parcelas que compõem o orçado. */
+  /* Situação do Orçamento: as parcelas que compõem o orçado.
+     "Em andamento" é o que foi digitado na tela — não é o saldo a realizar.
+     O que sobra depois dele é o disponível de verdade. */
   const situacao = [
     { name: "Realizado (Acum.)", value: totalRealizado },
     { name: "Comprometido", value: totalComprometido },
-    { name: "Em Andamento", value: Math.max(0, totalARealizar) },
+    { name: "Em Andamento", value: Math.max(0, totalEmAndamento) },
+    { name: "Disponível", value: Math.max(0, totalDisponivel) },
   ];
   const SITUACAO_CORES = {
-    "Realizado (Acum.)": "#22c55e", "Comprometido": "#f97316", "Em Andamento": "#eab308",
+    "Realizado (Acum.)": "#22c55e", "Comprometido": "#f97316",
+    "Em Andamento": "#eab308", "Disponível": "#3b82f6",
   };
 
   /* Prazo por projeto: fora do prazo = vencido e ainda não concluído. */
@@ -1200,7 +1215,8 @@ export default function App() {
       ["ID", "codigo"], ["Projeto/Demanda", "nome"], ["Tipo", "tipo"], ["Categoria", "categoria"],
       ["Área", "area"], ["Estágio", "estagio"], ["Prioridade", "prioridade"],
       ["Orçamento Aprovado", "orcamento"], ["Comprometido", "comprometido"],
-      ["Realizado (Acum.)", "realizado"], ["A Realizar", "aRealizar"],
+      ["Em Andamento", "emAndamento"], ["Realizado (Acum.)", "realizado"],
+      ["Disponível", "disponivel"],
       ["Vencimento", "vencimento"], ["Status", "status"], ["Bloqueado", "bloqueado"],
     ];
     const esc = (v) => {
@@ -1291,13 +1307,17 @@ export default function App() {
   );
 
   const kpis = (
-    <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+    // Quantos cartões cabem por linha é o navegador que decide: cada um tem
+    // largura mínima e o resto quebra para a linha de baixo. Assim vale em
+    // qualquer tela, sem depender de faixas fixas.
+    <section className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(190px,1fr))]">
       <KpiCard icon={Icon.doc} color="#64748b" label="Demandas" value={totalDemandas} sub={`${emExecucao} em execução`} />
       <KpiCard icon={Icon.dollar} color="#22c55e" label="Valor Total" value={fmtBRL(totalOrcamento)} sub="Orçamento aprovado" />
       <KpiCard icon={Icon.pie} color="#2563eb" label="CAPEX Aprovado" value={fmtBRL(totalCapex)} sub={pct(totalCapex).replace("do orçamento total", "do valor total")} />
       <KpiCard icon={Icon.trend} color="#8b5cf6" label="Realizado (Acum.)" value={fmtBRL(totalRealizado)} sub={pct(totalRealizado)} />
       <KpiCard icon={Icon.clipboard} color="#f97316" label="Comprometido" value={fmtBRL(totalComprometido)} sub={pct(totalComprometido)} />
-      <KpiCard icon={Icon.target} color="#06b6d4" label="Em Andamento" value={fmtBRL(totalARealizar)} sub={pct(totalARealizar)} />
+      <KpiCard icon={Icon.target} color="#eab308" label="Em Andamento" value={fmtBRL(totalEmAndamento)} sub="não comprometido, em curso" />
+      <KpiCard icon={Icon.target} color="#06b6d4" label="Disponível" value={fmtBRL(totalDisponivel)} sub="saldo após os descontos" />
     </section>
   );
 
@@ -1346,7 +1366,7 @@ export default function App() {
               <th rowSpan={2} className="th text-left">Área Responsável</th>
               <th rowSpan={2} className="th">Estágio</th>
               <th rowSpan={2} className="th">Prioridade</th>
-              <th colSpan={4} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
+              <th colSpan={5} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
               <th rowSpan={2} className="th text-right">% Realizado</th>
               <th rowSpan={2} className="th">Vencimento Previsto</th>
               <th rowSpan={2} className="th">Status</th>
@@ -1355,13 +1375,14 @@ export default function App() {
             <tr className="text-[11px]">
               <th className="th text-right">Orçamento Aprovado</th>
               <th className="th text-right">Comprometido</th>
+              <th className="th text-right" title="Ainda não comprometido, mas já em curso — uma PO aguardando aprovação, por exemplo">Em Andamento</th>
               <th className="th text-right">Realizado (Acum.)</th>
-              <th className="th text-right">A Realizar</th>
+              <th className="th text-right" title="Orçamento − Comprometido − Em Andamento − Realizado">Disponível</th>
             </tr>
           </thead>
           <tbody>
             {!carregando && visiveis.length === 0 && (
-              <tr><td colSpan={15} className="px-4 py-8 text-center text-gray-500 text-xs">
+              <tr><td colSpan={16} className="px-4 py-8 text-center text-gray-500 text-xs">
                 {projects.length === 0 ? "Nenhum projeto cadastrado. Clique em \"Novo projeto\" para começar." : "Nenhum projeto corresponde aos filtros selecionados."}
               </td></tr>
             )}
@@ -1400,9 +1421,10 @@ export default function App() {
                   </td>
                   <td className="td"><MoneyInput title="Orçamento aprovado" value={p.orcamento} onChange={(v) => handleUpdateProject(p.id, "orcamento", v)} /></td>
                   <td className="td"><MoneyInput title="Comprometido" value={p.comprometido} onChange={(v) => handleUpdateProject(p.id, "comprometido", v)} /></td>
+                  <td className="td"><MoneyInput title="Em andamento — ainda não comprometido, mas já em curso (PO aguardando aprovação, por exemplo). Não vem do EBS." value={p.emAndamento} onChange={(v) => handleUpdateProject(p.id, "em_andamento", v)} /></td>
                   <td className="td"><MoneyInput title="Realizado acumulado" value={p.realizado} onChange={(v) => handleUpdateProject(p.id, "realizado", v)} /></td>
-                  <td className={"td text-right tabular-nums " + (p.aRealizar < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title={p.sincronizado_em ? "Saldo do dia (EBS)" : "Orçamento − (Comprometido + Realizado)"}>
-                    {fmtBRL(p.aRealizar)}
+                  <td className={"td text-right tabular-nums " + (p.disponivel < 0 ? "text-red-600 font-semibold" : "text-gray-700")} title="Orçamento − Comprometido − Em Andamento − Realizado">
+                    {fmtBRL(p.disponivel)}
                   </td>
                   <td className="td text-right tabular-nums" title="Realizado ÷ Orçamento">
                     <div className="flex items-center justify-end gap-2">
@@ -1440,8 +1462,9 @@ export default function App() {
                 <td colSpan={7} className="td text-right text-gray-600">Totais ({visiveis.length})</td>
                 <td className="td text-right tabular-nums">{fmtBRL(totalOrcamento)}</td>
                 <td className="td text-right tabular-nums">{fmtBRL(totalComprometido)}</td>
+                <td className="td text-right tabular-nums">{fmtBRL(totalEmAndamento)}</td>
                 <td className="td text-right tabular-nums">{fmtBRL(totalRealizado)}</td>
-                <td className={"td text-right tabular-nums " + (totalARealizar < 0 ? "text-red-600" : "")}>{fmtBRL(totalARealizar)}</td>
+                <td className={"td text-right tabular-nums " + (totalDisponivel < 0 ? "text-red-600" : "")}>{fmtBRL(totalDisponivel)}</td>
                 <td className="td text-right tabular-nums">{totalOrcamento > 0 ? fmtPct(totalRealizado / totalOrcamento) : "0,0%"}</td>
                 <td colSpan={3} className="td" />
               </tr>
