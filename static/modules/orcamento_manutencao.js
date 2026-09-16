@@ -77,7 +77,7 @@
         '.om-kpi-v{font-size:22px;font-weight:700;line-height:1.2;margin-top:6px;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
         '.om-kpi-v .text-muted{font-size:15px;font-weight:600}' +
         '.om-kpi-s{font-size:12px;color:var(--text-muted);margin-top:3px;line-height:1.35}' +
-        '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;align-items:start}' +
+        '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}' +
         '.om-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}' +
         /* cards de gráfico */
         '.om-chart{display:flex;flex-direction:column;min-width:0;position:relative}' +
@@ -88,8 +88,6 @@
         'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
         '.om-chart .card-header{font-size:13px;padding:10px 16px}' +
         '.om-chart-body{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:14px 16px 6px;min-height:200px}' +
-        /* donut "Consumo por categoria": mesma altura do card "Aguardando devolução por categoria" (fileira om-g3) */
-        '.om-chart-body[data-chart="categoria"]{min-height:250px}' +
         '.om-chart svg{display:block;width:100%;height:auto;max-height:280px;overflow:visible}' +
         '.om-chart rect,.om-chart circle[data-tip],.om-hb-seg,.om-dl-row[data-tip]{cursor:default}' +
         '.om-dim{opacity:.42}' +
