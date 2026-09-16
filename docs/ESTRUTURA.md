@@ -41,9 +41,9 @@ integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   ebs_logged.py          Raspagem autenticada do EBS
 
 static/                  Front-end servido ao navegador (público por definição)
-  index.html · app.js · app.css · modules/*.js
+  index.html · app.js · app.css (tokens + componentes do padrão de UI) · modules/*.js
+  modules-times/ (espaço Consulta Times) · obsolescencia/ · ebs-forms/
   controle-orcamento-exec/ · indicadores/ · identificacao/ · cockpit/
-  consulta-times/
 
 frontend/                Fontes React dos painéis; o build sai em static/
 

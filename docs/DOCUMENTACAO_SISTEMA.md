@@ -46,17 +46,31 @@ derruba o portal**. Cada um tem **banco próprio e separado**.
 
 ## 2. Design / identidade visual
 
-**Portal (SPA)** — tema escuro configurável em *Parâmetros → Visual* (tabela
-`settings`, chave `visual`). Padrões:
-- Cor primária `#AB4807` (laranja queimado), destaque `#C79105` (âmbar),
-  fundo `#090B0D`, painel `#111419`, texto `#E8E8E8`, fonte **Inter**.
-- Layout: sidebar à esquerda + topbar + área de conteúdo; toasts; modais.
+**Padrão de UI SPARE** (contrato em `docs/PADRAO_UI_SPARE.md`) — todas as
+telas seguem a mesma biblioteca de `static/app.css`:
+- Paleta LRSA 2025: `#000000 #0C0C0C #FFFFFF #AB4807 #C79105 #E9D39B #246F68`
+  (mais os derivados de hover/contraste). Nenhum hex fora da tabela nos módulos:
+  as cores entram por token `--sp-*` (os nomes antigos `--color-*`/`--bg-*`
+  são apelidos para os tokens).
+- Tipografia: **Arial** para títulos, rótulos e botões; **IBM Plex Mono** para
+  números, matrícula, status, versão e rótulos técnicos em caixa-alta.
+- Forma: cantos retos (`border-radius: 0`), sem sombra; separação é borda de
+  1px. Grades de KPI e tabela com divisor no próprio `gap`.
+- Shell: sidebar fixa de 236px, **preta nos dois temas**, itens numerados
+  01…N, rodapé com versão/ambiente e "CSC TI - Spare"; header de 62px com
+  trilha (grupo / tela), busca global, alternador **Claro/Escuro**, pílula de
+  status do ServiceNow e avatar quadrado com iniciais + matrícula.
+- Tema: o login é sempre escuro; nos módulos o usuário escolhe. A preferência
+  fica no perfil (`settings`, chave `pref:<login>`, via
+  `PUT /api/auth/preferencias`) e o `localStorage['spare-tema']` é só cache.
+  As páginas fora do SPA (obsolescência, EBS Forms) leem o mesmo cache.
+- *Parâmetros → Visual* guarda só nome da aplicação e rodapé (tabela
+  `settings`, chave `visual`); cores não se configuram.
 
-**Indicadores (/indicadores)** — dashboard executivo **dark** (navy):
-- Fundo `#0A0F1A`, superfície `#121A2A`, texto `#E6EDF7`, acento **`#F97316`**.
-- Paleta categórica validada: `#3B82F6 #0891B2 #22C55E #A855F7 #EC4899 #F59E0B`.
-- Sidebar com **abas** (cada item mostra só a sua seção), KPIs com anel de %,
-  gráficos SVG inline (colunas, linha, ranking), auto-refresh 2 min.
+**Indicadores (/indicadores)** — painel executivo sempre escuro, na mesma
+paleta (fundo `#0C0C0C`, superfície `#141414`, acento `#AB4807`; séries
+`#C05B12 #2F8079 #C79105 #E9D39B #5FB8AC #6E6E6E`). Abas no topo, KPIs,
+gráficos SVG inline (colunas, linha, ranking), auto-refresh 2 min.
 
 **Controle de Orçamento (/controle-orcamento)** — React + Tailwind, tema
 claro; KPIs, donut, barras, curva S; tabela editável.
@@ -105,7 +119,7 @@ Regras:
 | **Correios** | *Rastreios* (individual/lote + comprovante) · *Encerramento* (encerra automaticamente chamados entregues: On Hold→In Progress→Resolved). |
 | **Central de Reparos** | *Registro de Reparo* (tempos, técnico, resultado, **saving** = valor-hora × tempo) · *Tratativa de saldos* · *Dashboard*. |
 | **Status** | Saúde das integrações. |
-| **Parâmetros** | *Visual* (admin) · *Locais* · *Classificações* · *Valor-hora* · *Usuários e Permissões* (admin: cria Local/SSO, libera SSO, define admin) · *Sequências* (admin) · *TV* · *Minha conta*. |
+| **Configuração** | *Visual* (admin: nome e rodapé) · *Locais* · *Classificações* · *Usuários e Permissões* (admin: cria usuário SSO, libera, define admin, permissões por módulo/ação) · *Sequências* (admin) · *Configuração Módulos* (admin) · *Ciclo do ativo* (admin) · *Automações* · *Monitoramento* (admin) · *Acessos & Alertas* (admin) · *Dashboards* (admin) · *Minha conta*. |
 
 O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída
 (formulário e upload). **A automação de encerramento de chamados não é afetada.**
@@ -260,7 +274,7 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 **Páginas:** `/` · `/controle-orcamento` · `/indicadores`
 
 **API (prefixos):**
-- `/api/auth/*` — login, logout, sessão, troca de senha, sessão ServiceNow.
+- `/api/auth/*` — login (SSO), logout, sessão (`/me`), preferências (tema), sessão ServiceNow.
 - `/api/consulta*` — consulta de ativos.
 - `/api/recebimento* · /recebimentos* · /lotes*` — recebimento e lotes.
 - `/api/identificacao/*` — etiquetas e impressoras.

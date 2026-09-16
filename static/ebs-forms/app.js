@@ -7,6 +7,13 @@
 (function () {
     "use strict";
 
+    // Tema escolhido no portal (cache local do mesmo usuário); a página
+    // não tem alternador próprio.
+    try {
+        document.documentElement.dataset.tema =
+            localStorage.getItem("spare-tema") === "escuro" ? "escuro" : "claro";
+    } catch (_) { /* sem storage: fica no claro */ }
+
     var API = "/api/ebs-forms";
     var MODULO = "ebs_forms";
     var INTERVALO_POLL = 3000;

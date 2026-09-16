@@ -169,8 +169,8 @@ window.SPARE_MODULES.status = {
 
         function barra(pct, alerta, critico) {
             pct = Number(pct) || 0;
-            var cor = pct >= critico ? '#dc2626' : (pct >= alerta ? '#d97706' : '#16a34a');
-            return '<div style="background:var(--bg-input,#eee);border-radius:6px;' +
+            var cor = pct >= critico ? 'var(--sp-alerta)' : (pct >= alerta ? 'var(--sp-gold)' : 'var(--sp-ok)');
+            return '<div style="background:var(--sp-border-soft);' +
                 'height:8px;overflow:hidden;margin-top:6px">' +
                 '<div style="height:100%;width:' + Math.min(100, pct) + '%;' +
                 'background:' + cor + '"></div></div>';

@@ -122,6 +122,20 @@ def _user_payload(u: User, perms: dict) -> dict:
     }
 
 
+TEMAS = ("claro", "escuro")
+
+
+def _chave_preferencias(login: str) -> str:
+    return f"pref:{(login or '').strip().lower()}"
+
+
+def tema_preferido(s, login: str) -> str:
+    """Tema claro/escuro salvo no perfil do usuário; sem registro, claro."""
+    row = s.get(Setting, _chave_preferencias(login))
+    tema = (row.value or {}).get("tema") if row else None
+    return tema if tema in TEMAS else "claro"
+
+
 # ── Endpoints ─────────────────────────────────────────────────────
 
 def _sn_login(username: str, password: str):
@@ -269,6 +283,7 @@ def auth_login(body: LoginIn, req: Request):
 
             perms = perms_efetivas(s, u)
             data = _user_payload(u, perms)
+            data["tema"] = tema_preferido(s, u.login)
 
             session_data = {
                 **data,
@@ -311,12 +326,43 @@ def auth_me(req: Request):
     with SessionLocal() as s:
         visual_row = s.get(Setting, "visual")
         visual = visual_row.value if visual_row else {}
+        tema = tema_preferido(s, sd.get("username", ""))
     return {
         **{k: v for k, v in sd.items() if k not in ("ebs_auth", "permission_map", "sn_cookies")},
         "permission_map": sd.get("permission_map", {}),
         "visual_config": visual,
         "sn_active": bool(sd.get("sn_cookies")),
+        "tema": tema,
     }
+
+
+class PreferenciasIn(BaseModel):
+    tema: str
+
+    @field_validator("tema")
+    @classmethod
+    def _tema(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in TEMAS:
+            raise ValueError("tema deve ser 'claro' ou 'escuro'")
+        return v
+
+
+@router.put("/preferencias")
+def preferencias_put(body: PreferenciasIn, req: Request):
+    """Preferências do próprio usuário (hoje só o tema das telas)."""
+    sd = get_session(req)
+    login = (sd.get("username") or "").strip().lower()
+    with SessionLocal() as s:
+        chave = _chave_preferencias(login)
+        row = s.get(Setting, chave)
+        if row is None:
+            row = Setting(key=chave, value={}, updated_by=login)
+            s.add(row)
+        row.value = {**(row.value or {}), "tema": body.tema}
+        row.updated_by = login
+        s.commit()
+    return {"ok": True, "tema": body.tema}
 
 
 @router.post("/logout")

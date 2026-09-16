@@ -34,8 +34,8 @@ from db.destinacao import (
 )
 from config import get_settings
 from core.security import require_permission, check_rate_limit
-from routers.trilha import (Calendario, duracao_util, mover, encerrar, TrilhaInvalida,
-                            garantir_ativo, _utc)
+from routers.trilha import (Calendario, duracao_util, prazo_util, mover, encerrar,
+                            TrilhaInvalida, garantir_ativo, _utc)
 
 _ORIGEM_ADOCAO = "destinacao"
 _log = logging.getLogger("destinacao")

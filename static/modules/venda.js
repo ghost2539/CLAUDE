@@ -269,9 +269,9 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     async function concluir(c, ciclo) {
         var f = S.el('div');
         f.innerHTML =
-            '<div class="form-group"><label for="vd-comp">Comprador <span style="color:#dc2626">*</span></label>' +
+            '<div class="form-group"><label for="vd-comp">Comprador <span style="color:var(--sp-alerta)">*</span></label>' +
             '<input id="vd-comp" class="form-control"></div>' +
-            '<div class="form-group"><label for="vd-doc">Documento da venda <span style="color:#dc2626">*</span></label>' +
+            '<div class="form-group"><label for="vd-doc">Documento da venda <span style="color:var(--sp-alerta)">*</span></label>' +
             '<input id="vd-doc" class="form-control" placeholder="Nota, contrato ou ata"></div>' +
             '<div class="form-group"><label for="vd-val">Valor total</label>' +
             '<input id="vd-val" class="form-control" type="number" step="0.01" min="0"></div>';

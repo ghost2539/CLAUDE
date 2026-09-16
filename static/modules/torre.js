@@ -25,9 +25,9 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
     /* Uma cor para as barras e as de severidade à parte. Cor de estado
        não é cor de série: misturar as duas faz o olho ler gravidade
        onde só há identidade. */
-    var COR_BARRA = '#3E9187';
-    var COR_ALERTA = '#C79105';
-    var COR_GRAVE = '#D4626C';
+    var COR_BARRA = 'var(--sp-serie-b)';
+    var COR_ALERTA = 'var(--sp-gold)';
+    var COR_GRAVE = 'var(--sp-alerta)';
 
     function abasVisiveis() {
         var u = S.user() || {};
@@ -142,7 +142,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
                         '<td>' + S.esc(p.modelo || '—') + '</td>' +
                         '<td>' + S.esc(p.rotulo) + '</td>' +
                         '<td>' + S.esc(p.usuario || '—') + '</td>' +
-                        '<td' + (p.em_alerta ? ' style="color:#E8B94A"' : '') + '>' +
+                        '<td' + (p.em_alerta ? ' style="color:var(--sp-gold)"' : '') + '>' +
                         S.esc(duracao(p.segundos)) + '</td></tr>';
                 }).join('') + '</tbody>';
             var w = S.el('div', { className: 'table-wrapper' });

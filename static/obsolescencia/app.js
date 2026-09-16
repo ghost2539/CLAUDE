@@ -7,6 +7,13 @@
 (function () {
     'use strict';
 
+    // Tema escolhido no portal (cache local do mesmo usuário); a página
+    // não tem alternador próprio.
+    try {
+        document.documentElement.dataset.tema =
+            localStorage.getItem('spare-tema') === 'escuro' ? 'escuro' : 'claro';
+    } catch (_) { /* sem storage: fica no claro */ }
+
     var alvo = document.getElementById('obs-conteudo');
     var ehAdmin = false;
 

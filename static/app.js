@@ -37,7 +37,8 @@
         user: null,
         permissions: [],
         permission_map: {},
-        current: ''
+        current: '',
+        nomeApp: 'Portal de Operações'
     };
 
     // ── Module registry (populated by lazy-loaded scripts) ────────
@@ -231,30 +232,38 @@
 
     // ── Login / App visibility ─────────────────────────────────────
     function showLogin() {
+        // O login é sempre escuro por conta própria: o tema escolhido pelo
+        // usuário só vale dentro do portal.
+        delete document.documentElement.dataset.tema;
         $('#login-screen').hidden = false;
         $('#app-wrapper').hidden = true;
-        preencherRodapeLogin();
+        carregarVersao();
     }
 
-    // Selo de ambiente e versão no login vêm de /api/versao (público, só o
-    // essencial). Uma vez por carga; se falhar, fica o texto padrão do HTML.
-    var _rodapeLoginPronto = false;
-    function preencherRodapeLogin() {
-        if (_rodapeLoginPronto) return;
-        _rodapeLoginPronto = true;
+    // Versão e ambiente vêm de /api/versao (público, só o essencial), uma
+    // vez por carga, e preenchem o selo do login e o rodapé da sidebar. Se
+    // falhar, fica o texto padrão do HTML.
+    var _versao = null;
+    function carregarVersao() {
+        if (_versao) { aplicarVersao(_versao); return; }
         fetch(API + '/versao', { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (v) {
-                if (!v) return;
-                var amb = String(v.ambiente || 'producao').toLowerCase();
-                var rotulo = { producao: 'Produção', testes: 'Testes', teste: 'Testes',
-                               homologacao: 'Homologação', homolog: 'Homologação' }[amb] || amb;
-                var selo = $('#login-ambiente-texto');
-                if (selo) selo.textContent = rotulo + ' · rede interna';
-                var ver = $('#login-versao');
-                if (ver && v.commit_curto) ver.textContent = 'Portal de Operações · ' + v.commit_curto;
-            })
+            .then(function (v) { if (v) { _versao = v; aplicarVersao(v); } })
             .catch(function () {});
+    }
+    function rotuloAmbiente(v) {
+        var amb = String(v.ambiente || 'producao').toLowerCase();
+        return { producao: 'Produção', testes: 'Testes', teste: 'Testes',
+                 homologacao: 'Homologação', homolog: 'Homologação' }[amb] || amb;
+    }
+    function aplicarVersao(v) {
+        var rotulo = rotuloAmbiente(v);
+        var selo = $('#login-ambiente-texto');
+        if (selo) selo.textContent = rotulo + ' · rede interna';
+        var ver = $('#login-versao');
+        if (ver && v.commit_curto) ver.textContent = 'Portal de Operações · ' + v.commit_curto;
+        var lateral = $('#sidebar-versao');
+        if (lateral) lateral.textContent = (v.commit_curto || 'Portal de Operações') + ' · ' + rotulo.toLowerCase();
     }
 
     // Keep-alive global do ServiceNow: enquanto o portal estiver logado, mantém
@@ -265,6 +274,8 @@
         if (_snKeepAlive) return;
         var ping = function () {
             fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { if (d) marcarIntegracao(!!d.active); })
                 .catch(function () {});
         };
         ping();
@@ -275,13 +286,17 @@
     }
 
     function showApp() {
+        aplicarTema(state.user.tema || temaGuardado(), false);
         $('#login-screen').hidden = true;
         $('#app-wrapper').hidden = false;
         startSnKeepAlive();
+        carregarVersao();
         buildMenu();
         var name = state.user.display_name || state.user.username;
-        $('#topbar-user-name').textContent = name;
-        $('#topbar-user-avatar').textContent = name[0].toUpperCase();
+        $('#topbar-user-name').textContent = state.user.username || '';
+        $('#topbar-user-avatar').textContent = iniciais(name);
+        $('#topbar-user-avatar').title = name;
+        marcarIntegracao(!!state.user.sn_active);
         var destino = destinoPedido();
         if (destino) { location.replace(destino); return; }
         nav(location.hash.slice(1) || (ESPACO ? 'consulta' : 'bemvindo'));
@@ -314,26 +329,74 @@
     }
 
     // ── Visual config ──────────────────────────────────────────────
+    // Só nome e rodapé são configuráveis: as cores são as do padrão de UI
+    // SPARE (paleta LRSA 2025), iguais para todo mundo.
     function applyVisual(v) {
         v = v || {};
-        var root = document.documentElement;
-        var map = {
-            cor_primaria: '--color-primary',
-            cor_fundo:    '--bg-root',
-            cor_painel:   '--bg-panel',
-            cor_texto:    '--text-primary',
-            cor_destaque: '--color-gold'
-        };
-        Object.keys(map).forEach(function (k) {
-            if (v[k]) root.style.setProperty(map[k], v[k]);
-        });
         if (v.nome_app) {
-            $('#app-title').textContent = v.nome_app;
+            state.nomeApp = v.nome_app;
             document.title = v.nome_app;
         }
         if (v.footer) {
             $('#portal-footer').textContent = v.footer;
         }
+    }
+
+    // ── Tema claro/escuro ─────────────────────────────────────────
+    // Preferência do usuário: vale para todos os módulos, fica no perfil
+    // (backend); o localStorage é só cache para não piscar ao abrir.
+    var TEMA_CHAVE = 'spare-tema';
+    function temaGuardado() {
+        try { return localStorage.getItem(TEMA_CHAVE) === 'escuro' ? 'escuro' : 'claro'; }
+        catch (_) { return 'claro'; }
+    }
+    function temaAtual() {
+        return document.documentElement.dataset.tema === 'escuro' ? 'escuro' : 'claro';
+    }
+    function aplicarTema(tema, salvar) {
+        tema = tema === 'escuro' ? 'escuro' : 'claro';
+        var mudou = document.documentElement.dataset.tema !== tema;
+        document.documentElement.dataset.tema = tema;
+        try { localStorage.setItem(TEMA_CHAVE, tema); } catch (_) {}
+        $$('.tema-seg button').forEach(function (b) {
+            b.setAttribute('aria-pressed', String(b.dataset.tema === tema));
+        });
+        if (salvar) {
+            api('/auth/preferencias', { method: 'PUT', body: { tema: tema } }).catch(function () {});
+            // A tela aberta redesenha para os gráficos lerem os tokens novos.
+            if (mudou && state.current) nav(location.hash.slice(1) || state.current);
+        }
+    }
+    function marcarIntegracao(ok) {
+        var p = $('#topbar-integ');
+        if (!p) return;
+        p.classList.toggle('off', !ok);
+        var d = $('.dot', p);
+        if (d) d.className = 'dot ' + (ok ? 'dot-green' : 'dot-red');
+        $('#topbar-integ-texto').textContent = ok ? 'ServiceNow ok' : 'ServiceNow off';
+        p.title = ok ? 'Sessão do ServiceNow ativa' : 'Sem sessão no ServiceNow';
+    }
+    function iniciais(nome) {
+        var partes = String(nome || '').trim().split(/\s+/).filter(Boolean);
+        if (!partes.length) return 'U';
+        var a = partes[0][0] || '';
+        var b = partes.length > 1 ? partes[partes.length - 1][0] : '';
+        return (a + b).toUpperCase();
+    }
+
+    // Trilha do header: grupo do menu / tela. Sem grupo (Bem-vindo, itens
+    // do rodapé da sidebar), o grupo é o nome do portal.
+    function atualizarTrilha(ativo, module) {
+        var grupo = '', tela = '';
+        if (ativo) {
+            var g = ativo.closest('.sidebar-grupo');
+            var t = g && $('.sidebar-grupo-titulo', g);
+            grupo = t ? t.textContent.trim() : '';
+            var rotulo = $('.sidebar-label', ativo);
+            tela = rotulo ? rotulo.textContent.trim() : '';
+        }
+        $('#topbar-grupo').textContent = grupo || state.nomeApp;
+        $('#topbar-tela').textContent = tela || ROUTES[module] || '';
     }
 
     // ── Espaços ───────────────────────────────────────────────────
@@ -442,6 +505,7 @@
         // O grupo do item ativo abre, mesmo que estivesse fechado.
         var ativo = $('.sidebar-item.active');
         if (ativo) { var g = ativo.closest('.sidebar-grupo'); if (g) g.classList.remove('fechado'); }
+        atualizarTrilha(ativo, module);
 
         // Clear sub-tabs and content
         $('#sub-tabs').hidden = true;
@@ -554,6 +618,7 @@
         loading: loading,
         formatDate: formatDate,
         user: function () { return state.user; },
+        tema: temaAtual,
         checkSnSession: checkSnSession,
         snReloginModal: snReloginModal
     };
@@ -602,6 +667,11 @@
         $('#modal-overlay').onclick = function (e) {
             if (e.target.classList.contains('modal-backdrop')) closeModal();
         };
+
+        // Tema claro/escuro
+        $$('.tema-seg button').forEach(function (b) {
+            b.onclick = function () { aplicarTema(b.dataset.tema, true); };
+        });
 
         // Global search
         setupGlobalSearch();

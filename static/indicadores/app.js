@@ -9,7 +9,8 @@
     var SVGNS = "http://www.w3.org/2000/svg";
     var MES_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun",
                     "jul", "ago", "set", "out", "nov", "dez"];
-    var PAL = ["#3B82F6", "#A855F7", "#22C55E", "#F59E0B", "#EC4899", "#06B6D4"];
+    // Paleta LRSA 2025 (padrão de UI SPARE): sem cor fora dela.
+    var PAL = ["#C05B12", "#2F8079", "#C79105", "#E9D39B", "#5FB8AC", "#6E6E6E"];
 
     var state = { auto: true, timer: null, view: "geral", dados: null };
     var tip = document.getElementById("tip");
@@ -127,7 +128,7 @@
                 "stroke-linejoin": "round", "stroke-linecap": "round" }));
         }
         series.forEach(function (d, i) {
-            var c = el("circle", { cx: X(i), cy: Y(d.pct), r: 4.5, fill: "#0A0F1A",
+            var c = el("circle", { cx: X(i), cy: Y(d.pct), r: 4.5, fill: "#0C0C0C",
                 stroke: "var(--good)", "stroke-width": 2.5 });
             c.style.cursor = "pointer";
             c.addEventListener("mousemove", function (ev) {

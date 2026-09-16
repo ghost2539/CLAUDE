@@ -650,8 +650,8 @@ async function renderMonitoramento(c, S) {
             '<div class="card-body" id="mo-falhas"></div></div>';
 
     function barra(pct, alerta, critico) {
-        var cor = pct >= critico ? '#dc2626' : (pct >= alerta ? '#d97706' : '#16a34a');
-        return '<div style="background:var(--bg-input,#eee);border-radius:6px;height:8px;overflow:hidden;margin-top:6px">' +
+        var cor = pct >= critico ? 'var(--sp-alerta)' : (pct >= alerta ? 'var(--sp-gold)' : 'var(--sp-ok)');
+        return '<div style="background:var(--sp-border-soft);height:8px;overflow:hidden;margin-top:6px">' +
             '<div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + cor + '"></div></div>';
     }
     function tile(titulo, valor, sub, extra) {
@@ -668,7 +668,7 @@ async function renderMonitoramento(c, S) {
             var sv = d.servidor || {}, mem = sv.memoria || {}, dk = sv.disco || {},
                 cg = sv.carga || {}, up = sv.uptime || {}, ap = d.aplicacao || {},
                 lim = d.limiares || {}, f = d.falhas || {};
-            var mapa = { ok: ['#16a34a', 'Tudo certo'], alerta: ['#d97706', 'Atenção'], critico: ['#dc2626', 'Crítico'] };
+            var mapa = { ok: ['var(--sp-ok)', 'Tudo certo'], alerta: ['var(--sp-gold)', 'Atenção'], critico: ['var(--sp-alerta)', 'Crítico'] };
             var st = mapa[d.status] || mapa.ok;
             var html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
                 '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + st[0] + '"></span>' +
@@ -691,8 +691,8 @@ async function renderMonitoramento(c, S) {
                 '<th>Banco</th><th>Tipo</th><th>Status</th><th>Tamanho</th><th>Detalhe</th></tr></thead><tbody>';
             (d.bancos || []).forEach(function (b) {
                 html += '<tr><td><b>' + S.esc(b.nome) + '</b></td><td>' + S.esc(b.tipo) + '</td>' +
-                    '<td>' + (b.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + (b.ok ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                                   : '<span style="color:var(--sp-alerta);font-weight:600">FALHA</span>') + '</td>' +
                     '<td>' + (b.tamanho_mb ? b.tamanho_mb + ' MB' : '—') + '</td>' +
                     '<td style="font-size:.8rem;color:var(--text-secondary)">' + S.esc(b.detalhe || '') + '</td></tr>';
             });
@@ -717,7 +717,7 @@ async function renderMonitoramento(c, S) {
                 { key: 'quando', label: 'Quando', render: function (v) {
                     return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
                 { key: 'severidade', label: 'Sev.', html: true, render: function (v) {
-                    var cor = v === 'erro' ? '#dc2626' : (v === 'alerta' ? '#d97706' : '#16a34a');
+                    var cor = v === 'erro' ? 'var(--sp-alerta)' : (v === 'alerta' ? 'var(--sp-gold)' : 'var(--sp-ok)');
                     return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
                 { key: 'origem', label: 'Origem' },
                 { key: 'alvo', label: 'Alvo' },
@@ -749,8 +749,8 @@ async function renderMonitoramento(c, S) {
             var html = '<table class="data-table"><thead><tr><th>Serviço</th><th>Status</th><th>Tempo</th><th>Detalhe</th></tr></thead><tbody>';
             (d.resultados || []).forEach(function (r) {
                 html += '<tr><td><b>' + S.esc(r.servico) + '</b></td>' +
-                    '<td>' + (r.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + (r.ok ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                                   : '<span style="color:var(--sp-alerta);font-weight:600">FALHA</span>') + '</td>' +
                     '<td>' + r.ms + ' ms</td>' +
                     '<td style="font-size:.8rem">' + S.esc(r.detalhe || '') + '</td></tr>';
             });
@@ -811,9 +811,9 @@ async function renderAcessos(c, S) {
             var d = await S.api('/monitor/acessos?' + p);
             var r = d.resumo || {};
             var html = '<div class="stats-grid" style="margin-bottom:12px">' +
-                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#d97706">' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:var(--sp-gold)">' +
                     (r.nao_autorizado || 0) + '</div><div class="stat-label">Sem liberação</div></div>' +
-                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#dc2626">' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:var(--sp-alerta)">' +
                     (r.credencial || 0) + '</div><div class="stat-label">Credencial inválida</div></div>' +
                 '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem">' +
                     (r.bloqueios_403 || 0) + '</div><div class="stat-label">Bloqueios dentro do portal</div></div>' +
@@ -825,7 +825,7 @@ async function renderAcessos(c, S) {
                 { key: 'login', label: 'Usuário' },
                 { key: 'tipo', label: 'Tipo', html: true, render: function (v) {
                     var nao = v === 'nao_autorizado';
-                    return '<span style="color:' + (nao ? '#d97706' : '#dc2626') + ';font-weight:600">' +
+                    return '<span style="color:' + (nao ? 'var(--sp-gold)' : 'var(--sp-alerta)') + ';font-weight:600">' +
                         (nao ? 'Sem liberação' : 'Credencial') + '</span>'; } },
                 { key: 'origem', label: 'Autenticação' },
                 { key: 'ip', label: 'IP' },
@@ -962,8 +962,8 @@ async function renderAcessos(c, S) {
                     return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
                 { key: 'usuario', label: 'Usuário' },
                 { key: 'acao', label: 'Ação', html: true, render: function (v) {
-                    var cor = v === 'negado' ? '#dc2626'
-                            : (v === 'abrir' ? '#6b7280' : '#2563eb');
+                    var cor = v === 'negado' ? 'var(--sp-alerta)'
+                            : (v === 'abrir' ? 'var(--sp-faint)' : 'var(--sp-teal-text)');
                     return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
                 { key: 'ip', label: 'IP' },
                 { key: 'detalhe', label: 'Detalhe' }
@@ -983,18 +983,13 @@ async function renderAcessos(c, S) {
 
 /* ── Visual ─────────────────────────────────────────────────────── */
 async function renderVisual(c, S) {
+    // Cores não se configuram: o portal segue o padrão de UI SPARE (paleta
+    // LRSA 2025) nos dois temas. Aqui ficam só os textos.
     c.innerHTML = '<h1 class="page-title">Administração visual</h1>';
     var d = await S.api('/parametros/config/visual');
     var fields = [
         ['nome_app',     'Nome da aplicação'],
-        ['subtitulo',    'Subtítulo'],
-        ['login_title',  'Título do login'],
-        ['footer',       'Rodapé'],
-        ['cor_primaria', 'Cor primária',    'color'],
-        ['cor_fundo',    'Cor de fundo',    'color'],
-        ['cor_painel',   'Cor dos painéis', 'color'],
-        ['cor_texto',    'Cor do texto',    'color'],
-        ['cor_destaque', 'Cor de destaque', 'color']
+        ['footer',       'Rodapé']
     ];
     var form = S.el('div', { className: 'form-grid cols-2' });
     fields.forEach(function (f) {
@@ -1036,7 +1031,7 @@ async function _cardIcone(S) {
     var body = S.el('div', { className: 'card-body' });
     var linha = S.el('div', { style: 'display:flex;align-items:center;gap:16px;flex-wrap:wrap' });
     var img = S.el('img', { src: '/favicon.ico?v=' + (info.versao || 0), alt: '',
-        style: 'width:48px;height:48px;border-radius:8px;background:var(--panel-2,#1c1f26);padding:4px' });
+        style: 'width:48px;height:48px;background:var(--sp-th-bg);border:1px solid var(--sp-border);padding:4px' });
     linha.appendChild(img);
     var txt = S.el('div');
     txt.appendChild(S.el('div', { textContent: info.personalizado ? 'Ícone personalizado' : 'Ícone padrão' }));

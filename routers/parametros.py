@@ -426,27 +426,9 @@ def visual_reset(req: Request):
         if x:
             x.value = {
                 "nome_app": "Portal de Operações - SPARE",
-                "subtitulo": "Operações de ativos",
-                "login_title": "Portal de Operações - SPARE",
                 "footer": "SPARE - Portal de Operações",
-                "fonte": "Inter",
-                "cor_primaria": "#AB4807",
-                "cor_fundo": "#090B0D",
-                "cor_painel": "#111419",
-                "cor_texto": "#E8E8E8",
-                "cor_destaque": "#C79105",
             }
     return {"ok": True}
-
-
-@router.post("/visual/logo")
-def logo_upload(req: Request, logo: UploadFile = File(...)):
-    require_permission(req, "parametros", "admin")
-    if not (logo.filename or "").lower().endswith(".png"):
-        raise HTTPException(400, "Envie arquivo PNG.")
-    p = _cfg.STATIC / "logo_custom.png"
-    p.write_bytes(logo.file.read())
-    return {"logo_url": "/static/logo_custom.png"}
 
 
 # ── Permissions ───────────────────────────────────────────────────

@@ -78,15 +78,15 @@
             <div id="login-error" class="lg-erro" role="alert" aria-live="polite" hidden>
                 <span id="login-error-text"></span>
             </div>
-            <p class="lg-ajuda">Problemas de acesso? Abra um chamado no Service Desk ou ligue no ramal 4120.</p>
+            <p class="lg-ajuda">Problemas no acesso? Contate <a href="https://teams.microsoft.com/l/chat/0/0?users=raphael.steilein@lojasrenner.com.br" target="_blank" rel="noopener">aqui</a>.</p>
         </form>
 
         <footer class="lg-rodape">
             <div class="lg-rodape-linha">
                 <span id="login-versao">Portal de Operações</span>
-                <span>Suporte TI · ramal 4120</span>
+                <span>CSC TI - Spare</span>
             </div>
-            <span class="lg-aviso">Uso exclusivo de colaboradores Lojas Renner S.A. Acessos são registrados e monitorados.</span>
+            <span class="lg-aviso">Uso restrito apenas para usuários liberados. Os acessos são registrados e monitorados.</span>
         </footer>
     </section>
 </div>
@@ -97,165 +97,161 @@
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <div class="sidebar-brand-icon">SP</div>
-            <div class="sidebar-brand-text">SPARE</div>
+            <svg class="sidebar-monograma" viewBox="0 0 48 48" width="24" height="24" aria-hidden="true">
+                <path d="M6 6 L40 6 L47 10 L40 14 L14 14 L14 20 L42 20 L42 42 L8 42 L1 38 L8 34 L34 34 L34 28 L6 28 Z" fill="currentColor"></path>
+            </svg>
+            <div class="sidebar-marca">
+                <span class="sidebar-brand-text">SPARE</span>
+                <span class="sidebar-brand-sub">Operações de TI CSC</span>
+            </div>
         </div>
         <nav class="sidebar-menu">
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Início</div>
             <a class="sidebar-item" data-route="torre" data-perm="torre">
-                <span class="sidebar-icon">&#x25F3;</span>
                 <span class="sidebar-label">Torre de Controle</span>
             </a>
             <a class="sidebar-item" data-route="consulta" data-espaco="times">
-                <span class="sidebar-icon">&#x2315;</span>
                 <span class="sidebar-label">Consulta</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Entrada</div>
             <a class="sidebar-item" data-route="recebimento">
-                <span class="sidebar-icon">&#x25A3;</span>
                 <span class="sidebar-label">Recebimento</span>
             </a>
             <a class="sidebar-item" data-route="identificacao">
-                <span class="sidebar-icon">&#x2399;</span>
                 <span class="sidebar-label">Identificação</span>
             </a>
             <a class="sidebar-item" data-route="reversa" data-perm="reversa">
-                <span class="sidebar-icon">&#x21B6;</span>
                 <span class="sidebar-label">Logística Reversa</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Atendimento</div>
             <a class="sidebar-item" data-route="atendimento" data-perm="atendimento">
-                <span class="sidebar-icon">&#x260E;</span>
                 <span class="sidebar-label">Atendimento</span>
             </a>
             <a class="sidebar-item" data-route="preparacao" data-perm="preparacao">
-                <span class="sidebar-icon">&#x2699;</span>
                 <span class="sidebar-label">Preparação</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Central de Reparos</div>
             <a class="sidebar-item" data-route="reparos/loja" data-perm="reparos">
-                <span class="sidebar-icon">&#x2692;</span>
                 <span class="sidebar-label">Frente e Retaguarda</span>
             </a>
             <a class="sidebar-item" data-route="reparos/frota" data-perm="reparos">
-                <span class="sidebar-icon">&#x2692;</span>
                 <span class="sidebar-label">Mobilidade</span>
             </a>
             <a class="sidebar-item" data-route="reparos/conectividade" data-perm="reparos">
-                <span class="sidebar-icon">&#x2692;</span>
                 <span class="sidebar-label">Conectividade</span>
             </a>
             <a class="sidebar-item" data-route="externo" data-perm="externo">
-                <span class="sidebar-icon">&#x21BB;</span>
                 <span class="sidebar-label">Assistência Externa</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Saída</div>
             <a class="sidebar-item" data-route="separacao" data-perm="separacao">
-                <span class="sidebar-icon">&#x21E5;</span>
                 <span class="sidebar-label">Separação</span>
             </a>
             <a class="sidebar-item" data-route="projetos" data-perm="projetos">
-                <span class="sidebar-icon">&#x2302;</span>
                 <span class="sidebar-label">Projetos de Loja</span>
             </a>
             <a class="sidebar-item" data-route="venda" data-perm="venda">
-                <span class="sidebar-icon">&#x1F4B0;</span>
                 <span class="sidebar-label">Venda de Ativos</span>
             </a>
             <a class="sidebar-item" data-route="destinacao" data-perm="destinacao">
-                <span class="sidebar-icon">&#x267B;</span>
                 <span class="sidebar-label">Destinação</span>
             </a>
             <a class="sidebar-item" data-route="rastreio">
-                <span class="sidebar-icon">&#x2709;</span>
                 <span class="sidebar-label">Correios</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Gestão de Ativos</div>
             <a class="sidebar-item" data-route="inventario" data-perm="inventario">
-                <span class="sidebar-icon">&#x2630;</span>
                 <span class="sidebar-label">Inventário</span>
             </a>
             <a class="sidebar-item" data-route="regularizacao" data-perm="regularizacao">
-                <span class="sidebar-icon">&#x2696;</span>
                 <span class="sidebar-label">Regularização</span>
             </a>
             <a class="sidebar-item" data-route="gestao_ativos/entrada" data-espaco="times" data-perm="servicenow">
-                <span class="sidebar-icon">&#x21C4;</span>
                 <span class="sidebar-label">Entrada de Ativos</span>
             </a>
             <a class="sidebar-item" data-route="gestao_ativos/saida" data-espaco="times" data-perm="servicenow">
-                <span class="sidebar-icon">&#x21C4;</span>
                 <span class="sidebar-label">Saída de Ativos</span>
             </a>
             <a class="sidebar-item" data-route="gestao_ativos/movimentacao" data-espaco="times" data-perm="servicenow">
-                <span class="sidebar-icon">&#x21C4;</span>
                 <span class="sidebar-label">Movimentação Interna</span>
             </a>
             <a class="sidebar-item" data-href="/obsolescencia" data-perm="obsolescencia">
-                <span class="sidebar-icon">&#x231B;</span>
                 <span class="sidebar-label">Obsolescência</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Gestão de Fornecedores</div>
             <a class="sidebar-item" data-route="orcamento_manutencao">
-                <span class="sidebar-icon">&#x1F527;</span>
                 <span class="sidebar-label">Brasil — Manutenção</span>
             </a>
             </div>
             <div class="sidebar-grupo"><div class="sidebar-grupo-titulo">Controle</div>
             <a class="sidebar-item" data-href="/orcamento-spare" data-perm="orcamento_spare">
-                <span class="sidebar-icon">&#x2211;</span>
                 <span class="sidebar-label">Orçamento Spare</span>
             </a>
             <a class="sidebar-item" data-href="/controle-orcamento" data-perm="orcamento">
-                <span class="sidebar-icon">&#x2211;</span>
                 <span class="sidebar-label">Orçamento Infra CSC</span>
             </a>
             </div>
         </nav>
 
         <div class="sidebar-bottom">
-            <a class="sidebar-item" data-route="status"><span class="sidebar-icon">&#x2301;</span><span class="sidebar-label">Status</span></a>
-            <a class="sidebar-item" data-route="parametros"><span class="sidebar-icon">&#x2699;</span><span class="sidebar-label">Configuração</span></a>
-            <a class="sidebar-item" data-route="consulta_times" data-perm="consulta_times" data-espaco="times"><span class="sidebar-icon">&#x1F511;</span><span class="sidebar-label">Acesso Consulta Times</span></a>
-            <a class="sidebar-item" data-route="parametros/conta" data-perm="parametros"><span class="sidebar-icon">&#x263A;</span><span class="sidebar-label">Minha conta</span></a>
-            <button id="logout-btn" class="sidebar-logout-btn">
-                <span>&#x21AA;</span>
+            <a class="sidebar-item" data-route="status"><span class="sidebar-label">Status</span></a>
+            <a class="sidebar-item" data-route="parametros"><span class="sidebar-label">Configuração</span></a>
+            <a class="sidebar-item" data-route="consulta_times" data-perm="consulta_times" data-espaco="times"><span class="sidebar-label">Acesso Consulta Times</span></a>
+            <a class="sidebar-item" data-route="parametros/conta" data-perm="parametros"><span class="sidebar-label">Minha conta</span></a>
+            <button id="logout-btn" class="sidebar-logout-btn" type="button">
                 <span class="sidebar-label">Sair</span>
             </button>
         </div>
+        <div class="sidebar-rodape">
+            <span id="sidebar-versao">Portal de Operações</span>
+            <span>CSC TI - Spare</span>
+        </div>
     </aside>
 
-    <!-- Top bar -->
-    <header class="topbar">
-        <button id="menu-toggle" class="menu-toggle" type="button" aria-label="Menu">&#9776;</button>
-        <div class="topbar-left">
-            <span id="app-title" class="topbar-app-title">Portal de Operações - SPARE</span>
-        </div>
-        <div class="topbar-center">
-            <div class="topbar-search">
-                <span class="topbar-search-icon">&#x2315;</span>
-                <input id="global-search" class="topbar-search-input"
-                       placeholder="Buscar ativo, etiqueta ou série">
+    <!-- Coluna de conteúdo: header de contexto fixo no topo + módulo -->
+    <div class="coluna">
+        <header class="topbar">
+            <button id="menu-toggle" class="menu-toggle" type="button" aria-label="Menu">&#9776;</button>
+            <nav class="topbar-trilha" aria-label="Onde estou">
+                <span id="topbar-grupo" class="topbar-trilha-grupo">Portal de Operações</span>
+                <span class="topbar-trilha-sep" aria-hidden="true">/</span>
+                <span id="topbar-tela" class="topbar-trilha-tela"></span>
+            </nav>
+            <div class="topbar-center">
+                <div class="topbar-search">
+                    <span class="topbar-search-icon">&#x2315;</span>
+                    <input id="global-search" class="topbar-search-input"
+                           placeholder="Buscar ativo, etiqueta ou série">
+                </div>
             </div>
-        </div>
-        <div class="topbar-right">
-            <span id="topbar-user-name" class="topbar-user-name"></span>
-            <span id="topbar-user-avatar" class="topbar-user-avatar">U</span>
-        </div>
-    </header>
+            <div class="topbar-right">
+                <div class="tema-seg" role="group" aria-label="Tema">
+                    <button type="button" data-tema="claro" aria-pressed="true">Claro</button>
+                    <button type="button" data-tema="escuro" aria-pressed="false">Escuro</button>
+                </div>
+                <div id="topbar-integ" class="integ-pilula" title="Sessão do ServiceNow">
+                    <span class="dot dot-muted"></span>
+                    <span id="topbar-integ-texto">ServiceNow</span>
+                </div>
+                <div class="topbar-user">
+                    <span id="topbar-user-avatar" class="topbar-user-avatar">U</span>
+                    <span id="topbar-user-name" class="topbar-user-name"></span>
+                </div>
+            </div>
+        </header>
 
-    <!-- Main content area -->
-    <main class="main-content">
-        <div id="sub-tabs" class="sub-tabs" hidden></div>
-        <section id="page-content" class="page-content"></section>
-        <footer id="portal-footer" class="login-footer">SPARE - Portal de Operações</footer>
-    </main>
+        <main class="main-content">
+            <div id="sub-tabs" class="sub-tabs" hidden></div>
+            <section id="page-content" class="page-content"></section>
+            <footer id="portal-footer" class="portal-rodape">SPARE - Portal de Operações</footer>
+        </main>
+    </div>
 
 </div>
 

@@ -315,7 +315,7 @@ window.SPARE_MODULES = window.SPARE_MODULES || {};
             esq.innerHTML = '<div class="sep-serie">' + S.esc(x.serial) + '</div>' +
                 '<div class="text-muted" style="font-size:11.5px">' +
                 S.esc(duracao(x.segundos)) + ' aguardando' +
-                (x.envelhecido ? ' · <span style="color:#E8B94A">atrasado</span>' : '') +
+                (x.envelhecido ? ' · <span style="color:var(--sp-gold)">atrasado</span>' : '') +
                 '</div>';
             l.appendChild(esq);
             l.appendChild(botao('Peça chegou', 'btn-outline btn-sm', async function () {

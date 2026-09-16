@@ -45,7 +45,7 @@ function renderNovo(c, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Onde os ativos foram guardados</div>' +
             '<div class="card-body">' +
-                '<label for="rec-espaco">Espaço e Corredor <span style="color:#dc2626">*</span></label>' +
+                '<label for="rec-espaco">Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
                 '<input id="rec-espaco" class="form-control" style="max-width:320px" ' +
                     'list="rec-corredores" autocomplete="off" placeholder="Ex.: A-12">' +
                 '<datalist id="rec-corredores"></datalist>' +
@@ -192,7 +192,7 @@ function renderNovo(c, S) {
         ];
         fields.forEach(function (x) {
             var g = S.el('div', { className: 'form-group' });
-            g.innerHTML = '<label>' + S.esc(x[0]) + (x[3] ? ' <span style="color:#dc2626">*</span>' : '') + '</label>' +
+            g.innerHTML = '<label>' + S.esc(x[0]) + (x[3] ? ' <span style="color:var(--sp-alerta)">*</span>' : '') + '</label>' +
                 '<input id="' + x[1] + '" class="form-control" value="' + S.esc(x[2] || '') + '">';
             f.appendChild(g);
         });
@@ -201,7 +201,7 @@ function renderNovo(c, S) {
             '<input type="checkbox" id="edit-ready" ' + (item.situacao === 'PRONTO PARA ENVIO' ? 'checked' : '') + '>' +
             ' Pronto para envio</label>';
         f.appendChild(chkGroup);
-        var errEl = S.el('div', { className: 'mt-2', style: 'color:#dc2626;font-size:.85rem' });
+        var errEl = S.el('div', { className: 'mt-2', style: 'color:var(--sp-alerta);font-size:.85rem' });
         f.appendChild(errEl);
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
@@ -329,7 +329,7 @@ function renderNovo(c, S) {
                 var dupMsg = '';
                 if (d.duplicado_local) {
                     var dl = d.duplicado_local;
-                    dupMsg = '<div class="alert alert-danger mt-2" style="border-left:4px solid #e53e3e">' +
+                    dupMsg = '<div class="alert alert-danger mt-2">' +
                         '<strong>Ativo já existe na base local!</strong><br>' +
                         'Etiqueta: <strong>' + S.esc(dl.etiqueta || '—') + '</strong> | ' +
                         'Serial: <strong>' + S.esc(dl.numero_serie || '—') + '</strong> | ' +

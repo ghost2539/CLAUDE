@@ -220,18 +220,16 @@ def check_duplicate(body: ScanIn, req: Request):
 def receipt_preview(body: ScanIn, req: Request):
     """Query EBS for an asset WITHOUT saving. Returns all matches including
     duplicates across companies (CM/YC prefix variants)."""
-    sd = require_permission(req, "recebimento", "create")
+    require_permission(req, "recebimento", "create")
     check_rate_limit(req)
 
     ident = body.identificador.strip()
     search_terms = [ident]
     bare = ident
-    detected_prefix = ""
     prefixos = config_familias()["prefixos_duplicidade"]
     for pfx in prefixos:
         if ident.upper().startswith(pfx) and len(ident) > len(pfx):
             bare = ident[len(pfx):]
-            detected_prefix = pfx
             break
     if bare != ident:
         search_terms.append(bare)

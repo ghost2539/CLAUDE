@@ -46,7 +46,7 @@ function _snLoginBarHtml() {
                 '<strong>ServiceNow</strong>' +
                 '<div id="sn-bar-status" style="font-size:.82rem;color:var(--text-secondary);margin-top:.25rem"></div>' +
             '</div>' +
-            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:10px;background:#dc262620;color:#dc2626;white-space:nowrap">Verificando…</span>' +
+            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:0;background:var(--sp-alerta)20;color:var(--sp-alerta);white-space:nowrap">Verificando…</span>' +
         '</div>' +
     '</div>';
 }
@@ -63,18 +63,18 @@ function _snSetBadge(active) {
     if (badge) {
         if (active) {
             badge.textContent = 'Conectado';
-            badge.style.background = '#16a34a20';
-            badge.style.color = '#16a34a';
+            badge.style.background = 'var(--sp-ok)20';
+            badge.style.color = 'var(--sp-ok)';
         } else {
             badge.textContent = 'Sessão expirada';
-            badge.style.background = '#dc262620';
-            badge.style.color = '#dc2626';
+            badge.style.background = 'var(--sp-alerta)20';
+            badge.style.color = 'var(--sp-alerta)';
         }
     }
     if (st) {
         st.innerHTML = active
             ? ''
-            : '<span style="color:#dc2626">Sessão do ServiceNow expirou. Saia e entre novamente no portal (Logon AD) para renovar.</span>';
+            : '<span style="color:var(--sp-alerta)">Sessão do ServiceNow expirou. Saia e entre novamente no portal (Logon AD) para renovar.</span>';
     }
 }
 
@@ -184,7 +184,7 @@ function _snRenderUpload(container, S) {
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
                         '<select id="sn-stockroom" class="form-control"><option>SPARE - CD324</option></select></div>' +
-                    '<div><label>Espaço e Corredor <span style="color:#dc2626">*</span></label>' +
+                    '<div><label>Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
                         '<input id="sn-aisle" class="form-control" list="ga-corredores" placeholder="Obrigatório" autocomplete="off">' +
                         '<datalist id="ga-corredores"></datalist></div>' +
                 '</div>' +
@@ -196,7 +196,7 @@ function _snRenderUpload(container, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Enviar ao ServiceNow</div>' +
             '<div class="card-body">' +
-                '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
+                '<button class="btn btn-primary" id="sn-upload">' +
                     'Subir selecionados</button>' +
                 '<div id="sn-login-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
             '</div>' +
@@ -206,17 +206,17 @@ function _snRenderUpload(container, S) {
             '<div class="card-header">Progresso</div>' +
             '<div class="card-body">' +
                 '<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">' +
-                    '<div style="flex:1;background:var(--bg-input);border-radius:8px;height:24px;overflow:hidden">' +
-                        '<div id="sn-bar" style="height:100%;background:#c06010;border-radius:8px;transition:width .3s;width:0%"></div>' +
+                    '<div style="flex:1;background:var(--bg-input);border-radius:0;height:24px;overflow:hidden">' +
+                        '<div id="sn-bar" style="height:100%;background:var(--sp-accent);transition:width .3s;width:0%"></div>' +
                     '</div>' +
                     '<span id="sn-pct" style="min-width:60px;text-align:right;font-weight:600">0%</span>' +
                 '</div>' +
                 '<div id="sn-phase" style="color:var(--text-secondary);margin-bottom:.5rem"></div>' +
                 '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem">' +
                     '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700" id="sn-s-total">0</div><div style="color:var(--text-secondary);font-size:.85rem">Total</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#16a34a" id="sn-s-ok">0</div><div style="color:var(--text-secondary);font-size:.85rem">Inseridos</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#dc2626" id="sn-s-err">0</div><div style="color:var(--text-secondary);font-size:.85rem">Erros</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#2563eb" id="sn-s-dep">0</div><div style="color:var(--text-secondary);font-size:.85rem">Depreciação</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-ok)" id="sn-s-ok">0</div><div style="color:var(--text-secondary);font-size:.85rem">Inseridos</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-alerta)" id="sn-s-err">0</div><div style="color:var(--text-secondary);font-size:.85rem">Erros</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-teal-text)" id="sn-s-dep">0</div><div style="color:var(--text-secondary);font-size:.85rem">Depreciação</div></div>' +
                 '</div>' +
                 '<div id="sn-results" style="max-height:300px;overflow:auto"></div>' +
             '</div>' +
@@ -407,7 +407,7 @@ function _snRenderPreview(S, rows) {
     var jaSN = rows.filter(function (r) { return r.existe_sn; }).length;
     info.innerHTML = enc + ' ativo(s) encontrado(s)' +
         (jaSN ? ' · <strong>' + jaSN + ' já no ServiceNow (serão atualizados)</strong>' : '') +
-        (rows.length - enc ? ' · <span style="color:#dc2626">' + (rows.length - enc) + ' não encontrado(s) no EBS</span>' : '');
+        (rows.length - enc ? ' · <span style="color:var(--sp-alerta)">' + (rows.length - enc) + ' não encontrado(s) no EBS</span>' : '');
 
     var html = '<table class="data-table" style="min-width:1050px"><thead><tr>' +
         '<th><input type="checkbox" id="snp-all" checked></th>' +
@@ -416,9 +416,9 @@ function _snRenderPreview(S, rows) {
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         var ok = !!r.encontrado;
-        var sn = r.existe_sn ? '<span style="color:#2563eb;font-weight:600">Sim (atualiza)</span>'
-            : '<span style="color:#16a34a">Novo</span>';
-        var sit = ok ? '' : '<span style="color:#dc2626">' +
+        var sn = r.existe_sn ? '<span style="color:var(--sp-teal-text);font-weight:600">Sim (atualiza)</span>'
+            : '<span style="color:var(--sp-ok)">Novo</span>';
+        var sit = ok ? '' : '<span style="color:var(--sp-alerta)">' +
             S.esc(r.erro || (r.origem_planilha ? 'Linha incompleta' : 'Não encontrado no EBS')) + '</span>';
         html += '<tr>' +
             '<td><input type="checkbox" class="snp-row" value="' + i + '"' + (ok ? ' checked' : ' disabled') + '></td>' +
@@ -502,7 +502,7 @@ function _snRenderErroReport(S, d) {
     var linhas = erros.map(function (r) {
         var motivos = (r.motivos && r.motivos.length) ? r.motivos.join(' | ') : (r.detail || '');
         return '<tr><td>' + r.idx + '</td><td>' + S.esc(r.serie || '') + '</td><td>' +
-            S.esc(r.etiqueta || '') + '</td><td style="color:#dc2626">' + S.esc(motivos) + '</td></tr>';
+            S.esc(r.etiqueta || '') + '</td><td style="color:var(--sp-alerta)">' + S.esc(motivos) + '</td></tr>';
     }).join('');
     box.innerHTML =
         '<div class="alert alert-danger" style="margin-bottom:.6rem">' +
@@ -568,11 +568,11 @@ function _snPollJob(S, jobId) {
                 for (var i = 0; i < d.results.length; i++) {
                     var r = d.results[i];
                     var statusBadge = r.status === 'ok'
-                        ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                        : '<span style="color:#dc2626;font-weight:600">ERRO</span>';
+                        ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                        : '<span style="color:var(--sp-alerta);font-weight:600">ERRO</span>';
                     var depBadge = '';
-                    if (r.depreciation === 'ok') depBadge = '<span style="color:#16a34a">OK</span>';
-                    else if (r.depreciation === 'falhou') depBadge = '<span style="color:#eab308">Falhou</span>';
+                    if (r.depreciation === 'ok') depBadge = '<span style="color:var(--sp-ok)">OK</span>';
+                    else if (r.depreciation === 'falhou') depBadge = '<span style="color:var(--sp-gold)">Falhou</span>';
                     else depBadge = '—';
                     var detalhe = r.status === 'ok' ? (r.display || '') : (r.detail || '');
                     html += '<tr>' +
@@ -582,7 +582,7 @@ function _snPollJob(S, jobId) {
                         '<td>' + S.esc(r.empresa || '') + '</td>' +
                         '<td>' + statusBadge + '</td>' +
                         '<td>' + depBadge + '</td>' +
-                        '<td style="font-size:.8rem;color:' + (r.status === 'ok' ? 'inherit' : '#dc2626') + '">' +
+                        '<td style="font-size:.8rem;color:' + (r.status === 'ok' ? 'inherit' : 'var(--sp-alerta)') + '">' +
                             S.esc(detalhe) + '</td>' +
                         '</tr>';
                 }
@@ -603,7 +603,7 @@ function _snPollJob(S, jobId) {
                 _snPollTimer = null;
                 document.getElementById('sn-upload').disabled = false;
                 document.getElementById('sn-phase').textContent = 'Erro: ' + d.error;
-                document.getElementById('sn-phase').style.color = '#dc2626';
+                document.getElementById('sn-phase').style.color = 'var(--sp-alerta)';
                 S.toast(d.error, 'error');
             }
         }).catch(function (e) {
@@ -637,7 +637,7 @@ function _snRenderSaida(container, S) {
                     'Definir os dados de destino abaixo e aplicá-los a todos os ativos ao buscar' +
                 '</label>' +
                 '<div id="sa-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
-                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:0">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                         '<div><label>BU</label>' +
                             '<select id="sa-bu" class="form-control">' +
@@ -655,11 +655,11 @@ function _snRenderSaida(container, S) {
                             '<select id="sa-location" class="form-control">' +
                                 '<option value="">Informe BU e código da loja</option>' +
                             '</select></div>' +
-                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Novo Status <span style="color:var(--sp-alerta)">*</span></label>' +
                             _saStatusSelectHtml('sa-new-status', 'In transit', '') + '</div>' +
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
-                        '<label>Observações <span style="color:#dc2626">*</span> (nº do chamado ou motivo)</label>' +
+                        '<label>Observações <span style="color:var(--sp-alerta)">*</span> (nº do chamado ou motivo)</label>' +
                         '<input id="sa-notes" class="form-control" list="ga-anotacoes" placeholder="Ex.: INC0012345 ou devolução de estoque" autocomplete="off">' +
                         '<datalist id="ga-anotacoes"></datalist></div>' +
                 '</div>' +
@@ -779,7 +779,7 @@ function _saSearch(S) {
             _saRenderList(S, window._saAssets, d.nao_encontrados || [], d.solicitados || ids.length);
         })
         .catch(function (e) {
-            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+            prog.innerHTML = '<span style="color:var(--sp-alerta)">' + S.esc(e.message) + '</span>';
         });
 }
 
@@ -797,7 +797,7 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
     var info = document.getElementById('sa-found-info');
     var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
     if (naoEncontrados.length) {
-        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+        msg += ' <span style="color:var(--sp-alerta)">Não encontrados (' + naoEncontrados.length + '): ' +
             S.esc(naoEncontrados.join(', ')) + '</span>';
     }
     info.innerHTML = msg;
@@ -848,7 +848,7 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
             } else {
                 cell.textContent = inp.value.trim() ? 'Loja não encontrada' : '—';
                 cell.setAttribute('data-loc', '');
-                cell.style.color = inp.value.trim() ? '#dc2626' : '';
+                cell.style.color = inp.value.trim() ? 'var(--sp-alerta)' : '';
             }
         });
     });
@@ -912,8 +912,8 @@ function _saMoveAll(S) {
     function setProg() {
         var pct = Math.round(done / total * 100);
         prog.innerHTML =
-            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
-            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:var(--sp-accent);transition:width .2s"></div></div>' +
             '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
             done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
     }
@@ -923,7 +923,7 @@ function _saMoveAll(S) {
     function next() {
         if (idx >= selected.length) {
             btn.disabled = false;
-            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+            result.innerHTML = '<span style="color:' + (fail ? 'var(--sp-gold)' : 'var(--sp-ok)') + ';font-weight:600">' +
                 'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
             S.toast('Saída concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
             return;
@@ -944,9 +944,9 @@ function _saMoveAll(S) {
         };
 
         S.api('/servicenow/saida/move', { method: 'POST', body: body })
-            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .then(function () { cell.innerHTML = '<span style="color:var(--sp-ok)">✓</span>'; ok++; })
             .catch(function (e) {
-                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                cell.innerHTML = '<span style="color:var(--sp-alerta)" title="' + S.esc(e.message) + '">✗</span>';
                 fail++;
             })
             .then(function () { done++; idx++; setProg(); next(); });
@@ -1009,9 +1009,9 @@ function _snRenderMovInterna(container, S) {
                     'Definir os dados abaixo e aplicá-los a todos os ativos ao buscar' +
                 '</label>' +
                 '<div id="mi-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
-                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:0">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
-                        '<div><label>Estoque destino <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Estoque destino <span style="color:var(--sp-alerta)">*</span></label>' +
                             _miStockroomSelectHtml('mi-stockroom', 'SPARE - CD324') + '</div>' +
                         '<div><label>BU</label>' +
                             '<select id="mi-bu" class="form-control">' +
@@ -1023,14 +1023,14 @@ function _snRenderMovInterna(container, S) {
                             '</select></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
-                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Novo Status <span style="color:var(--sp-alerta)">*</span></label>' +
                             _saStatusSelectHtml('mi-new-status', 'In stock', '') + '</div>' +
-                        '<div><label>Espaço e Corredor <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
                             '<input id="mi-aisle" class="form-control" list="ga-corredores" placeholder="Ex.: A-12" autocomplete="off">' +
                             '<datalist id="ga-corredores"></datalist></div>' +
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
-                        '<label>Observações <span style="color:#dc2626">*</span></label>' +
+                        '<label>Observações <span style="color:var(--sp-alerta)">*</span></label>' +
                         '<input id="mi-notes" class="form-control" placeholder="Motivo da movimentação"></div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
@@ -1079,7 +1079,7 @@ function _miSearch(S) {
             _miRenderList(S, window._miAssets, d.nao_encontrados || [], d.solicitados || ids.length);
         })
         .catch(function (e) {
-            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+            prog.innerHTML = '<span style="color:var(--sp-alerta)">' + S.esc(e.message) + '</span>';
         });
 }
 
@@ -1093,7 +1093,7 @@ function _miRenderList(S, assets, naoEncontrados, solicitados) {
     var info = document.getElementById('mi-found-info');
     var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
     if (naoEncontrados.length) {
-        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+        msg += ' <span style="color:var(--sp-alerta)">Não encontrados (' + naoEncontrados.length + '): ' +
             S.esc(naoEncontrados.join(', ')) + '</span>';
     }
     info.innerHTML = msg;
@@ -1167,8 +1167,8 @@ function _miMoveAll(S) {
     function setProg() {
         var pct = Math.round(done / total * 100);
         prog.innerHTML =
-            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
-            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:var(--sp-accent);transition:width .2s"></div></div>' +
             '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
             done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
     }
@@ -1178,7 +1178,7 @@ function _miMoveAll(S) {
     function next() {
         if (idx >= selected.length) {
             btn.disabled = false;
-            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+            result.innerHTML = '<span style="color:' + (fail ? 'var(--sp-gold)' : 'var(--sp-ok)') + ';font-weight:600">' +
                 'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
             S.toast('Movimentação concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
             return;
@@ -1200,9 +1200,9 @@ function _miMoveAll(S) {
         };
 
         S.api('/servicenow/mov-interna/move', { method: 'POST', body: body })
-            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .then(function () { cell.innerHTML = '<span style="color:var(--sp-ok)">✓</span>'; ok++; })
             .catch(function (e) {
-                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                cell.innerHTML = '<span style="color:var(--sp-alerta)" title="' + S.esc(e.message) + '">✗</span>';
                 fail++;
             })
             .then(function () { done++; idx++; setProg(); next(); });
@@ -1297,7 +1297,7 @@ function _snRenderCorreios(container, S) {
                     for (var j = 0; j < entries.length; j++) {
                         html += '<tr><td style="font-weight:600">' + S.esc(field) + '</td>' +
                             '<td>' + S.esc(entries[j].incident) + '</td>' +
-                            '<td style="color:' + (entries[j].value === '(vazio)' ? 'var(--text-secondary)' : '#c06010') + '">' +
+                            '<td style="color:' + (entries[j].value === '(vazio)' ? 'var(--text-secondary)' : 'var(--sp-kicker)') + '">' +
                                 S.esc(entries[j].value) + '</td></tr>';
                     }
                 }
@@ -1307,14 +1307,14 @@ function _snRenderCorreios(container, S) {
                 var det = d.detected_tracking_codes || {};
                 var detKeys = Object.keys(det);
                 if (detKeys.length) {
-                    html += '<h3 style="margin:16px 0 8px;color:#198754">Códigos de rastreio detectados automaticamente</h3>';
+                    html += '<h3 style="margin:16px 0 8px;color:var(--sp-ok)">Códigos de rastreio detectados automaticamente</h3>';
                     html += '<table class="data-table"><thead><tr><th>Campo</th><th>Incidente</th><th>Código</th></tr></thead><tbody>';
                     for (var k = 0; k < detKeys.length; k++) {
                         var items = det[detKeys[k]];
                         for (var m = 0; m < items.length; m++) {
-                            html += '<tr><td style="font-weight:600;color:#198754">' + S.esc(detKeys[k]) + '</td>' +
+                            html += '<tr><td style="font-weight:600;color:var(--sp-ok)">' + S.esc(detKeys[k]) + '</td>' +
                                 '<td>' + S.esc(items[m].incident) + '</td>' +
-                                '<td style="font-weight:600;color:#c06010">' + S.esc(items[m].value) + '</td></tr>';
+                                '<td style="font-weight:600;color:var(--sp-kicker)">' + S.esc(items[m].value) + '</td></tr>';
                         }
                     }
                     html += '</tbody></table>';
@@ -1364,7 +1364,7 @@ function _snRenderCorreios(container, S) {
                 for (var i = 0; i < d.eventos.length; i++) {
                     var ev = d.eventos[i];
                     var isFirst = i === 0;
-                    var dotColor = isFirst ? '#198754' : '#666';
+                    var dotColor = isFirst ? 'var(--sp-ok)' : 'var(--sp-faint)';
                     var dtStr = '';
                     if (ev.data) {
                         try {
@@ -1374,7 +1374,7 @@ function _snRenderCorreios(container, S) {
                         } catch (_) { dtStr = ev.data; }
                     }
                     html += '<div style="position:relative;padding-bottom:20px;' +
-                        (i < d.eventos.length - 1 ? 'border-left:2px solid #333;margin-left:6px;padding-left:24px' : 'margin-left:6px;padding-left:24px') + '">' +
+                        (i < d.eventos.length - 1 ? 'border-left:2px solid var(--sp-border);margin-left:6px;padding-left:24px' : 'margin-left:6px;padding-left:24px') + '">' +
                         '<div style="position:absolute;left:-7px;top:2px;width:14px;height:14px;border-radius:50%;background:' + dotColor + '"></div>' +
                         '<div style="font-weight:600;font-size:.95rem">' + S.esc(ev.descricao) + '</div>' +
                         (ev.detalhe ? '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(ev.detalhe) + '</div>' : '') +
@@ -1387,7 +1387,7 @@ function _snRenderCorreios(container, S) {
 
                 // Info do objeto
                 if (d.tipo || d.dt_prevista) {
-                    html += '<div style="margin-top:16px;padding:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.9rem">' +
+                    html += '<div style="margin-top:16px;padding:12px;background:var(--sp-badge-teal-bg);border:1px solid var(--sp-teal-border);border-radius:0;font-size:.9rem">' +
                         '<div style="display:flex;gap:24px;flex-wrap:wrap">' +
                             (d.tipo ? '<div><span style="color:var(--text-secondary)">Tipo:</span> <strong>' + S.esc(d.tipo) + '</strong>' +
                                 (d.tipo_nome ? ' — ' + S.esc(d.tipo_nome) : '') + '</div>' : '') +
@@ -1408,8 +1408,8 @@ function _snRenderCorreios(container, S) {
                                 edt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                         } catch (_) { entDt = ent.data; }
                     }
-                    html += '<div style="margin-top:20px;padding:16px;background:rgba(25,135,84,.1);border:1px solid rgba(25,135,84,.3);border-radius:8px">' +
-                        '<div style="font-weight:700;font-size:1rem;color:#198754;margin-bottom:8px">' +
+                    html += '<div style="margin-top:20px;padding:16px;background:var(--sp-badge-teal-bg);border:1px solid var(--sp-teal-border);border-radius:0">' +
+                        '<div style="font-weight:700;font-size:1rem;color:var(--sp-ok);margin-bottom:8px">' +
                             'COMPROVANTE DE ENTREGA</div>' +
                         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.9rem">' +
                             '<div><span style="color:var(--text-secondary)">Status:</span> ' + S.esc(ent.descricao) + '</div>' +
@@ -1424,7 +1424,7 @@ function _snRenderCorreios(container, S) {
                             (ent.recebedor_comentario ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Obs:</span> ' + S.esc(ent.recebedor_comentario) + '</div>' : '') +
                         '</div>' +
                         '<div style="margin-top:12px">' +
-                            '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:#198754;border-color:#198754">' +
+                            '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:var(--sp-ok);border-color:var(--sp-ok)">' +
                                 'Comprovante de entrega</button>' +
                             '<div id="co-ar-result" style="margin-top:8px"></div>' +
                         '</div>' +
@@ -1451,12 +1451,12 @@ function _snRenderCorreios(container, S) {
                                 var arHtml = '<div style="font-size:.9rem">';
                                 if (comp.imagem) {
                                     arHtml += '<div style="margin-bottom:8px"><img src="data:image/jpeg;base64,' + comp.imagem +
-                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                 }
                                 if (comp.assinatura) {
                                     arHtml += '<div style="margin-bottom:8px"><strong>Assinatura:</strong><br>' +
                                         '<img src="data:image/png;base64,' + comp.assinatura +
-                                        '" style="max-width:300px;border:1px solid #333;border-radius:4px" /></div>';
+                                        '" style="max-width:300px;border:1px solid var(--sp-border);border-radius:0" /></div>';
                                 }
                                 if (comp.nome) {
                                     arHtml += '<div><span style="color:var(--text-secondary)">Nome:</span> ' + S.esc(comp.nome) + '</div>';
@@ -1490,7 +1490,7 @@ function _snRenderCorreios(container, S) {
                                             : (gimg.conteudo ? 'data:' + (gimg.tipo || 'image/jpeg') + ';base64,' + gimg.conteudo : '');
                                         if (src) {
                                             arHtml += '<div style="margin:8px 0"><img src="' + src +
-                                                '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                         }
                                     }
                                 }
@@ -1505,10 +1505,10 @@ function _snRenderCorreios(container, S) {
                                                 var img = imgs[ii];
                                                 if (typeof img === 'string') {
                                                     arHtml += '<div style="margin:8px 0"><img src="data:image/jpeg;base64,' + img +
-                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                                 } else if (img.conteudo) {
                                                     arHtml += '<div style="margin:8px 0"><img src="data:' + (img.tipo || 'image/jpeg') + ';base64,' + img.conteudo +
-                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                                 }
                                             }
                                         }
@@ -1527,7 +1527,7 @@ function _snRenderCorreios(container, S) {
                                 arResult.innerHTML = arHtml;
                             })
                             .catch(function (e) {
-                                arResult.innerHTML = '<div style="color:#dc2626;font-size:.85rem">' + S.esc(e.message) + '</div>';
+                                arResult.innerHTML = '<div style="color:var(--sp-alerta);font-size:.85rem">' + S.esc(e.message) + '</div>';
                             })
                             .finally(function () {
                                 arBtn.disabled = false;
@@ -1537,7 +1537,7 @@ function _snRenderCorreios(container, S) {
                 }
             })
             .catch(function (e) {
-                body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+                body.innerHTML = '<div style="padding:1rem;color:var(--sp-alerta)">' + S.esc(e.message) + '</div>';
             });
     }
 
@@ -1588,7 +1588,7 @@ function _snRenderCorreios(container, S) {
                             (hasValidCode
                                 ? '<button class="btn btn-sm btn-outline co-track-btn" ' +
                                     'data-code="' + S.esc(trackCode) + '" ' +
-                                    'style="font-weight:600;color:#c06010">' +
+                                    'style="font-weight:600;color:var(--sp-kicker)">' +
                                     S.esc(trackCode) + '</button>'
                                 : '<span style="color:var(--text-secondary);font-size:.85rem" title="' +
                                     S.esc(trackCode) + '">' +
@@ -1643,12 +1643,12 @@ async function _coAutoRastrear(lista, S, reloadFn) {
             if (entregue) {
                 _coCellEncerrar(cell, item, S, reloadFn);
             } else if (d && !d.encontrado) {
-                cell.innerHTML = '<span style="color:#6b7280;font-size:.82rem">Não encontrado</span>';
+                cell.innerHTML = '<span style="color:var(--sp-faint);font-size:.82rem">Não encontrado</span>';
             } else {
-                cell.innerHTML = '<span style="color:#2563eb;font-size:.82rem;font-weight:600">Aguardando Entrega</span>';
+                cell.innerHTML = '<span style="color:var(--sp-teal-text);font-size:.82rem;font-weight:600">Aguardando Entrega</span>';
             }
         } catch (err) {
-            cell.innerHTML = '<span style="color:#dc2626;font-size:.8rem" title="' +
+            cell.innerHTML = '<span style="color:var(--sp-alerta);font-size:.8rem" title="' +
                 S.esc(err.message || '') + '">Erro no rastreio</span>';
         }
     }
@@ -1658,7 +1658,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
     cell.innerHTML = '';
     var wrap = S.el('div', { style: 'display:flex;align-items:center;gap:6px' });
     wrap.appendChild(S.el('span', {
-        style: 'color:#16a34a;font-weight:600;font-size:.82rem', textContent: 'Entregue'
+        style: 'color:var(--sp-ok);font-weight:600;font-size:.82rem', textContent: 'Entregue'
     }));
     var btn = S.el('button', { className: 'btn btn-sm btn-primary', textContent: 'Encerrar' });
     btn.onclick = function () {
@@ -1671,7 +1671,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
         })
             .then(function (r) {
                 S.toast('Chamado ' + (r.encerrado || item.number) + ' encerrado.', 'success');
-                cell.innerHTML = '<span style="color:#16a34a;font-weight:600">Encerrado ✓</span>';
+                cell.innerHTML = '<span style="color:var(--sp-ok);font-weight:600">Encerrado ✓</span>';
             })
             .catch(function (err) {
                 S.toast(err.message || 'Falha ao encerrar.', 'error');
@@ -1685,7 +1685,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
 function _snShowError(targetId, err, S, retryFn) {
     var el = document.getElementById(targetId);
     var isSn = err.message && err.message.indexOf('ServiceNow') !== -1;
-    var html = '<div style="padding:1rem;color:#dc2626">' + S.esc(err.message) + '</div>';
+    var html = '<div style="padding:1rem;color:var(--sp-alerta)">' + S.esc(err.message) + '</div>';
     if (isSn) {
         html += '<div style="padding:0 1rem .5rem"><button class="btn btn-sm btn-primary" id="' + targetId + '-relogin">Reconectar ServiceNow</button></div>';
     }
@@ -1802,7 +1802,7 @@ function _relLoad(S) {
     S.api('/servicenow/relatorios/sla?' + qp)
         .then(function (d) {
             document.getElementById('rel-sla').style.display = '';
-            var pctColor = d.compliance_pct >= 90 ? '#16a34a' : d.compliance_pct >= 70 ? '#ca8a04' : '#dc2626';
+            var pctColor = d.compliance_pct >= 90 ? 'var(--sp-ok)' : d.compliance_pct >= 70 ? 'var(--sp-gold)' : 'var(--sp-alerta)';
             var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;text-align:center;margin-bottom:1.5rem">' +
                 '<div class="stat-card accent-green"><div class="stat-value" style="color:' + pctColor + '">' + d.compliance_pct + '%</div>' +
                 '<div class="stat-label">Conformidade</div></div>' +
@@ -1810,7 +1810,7 @@ function _relLoad(S) {
                 '<div class="stat-label">Total SLAs</div></div>' +
                 '<div class="stat-card accent-orange"><div class="stat-value">' + d.met + '</div>' +
                 '<div class="stat-label">Dentro do SLA</div></div>' +
-                '<div class="stat-card" style="border-top:4px solid #dc2626"><div class="stat-value" style="color:#dc2626">' + d.breached + '</div>' +
+                '<div class="stat-card" style="border-top:4px solid var(--sp-alerta)"><div class="stat-value" style="color:var(--sp-alerta)">' + d.breached + '</div>' +
                 '<div class="stat-label">Violados</div></div>' +
                 '</div>';
 
@@ -1821,8 +1821,8 @@ function _relLoad(S) {
                     var bp = d.by_priority[p];
                     var bpPct = bp.total > 0 ? Math.round((bp.met / bp.total) * 100) : 0;
                     html += '<tr><td style="font-weight:600">' + S.esc(p) + '</td>' +
-                        '<td>' + bp.total + '</td><td style="color:#16a34a">' + bp.met + '</td>' +
-                        '<td style="color:#dc2626">' + bp.breached + '</td>' +
+                        '<td>' + bp.total + '</td><td style="color:var(--sp-ok)">' + bp.met + '</td>' +
+                        '<td style="color:var(--sp-alerta)">' + bp.breached + '</td>' +
                         '<td style="font-weight:600">' + bpPct + '%</td></tr>';
                 });
                 html += '</tbody></table>';

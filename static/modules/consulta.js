@@ -84,8 +84,8 @@ window.SPARE_MODULES.consulta = {
                 '<div style="display:flex;justify-content:space-between;font-size:.85rem;' +
                 'color:var(--text-secondary);margin-bottom:4px">' +
                 '<span class="cp-label">Consultando...</span><span class="cp-pct">0%</span></div>' +
-                '<div style="height:10px;background:var(--bg-secondary,#eee);border-radius:6px;overflow:hidden">' +
-                '<div class="cp-fill" style="height:100%;width:0%;background:#3b82f6;transition:width .2s"></div></div>';
+                '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
+                '<div class="cp-fill" style="height:100%;width:0%;background:var(--sp-accent);transition:width .2s"></div></div>';
             return {
                 el: wrap,
                 set: function (feito, total) {

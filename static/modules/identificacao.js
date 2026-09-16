@@ -85,10 +85,10 @@ function _renderLote(c, S) {
                     '<button class="btn" id="lt-save-ip">Salvar IP</button>' +
                     '<button class="btn" id="lt-test">Testar conexão</button>' +
                     '<button class="btn btn-dark" id="lt-preview">Baixar prévia ZPL</button>' +
-                    '<button class="btn btn-primary" id="lt-generate" style="background:#c06010;border-color:#c06010">Gerar Caixa e imprimir</button>' +
+                    '<button class="btn btn-primary" id="lt-generate">Gerar Caixa e imprimir</button>' +
                 '</div>' +
                 '<pre id="lt-zpl-out" style="margin-top:1rem;display:none;max-height:250px;overflow:auto;' +
-                    'background:var(--bg-input);padding:1rem;border-radius:8px;font-size:.85rem"></pre>' +
+                    'background:var(--bg-input);padding:1rem;font-size:.85rem"></pre>' +
             '</div>' +
         '</div>';
 
@@ -273,7 +273,7 @@ function _renderA4(c, S) {
                 '<div style="margin-top:1.5rem;display:flex;gap:.8rem;flex-wrap:wrap">' +
                     '<button class="btn" id="a4-save-ip">Salvar IP</button>' +
                     '<button class="btn btn-dark" id="a4-pdf">Visualizar PDF</button>' +
-                    '<button class="btn btn-primary" id="a4-print" style="background:#c06010;border-color:#c06010">Imprimir na Lexmark</button>' +
+                    '<button class="btn btn-primary" id="a4-print">Imprimir na Lexmark</button>' +
                 '</div>' +
             '</div>' +
         '</div>';
@@ -362,10 +362,10 @@ function _renderLivre(c, S) {
                     '<button class="btn" id="zl-save-ip">Salvar IP</button>' +
                     '<button class="btn" id="zl-test">Testar conexão</button>' +
                     '<button class="btn btn-dark" id="zl-download">Baixar ZPL</button>' +
-                    '<button class="btn btn-primary" id="zl-print" style="background:#c06010;border-color:#c06010">Imprimir na Zebra</button>' +
+                    '<button class="btn btn-primary" id="zl-print">Imprimir na Zebra</button>' +
                 '</div>' +
                 '<pre id="zl-zpl-out" style="margin-top:1rem;display:none;max-height:250px;overflow:auto;' +
-                    'background:var(--bg-input);padding:1rem;border-radius:8px;font-size:.85rem"></pre>' +
+                    'background:var(--bg-input);padding:1rem;font-size:.85rem"></pre>' +
             '</div>' +
         '</div>';
 

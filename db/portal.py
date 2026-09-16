@@ -343,15 +343,7 @@ def init_db() -> None:
         defaults = {
             "visual": {
                 "nome_app": "Portal de Operações - SPARE",
-                "subtitulo": "Operações de ativos",
-                "login_title": "Portal de Operações - SPARE",
                 "footer": "SPARE - Portal de Operações",
-                "fonte": "Inter",
-                "cor_primaria": "#AB4807",
-                "cor_fundo": "#090B0D",
-                "cor_painel": "#111419",
-                "cor_texto": "#E8E8E8",
-                "cor_destaque": "#C79105",
             },
             "tv": {
                 "title": "Painel de Operações",
