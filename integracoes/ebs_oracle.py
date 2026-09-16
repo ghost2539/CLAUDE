@@ -179,6 +179,35 @@ def describe(object_name: str, owner: str = "APPS") -> list[dict]:
     )
 
 
+def find_objects(termo: str, limit: int = 500) -> list[dict]:
+    """Procura objetos (tabela/view/synonym) cujo NOME contém `termo`, em
+    QUALQUER owner acessível pela conta. Útil para garimpar a tabela certa,
+    ex.: find_objects('FA_ADD') ou find_objects('ATIVO')."""
+    return query(
+        """
+        SELECT owner, object_name, object_type
+        FROM all_objects
+        WHERE object_type IN ('TABLE','VIEW','SYNONYM')
+          AND object_name LIKE :pat
+        ORDER BY
+          CASE object_type WHEN 'TABLE' THEN 0 WHEN 'VIEW' THEN 1 ELSE 2 END,
+          owner, object_name
+        """,
+        {"pat": "%" + termo.upper() + "%"},
+        max_rows=limit,
+    )
+
+
+def sql_livre(texto: str, max_rows: int = 200) -> list[dict]:
+    """Roda um SELECT ad-hoc, só-leitura, com trava contra DML.
+    Para exploração pelo CLI (`ebs_oracle.py sql "SELECT ..."`)."""
+    limpo = texto.strip().rstrip(";").strip()
+    inicio = limpo.lstrip("(").lstrip().split(None, 1)[0].lower() if limpo else ""
+    if inicio not in ("select", "with"):
+        raise ValueError("Só SELECT/WITH é permitido no comando sql.")
+    return query(limpo, {}, max_rows=max_rows, read_only=True)
+
+
 # ── Registro de consultas (VOCÊS configuram aqui) ─────────────────
 # Preencha com as consultas de negócio. Sempre use bind variables (:param).
 # As consultas do módulo Gestão de Compras (oracle_helper.py do time), tal e
@@ -353,7 +382,7 @@ def _parse_binds(args: list[str]) -> dict:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Uso: ebs_oracle.py <check|list|describe|NOME> [args...]"}))
+        print(json.dumps({"error": "Uso: ebs_oracle.py <check|list|find|describe|sql|NOME> [args...]"}))
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -368,6 +397,17 @@ def main() -> None:
                 print(json.dumps({"error": "describe <OBJETO>"}))
                 sys.exit(1)
             print(json.dumps({"data": describe(sys.argv[2])}, default=str))
+        elif cmd == "find":
+            if len(sys.argv) < 3:
+                print(json.dumps({"error": "find <TERMO>"}))
+                sys.exit(1)
+            print(json.dumps({"data": find_objects(sys.argv[2])}, default=str))
+        elif cmd == "sql":
+            if len(sys.argv) < 3:
+                print(json.dumps({"error": 'sql "SELECT ..." [max_rows]'}))
+                sys.exit(1)
+            mx = int(sys.argv[3]) if len(sys.argv) > 3 else 200
+            print(json.dumps({"data": sql_livre(sys.argv[2], max_rows=mx)}, default=str))
         else:
             print(json.dumps({"data": run_named(cmd, _parse_binds(sys.argv[2:]))}, default=str))
     except Exception as e:  # noqa: BLE001
