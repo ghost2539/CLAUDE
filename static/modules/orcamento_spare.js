@@ -78,7 +78,6 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<div class="card"><div class="card-header" ' +
                     'style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
                     '<span>Projetos</span><span style="display:flex;gap:8px">' +
-                    (podeEditar ? '<button id="os-ebs" class="btn btn-secondary btn-sm">Atualizar (EBS)</button>' : '') +
                     (podeCriar ? '<button id="os-novo" class="btn btn-primary btn-sm">Novo projeto</button>' : '') +
                     '</span></div><div class="card-body">' +
                     '<div class="form-group" style="max-width:360px">' +
@@ -185,9 +184,8 @@ window.SPARE_MODULES.orcamento_spare = {
             var saldo = (t.aprovado_spare || 0) - (t.custo_total || 0);
             document.getElementById('os-resumo').innerHTML =
                 card('Projetos', e(t.projetos || 0)) +
-                card('Aprovado (EBS)', money(t.aprovado_ebs)) +
                 card('Destinado ao Spare', money(t.aprovado_spare)) +
-                card('Custo total', money(t.custo_total)) +
+                card('Custo total (linhas)', money(t.custo_total)) +
                 card('Saldo Spare', money(saldo), saldo < 0 ? '#dc2626' : '#16a34a');
         }
 
@@ -223,7 +221,7 @@ window.SPARE_MODULES.orcamento_spare = {
         function tabela() {
             var termo = (document.getElementById('os-busca').value || '').trim().toLowerCase();
             var linhas = DADOS.projetos.filter(function (p) {
-                return !termo || [p.numero, p.descricao, p.bu, p.servico, p.categoria].some(function (c) {
+                return !termo || [p.numero, p.descricao, p.bu, p.categoria].some(function (c) {
                     return String(c || '').toLowerCase().indexOf(termo) !== -1;
                 });
             });
@@ -238,11 +236,9 @@ window.SPARE_MODULES.orcamento_spare = {
                     '<td style="' + padT + ';white-space:nowrap"><b>' + e(p.numero) + '</b></td>' +
                     '<td style="' + padT + '">' + e(p.descricao) + '</td>' +
                     '<td style="' + padT + ';white-space:nowrap">' + e(p.bu || '') + '</td>' +
-                    '<td style="' + padT + '">' + e(p.servico) + '</td>' +
                     '<td style="' + padT + '">' + e(p.categoria) + '</td>' +
                     '<td class="text-center" style="' + padT + '">' +
                         (nItens ? '<a href="#" class="os-verit" data-num="' + e(p.numero) + '" title="Ver itens deste projeto">' + nItens + '</a>' : '0') + '</td>' +
-                    '<td class="text-right" style="' + padN + '">' + money(p.aprovado_ebs) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.aprovado_spare) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(p.custo_total) + '</td>' +
                     '<td class="text-right" style="' + padN + ';color:' + (p.saldo_spare < 0 ? '#dc2626' : '#16a34a') + '">' + money(p.saldo_spare) + '</td>' +
@@ -253,9 +249,8 @@ window.SPARE_MODULES.orcamento_spare = {
                 '<thead><tr>' +
                 '<th style="' + padT + '">Nº projeto</th><th style="' + padT + '">Descrição</th>' +
                 '<th style="' + padT + '">BU</th>' +
-                '<th style="' + padT + '">Serviço</th><th style="' + padT + '">Categoria</th>' +
+                '<th style="' + padT + '">Categoria</th>' +
                 '<th class="text-center" style="' + padT + '">Itens</th>' +
-                '<th class="text-right" style="' + padN + '">Aprovado (EBS)</th>' +
                 '<th class="text-right" style="' + padN + '">Destinado Spare</th>' +
                 '<th class="text-right" style="' + padN + '">Custo total</th>' +
                 '<th class="text-right" style="' + padN + '">Saldo</th>' +
@@ -489,14 +484,12 @@ window.SPARE_MODULES.orcamento_spare = {
                     campo('Nº do projeto (EBS)', '<input id="os-numero" class="form-control" value="' + e(d.numero || '') + '">') +
                     campo('Descrição', '<input id="os-descricao" class="form-control" value="' + e(d.descricao || '') + '">')) +
                 '<div style="height:14px"></div>' +
-                grade('1fr 1fr 1fr',
+                grade('1fr 1fr',
                     campo('BU', '<select id="os-bu" class="form-control">' + opcoesBU(d.bu || '') + '</select>') +
-                    campo('Serviço', '<input id="os-servico" class="form-control" value="' + e(d.servico || '') + '">') +
                     campo('Categoria', '<input id="os-categoria" class="form-control" value="' + e(d.categoria || '') + '">')) +
                 secao('Orçamento') +
-                '<div style="max-width:520px">' + grade('1fr 1fr',
-                    campo('Aprovado (EBS)', '<input class="form-control" value="' + money(d.aprovado_ebs || 0) + '" disabled title="Puxado do EBS pelo Atualizar (EBS)">') +
-                    campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">')) +
+                '<div style="max-width:280px">' +
+                    campo('Destinado ao Spare', '<input id="os-aprovspare" type="number" step="0.01" min="0" class="form-control" value="' + e(d.aprovado_spare != null ? d.aprovado_spare : 0) + '">') +
                 '</div>' +
                 secao('Itens') +
                 '<p class="text-muted" style="font-size:.8em;margin:-4px 0 10px">Digite o Item EBS: se estiver no cadastro, puxa descrição, NCM e imposto (e o preço, se for de acordo). Sem acordo, o preço é obrigatório.</p>' +
@@ -674,7 +667,6 @@ window.SPARE_MODULES.orcamento_spare = {
                 numero: document.getElementById('os-numero').value.trim(),
                 descricao: document.getElementById('os-descricao').value.trim(),
                 bu: document.getElementById('os-bu').value,
-                servico: document.getElementById('os-servico').value.trim(),
                 categoria: document.getElementById('os-categoria').value.trim(),
                 aprovado_spare: av === '' ? 0 : parseFloat(av),
                 observacao: document.getElementById('os-obs').value.trim(),
@@ -722,7 +714,6 @@ window.SPARE_MODULES.orcamento_spare = {
 
         // ── Eventos ───────────────────────────────────────────────────
         if (podeCriar) document.getElementById('os-novo').onclick = function () { abrirForm(); };
-        if (podeEditar) document.getElementById('os-ebs').onclick = sincronizarEbs;
         if (podeCriar) document.getElementById('cat-novo').onclick = function () { abrirFormCat(); };
         if (podeCriar) {
             var catFile = document.getElementById('cat-file');
