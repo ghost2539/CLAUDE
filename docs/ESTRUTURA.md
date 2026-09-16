@@ -19,6 +19,9 @@ requirements.txt         Dependências do portal
 core/                    Núcleo: o que não é rota, banco nem integração
   security.py            Sessão, permissões, rate limit, middlewares de segurança
   notificador.py         Canal de alertas por e-mail (SMTP)
+  cofre.py               Segredos: cofre corporativo, cofre local cifrado, ambiente
+  prefixo.py             Portal servido num subcaminho do proxy (/portal-spare)
+  acordos.py · nf_pdf.py · tipi.py   Apoio do CAPEX Spare (acordo, NF em PDF, NCM)
 
 db/                      Camada de dados — um módulo por banco, todos isolados
   portal.py              Postgres principal (usuários, recebimentos, reparos…)
@@ -26,6 +29,9 @@ db/                      Camada de dados — um módulo por banco, todos isolado
   automacoes.py          Regras, logs e configuração das automações
   monitoramento.py       Eventos de saúde/falha e configuração de alertas
   orcamento_exec.py      Controle de Orçamento — execução CAPEX
+  capex_spare.py         CAPEX Spare — projetos e itens de investimento
+  agendamentos_forn.py   Agendamentos de entrega de fornecedor
+  internalizacao.py      Internalização dos itens recebidos
 
 
 routers/                 As APIs do portal — uma por área funcional
@@ -34,11 +40,14 @@ routers/                 As APIs do portal — uma por área funcional
   indicadores · automacoes · monitoramento
   controle_orcamento_exec · orcamento_spare · public_assets · helpers
   consulta_times · cockpit (telas de TV)
+  capex_spare · agendamentos_forn · internalizacao
+  gestao_compras · cofre (abas de Parâmetros, só administrador)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
+  http.py                Fábrica de sessões de saída — TLS verificado por padrão
   ebs_service.py         API REST do EBS
-
   ebs_logged.py          Raspagem autenticada do EBS
+  gestao_compras.py      Ponte HTTP com o módulo /gestao_compras (PO e projetos)
 
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css (tokens + componentes do padrão de UI) · modules/*.js

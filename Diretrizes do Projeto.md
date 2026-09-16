@@ -52,7 +52,12 @@ normativo.
    concatenação é sanitizado antes (`routers/servicenow.py`). `^ = , !`
    mudam o significado da consulta, e uma reserva no `sys_id` errado é o
    custo.
-11. **Tela nova segue o padrão de UI SPARE** (`docs/PADRAO_UI_SPARE.md`):
+11. **Proxy de saída se declara com `config._proxy()`.** Variável
+   DECLARADA e vazia é decisão ("aqui não tem proxy") e encerra a busca; só
+   a ausência total continua procurando. Encadear com `or` faz o
+   `https_proxy` do perfil do servidor entrar sem ninguém configurar, e
+   toda chamada de API sai por um endereço que o destino não conhece.
+12. **Tela nova segue o padrão de UI SPARE** (`docs/PADRAO_UI_SPARE.md`):
    usa o shell e as classes de `static/app.css`, nenhum hex fora da paleta
    (cor entra por token `--sp-*`), Arial, estrutura reta com controles
    arredondados e funciona nos temas claro e escuro. Nada de fonte, script
@@ -94,3 +99,8 @@ normativo.
 - Antes de commitar: `python3 -m compileall` no que mudou, `node --check`
   nos `.js`, `bash -n` nos `.sh`, e subir o app em memória conferindo que a
   lista de rotas não regrediu.
+- **Ao trazer código de outra branch**, rodar
+  `python3 scripts/verificar_migracao.py`. Ele falha se voltar algo que já
+  tinha sido removido de propósito — acesso direto ao banco Oracle, cofre
+  desligado, credencial lida do ambiente, TLS sem verificação, tela morta.
+  O porquê de cada item está em `docs/MIGRACAO_OFICIAL.md`.

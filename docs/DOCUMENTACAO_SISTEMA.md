@@ -123,8 +123,12 @@ Regras:
 | **ServiceNow** | *Entrada de estoque* (envia ativos p/ `alm_hardware` via SSO+JSONv2, assíncrono) · *Saída de estoque* (**lote**: cola lista de identificadores, edita por linha destino/status/**corredor-espaço**/obs, flag "aplicar a todos") · *Rastreio - Chamados* · *Relatórios*. |
 | **Correios** | *Rastreios* (individual/lote + comprovante) · *Encerramento* (encerra automaticamente chamados entregues: On Hold→In Progress→Resolved). |
 | **Central de Reparos** | *Registro de Reparo* (tempos, técnico, resultado, **saving** = valor-hora × tempo) · *Tratativa de saldos* · *Dashboard*. |
+| **Orçamento** | Orçamento de Manutenção — previsto × realizado por centro de custo. |
+| **CAPEX Spare** | Projetos de investimento e suas linhas de item: catálogo, acordo de compra, NCM/TIPI e leitura da NF em PDF. Banco e permissão próprios (`capex_spare`) — **não é** o Orçamento Spare, que é outro produto. |
+| **Agendamentos Forn.** | Entrega de fornecedor agendada: BU, NF, PO, volumes, estoque de destino e a lista de equipamentos. Gera o recebimento quando a carga chega. |
+| **Internalização** | O que entrou por agendamento, pronto para conferência e exportação. |
 | **Status** | Saúde das integrações. |
-| **Configuração** | *Visual* (admin: nome e rodapé) · *Locais* · *Classificações* · *Usuários e Permissões* (admin: cria usuário SSO, libera, define admin, permissões por módulo/ação) · *Sequências* (admin) · *Configuração Módulos* (admin) · *Ciclo do ativo* (admin) · *Automações* · *Monitoramento* (admin) · *Acessos & Alertas* (admin) · *Dashboards* (admin) · *Minha conta*. |
+| **Configuração** | *Visual* (admin: nome e rodapé) · *Locais* · *Classificações* · *Usuários e Permissões* (admin: cria usuário SSO, libera, define admin, permissões por módulo/ação) · *Sequências* (admin) · *Configuração Módulos* (admin) · *Ciclo do ativo* (admin) · *Automações* · *Monitoramento* (admin) · *Cofre de segredos* (admin: de onde vem cada chave, sem mostrar valor) · *Gestão de Compras* (admin: ponte HTTP com o módulo /gestao_compras) · *Acessos & Alertas* (admin) · *Dashboards* (admin) · *Minha conta*. |
 
 O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída
 (formulário e upload). **A automação de encerramento de chamados não é afetada.**
@@ -325,8 +329,9 @@ Mudança de `.py`/config → **reiniciar o serviço**.
 ## 11. Documentos relacionados
 | Arquivo | Assunto |
 |---|---|
+| `docs/MIGRACAO_OFICIAL.md` | A junção das quatro branches: o que entrou, o que ficou de fora e por quê. |
 | `docs/MIGRACAO_SERVIDOR_NOVO.md` | Migração p/ o servidor novo (MySQL + cofre). |
-| `docs/EBS_ORACLE_BASE.md` | Camada de acesso Oracle EBS + catálogo de tabelas padrão. |
 | `docs/CORREIOS_SERVICENOW.md` | Integração Correios/ServiceNow. |
-| `docs/CONTROLE_ORCAMENTO.md` | Módulo Controle de Orçamento. |
+| `docs/PADRAO_UI_SPARE.md` | O padrão de design: paleta, tipografia, componentes. |
+| `docs/ESTRUTURA.md` | O papel de cada pasta do repositório. |
 
