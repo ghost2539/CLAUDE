@@ -144,6 +144,13 @@
         /* listas de pendências */
         '.om-cards2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}' +
         '.om-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
+        /* linhas de categoria que abrem nos modelos */
+        '.om-catrow.om-exp{cursor:pointer}' +
+        '.om-catrow.om-exp:hover td{background:var(--bg-panel-alt)}' +
+        '.om-caret{display:inline-block;width:12px;font-size:10px;color:var(--text-secondary);transition:transform .12s}' +
+        '.om-catrow.om-open .om-caret{transform:rotate(90deg)}' +
+        '.om-modrow td{color:var(--text-secondary);font-weight:400;background:var(--bg-panel-alt)}' +
+        '.om-modcel{padding-left:26px !important}' +
         /* reparos / importar / config */
         '.data-table .om-num,.om-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
         '.om-src{font-size:9px;padding:1px 5px;margin-left:5px;vertical-align:middle}' +
@@ -499,6 +506,20 @@
                     if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(b); }
                 });
             }
+        });
+        // Linhas de categoria que abrem nos modelos (aguardando aprovação/devolução).
+        host.querySelectorAll('.om-catrow[data-exp]').forEach(function (row) {
+            function toggle() {
+                var id = row.getAttribute('data-exp');
+                var aberto = row.classList.toggle('om-open');
+                host.querySelectorAll('tr[data-exp-of="' + id + '"]').forEach(function (m) {
+                    m.hidden = !aberto;
+                });
+            }
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+            });
         });
         // Controle segmentado do detalhamento mensal.
         var seg = host.querySelector('.om-seg');
@@ -1218,11 +1239,23 @@
     function aprovacaoHtml(d) {
         var list = d.aguardando_aprovacao || [];
         var tq = 0, tv = 0;
-        var rows = list.map(function (r) {
+        var rows = list.map(function (r, i) {
             tq += Number(r.qtde || 0); tv += Number(r.valor || 0);
-            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
+            var mods = r.modelos || [];
+            var cid = 'apr' + i, exp = mods.length > 0;
+            var head = '<tr class="om-catrow' + (exp ? ' om-exp' : '') + '"' +
+                (exp ? ' data-exp="' + cid + '" role="button" tabindex="0"' : '') + '>' +
+                '<td>' + (exp ? '<span class="om-caret">&#x25B8;</span> ' : '') +
+                    catComFamilia(r.categoria, r.familia) + '</td>' +
                 '<td class="om-num">' + fmtInt(r.qtde) + '</td>' +
                 '<td class="om-num">' + money(r.valor) + '</td></tr>';
+            var det = mods.map(function (m) {
+                return '<tr class="om-modrow" data-exp-of="' + cid + '" hidden>' +
+                    '<td class="om-modcel">' + S.esc(m.modelo) + '</td>' +
+                    '<td class="om-num">' + fmtInt(m.qtde) + '</td>' +
+                    '<td class="om-num">' + money(m.valor) + '</td></tr>';
+            }).join('');
+            return head + det;
         }).join('');
         if (!rows) rows = '<tr><td colspan="3" class="empty-row">Nenhum reparo aguardando aprovação.</td></tr>';
         else rows += '<tr><td><b>TOTAL</b></td><td class="om-num"><b>' + fmtInt(tq) + '</b></td>' +
@@ -1238,10 +1271,21 @@
         var list = d.aguardando_devolucao || [];
         var t = { total: 0, ag_manutencao: 0, ag_orcamento: 0, ag_aprovacao: 0, reprovado: 0 };
         var cols = ['total', 'ag_manutencao', 'ag_orcamento', 'ag_aprovacao', 'reprovado'];
-        var rows = list.map(function (r) {
+        var rows = list.map(function (r, i) {
             cols.forEach(function (k) { t[k] += Number(r[k] || 0); });
-            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
+            var mods = r.modelos || [];
+            var cid = 'dev' + i, exp = mods.length > 0;
+            var head = '<tr class="om-catrow' + (exp ? ' om-exp' : '') + '"' +
+                (exp ? ' data-exp="' + cid + '" role="button" tabindex="0"' : '') + '>' +
+                '<td>' + (exp ? '<span class="om-caret">&#x25B8;</span> ' : '') +
+                    catComFamilia(r.categoria, r.familia) + '</td>' +
                 cols.map(function (k) { return '<td class="om-num">' + fmtInt(r[k]) + '</td>'; }).join('') + '</tr>';
+            var det = mods.map(function (m) {
+                return '<tr class="om-modrow" data-exp-of="' + cid + '" hidden>' +
+                    '<td class="om-modcel">' + S.esc(m.modelo) + '</td>' +
+                    cols.map(function (k) { return '<td class="om-num">' + fmtInt(m[k]) + '</td>'; }).join('') + '</tr>';
+            }).join('');
+            return head + det;
         }).join('');
         if (!rows) rows = '<tr><td colspan="6" class="empty-row">Nenhum equipamento em manutenção.</td></tr>';
         else rows += '<tr><td><b>TOTAL</b></td>' +
