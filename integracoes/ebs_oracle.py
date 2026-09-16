@@ -27,21 +27,29 @@ import oracledb
 
 # ── Segredos (cofre do EBS) ───────────────────────────────────────
 def _secret(nome: str, default=None):
-    """Segredo do EBS. O cofre do EBS expõe `s()`, diferente do cofre geral,
-    por isso a tentativa própria antes de cair no caminho comum."""
-    # Passa pelo core.cofre: ele resolve o loader por import, por caminho
-    # absoluto ou lendo o arquivo do cofre — o import direto falharia num
-    # venv isolado, que é o caso deste servidor.
+    """Segredo do EBS lido do ambiente/cofre local via core.cofre.obter."""
     from core.cofre import obter
     return obter(nome, default or "") or default
 
 
+def _secret_multi(nomes, default=None):
+    """Primeiro nome que tiver valor. O serviço injeta as chaves do cofre
+    corporativo no ambiente com o prefixo EBS_ORACLE_ (ex.: EBS_ORACLE_USER);
+    mantemos ORACLE_EBS_* como alternativa para compatibilidade."""
+    for nome in nomes:
+        v = _secret(nome)
+        if v:
+            return v
+    return default
+
+
 def _config() -> dict:
     return {
-        "user": _secret("ORACLE_EBS_USER", "USUARIO_REMOVIDO"),
-        "password": _secret("ORACLE_EBS_PASS"),
-        "dsn": _secret("ORACLE_EBS_DSN", "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
-        "lib_dir": _secret("ORACLE_CLIENT_LIB_DIR", "/usr/lib/oracle/21/client64/lib"),
+        "user": _secret_multi(("EBS_ORACLE_USER", "ORACLE_EBS_USER"), "USUARIO_REMOVIDO"),
+        "password": _secret_multi(("EBS_ORACLE_PASS", "ORACLE_EBS_PASS")),
+        "dsn": _secret_multi(("EBS_ORACLE_DSN", "ORACLE_EBS_DSN"), "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
+        "lib_dir": _secret_multi(("EBS_ORACLE_CLIENT_LIB_DIR", "ORACLE_CLIENT_LIB_DIR"),
+                                 "/usr/lib/oracle/21/client64/lib"),
     }
 
 
