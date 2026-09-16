@@ -163,6 +163,9 @@
         '.om-tw{max-height:60vh}' +
         '.om-tw td{white-space:nowrap}' +
         '.om-tw td.om-lote{white-space:normal;min-width:140px;max-width:260px}' +
+        /* RMA com valor alterado à mão: linha em amarelo queimado fraco */
+        '.om-tw tr.om-valor-alterado td{background:rgba(199,145,5,.14)}' +
+        '.om-tw tr.om-valor-alterado:hover td{background:rgba(199,145,5,.22)}' +
         '.om-hint{font-size:12px;color:var(--text-muted);margin:4px 0 0}' +
         /* retorno de reparo */
         '.om-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.02em}' +
@@ -1548,7 +1551,7 @@
               '" title="ver os ' + e(r.serie_reparos) + ' atendimentos desta série">' +
               e(r.serie) + '</a>'
             : e(r.serie);
-        return '<tr data-i="' + i + '">' +
+        return '<tr data-i="' + i + '"' + (r.valor_alterado ? ' class="om-valor-alterado"' : '') + '>' +
             '<td class="om-mono">' + e(r.rma) + '</td>' +
             '<td>' + serieHtml + '</td>' +
             '<td class="om-num">' + reincHtml(r) + '</td>' +
@@ -1618,8 +1621,11 @@
             '<div class="form-group" id="om-f-categoria-outra-wrap" hidden><label>Nova categoria</label>' +
                 '<input id="om-f-categoria-outra" class="form-control" placeholder="ex.: Coletor S70"' + (ro ? ' disabled' : '') + '></div>' +
             inputHtml('om-f-orcamento', 'Orçamento (R$)', 'number', r.orcamento == null ? '' : r.orcamento, ' step="0.01" min="0"', ro) +
-            '<div class="form-group"><label>&nbsp;</label><label class="checkbox-label">' +
-                '<input id="om-f-garantia" type="checkbox"' + (r.garantia ? ' checked' : '') + (ro ? ' disabled' : '') + '> Reparo em garantia (sem custo)</label></div>' +
+            '<div class="form-group"><label>&nbsp;</label>' +
+                '<div style="display:flex;flex-direction:column;gap:8px">' +
+                    '<label class="checkbox-label"><input id="om-f-garantia" type="checkbox"' + (r.garantia ? ' checked' : '') + (ro ? ' disabled' : '') + '> Reparo em garantia (sem custo)</label>' +
+                    '<label class="checkbox-label"><input id="om-f-valor_alterado" type="checkbox"' + (r.valor_alterado ? ' checked' : '') + (ro ? ' disabled' : '') + '> Valor Alterado</label>' +
+                '</div></div>' +
             selectHtml('om-f-status', 'Status', opts(opcoes, 'status', STATUS_LABEL), r.status || 'AGUARDANDO_APROVACAO', null, ro) +
             selectHtml('om-f-tipo_manutencao', 'Tipo de manutenção', opts(opcoes, 'tipos', TIPO_LABEL), r.tipo_manutencao || 'CONTRATO', null, ro) +
             selectHtml('om-f-status_retorno', 'Status de retorno', opts(opcoes, 'status_retorno', RETORNO_LABEL), r.status_retorno || 'EM_MANUTENCAO', null, ro) +
@@ -1642,6 +1648,8 @@
         var cat = v('om-f-categoria');
         if (cat === '__outra__') cat = v('om-f-categoria-outra').trim();
         var garantia = !!f.querySelector('#om-f-garantia').checked;
+        var alterado = f.querySelector('#om-f-valor_alterado');
+        var valorAlterado = !!(alterado && alterado.checked);
         var orc = num(v('om-f-orcamento'));
         return {
             rma:              v('om-f-rma').trim(),
@@ -1650,6 +1658,7 @@
             categoria:        cat,
             orcamento:        garantia ? 0 : (orc == null ? 0 : orc),
             garantia:         garantia,
+            valor_alterado:   valorAlterado,
             status:           v('om-f-status'),
             tipo_manutencao:  v('om-f-tipo_manutencao'),
             status_retorno:   v('om-f-status_retorno'),

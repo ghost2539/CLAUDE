@@ -181,6 +181,9 @@ class Reparo(Base):
 
     orcamento: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False), default=0)
     garantia: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Marca manual: o valor do orçamento foi alterado à mão. Serve só para
+    # pintar a linha do RMA e chamar atenção — não altera cálculo nenhum.
+    valor_alterado: Mapped[bool] = mapped_column(Boolean, default=False)
     valor_compra: Mapped[float | None] = mapped_column(Numeric(12, 2, asdecimal=False), nullable=True)
     valor_compra_fonte: Mapped[str] = mapped_column(String(12), default="")
     percentual: Mapped[float | None] = mapped_column(Numeric(8, 4, asdecimal=False), nullable=True)
@@ -222,6 +225,7 @@ class Reparo(Base):
             "origem_equipamento": self.origem_equipamento or "",
             "disponibilizacao": _dt(self.disponibilizacao),
             "orcamento": float(self.orcamento or 0), "garantia": bool(self.garantia),
+            "valor_alterado": bool(self.valor_alterado),
             "valor_compra": _f(self.valor_compra), "valor_compra_fonte": self.valor_compra_fonte or "",
             "percentual": _f(self.percentual), "avaliacao": self.avaliacao or "",
             "status": self.status, "status_rotulo": STATUS_ROTULOS.get(self.status, self.status),
@@ -288,7 +292,7 @@ _ready = False
 # `create_all` só cria tabela nova: em banco antigo elas entram por ALTER.
 COLUNAS_MIGRAVEIS: dict[str, tuple[str, ...]] = {
     "manut_reparo": ("origem_equipamento", "disponibilizacao", "devolvido_em",
-                     "devolvido_por", "po", "modelo"),
+                     "devolvido_por", "po", "modelo", "valor_alterado"),
 }
 
 
