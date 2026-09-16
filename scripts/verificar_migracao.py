@@ -79,15 +79,27 @@ for caminho, motivo in BARRADOS.items():
     checar(not (RAIZ / caminho).exists(), f"{caminho} continua fora — {motivo}")
 
 
-print("\n[2] O banco Oracle não voltou por dentro do código")
-# A palavra "Oracle" sozinha não é o problema: o SSO é o Oracle Access
-# Manager e o EBS é o Oracle E-Business Suite, e o portal fala com os dois
-# por HTTP — legitimamente. O que foi removido é a LIGAÇÃO DIRETA ao banco:
-# driver, DSN/TNS, credencial de esquema e SQL solto. É isso que se procura.
+print("\n[2] Endereço e credencial de banco não voltaram para o código")
+# Duas coisas diferentes, e só a primeira é regra absoluta:
+#
+#   1. DADO DE ACESSO nunca fica no repositório — host, instância, SID,
+#      esquema, usuário, senha. Não importa como o portal chega ao banco:
+#      isso vem do cofre ou do ambiente, nunca do git. É por isso que o
+#      histórico foi reescrito para tirar o que já tinha vazado.
+#
+#   2. A ligação DIRETA ao banco (driver, DSN montado no código, SQL
+#      solto) foi retirada nesta linha de trabalho: o portal fala com o
+#      EBS por HTTP, e quem consulta a base é o módulo /gestao_compras,
+#      do lado de lá. Isso é DECISÃO DE ARQUITETURA, não regra de
+#      segurança — se um dia a conexão direta voltar a ser necessária, é
+#      só tirar a linha do driver daqui; o item 1 continua valendo.
+#
+# A palavra "Oracle" sozinha não é problema: o SSO é o Oracle Access
+# Manager e o EBS é o Oracle E-Business Suite.
 LIGACAO_DIRETA = (
     (r"\bimport\s+(cx_Oracle|oracledb)\b", "driver de banco Oracle"),
     (r"\bORACLE_EBS_(USER|PASS|PASSWORD|SENHA|DSN|TNS)\b", "credencial de esquema do EBS"),
-    (r"\b(ORACLE_DSN|ORACLE_TNS|EBS_ORACLE_\w+|BASE_REMOVIDA_\w+)\b", "endereço/credencial do banco"),
+    (r"\b(ORACLE|EBS)_\w*(DSN|TNS|SID|SCHEMA)\b", "endereço do banco"),
     (r"\bmakedsn\(|\bconnect\(.*service_name", "abertura de conexão Oracle"),
     (r"\bfrom\s+apps\.\w+", "SQL direto no esquema APPS"),
 )
@@ -97,10 +109,10 @@ for p in PRODUTO:
         for padrao, oque in LIGACAO_DIRETA:
             if re.search(padrao, linha):
                 achados.append(f"{p.relative_to(RAIZ)}:{n} {oque}")
-checar(not achados, f"nenhum arquivo de produto se liga ao banco Oracle ({achados[:3]})")
+checar(not achados, f"nenhum endereço nem credencial de banco no código ({achados[:3]})")
 req = texto("requirements.txt")
 checar("cx_Oracle" not in req and "oracledb" not in req,
-       "e o driver Oracle não está nas dependências")
+       "e o driver Oracle segue fora das dependências (decisão de arquitetura)")
 
 
 print("\n[3] TLS: verificação ligada, e uma porta só de saída")
