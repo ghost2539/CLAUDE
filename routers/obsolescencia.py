@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 import config as _config_mod
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import get_session
 
 _cfg = _config_mod.get_settings()
@@ -304,9 +305,9 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page() -> HTMLResponse:
-    html = (_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("{{v}}", _asset_version()))
+def _page(req: Request) -> HTMLResponse:
+    html = (_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", _asset_version())
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 def _acesso_pagina(req: Request):
@@ -314,8 +315,10 @@ def _acesso_pagina(req: Request):
     módulo à parte. Sem sessão, manda para o login levando o destino."""
     sd = get_session(req, required=False)
     if not sd:
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
-    return _page()
+        base = prefixo(req)
+        return RedirectResponse(
+            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
+    return _page(req)
 
 
 @router.get("/obsolescencia", response_class=HTMLResponse)

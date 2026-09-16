@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 import db.ebs_forms as db
 import integracoes.ebs_forms as forms
 from config import get_settings
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import check_rate_limit, get_session, require_permission
 
 _log = logging.getLogger("ebs_forms")
@@ -214,9 +215,9 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page() -> HTMLResponse:
-    html = (_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("{{v}}", _asset_version()))
+def _page(req: Request) -> HTMLResponse:
+    html = (_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", _asset_version())
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 _SEM_PERMISSAO = """<!doctype html><meta charset="utf-8">
@@ -238,12 +239,14 @@ def _acesso_pagina(req: Request):
     sd = get_session(req, required=False)
     if not sd:
         # o destino vai junto: depois do login o portal volta para esta tela
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
+        base = prefixo(req)
+        return RedirectResponse(
+            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
     try:
         require_permission(req, MODULO, "view")
     except HTTPException:
         return HTMLResponse(_SEM_PERMISSAO, status_code=403)
-    return _page()
+    return _page(req)
 
 
 # A página mora fora do prefixo /api/ebs-forms, por isso tem router próprio;

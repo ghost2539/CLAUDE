@@ -2,11 +2,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
+from core.prefixo import BarraFinalMiddleware, com_prefixo, prefixo
 from db.portal import init_db
 from core.security import (
     SecurityHeadersMiddleware,
@@ -42,6 +43,9 @@ def create_app() -> FastAPI:
     )
 
     # ── Middleware stack (order matters — last added = first executed) ──
+    # Antes de tudo: proxy que acrescenta barra no fim faria a API cair num
+    # 307 com Location absoluto — e http:// numa página https:// é bloqueado.
+    app.add_middleware(BarraFinalMiddleware)
     app.add_middleware(MaxBodyMiddleware)
     app.add_middleware(BotProtectionMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
@@ -52,8 +56,11 @@ def create_app() -> FastAPI:
     # ── Page routes ─────────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)
-    def index():
-        return (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
+    def index(request: Request):
+        # O prefixo sai do --root-path do uvicorn ou do APP_BASE_PATH; na
+        # raiz do domínio é vazio e a página vai como está.
+        html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
+        return com_prefixo(html, prefixo(request))
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

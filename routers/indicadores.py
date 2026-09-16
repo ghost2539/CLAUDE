@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 import config as _config_mod
+from core.prefixo import com_prefixo, prefixo
 import db.indicadores as db
 
 _cfg = _config_mod.get_settings()
@@ -447,14 +448,14 @@ def start_scheduler() -> None:
 
 # ── Endpoints ──────────────────────────────────────────────────────────
 @router.get("/indicadores", response_class=HTMLResponse)
-def indicadores_page():
+def indicadores_page(req: Request):
     html = (_cfg.STATIC / "indicadores" / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html)
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 @router.get("/indicadores/", response_class=HTMLResponse)
-def indicadores_page_slash():
-    return indicadores_page()
+def indicadores_page_slash(req: Request):
+    return indicadores_page(req)
 
 
 @router.get("/api/indicadores/dados")

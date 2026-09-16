@@ -5,7 +5,29 @@
 (function () {
     'use strict';
 
-    var API = '/api';
+    // Prefixo quando o portal é servido num subcaminho do proxy (o main.py
+    // injeta <meta name=app-base>). Vazio na raiz do domínio.
+    var APP_BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+    var API = APP_BASE + '/api';
+
+    // Alguns proxies acrescentam a barra no fim por REDIRECIONAMENTO (301).
+    // O navegador reemite um POST como GET e o login quebra. Com a marca
+    // ligada, a URL já sai com a barra e não há o que o proxy acrescentar.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+
+    // Junta a base ao caminho, pondo a barra ANTES da query quando preciso.
+    function apiUrl(caminho) {
+        var url = API + caminho;
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
 
     var ROUTES = {
         bemvindo:       'Bem-vindo',
@@ -91,7 +113,7 @@
         if (body && !(body instanceof FormData) && typeof body === 'object') {
             body = JSON.stringify(body);
         }
-        var url = path.indexOf('http') === 0 ? path : API + path;
+        var url = path.indexOf('http') === 0 ? path : apiUrl(path);
         var r = await fetch(url, Object.assign({}, opts, {
             credentials: 'include',
             body: body,
@@ -246,7 +268,7 @@
     var _versao = null;
     function carregarVersao() {
         if (_versao) { aplicarVersao(_versao); return; }
-        fetch(API + '/versao', { credentials: 'same-origin' })
+        fetch(apiUrl('/versao'), { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (v) { if (v) { _versao = v; aplicarVersao(v); } })
             .catch(function () {});
@@ -274,7 +296,7 @@
 
     function snPing() {
         _snUltimoPing = Date.now();
-        return fetch('/api/servicenow/session-status', { credentials: 'same-origin' })
+        return fetch(apiUrl('/servicenow/session-status'), { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) { if (d) marcarIntegracao(!!d.active); })
             .catch(function () {});
@@ -491,7 +513,7 @@
             var script = document.createElement('script');
             // O espaço Times tem os módulos dele, em pasta própria: mexer
             // num lado não muda o outro.
-            var base = ESPACO === 'times' ? '/static/modules-times/' : '/static/modules/';
+            var base = APP_BASE + (ESPACO === 'times' ? '/static/modules-times/' : '/static/modules/');
             script.src = base + name + '.js?v=' + Date.now();
             script.onload = function () {
                 delete _loadingModules[name];

@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 
 from config import get_settings
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import get_session, check_rate_limit, client_ip
 from db.portal import SessionLocal
 import db.consulta_times as dbct
@@ -72,11 +73,12 @@ def _exigir(req: Request, minimo: str) -> dict:
 
 
 # ── Página ─────────────────────────────────────────────────────────
-def _pagina() -> HTMLResponse:
+def _pagina(req: Request) -> HTMLResponse:
     html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
     # O mesmo shell do portal, marcado como espaço "times": o app.js
     # mostra só o menu deste espaço e cai na Consulta ao entrar.
-    return HTMLResponse(html.replace("<body", '<body data-espaco="times"', 1))
+    html = html.replace("<body", '<body data-espaco="times"', 1)
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 @router.get("/consulta-times", response_class=HTMLResponse)
@@ -84,7 +86,9 @@ def _pagina() -> HTMLResponse:
 def pagina(req: Request):
     sd = get_session(req, required=False)
     if not sd:
-        return RedirectResponse(f"/?next={quote('/consulta-times', safe='/')}", status_code=302)
+        base = prefixo(req)
+        return RedirectResponse(
+            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
     try:
         dbct.init_db()
     except Exception:  # noqa: BLE001
@@ -93,7 +97,7 @@ def pagina(req: Request):
         dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "negado", "/consulta-times")
         return HTMLResponse(_SEM_ACESSO, status_code=403)
     dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/consulta-times")
-    return _pagina()
+    return _pagina(req)
 
 
 # ── Consulta (a mesma do portal, sob a liberação deste espaço) ─────

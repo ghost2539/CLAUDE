@@ -59,6 +59,7 @@ from db.orcamento_exec import (
     definir_permissao_modulo, remover_permissao_modulo,
     OpexItem,
 )
+from core.prefixo import com_prefixo, destino, prefixo
 from core.security import (
     check_rate_limit, client_ip, get_session,
 )
@@ -110,9 +111,9 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page() -> HTMLResponse:
-    html = (_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("{{v}}", _asset_version()))
+def _page(req: Request) -> HTMLResponse:
+    html = (_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", _asset_version())
+    return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
 # ── Controle de acesso ────────────────────────────────────────────
@@ -140,7 +141,9 @@ def _acesso_pagina(req: Request):
     if not sd:
         # Leva o destino junto: depois do login o portal volta para cá, em vez
         # de largar quem digitou o endereço na tela de Bem-vindo.
-        return RedirectResponse(f"/?next={quote(req.url.path, safe='/')}", status_code=302)
+        base = prefixo(req)
+        return RedirectResponse(
+            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
     try:
         ensure_db()   # a trilha de acesso vive no banco do módulo
     except Exception:  # noqa: BLE001 — banco fora não impede abrir a tela
@@ -150,7 +153,7 @@ def _acesso_pagina(req: Request):
                          "sem acesso liberado ao módulo")
         return HTMLResponse(_SEM_PERMISSAO, status_code=403)
     registrar_acesso(sd.get("username", ""), client_ip(req), "abrir", "/controle-orcamento")
-    return _page()
+    return _page(req)
 
 
 # Ações da API mapeadas ao nível mínimo próprio do módulo.

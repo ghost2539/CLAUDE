@@ -46,6 +46,18 @@ class Settings:
     STATIC: Path = ROOT / "static"
     UPLOAD: Path = ROOT / "data" / "uploads"
 
+    # Prefixo do portal quando servido atrás de proxy num subcaminho
+    # (ex.: /portal-spare). Vazio = servido na raiz do domínio. O
+    # front-end lê isto e monta /static e /api já com o prefixo; sem ele,
+    # o navegador buscaria /static na raiz do domínio e receberia 404.
+    APP_BASE_PATH: str = _env("APP_BASE_PATH", "").rstrip("/")
+    # Contorno para proxy que acrescenta barra no fim por REDIRECIONAMENTO:
+    # o 301 faz o navegador reemitir um POST como GET e o login quebra. Com
+    # isto ligado, o front-end já pede a API com a barra, então não há o que
+    # o proxy acrescentar. Desligado por padrão — a raiz do domínio não muda.
+    API_BARRA_FINAL: bool = _env("API_BARRA_FINAL", "").strip().lower() in (
+        "1", "sim", "true", "yes")
+
     DATABASE_URL: str = _env("DATABASE_URL", os.environ["DATABASE_URL"])
     SESSION_SECRET: str = _env("PORTAL_SESSION_SECRET", os.environ["PORTAL_SESSION_SECRET"])
     # Ociosidade: a sessão cai depois deste tempo SEM uso. Cada pedido
