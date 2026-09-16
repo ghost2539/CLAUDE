@@ -236,4 +236,80 @@ try:
 except HTTPException as exc:
     checar(exc.status_code == 429, "6ª tentativa contra o mesmo login, de outro IP, é bloqueada")
 
+print(f"-- críticas ok ({feitos} checagens)")
+
+print("-- cofre e automação")
+import config as _config  # noqa: E402
+os.environ["SEGREDO_TESTE_COFRE"] = "s3gr3d0"
+os.environ["URL_TESTE_COFRE"] = "pg://portal:@cofre:SEGREDO_TESTE_COFRE@@host/base"
+checar(_config._env("URL_TESTE_COFRE") == "pg://portal:s3gr3d0@host/base",
+       "config expande @cofre:NOME@ (DATABASE_URL pode ficar sem senha no environment)")
+from routers import automacoes as au  # noqa: E402
+import db.automacoes as dbau  # noqa: E402
+checar(au._chave_cofre_valida("SN_AUTOMACAO_SENHA") and not au._chave_cofre_valida("DATABASE_URL")
+       and not au._chave_cofre_valida("PORTAL_SESSION_SECRET"), "chave do cofre da automação só SN_AUTOMACAO_*")
+_, cookie_adm_sn = sec.create_session({"username": "admin.teste", "is_admin": True, "role": "ADMIN",
+                                       "permissions": ["admin"], "permission_map": {}, "user_id": 1,
+                                       "ebs_auth": None, "sn_cookies": {"glide_user": "x"}})
+ADM_SN = {COOKIE: cookie_adm_sn}
+r = c.put("/api/automacoes/config", json={"enabled": False, "cofre_pass_key": "DATABASE_URL"}, cookies=ADM_SN)
+checar(r.status_code == 400, "PUT config recusa chave de cofre fora de SN_AUTOMACAO_*")
+r = c.put("/api/automacoes/config", json={"enabled": False, "horarios": "7,12"}, cookies=ADM_SN)
+checar(r.status_code == 200 and not dbau.obter_config().get("sn_cookies"),
+       "salvar a configuração não grava mais os cookies SSO do admin no banco")
+dbau.salvar_config({"sn_cookies": {"glide_user": "antigo"}})
+au.purgar_cookies_gravados()
+checar(not dbau.obter_config().get("sn_cookies"), "cookies gravados por versões antigas são purgados")
+checar(c.get("/api/automacoes/config", cookies=ADM_SN).json()["tem_sessao"] is False,
+       "tem_sessao reflete a sessão da conta de serviço, não a de usuários")
+s_rot, u_rot = au._sessao_para_rotina()
+checar(s_rot is None, "sem credencial de serviço, a rotina não pega sessão de usuário nenhum")
+
+print("-- EBS Forms: processos filhos")
+from integracoes import ebs_forms as ef  # noqa: E402
+amb = ef._ambiente_minimo()
+checar("PORTAL_SESSION_SECRET" not in amb and "DATABASE_URL" not in amb and "PATH" in amb,
+       "JVM e compositor não herdam segredos do portal")
+checar(ef.SOCKET_COMPOSITOR.endswith("-testes") and ef._DISPLAY_PADRAO == ":98",
+       "socket e display próprios do ambiente de testes")
+
+print("-- consultas ao ServiceNow codificadas")
+
+
+class _Captura:
+    def __init__(self):
+        self.chamadas = []
+
+    def get(self, url, params=None, **kw):
+        self.chamadas.append((url, params))
+
+        class R:
+            status_code = 200
+            url = "https://sn/x.do"
+            headers = {"Content-Type": "application/json"}
+
+            def json(self):
+                return {"records": []}
+        return R()
+
+
+cap = _Captura()
+sn._sn_query(cap, "alm_hardware", "asset_tag=A&B#C", "sys_id", limit=5)
+url, params = cap.chamadas[0]
+checar(url.endswith("/alm_hardware.do?JSONv2") and params["sysparm_query"] == "asset_tag=A&B#C",
+       "_sn_query passa a query por params (requests codifica & e #)")
+sn._lookup_reference(cap, "stockroom", "SPARE & CIA", {}, None)
+checar(cap.chamadas[1][1]["sysparm_query"] == "name=SPARE & CIA", "_lookup_reference idem")
+
+print("-- diagnóstico dos Correios")
+_, cookie_rastreio = sec.create_session({"username": "op.rastreio", "is_admin": False, "permissions": ["rastreio"],
+                                         "permission_map": {"rastreio": {"can_view": True}}, "user_id": 9,
+                                         "ebs_auth": None})
+checar(c.post("/api/servicenow/correios/test", cookies={COOKIE: cookie_rastreio}).status_code == 403,
+       "/correios/test só para administrador")
+
+print("-- instaladores")
+txt = open(os.path.join(RAIZ, "deploy", "instalar_testes.sh"), encoding="utf-8").read()
+checar("pg_reload_conf" not in txt and "hba_novo" not in txt, "instalador de testes não reescreve o pg_hba.conf")
+
 print(f"Segurança íntegra ({feitos} checagens).")

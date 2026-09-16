@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 import config as _config_mod
 import db.automacoes as db
-from core.security import require_permission, get_session, SESSIONS
+from core.security import require_permission, get_session
 from routers.servicenow import (
     _sn_session_from_portal, _sn_session_from_cookies, _sn_session_valida,
     _sn_query, _sn_query_all, _sn_update, _extract_tracking_code, _TRACKING_RE,
@@ -51,28 +51,32 @@ router = APIRouter(prefix="/api/automacoes", tags=["Automações"])
 
 
 # ── Credencial para a rotina 100% automática ────────────────────────────
-# Preferência: cofre (vcreports_secret) no servidor novo. Enquanto não há
-# cofre, guardamos a senha CRIPTOGRAFADA no banco de automações (chave
-# derivada do SESSION_SECRET). Nunca em texto puro.
+# Preferência: cofre (core.cofre — corporativo, local ou ambiente). Sem
+# cofre, a senha fica CIFRADA no banco de automações. Nunca em texto puro.
+# A rotina roda SEMPRE com essa conta de serviço: nunca com a sessão SSO
+# de um usuário do portal.
 def _secret(nome: str, default: str = "") -> str:
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        v = vcreports_secret(nome)
-        if v:
-            return str(v)
-    except Exception:  # noqa: BLE001
-        pass
-    return os.environ.get(nome, default)
+    from core import cofre
+    return cofre.obter(nome) or default
 
 
 DEFAULT_COFRE_USER_KEY = "SN_AUTOMACAO_USUARIO"
 DEFAULT_COFRE_PASS_KEY = "SN_AUTOMACAO_SENHA"
+# Só chaves da automação: sem isto, o admin do módulo apontaria a "senha"
+# para qualquer variável do ambiente (DATABASE_URL, PORTAL_SESSION_SECRET).
+_CHAVE_COFRE_RE = re.compile(r"^SN_AUTOMACAO_[A-Z0-9_]{1,40}$")
+
+
+def _chave_cofre_valida(chave: str) -> bool:
+    return bool(_CHAVE_COFRE_RE.match(chave or ""))
 
 
 def _cofre_keys() -> tuple[str, str]:
     cfg = db.obter_config()
-    return (cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY,
-            cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY)
+    uk = cfg.get("cofre_user_key") or DEFAULT_COFRE_USER_KEY
+    pk = cfg.get("cofre_pass_key") or DEFAULT_COFRE_PASS_KEY
+    return (uk if _chave_cofre_valida(uk) else DEFAULT_COFRE_USER_KEY,
+            pk if _chave_cofre_valida(pk) else DEFAULT_COFRE_PASS_KEY)
 
 
 def _cofre_disponivel() -> bool:
@@ -150,6 +154,11 @@ def _creds_para_login() -> tuple[str, str, str]:
     return "", "", ""
 
 
+# Sessão da conta de serviço, só em memória: cookies de SSO não vão para o
+# banco (entrariam no backup) e não se usa a sessão de nenhum usuário.
+_SESSAO_ROTINA: dict = {"session": None, "usuario": ""}
+
+
 def _login_fresh():
     """Faz login SSO fresco com a credencial (cofre/store) e devolve a sessão."""
     usuario, senha, fonte = _creds_para_login()
@@ -159,15 +168,28 @@ def _login_fresh():
     s = _sn_sessao()
     try:
         ok = _login_sso(s, usuario, senha, _req, BS)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — a rotina registra a falha
+        _log.warning("automação: login SSO da conta de serviço falhou: %s", exc)
         return None, usuario
     if ok:
-        try:
-            db.salvar_config({"sn_cookies": dict(s.cookies), "usuario": usuario})
-        except Exception:  # noqa: BLE001
-            pass
+        _SESSAO_ROTINA.update(session=s, usuario=usuario)
         return s, usuario
     return None, usuario
+
+
+def _tem_sessao_rotina() -> bool:
+    return _SESSAO_ROTINA.get("session") is not None
+
+
+def purgar_cookies_gravados() -> None:
+    """Versões anteriores guardavam cookies SSO de usuários no banco. Limpa."""
+    try:
+        cfg = db.obter_config()
+        if cfg.get("sn_cookies"):
+            db.salvar_config({"sn_cookies": None})
+            _log.info("automação: cookies SSO antigos removidos do banco")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("automação: não limpei cookies antigos: %s", exc)
 
 
 def _monitor(alvo: str, detalhe: str, usuario: str = "", severidade: str = "erro") -> None:
@@ -436,8 +458,8 @@ def config_get(req: Request):
         return {
             "enabled": bool(cfg.get("enabled", False)),
             "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
-            "tem_sessao": bool(cfg.get("sn_cookies")),
-            "usuario": cfg.get("usuario", ""),
+            "tem_sessao": _tem_sessao_rotina(),
+            "usuario": _SESSAO_ROTINA.get("usuario", ""),
             "ultima_execucao": cfg.get("ultima_execucao", ""),
             "somente_leitura": True,
         }
@@ -445,8 +467,8 @@ def config_get(req: Request):
         "enabled": bool(cfg.get("enabled", False)),
         "horarios": cfg.get("horarios") or _cfg.AUTOMACOES_HORARIOS,
         "tracking_field": cfg.get("tracking_field") or DEFAULT_TRACKING_FIELD,
-        "usuario": cfg.get("usuario", ""),
-        "tem_sessao": bool(cfg.get("sn_cookies")),
+        "usuario": _SESSAO_ROTINA.get("usuario", ""),
+        "tem_sessao": _tem_sessao_rotina(),
         "ultima_execucao": cfg.get("ultima_execucao", ""),
         # 100% automático:
         "cofre_disponivel": _cofre_disponivel(),
@@ -477,14 +499,12 @@ def config_put(body: ConfigIn, req: Request):
         dados["horarios"] = body.horarios.strip()
     if body.tracking_field.strip():
         dados["tracking_field"] = body.tracking_field.strip()
-    if body.cofre_user_key.strip():
-        dados["cofre_user_key"] = body.cofre_user_key.strip()
-    if body.cofre_pass_key.strip():
-        dados["cofre_pass_key"] = body.cofre_pass_key.strip()
-    # Captura a sessão SN do usuário que ativou, para a rotina rodar como ele.
-    if sd.get("sn_cookies"):
-        dados["sn_cookies"] = sd["sn_cookies"]
-        dados["usuario"] = sd.get("username", "")
+    for campo in ("cofre_user_key", "cofre_pass_key"):
+        valor = getattr(body, campo).strip()
+        if valor:
+            if not _chave_cofre_valida(valor):
+                raise HTTPException(400, f"{campo}: use uma chave SN_AUTOMACAO_... (letras, números e _).")
+            dados[campo] = valor
     # Credencial para automação 100% (guardada CRIPTOGRAFADA; no servidor novo,
     # prefira o cofre: SN_AUTOMACAO_USUARIO / SN_AUTOMACAO_SENHA).
     if body.limpar_credencial:
@@ -509,11 +529,6 @@ def run_now(req: Request):
     quem não pode encerrar um chamado lá também não consegue por aqui."""
     sd = get_session(req)
     session = _sn_session_from_portal(req)
-    # Aproveita para atualizar a sessão salva (mantém a rotina agendada viva).
-    try:
-        db.salvar_config({"sn_cookies": sd.get("sn_cookies"), "usuario": sd.get("username", "")})
-    except Exception:  # noqa: BLE001
-        pass
     resumo = _rodar(session, origem="botao", usuario=sd.get("username", ""))
     return {"ok": True, "resumo": resumo}
 
@@ -534,37 +549,17 @@ def _horarios() -> set[int]:
 
 
 def _sessao_para_rotina():
-    """Sessão SN para a rotina: usa a salva do usuário; se inválida, procura uma
-    sessão viva do mesmo usuário no portal. Retorna (session, usuario) ou (None, '')."""
-    cfg = db.obter_config()
-    usuario = cfg.get("usuario", "")
-    cookies = cfg.get("sn_cookies")
-    if cookies:
-        s = _sn_session_from_cookies(cookies)
-        if s and _sn_session_valida(s):
-            return s, usuario
-    # Procura sessão viva do mesmo usuário (ou qualquer uma com cookies válidos).
-    candidatos = []
-    for sd in list(SESSIONS.values()):
-        if sd.get("sn_cookies"):
-            if usuario and sd.get("username") == usuario:
-                candidatos.insert(0, sd)
-            else:
-                candidatos.append(sd)
-    for sd in candidatos:
-        s = _sn_session_from_cookies(sd.get("sn_cookies"))
-        if s and _sn_session_valida(s):
-            # atualiza a sessão salva
-            try:
-                db.salvar_config({"sn_cookies": sd["sn_cookies"], "usuario": sd.get("username", usuario)})
-            except Exception:  # noqa: BLE001
-                pass
-            return s, sd.get("username", usuario)
-    # Último recurso: login SSO fresco com a credencial do cofre/store (100%).
+    """Sessão SN da rotina agendada: a da conta de serviço, mantida em memória
+    enquanto válida; senão um login SSO fresco com a credencial do cofre/store.
+    Retorna (session, usuario) ou (None, '')."""
+    s = _SESSAO_ROTINA.get("session")
+    if s is not None and _sn_session_valida(s):
+        return s, _SESSAO_ROTINA.get("usuario", "")
+    _SESSAO_ROTINA.update(session=None)
     s, u = _login_fresh()
     if s:
-        return s, (u or usuario)
-    return None, usuario
+        return s, u
+    return None, u
 
 
 def _scheduler_loop() -> None:
@@ -600,6 +595,7 @@ def start_scheduler() -> None:
     global _scheduler_started
     if _scheduler_started:
         return
+    purgar_cookies_gravados()
     if getattr(_cfg, "TESTES", False):
         # Ambiente de testes com cópia da configuração de produção: o
         # agendador rodaria a rotina dos Correios em dobro no ServiceNow.

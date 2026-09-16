@@ -484,7 +484,7 @@ async function renderAutomacoes(c, S) {
                         '<div style="padding-top:6px">' + S.esc(cfg.horarios || '') + '</div></div>' +
                     '<div class="form-group"><label>Sessão para a rotina</label>' +
                         '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
-                        (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
+                        (cfg.tem_sessao ? ('Ativa (conta de serviço ' + S.esc(cfg.usuario || '') + ')') : 'Sem sessão da conta de serviço — o login acontece no próximo horário, com a credencial do cofre') +
                         '</div></div>' +
                     '<div class="form-group"><label>Última execução</label>' +
                         '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
@@ -512,7 +512,7 @@ async function renderAutomacoes(c, S) {
                     '<small class="text-muted">padrão: sys_tags</small></div>' +
                 '<div class="form-group"><label>Sessão para a rotina</label>' +
                     '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' +
-                    (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
+                    (cfg.tem_sessao ? ('Ativa (conta de serviço ' + S.esc(cfg.usuario || '') + ')') : 'Sem sessão da conta de serviço — o login acontece no próximo horário, com a credencial do cofre') +
                     (cfg.ultima_execucao ? ('<br>Última execução: ' + S.esc(cfg.ultima_execucao)) : '') +
                     '</div></div>' +
             '</div>' +

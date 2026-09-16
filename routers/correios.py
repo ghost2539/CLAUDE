@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Request, HTTPException
 
-from core.security import require_permission
+from core.security import require_permission, require_admin
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
@@ -71,20 +71,9 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Lê um segredo do cofre `vcreports_secrets` (servidor novo); se ele não
-    estiver disponível, cai para variável de ambiente (servidor atual/transição).
-
-    No servidor novo as credenciais dos Correios NÃO ficam em variável de
-    ambiente nem em arquivo — vêm somente do cofre, que só a aplicação lê.
-    """
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        val = vcreports_secret(nome)
-        if val:
-            return str(val)
-    except Exception:
-        pass
-    return os.environ.get(nome, default)
+    """Segredo pelo cofre (core.cofre: corporativo, local, ambiente)."""
+    from core import cofre
+    return cofre.obter(nome) or default
 
 
 def _correios_creds():
@@ -433,7 +422,9 @@ def correios_rastrear_lote(body: dict, req: Request):
 @router.post("/correios/test")
 def correios_test(req: Request):
     """Testa conexão com Correios mostrando detalhes de cada etapa."""
-    require_permission(req, "rastreio", "view")
+    # Diagnóstico de credencial: só administrador, e a resposta não carrega
+    # usuário completo, cartões nem token.
+    require_admin(req)
     _check_credenciais()
     _correios_token_cache.clear()
 
@@ -444,8 +435,8 @@ def correios_test(req: Request):
 
     result = {
         "config": {
-            "usuario": usuario,
-            "cartoes": cartoes,
+            "usuario": (usuario[:2] + "***") if usuario else "",
+            "cartoes": len(cartoes),
             "proxy": SN_PROXY or "(direto)",
         }
     }
@@ -462,7 +453,7 @@ def correios_test(req: Request):
         )
         result["1_auth_basica"] = {
             "status": r.status_code,
-            "response": r.text[:600],
+            "response": "(token omitido)" if r.status_code in (200, 201) else r.text[:600],
         }
         if r.status_code not in (200, 201):
             return result
@@ -502,7 +493,7 @@ def correios_test(req: Request):
             )
             result[f"2_cartao_{cartao}"] = {
                 "status": r_cp.status_code,
-                "response": r_cp.text[:300],
+                "response": "(token omitido)" if r_cp.status_code in (200, 201) else r_cp.text[:300],
             }
             if r_cp.status_code in (200, 201) and not token_cp:
                 token_cp = r_cp.json().get("token", "")

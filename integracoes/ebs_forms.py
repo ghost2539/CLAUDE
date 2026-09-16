@@ -64,6 +64,24 @@ def _c(nome: str, padrao: str = "") -> str:
     return getattr(_cfg, nome, padrao) or padrao
 
 
+# Socket do compositor e display: um por ambiente (produção e testes rodam
+# no mesmo servidor com o mesmo usuário; sem isto uma instância derruba a
+# tela virtual da outra).
+_AMBIENTE = getattr(_cfg, "AMBIENTE", "producao") or "producao"
+SOCKET_COMPOSITOR = f"portal-ebs-forms-{_AMBIENTE}"
+_DISPLAY_PADRAO = ":98" if getattr(_cfg, "TESTES", False) else ":99"
+
+# Só o que o compositor e a JVM precisam. Nada de segredo do portal
+# (DATABASE_URL, PORTAL_SESSION_SECRET, senhas) chega a processo filho.
+_ENV_HERDADO = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL",
+                "LC_CTYPE", "TZ", "TMPDIR", "JAVA_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME",
+                "XDG_CONFIG_HOME", "XAUTHORITY")
+
+
+def _ambiente_minimo() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k in _ENV_HERDADO}
+
+
 class ErroForms(RuntimeError):
     """Falha esperável do RPA (login, jnlp, JVM, roteiro) — vai para o log da execução."""
 
@@ -141,6 +159,9 @@ class Sessao:
             self.http.trust_env = False
         self.home = _c("EBS_FORMS_HOME_URL",
                        "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE")
+        if self.home.lower().startswith("http://"):
+            # A senha do robô sai no POST de login: sem TLS ela cruza a rede em claro.
+            _log.warning("EBS_FORMS_HOME_URL em http:// — a senha do robô trafega sem TLS; use https://")
         self.timeout = int(_c("EBS_FORMS_TIMEOUT", "40"))
         self._registrar = registrar or (lambda m: _log.info("%s", m))
         self.jnlp_pronto: str = ""
@@ -366,7 +387,7 @@ class Xvfb:
 
     @classmethod
     def garantir(cls) -> str:
-        display = _c("EBS_FORMS_DISPLAY", ":99")
+        display = _c("EBS_FORMS_DISPLAY", _DISPLAY_PADRAO)
         if cls._proc and cls._proc.poll() is None:
             return cls._display
         if not _display_livre(display):
@@ -422,14 +443,14 @@ class Xvfb:
         # Sobras de uma rodada anterior (Weston órfão, lock e socket) impedem
         # o novo de subir: "unable to lock lockfile". Só mexemos no nosso
         # socket nomeado, nunca em outro compositor da máquina.
-        subprocess.run(["pkill", "-f", "weston .*--socket=portal-ebs-forms"], capture_output=True)
+        subprocess.run(["pkill", "-f", f"weston .*--socket={SOCKET_COMPOSITOR}( |$)"], capture_output=True)
         time.sleep(0.3)
-        for sobra in ("portal-ebs-forms", "portal-ebs-forms.lock"):
+        for sobra in (SOCKET_COMPOSITOR, f"{SOCKET_COMPOSITOR}.lock"):
             try:
                 (runtime / sobra).unlink()
             except FileNotFoundError:
                 pass
-        env = dict(os.environ)
+        env = _ambiente_minimo()
         env["XDG_RUNTIME_DIR"] = str(runtime)
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
@@ -439,7 +460,7 @@ class Xvfb:
         # da máquina; o acesso é o do túnel SSH.
         porta_vnc = _c("EBS_FORMS_VNC_PORTA", "5900")
         comum = ["--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
-                 "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
+                 f"--socket={SOCKET_COMPOSITOR}", "--idle-time=0", f"--log={log_path}"]
         tentativas: list[list[str]] = []
         if _c("EBS_FORMS_VNC", "nao").lower() in ("sim", "true", "1"):
             # O backend VNC varia entre versões (TLS obrigatório, opções com
@@ -540,7 +561,7 @@ class Cliente:
             compilar()
         display = Xvfb.garantir()
         java = _c("EBS_FORMS_JAVA") or shutil.which("java") or "java"
-        env = dict(os.environ)
+        env = _ambiente_minimo()
         env["DISPLAY"] = display
         if Xvfb._xdg_runtime:
             env["XDG_RUNTIME_DIR"] = Xvfb._xdg_runtime
@@ -1123,7 +1144,7 @@ def diagnostico() -> dict[str, Any]:
         cred = f"ok ({usuario})"
     except ErroForms as exc:
         cred = str(exc)
-    display = _c("EBS_FORMS_DISPLAY", ":99")
+    display = _c("EBS_FORMS_DISPLAY", _DISPLAY_PADRAO)
     return {
         "java": java or "", "java_versao": versao, "javac": javac or "",
         "lancador_compilado": compilado(),

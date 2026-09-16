@@ -38,15 +38,9 @@ COFRE_SMTP_PASS_KEY = "SMTP_SENHA"
 
 # ── Cofre / criptografia local ──────────────────────────────────────────
 def _secret(nome: str, default: str = "") -> str:
-    """Cofre corporativo quando existir; senão variável de ambiente."""
-    try:
-        from vcreports_secrets import vcreports_secret  # type: ignore
-        v = vcreports_secret(nome)
-        if v:
-            return str(v)
-    except Exception:  # noqa: BLE001
-        pass
-    return os.environ.get(nome, default)
+    """Segredo pelo cofre (core.cofre: corporativo, local, ambiente)."""
+    from core import cofre
+    return cofre.obter(nome) or default
 
 
 def _fernet():

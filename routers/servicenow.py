@@ -280,14 +280,13 @@ def _lookup_reference(session, field, display_value, cache, BS):
     name_field = REFERENCE_NAME_FIELD.get(field, "name")
     if not table:
         return display_value
-    url = (
-        f"{SERVICENOW_BASE}/{table}.do?JSONv2"
-        f"&sysparm_action=getRecords"
-        f"&sysparm_record_count=1"
-        f"&sysparm_query={name_field}={display_value}"
-    )
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
     try:
-        r = session.get(url, headers={
+        r = session.get(url, params={
+            "sysparm_action": "getRecords",
+            "sysparm_record_count": "1",
+            "sysparm_query": f"{name_field}={display_value}",
+        }, headers={
             "Accept": "application/json",
             "X-Requested-With": "XMLHttpRequest",
         }, timeout=15)
@@ -376,20 +375,19 @@ def termo_sn(valor: str, rotulo: str = "valor") -> str:
 def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_value=True):
     """Query ServiceNow via JSONv2 API (works with SSO cookies).
     Returns list of records."""
-    params = [
-        f"sysparm_action=getRecords",
-        f"sysparm_record_count={limit}",
-    ]
+    # Parâmetros codificados pelo requests: um "&" ou "#" num valor não
+    # injeta nem trunca a query string.
+    params = {"sysparm_action": "getRecords", "sysparm_record_count": str(limit)}
     if query:
-        params.append(f"sysparm_query={query}")
+        params["sysparm_query"] = query
     if fields:
-        params.append(f"sysparm_fields={fields}")
+        params["sysparm_fields"] = fields
     if offset:
-        params.append(f"sysparm_first_row={offset}")
+        params["sysparm_first_row"] = str(offset)
     if display_value:
-        params.append("displayvalue=true")
-    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&{'&'.join(params)}"
-    r = session.get(url, headers={
+        params["displayvalue"] = "true"
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
+    r = session.get(url, params=params, headers={
         "Accept": "application/json",
         "X-Requested-With": "XMLHttpRequest",
     }, timeout=30)

@@ -6,6 +6,19 @@ from functools import lru_cache
 _ROOT = Path(__file__).parent
 
 
+def _env(nome: str, padrao: str = "") -> str:
+    """Variável de ambiente com `@cofre:NOME@` já trocado pelo segredo.
+
+    É o que deixa o `environment` legível e sem senha:
+    DATABASE_URL=postgresql+psycopg://portal:@cofre:DB_SENHA@@host:5432/base
+    """
+    v = os.getenv(nome, padrao)
+    if v and "@cofre:" in v:
+        from core.cofre import expandir  # tardio: o cofre não depende do config
+        v = expandir(v)
+    return v
+
+
 def _sqlite(nome: str) -> str:
     """URL do banco SQLite `nome`, guardado em `data/db/`.
 
@@ -33,8 +46,8 @@ class Settings:
     STATIC: Path = ROOT / "static"
     UPLOAD: Path = ROOT / "data" / "uploads"
 
-    DATABASE_URL: str = os.environ["DATABASE_URL"]
-    SESSION_SECRET: str = os.environ["PORTAL_SESSION_SECRET"]
+    DATABASE_URL: str = _env("DATABASE_URL", os.environ["DATABASE_URL"])
+    SESSION_SECRET: str = _env("PORTAL_SESSION_SECRET", os.environ["PORTAL_SESSION_SECRET"])
     SESSION_TTL: int = int(os.getenv("SESSION_TTL_MINUTES", "480")) * 60
 
     EBS_LOGIN_URL: str = os.getenv("EBS_LOGIN_URL", "")
@@ -65,7 +78,7 @@ class Settings:
 
     DEFAULT_HOURLY_RATE: float = float(os.getenv("DEFAULT_VALOR_HORA", "150"))
     INITIAL_ADMIN_LOGIN: str = os.getenv("INITIAL_ADMIN_LOGIN", "")
-    INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+    INITIAL_ADMIN_PASSWORD: str = _env("INITIAL_ADMIN_PASSWORD", "")
     # Admin geral: o único que altera identidade do portal (ícone). Em
     # branco, vale o INITIAL_ADMIN_LOGIN.
     ADMIN_GERAL_LOGIN: str = os.getenv("ADMIN_GERAL_LOGIN", "")
@@ -86,7 +99,7 @@ class Settings:
 
     # ── Indicadores (RMR) — módulo isolado em /indicadores ──────────────
     # Banco próprio, separado do resto do sistema. Default: SQLite local.
-    INDICADORES_DATABASE_URL: str = os.getenv(
+    INDICADORES_DATABASE_URL: str = _env(
         "INDICADORES_DATABASE_URL",
         _sqlite("indicadores"),
     )
@@ -94,7 +107,7 @@ class Settings:
     # A senha nunca fica no repositório; vem do ambiente / systemd-creds.
     SN_API_BASE: str = os.getenv("SN_API_BASE", "https://renner.service-now.com")
     SN_API_USER: str = os.getenv("SN_API_USER", "")
-    SN_API_PASS: str = os.getenv("SN_API_PASS", "")
+    SN_API_PASS: str = _env("SN_API_PASS", "")
     # Proxy de saída (com a senha do @ escapada como %40). Reaproveita o
     # https_proxy do ambiente se não houver um específico.
     # Usa, por padrão, o MESMO proxy que o portal já usa para o ServiceNow
@@ -154,7 +167,7 @@ class Settings:
 
     # ── Automações (encerramento/encaminhamento) — módulo isolado ───────
     # Banco próprio, separado do portal. Default: SQLite local.
-    AUTOMACOES_DATABASE_URL: str = os.getenv(
+    AUTOMACOES_DATABASE_URL: str = _env(
         "AUTOMACOES_DATABASE_URL",
         _sqlite("automacoes"),
     )
@@ -162,7 +175,7 @@ class Settings:
     AUTOMACOES_HORARIOS: str = os.getenv("AUTOMACOES_HORARIOS", "7,12,16")
 
     # ── Monitoramento (saúde e falhas) — módulo isolado ─────────────────
-    MONITORAMENTO_DATABASE_URL: str = os.getenv(
+    MONITORAMENTO_DATABASE_URL: str = _env(
         "MONITORAMENTO_DATABASE_URL",
         _sqlite("monitoramento"),
     )
@@ -180,21 +193,21 @@ class Settings:
 
     # ── Orçamento do SPARE (CAPEX da área) — módulo isolado ─────────────
     # Banco PRÓPRIO, separado do /controle-orcamento e do portal.
-    ORCAMENTO_SPARE_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_SPARE_DATABASE_URL: str = _env(
         "ORCAMENTO_SPARE_DATABASE_URL",
         _sqlite("orcamento_spare"),
     )
 
     # ── Orçamento de Manutenção (reparo de coletores e SLEDs) — módulo isolado
     # Banco PRÓPRIO; contrato em docs/ORCAMENTO_MANUTENCAO.md.
-    ORCAMENTO_MANUTENCAO_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_MANUTENCAO_DATABASE_URL: str = _env(
         "ORCAMENTO_MANUTENCAO_DATABASE_URL",
         _sqlite("orcamento_manutencao"),
     )
 
     # ── Obsolescência do parque de coletores (/obsolescencia) ───────────
     # Banco PRÓPRIO; contrato em docs/MDM_OBSOLESCENCIA.md.
-    OBSOLESCENCIA_DATABASE_URL: str = os.getenv(
+    OBSOLESCENCIA_DATABASE_URL: str = _env(
         "OBSOLESCENCIA_DATABASE_URL",
         _sqlite("obsolescencia"),
     )
@@ -208,98 +221,98 @@ class Settings:
     # ── Trilha do Ativo (núcleo de rastreabilidade e relógios) ──────────
     # Banco próprio: é a espinha dos processos e não divide arquivo com
     # nenhum módulo de tela.
-    TRILHA_DATABASE_URL: str = os.getenv(
+    TRILHA_DATABASE_URL: str = _env(
         "TRILHA_DATABASE_URL",
         _sqlite("trilha"),
     )
 
     # ── Separação e Expedição (A15) ─────────────────────────────────────
-    SEPARACAO_DATABASE_URL: str = os.getenv(
+    SEPARACAO_DATABASE_URL: str = _env(
         "SEPARACAO_DATABASE_URL",
         _sqlite("separacao"),
     )
 
     # ── Projetos de loja (A16) ──────────────────────────────────────────
-    PROJETOS_DATABASE_URL: str = os.getenv(
+    PROJETOS_DATABASE_URL: str = _env(
         "PROJETOS_DATABASE_URL",
         _sqlite("projetos"),
     )
 
     # ── Logística reversa (A17) ─────────────────────────────────────────
-    REVERSA_DATABASE_URL: str = os.getenv(
+    REVERSA_DATABASE_URL: str = _env(
         "REVERSA_DATABASE_URL",
         _sqlite("reversa"),
     )
 
     # ── Inventário e contagem (A18) ─────────────────────────────────────
-    INVENTARIO_DATABASE_URL: str = os.getenv(
+    INVENTARIO_DATABASE_URL: str = _env(
         "INVENTARIO_DATABASE_URL",
         _sqlite("inventario"),
     )
 
     # ── Venda de ativos (A11) ───────────────────────────────────────────
-    VENDA_DATABASE_URL: str = os.getenv(
+    VENDA_DATABASE_URL: str = _env(
         "VENDA_DATABASE_URL",
         _sqlite("venda"),
     )
 
     # ── Regularização de ativo (A19) ────────────────────────────────────
-    REGULARIZACAO_DATABASE_URL: str = os.getenv(
+    REGULARIZACAO_DATABASE_URL: str = _env(
         "REGULARIZACAO_DATABASE_URL",
         _sqlite("regularizacao"),
     )
 
     # ── Planejamento de compras (Orçamento Spare) ───────────────────────
-    PLANEJAMENTO_DATABASE_URL: str = os.getenv(
+    PLANEJAMENTO_DATABASE_URL: str = _env(
         "PLANEJAMENTO_DATABASE_URL",
         _sqlite("planejamento_spare"),
     )
 
     # ── Consulta Times (acesso específico) ──────────────────────────────
-    CONSULTA_TIMES_DATABASE_URL: str = os.getenv(
+    CONSULTA_TIMES_DATABASE_URL: str = _env(
         "CONSULTA_TIMES_DATABASE_URL",
         _sqlite("consulta_times"),
     )
 
     # ── Atendimento a chamados (A20) ────────────────────────────────────
-    ATENDIMENTO_DATABASE_URL: str = os.getenv(
+    ATENDIMENTO_DATABASE_URL: str = _env(
         "ATENDIMENTO_DATABASE_URL",
         _sqlite("atendimento"),
     )
 
     # ── Bancadas de triagem e reparo (A02, A03, A04) ────────────────────
-    BANCADA_DATABASE_URL: str = os.getenv(
+    BANCADA_DATABASE_URL: str = _env(
         "BANCADA_DATABASE_URL",
         _sqlite("bancada"),
     )
 
     # ── Preparação: configuração, montagem e internalização ─────────────
-    PREPARACAO_DATABASE_URL: str = os.getenv(
+    PREPARACAO_DATABASE_URL: str = _env(
         "PREPARACAO_DATABASE_URL",
         _sqlite("preparacao"),
     )
 
     # ── Destinação (A09 a A13) ──────────────────────────────────────────
-    DESTINACAO_DATABASE_URL: str = os.getenv(
+    DESTINACAO_DATABASE_URL: str = _env(
         "DESTINACAO_DATABASE_URL",
         _sqlite("destinacao"),
     )
 
     # ── Assistência externa e devolução a terceiros (A05, A14) ──────────
-    EXTERNO_DATABASE_URL: str = os.getenv(
+    EXTERNO_DATABASE_URL: str = _env(
         "EXTERNO_DATABASE_URL",
         _sqlite("externo"),
     )
 
     # ── Controle de Orçamento — Execução CAPEX (/controle-orcamento) ────
     # Banco próprio, separado do portal. Default: SQLite local.
-    ORCAMENTO_EXEC_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_EXEC_DATABASE_URL: str = _env(
         "ORCAMENTO_EXEC_DATABASE_URL",
         _sqlite("controle_orcamento_exec"),
     )
     # ── Orçamento Spare (CAPEX + OPEX da área) — mesma tela do Infra CSC,
     #    banco e permissão próprios ─────────────────────────────────────
-    ORCAMENTO_SPARE_EXEC_DATABASE_URL: str = os.getenv(
+    ORCAMENTO_SPARE_EXEC_DATABASE_URL: str = _env(
         "ORCAMENTO_SPARE_EXEC_DATABASE_URL",
         _sqlite("orcamento_spare_exec"),
     )
@@ -314,10 +327,10 @@ class Settings:
     # Autenticação da API de CAPEX (a API exige credencial em chamadas de servidor).
     # Opção A — Basic auth (usuário/senha):
     EBS_CAPEX_USER: str = os.getenv("EBS_CAPEX_USER", "")
-    EBS_CAPEX_PASS: str = os.getenv("EBS_CAPEX_PASS", "")
+    EBS_CAPEX_PASS: str = _env("EBS_CAPEX_PASS", "")
     # Opção B — token/header (ex.: Bearer). Se EBS_CAPEX_TOKEN estiver definido,
     # é enviado como  "<EBS_CAPEX_TOKEN_SCHEME> <token>"  no header indicado.
-    EBS_CAPEX_TOKEN: str = os.getenv("EBS_CAPEX_TOKEN", "")
+    EBS_CAPEX_TOKEN: str = _env("EBS_CAPEX_TOKEN", "")
     EBS_CAPEX_TOKEN_SCHEME: str = os.getenv("EBS_CAPEX_TOKEN_SCHEME", "Bearer")
     EBS_CAPEX_AUTH_HEADER: str = os.getenv("EBS_CAPEX_AUTH_HEADER", "Authorization")
     # Conversão de moeda para projetos de Argentina (ARS) e Uruguai (UYU) → BRL.
@@ -339,7 +352,7 @@ class Settings:
     # ── EBS Forms (RPA sobre o cliente Oracle Forms) — aditivo ──────────
     # Usuário/senha do robô vêm do cofre local (EBS_FORMS_USER / EBS_FORMS_PASS),
     # resolvidos dentro de integracoes/ebs_forms.py.
-    EBS_FORMS_DATABASE_URL: str = os.getenv("EBS_FORMS_DATABASE_URL") or _sqlite("ebs_forms")
+    EBS_FORMS_DATABASE_URL: str = _env("EBS_FORMS_DATABASE_URL") or _sqlite("ebs_forms")
     EBS_FORMS_HOME_URL: str = os.getenv(
         "EBS_FORMS_HOME_URL",
         "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE",
@@ -351,7 +364,7 @@ class Settings:
     EBS_FORMS_PROXY: str = os.getenv("EBS_FORMS_PROXY", "")
     EBS_FORMS_VERIFY: str = os.getenv("EBS_FORMS_VERIFY", "")  # em branco segue VERIFY_SSL
     EBS_FORMS_TIMEOUT: str = os.getenv("EBS_FORMS_TIMEOUT", "40")
-    EBS_FORMS_DISPLAY: str = os.getenv("EBS_FORMS_DISPLAY", ":99")
+    EBS_FORMS_DISPLAY: str = os.getenv("EBS_FORMS_DISPLAY", "")  # vazio: :99 (produção) / :98 (testes)
     EBS_FORMS_TELA: str = os.getenv("EBS_FORMS_TELA", "1280x900x24")
     EBS_FORMS_JAVA: str = os.getenv("EBS_FORMS_JAVA", "")
     EBS_FORMS_JAVAC: str = os.getenv("EBS_FORMS_JAVAC", "")

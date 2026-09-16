@@ -103,6 +103,12 @@ atualizar)
     # só para este comando.
     cd "$APP_DIR" || exit 1
     echo "== Atualizando a partir do GitHub =="
+    # Token colado na URL do remoto fica gravado em .git/config, legível por
+    # quem abrir a pasta. Avisa; o clone deve usar credential helper ou deploy key.
+    if git config --get remote.origin.url 2>/dev/null | grep -Eq '://[^/@]+:[^/@]+@'; then
+        echo "AVISO: a URL do remoto origin contém usuário:token. Remova com"
+        echo "       git remote set-url origin <URL sem credencial> e use um credential helper."
+    fi
     env -u https_proxy -u http_proxy -u HTTPS_PROXY -u HTTP_PROXY \
         git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" || {
         echo "ERRO no git pull. Nada foi alterado."; exit 1; }
