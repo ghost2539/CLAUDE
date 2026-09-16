@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """TMA dos chamados do Spare a partir de uma planilha de INCs, consultando o SN.
 
+Script AUTÔNOMO: não depende de nada do portal. Só precisa de Python 3,
+`requests` e `openpyxl`. A autenticação é HTTP Basic com uma CONTA DE SERVIÇO
+do ServiceNow (não usa SSO) — o usuário e a senha são informados na hora.
+
 A planilha (coluna 'Tarefa') dá os números dos chamados; TODO o resto vem do
-ServiceNow, consultado em LOTES com a conta de serviço (SN_API_USER/PASS):
+ServiceNow, consultado em LOTES:
 
 - incident:            sys_id, subcategory, opened_at, resolved_at, assignment_group
 - sys_journal_field:   work notes/comments — confirma apontamento do time
@@ -16,14 +20,23 @@ Janela de atendimento (do mais novo para o mais antigo, tratando "bouncing"):
              resolvido dentro do Spare, a data de RESOLVIDO (resolved_at).
 - TMA      = Saída − Entrada, em DIAS: corrido e útil (sem sábado/domingo).
 
-Uso (no servidor, no venv do portal):
-    python3 scripts/tma_chamados.py ENTRADA.xlsx [SAIDA.xlsx] [--limit N] [--selftest]
+Uso:
+    python3 tma_chamados.py ENTRADA.xlsx [SAIDA.xlsx] [opções]
 
-Credenciais: lidas de SN_API_USER / SN_API_PASS / SN_API_PROXY no ambiente;
-se ausentes, tenta ler de /etc/portal_operacoes_spare/environment.
+Opções:
+    --limit N        processa só os N primeiros chamados (teste)
+    --usuario NOME   conta de serviço (senão, pergunta na hora)
+    --instancia URL  base do ServiceNow (padrão: https://renner.service-now.com)
+    --proxy URL      proxy https, se necessário (ex.: http://10.115.35.45:8888)
+    --sem-proxy      força NÃO usar proxy
+    --selftest       roda só o autoteste da lógica (sem SN)
+
+O usuário pode vir por --usuario ou pela variável SN_USER; a senha, pela
+variável SN_PASS ou digitada na hora (getpass, não aparece na tela).
 """
 from __future__ import annotations
 
+import getpass
 import os
 import re
 import sys
@@ -31,14 +44,8 @@ import time
 import unicodedata
 from datetime import datetime, timedelta
 
-# Garante que a RAIZ do projeto esteja no path (import routers/core funciona
-# mesmo rodando "venv/bin/python scripts/tma_chamados.py", quando o Python
-# coloca scripts/ no path em vez da raiz).
-_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _RAIZ not in sys.path:
-    sys.path.insert(0, _RAIZ)
-
 SPARE_GRUPO = "TI_N2_FLD_RNR_LOJAS_SPARE"
+SN_BASE_PADRAO = "https://renner.service-now.com"
 APONTAMENTOS = ("modalidade de envio", "modalidade envio")
 
 # Lotes: gentis com a conta de serviço.
@@ -295,45 +302,71 @@ def carregar_incs(caminho: str):
     return out
 
 
-# ── Credenciais e sessão SN ─────────────────────────────────────────────────
-def _carregar_env_arquivo():
-    """Se as SN_API_* não estão no ambiente, tenta o environment do serviço."""
-    if os.environ.get("SN_API_USER") and os.environ.get("SN_API_PASS"):
-        return
-    for caminho in ("/etc/portal_operacoes_spare/environment",
-                    "/var/www/vcreports/portal-spare/data/environment"):
+# ── Credenciais e sessão SN (Basic Auth — conta de serviço) ─────────────────
+def _get_requests():
+    try:
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return requests
+    except ImportError:
+        raise SystemExit("Pacote 'requests' não instalado. Rode: pip install requests")
+
+
+def obter_credenciais(usuario_cli=None):
+    """Usuário/senha da conta de serviço, informados na hora (ou por env/CLI)."""
+    usuario = usuario_cli or os.environ.get("SN_USER") or ""
+    if not usuario:
         try:
-            with open(caminho, encoding="utf-8") as f:
-                for linha in f:
-                    linha = linha.strip()
-                    if not linha or linha.startswith("#") or "=" not in linha:
-                        continue
-                    k, _, v = linha.partition("=")
-                    k, v = k.strip(), v.strip().strip('"').strip("'")
-                    if k.startswith("SN_API_") and k not in os.environ:
-                        os.environ[k] = v
-        except OSError:
-            continue
+            usuario = input("Usuário da conta de serviço do ServiceNow: ").strip()
+        except EOFError:
+            usuario = ""
+    if not usuario:
+        raise SystemExit("Usuário não informado.")
+    senha = os.environ.get("SN_PASS") or ""
+    if not senha:
+        senha = getpass.getpass(f"Senha de {usuario} (não aparece na tela): ")
+    if not senha:
+        raise SystemExit("Senha não informada.")
+    return usuario, senha
 
 
-def abrir_sessao_sn():
-    """Sessão requests autenticada no SN via SSO com a conta de serviço."""
-    _carregar_env_arquivo()
-    user = os.environ.get("SN_API_USER", "")
-    pwd = os.environ.get("SN_API_PASS", "")
-    if not user or not pwd:
-        raise SystemExit("SN_API_USER / SN_API_PASS não definidos no ambiente.")
-    from routers.servicenow import _get_http, _login_sso, SERVICENOW_BASE, SN_PROXY
-    req, BS = _get_http()
-    session = req.Session()
+def abrir_sessao_sn(base, usuario, senha, proxy=None):
+    """Sessão requests com HTTP Basic Auth (conta de serviço, sem SSO).
+
+    Faz um GET de teste no incident (1 registro) para validar o login antes
+    de começar os lotes. Retorna a sessão pronta.
+    """
+    requests = _get_requests()
+    session = requests.Session()
     session.verify = False
-    proxy = os.environ.get("SN_API_PROXY", SN_PROXY)
+    session.auth = (usuario, senha)
+    session.headers.update({
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    })
     if proxy:
         session.proxies = {"https": proxy, "http": proxy}
-    print(f"[SN] Login SSO como {user} …")
-    if not _login_sso(session, user, pwd, None, BS):
-        raise SystemExit("Login SSO no ServiceNow falhou (confira SN_API_USER/PASS).")
-    print("[SN] Login OK.")
+    session._sn_base = base.rstrip("/")  # guardado para os helpers
+
+    print(f"[SN] Testando acesso como {usuario} em {session._sn_base} …")
+    url = (f"{session._sn_base}/incident.do?JSONv2"
+           "&sysparm_action=getRecords&sysparm_record_count=1&sysparm_fields=number")
+    try:
+        r = session.get(url, timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"Falha de conexão ao ServiceNow: {exc}")
+    if r.status_code in (401, 403) or "login" in r.url.lower():
+        raise SystemExit(
+            f"Autenticação recusada (HTTP {r.status_code}). Confira usuário/senha "
+            "da conta de serviço e se ela tem acesso à API (JSONv2)."
+        )
+    if "json" not in r.headers.get("Content-Type", "").lower():
+        raise SystemExit(
+            f"Resposta inesperada (HTTP {r.status_code}). Talvez precise de proxy "
+            "(--proxy) ou a conta caiu em tela de SSO. Confira o acesso."
+        )
+    print("[SN] Acesso OK.")
     return session
 
 
@@ -346,12 +379,45 @@ def _plain(v):
     return v.get("value", "") if isinstance(v, dict) else (v if v is not None else "")
 
 
+def _sn_query(session, table, query="", fields="", limit=500, offset=0):
+    """Uma página da tabela via JSONv2 + Basic Auth. Retorna lista de dicts."""
+    params = ["sysparm_action=getRecords", f"sysparm_record_count={limit}"]
+    if query:
+        from urllib.parse import quote
+        params.append("sysparm_query=" + quote(query, safe="=^,<>!@."))
+    if fields:
+        params.append(f"sysparm_fields={fields}")
+    if offset:
+        params.append(f"sysparm_first_row={offset}")
+    url = f"{session._sn_base}/{table}.do?JSONv2&{'&'.join(params)}"
+    r = session.get(url, timeout=60)
+    if r.status_code in (401, 403) or "login" in r.url.lower():
+        raise SystemExit("Sessão ServiceNow recusada/expirou (HTTP "
+                         f"{r.status_code}). Rode de novo e confira as credenciais.")
+    if r.status_code != 200 or "json" not in r.headers.get("Content-Type", "").lower():
+        raise SystemExit(f"ServiceNow retornou HTTP {r.status_code} em {table}.")
+    return r.json().get("records", [])
+
+
+def _sn_query_all(session, table, query="", fields="", page_size=500, max_records=100000):
+    """Pagina via sysparm_first_row até esgotar (ou max_records)."""
+    todos, offset = [], 0
+    while offset < max_records:
+        lote = _sn_query(session, table, query, fields, page_size, offset)
+        if not lote:
+            break
+        todos.extend(lote)
+        if len(lote) < page_size:
+            break
+        offset += page_size
+        time.sleep(PAUSA_S)
+    return todos
+
+
 def coletar_sn(session, numeros):
     """Consulta incident + work notes + histórico de fila em lotes.
     Devolve dict number -> {sys_id, subcategoria, resolved_at, grupo_atual,
     textos:[...], audits:[{ts,old,new}]}."""
-    from routers.servicenow import _sn_query_all
-
     # 1) Grupo Spare: nome + sys_id (para casar no audit).
     tokens = {_norm(SPARE_GRUPO)}
     try:
@@ -359,6 +425,8 @@ def coletar_sn(session, numeros):
                           "sys_id,name", page_size=1, max_records=1)
         if g:
             tokens.add(_norm(_plain(g[0].get("sys_id"))))
+    except SystemExit:
+        raise
     except Exception as exc:  # noqa: BLE001
         print(f"[SN] aviso: não resolvi o sys_id do grupo Spare ({exc})")
 
@@ -531,25 +599,61 @@ def _selftest():
     print("selftest OK")
 
 
+def _opt(argv, nome, default=None):
+    """Lê --nome VALOR ou --nome=VALOR."""
+    for i, a in enumerate(argv):
+        if a == nome and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith(nome + "="):
+            return a.split("=", 1)[1]
+    return default
+
+
 def main(argv):
-    args = [a for a in argv if not a.startswith("--")]
-    limite = None
-    for a in argv:
-        if a.startswith("--limit"):
-            limite = int(a.split("=")[1]) if "=" in a else int(argv[argv.index(a) + 1])
     if "--selftest" in argv:
         _selftest()
         return
+
+    # posicionais = tudo que não é flag nem valor de flag
+    flags_com_valor = {"--limit", "--usuario", "--instancia", "--proxy"}
+    args, pular = [], False
+    for i, a in enumerate(argv):
+        if pular:
+            pular = False
+            continue
+        if a.startswith("--"):
+            if a in flags_com_valor and "=" not in a:
+                pular = True
+            continue
+        args.append(a)
+
     if not args:
         print(__doc__)
         raise SystemExit(2)
+
     entrada = args[0]
     saida = args[1] if len(args) > 1 else "TMA_chamados_resultado.xlsx"
+
+    limite_s = _opt(argv, "--limit")
+    limite = int(limite_s) if limite_s else None
+    usuario_cli = _opt(argv, "--usuario")
+    base = _opt(argv, "--instancia", os.environ.get("SN_BASE", SN_BASE_PADRAO))
+    if "--sem-proxy" in argv:
+        proxy = None
+    else:
+        proxy = _opt(argv, "--proxy", os.environ.get("SN_PROXY"))
+
+    # 1) Lê a planilha ANTES de pedir senha (falha cedo se o arquivo estiver ruim).
     itens = carregar_incs(entrada)
     if limite:
         itens = itens[:limite]
-    print(f"{len(itens)} chamados na planilha.")
-    session = abrir_sessao_sn()
+    print(f"{len(itens)} chamados para consultar.")
+
+    # 2) Credenciais (na hora) e sessão.
+    usuario, senha = obter_credenciais(usuario_cli)
+    session = abrir_sessao_sn(base, usuario, senha, proxy)
+
+    # 3) Consulta e relatório.
     numeros = [i["number"] for i in itens]
     dados, tokens = coletar_sn(session, numeros)
     montar(itens, dados, tokens, saida)
