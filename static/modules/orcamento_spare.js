@@ -28,6 +28,7 @@ window.SPARE_MODULES.orcamento_spare = {
             { valor: 'entregue', rotulo: 'Entregue' }
         ];
         var BUS = ['Renner', 'Camicado', 'Youcom', 'Renner Argentina', 'Renner Uruguai'];
+        var FASES = ['1º semestre', '2º semestre'];
         function opcoesBU(sel) {
             return '<option value="">— selecione —</option>' + BUS.map(function (b) {
                 return '<option value="' + e(b) + '"' + (b === sel ? ' selected' : '') + '>' + e(b) + '</option>';
@@ -302,36 +303,54 @@ window.SPARE_MODULES.orcamento_spare = {
             var fSt = (document.getElementById('os-it-status').value || '');
             var termo = (document.getElementById('os-it-busca').value || '').trim().toLowerCase();
             var linhas = (ITENS.itens || []).filter(function (it) {
-                if (fSt && it.status !== fSt) return false;
+                if (fSt) {
+                    if (fSt === 'executado' && !(it.valor_executado > 0)) return false;
+                    if (fSt === 'andamento' && !(it.tem_po && it.valor_saldo > 0)) return false;
+                    if (fSt === 'orcado' && it.tem_po) return false;
+                }
                 if (!termo) return true;
-                return [it.projeto_numero, it.projeto_descricao, it.item_ebs, it.descricao_item].some(function (c) {
+                return [it.projeto_numero, it.projeto_descricao, it.item_ebs, it.descricao_item, it.fase].some(function (c) {
                     return String(c || '').toLowerCase().indexOf(termo) !== -1;
                 });
             });
             if (!linhas.length) { box.innerHTML = '<p class="text-muted">Nenhum item para este filtro.</p>'; return; }
-            var totalFiltro = linhas.reduce(function (a, it) { return a + (it.valor_total || 0); }, 0);
+            var totExec = linhas.reduce(function (a, it) { return a + (it.valor_executado || 0); }, 0);
+            var totSaldo = linhas.reduce(function (a, it) { return a + (it.tem_po ? (it.valor_saldo || 0) : 0); }, 0);
+            var totOrc = linhas.reduce(function (a, it) { return a + (!it.tem_po ? (it.valor_total || 0) : 0); }, 0);
+            function badge(it) {
+                var m = { orcado: ['Orçado', '#6b7280'], andamento: ['Em andamento', '#2563eb'],
+                    parcial: ['Entrega parcial', '#d97706'], executado: ['Executado', '#16a34a'] };
+                var b = m[it.situacao] || m.orcado; var cor = b[1];
+                return '<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:.72em;' +
+                    'background:' + cor + '22;color:' + cor + ';border:1px solid ' + cor + '66;white-space:nowrap">' + b[0] + '</span>';
+            }
             var corpo = linhas.map(function (it) {
+                var ent = (Number(it.quantidade_entregue || 0)).toLocaleString('pt-BR') + '/' + (Number(it.quantidade || 0)).toLocaleString('pt-BR');
                 return '<tr>' +
                     '<td style="' + padT + ';white-space:nowrap"><b>' + e(it.projeto_numero) + '</b>' +
                         (it.projeto_descricao ? '<div class="text-muted" style="font-size:.75em">' + e(it.projeto_descricao) + '</div>' : '') + '</td>' +
                     '<td style="' + padT + ';white-space:nowrap">' + e(it.item_ebs) + '</td>' +
                     '<td style="' + padT + '">' + e(it.descricao_item) + '</td>' +
-                    '<td style="' + padT + ';white-space:nowrap">' + e(it.ncm || '') + '</td>' +
-                    '<td class="text-right" style="' + padN + '">' + (Number(it.quantidade || 0).toLocaleString('pt-BR')) + '</td>' +
-                    '<td class="text-right" style="' + padN + '">' + money(it.valor_unitario) + '</td>' +
-                    '<td class="text-right" style="' + padN + '">' + (Number(it.imposto_percent || 0)).toLocaleString('pt-BR') + '%</td>' +
+                    '<td style="' + padT + ';white-space:nowrap">' + e(it.fase || '') + '</td>' +
+                    '<td class="text-center" style="' + padN + '">' + ent + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(it.valor_executado) + '</td>' +
+                    '<td class="text-right" style="' + padN + '">' + money(it.tem_po ? it.valor_saldo : (it.valor_total)) + '</td>' +
                     '<td class="text-right" style="' + padN + '">' + money(it.valor_total) + '</td>' +
-                    '<td style="' + padT + ';white-space:nowrap">' + statusBadge(it.status) + '</td></tr>';
+                    '<td style="' + padT + ';white-space:nowrap">' + badge(it) + '</td></tr>';
             }).join('');
             box.innerHTML =
-                '<div class="table-responsive"><table class="table table-sm" style="min-width:920px">' +
+                '<div class="table-responsive"><table class="table table-sm" style="min-width:960px">' +
                 '<thead><tr><th style="' + padT + '">Projeto</th><th style="' + padT + '">Item EBS</th>' +
-                '<th style="' + padT + '">Descrição do item</th><th style="' + padT + '">NCM</th>' +
-                '<th class="text-right" style="' + padN + '">Qtd</th><th class="text-right" style="' + padN + '">Valor unit.</th>' +
-                '<th class="text-right" style="' + padN + '">% Imp.</th><th class="text-right" style="' + padN + '">Valor total (c/ imp.)</th>' +
+                '<th style="' + padT + '">Descrição do item</th><th style="' + padT + '">Fase</th>' +
+                '<th class="text-center" style="' + padN + '">Entregue</th>' +
+                '<th class="text-right" style="' + padN + '">Executado</th>' +
+                '<th class="text-right" style="' + padN + '">Em andamento</th>' +
+                '<th class="text-right" style="' + padN + '">Valor total</th>' +
                 '<th style="' + padT + '">Situação</th></tr></thead><tbody>' + corpo + '</tbody>' +
-                '<tfoot><tr><td colspan="7" class="text-right" style="' + padT + '"><b>Total filtrado</b></td>' +
-                    '<td class="text-right" style="' + padN + '"><b>' + money(totalFiltro) + '</b></td><td></td></tr></tfoot></table></div>';
+                '<tfoot><tr><td colspan="5" class="text-right" style="' + padT + '"><b>Totais</b></td>' +
+                    '<td class="text-right" style="' + padN + '"><b>' + money(totExec) + '</b></td>' +
+                    '<td class="text-right" style="' + padN + '"><b>' + money(totSaldo + totOrc) + '</b></td>' +
+                    '<td></td><td></td></tr></tfoot></table></div>';
         }
 
         // ── Cadastro de itens (catálogo) ──────────────────────────────
@@ -523,14 +542,12 @@ window.SPARE_MODULES.orcamento_spare = {
             it = it || {};
             var ro = podeEditar ? '' : ' readonly';
             var dis = podeEditar ? '' : ' disabled';
-            var stAtual = it.status || 'orcado';
-            var opts = STATUS.map(function (s) {
-                return '<option value="' + s.valor + '"' + (s.valor === stAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
-            }).join('');
             var acordoOn = !!it.acordo;
-            var entAtual = it.entrega_status || 'pendente';
-            var optsEnt = ENTREGA.map(function (s) {
-                return '<option value="' + s.valor + '"' + (s.valor === entAtual ? ' selected' : '') + '>' + e(s.rotulo) + '</option>';
+            var entManual = (it.entrega_status === 'agendado') ? 'agendado' : 'pendente';
+            var optsEnt = '<option value="pendente"' + (entManual === 'pendente' ? ' selected' : '') + '>Pendente entrega</option>' +
+                '<option value="agendado"' + (entManual === 'agendado' ? ' selected' : '') + '>Agendado</option>';
+            var optsFase = '<option value="">—</option>' + FASES.map(function (f) {
+                return '<option value="' + e(f) + '"' + (f === (it.fase || '') ? ' selected' : '') + '>' + e(f) + '</option>';
             }).join('');
             function fld(rot, ctrl) {
                 return '<div style="min-width:0"><label style="display:block;font-size:11px;color:#94a3b8;' +
@@ -539,51 +556,135 @@ window.SPARE_MODULES.orcamento_spare = {
             var tr = document.createElement('div');
             tr.className = 'os-item';
             tr.dataset.acordo = acordoOn ? '1' : '0';
+            tr._entregas = (it.entregas && it.entregas.length) ? it.entregas.map(function (x) {
+                return { quantidade: Number(x.quantidade || 0), nf: x.nf || '', data: x.data || '' };
+            }) : [];
             tr.style.cssText = 'border:1px solid #64748b40;border-radius:10px;padding:14px 16px;margin-bottom:12px';
             tr.innerHTML =
-                // Linha 1 — identidade
-                '<div style="display:grid;grid-template-columns:150px 1fr ' + (podeEditar ? '32px' : '') +
+                // Linha 1 — identidade + situação derivada
+                '<div style="display:grid;grid-template-columns:150px 1fr auto ' + (podeEditar ? '32px' : '') +
                     ';gap:12px;align-items:end">' +
                     fld('Item EBS', '<input class="form-control os-i-ebs" value="' + e(it.item_ebs || '') + '"' + ro + '>') +
                     fld('Descrição do item', '<input class="form-control os-i-desc" value="' + e(it.descricao_item || '') + '"' + ro + '>') +
+                    '<div class="os-i-sit" style="align-self:center"></div>' +
                     (podeEditar ? '<button type="button" class="btn btn-secondary btn-sm os-i-rm" title="Remover item" style="height:34px">&times;</button>' : '') +
                 '</div>' +
                 // Linha 2 — valores
-                '<div style="display:grid;grid-template-columns:130px 90px 1fr 80px 1fr auto;gap:12px;align-items:end;margin-top:12px">' +
+                '<div style="display:grid;grid-template-columns:130px 90px 1fr 80px auto;gap:12px;align-items:end;margin-top:12px">' +
                     fld('NCM', '<input class="form-control os-i-ncm" placeholder="XXXX.XX.XX" value="' + e(it.ncm || '') + '"' + ro + '>') +
                     fld('Qtd', '<input class="form-control os-i-qtd" type="number" step="0.001" min="0" value="' + e(it.quantidade != null ? it.quantidade : '') + '"' + ro + '>') +
                     fld('Valor unit.', '<input class="form-control os-i-vu" type="number" step="0.01" min="0" value="' + e(it.valor_unitario != null ? it.valor_unitario : '') + '"' + (acordoOn ? ' readonly title="Preço do acordo (cadastro)"' : ro) + '>') +
                     fld('% Imp.', '<input class="form-control os-i-imp" type="number" step="0.01" min="0" value="' + e(it.imposto_percent != null ? it.imposto_percent : '') + '" readonly title="Imposto do NCM (TIPI)">') +
-                    fld('Situação', '<select class="form-control os-i-st"' + dis + '>' + opts + '</select>') +
                     '<div style="text-align:right;min-width:120px"><div style="font-size:11px;color:#94a3b8;margin-bottom:3px">Valor total</div>' +
                         '<div class="os-i-vt" style="font-weight:700;font-size:1.05em;font-variant-numeric:tabular-nums;white-space:nowrap">R$ 0,00</div></div>' +
                 '</div>' +
-                // divisória + Linha 3 — execução
+                // divisória + Linha 3 — execução da compra
                 '<div style="border-top:1px dashed #64748b40;margin:14px 0 12px"></div>' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:end">' +
                     fld('RC (Solic. compra)', '<input class="form-control os-i-sc" placeholder="Nº RC" value="' + e(it.solicitacao_compra || '') + '"' + ro + '>') +
                     fld('PO (Pedido compra)', '<input class="form-control os-i-pc" placeholder="Nº PO" value="' + e(it.pedido_compra || '') + '"' + ro + '>') +
+                    fld('Fase', '<select class="form-control os-i-fase"' + dis + '>' + optsFase + '</select>') +
                     fld('Status entrega', '<select class="form-control os-i-ent"' + dis + '>' + optsEnt + '</select>') +
-                    fld('NF', '<input class="form-control os-i-nf" placeholder="Nº NF" value="' + e(it.nf || '') + '"' + (entAtual === 'entregue' ? '' : ' disabled') + ro + '>') +
+                '</div>' +
+                // Entregas (parciais, cada uma com NF)
+                '<div style="margin-top:12px;background:#64748b14;border-radius:8px;padding:10px 12px">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+                        '<span style="font-size:12px;color:#94a3b8">Entregas <span class="os-i-entinfo"></span></span>' +
+                        (podeEditar ? '<button type="button" class="btn btn-secondary btn-sm os-i-addent">+ Registrar entrega</button>' : '') +
+                    '</div>' +
+                    '<div class="os-i-entlist" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>' +
+                    '<div class="os-i-entform" style="display:none;gap:8px;align-items:end;margin-top:10px;flex-wrap:wrap">' +
+                        fld('Qtd entregue', '<input class="form-control os-ie-qtd" type="number" step="0.001" min="0" style="width:120px">') +
+                        fld('NF', '<input class="form-control os-ie-nf" placeholder="Nº NF" style="width:140px">') +
+                        fld('Data', '<input class="form-control os-ie-data" type="date" style="width:150px">') +
+                        '<button type="button" class="btn btn-primary btn-sm os-ie-add">Adicionar</button>' +
+                        '<button type="button" class="btn btn-secondary btn-sm os-ie-cancel">Cancelar</button>' +
+                    '</div>' +
                 '</div>';
             document.getElementById('os-itens').appendChild(tr);
+            syncEntrega(tr);
             if (podeEditar) {
                 tr.querySelector('.os-i-rm').onclick = function () { tr.remove(); recalc(); };
-                tr.querySelector('.os-i-qtd').oninput = recalc;
+                tr.querySelector('.os-i-qtd').oninput = function () { recalc(); syncEntrega(tr); };
                 tr.querySelector('.os-i-vu').oninput = recalc;
                 tr.querySelector('.os-i-ebs').addEventListener('change', function () { puxarCatalogo(tr); });
                 tr.querySelector('.os-i-ncm').addEventListener('change', function () { aplicarNcm(tr); });
-                var ent = tr.querySelector('.os-i-ent');
-                var nf = tr.querySelector('.os-i-nf');
-                var pc = tr.querySelector('.os-i-pc');
-                ent.onchange = function () {
-                    if (ent.value !== 'pendente' && !pc.value.trim()) {
-                        alert('Informe o Pedido de compra antes de agendar/entregar.');
+                tr.querySelector('.os-i-pc').addEventListener('input', function () { syncEntrega(tr); });
+                tr.querySelector('.os-i-ent').onchange = function () {
+                    var ent = tr.querySelector('.os-i-ent');
+                    if (ent.value === 'agendado' && !tr.querySelector('.os-i-pc').value.trim()) {
+                        alert('Informe a PO (Pedido de compra) antes de agendar.');
                         ent.value = 'pendente';
                     }
-                    var entregue = ent.value === 'entregue';
-                    nf.disabled = !entregue; if (!entregue) nf.value = '';
+                    syncEntrega(tr);
                 };
+                var form = tr.querySelector('.os-i-entform');
+                tr.querySelector('.os-i-addent').onclick = function () {
+                    if (!tr.querySelector('.os-i-pc').value.trim()) { alert('Informe a PO antes de registrar entrega.'); return; }
+                    form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+                };
+                tr.querySelector('.os-ie-cancel').onclick = function () { form.style.display = 'none'; };
+                tr.querySelector('.os-ie-add').onclick = function () {
+                    var qe = parseFloat(tr.querySelector('.os-ie-qtd').value) || 0;
+                    var nfe = tr.querySelector('.os-ie-nf').value.trim();
+                    var dt = tr.querySelector('.os-ie-data').value || '';
+                    if (qe <= 0) { alert('Informe a quantidade entregue.'); return; }
+                    if (!nfe) { alert('Informe a NF da entrega.'); return; }
+                    var qtd = parseFloat(tr.querySelector('.os-i-qtd').value) || 0;
+                    var jaEnt = tr._entregas.reduce(function (a, x) { return a + (x.quantidade || 0); }, 0);
+                    if (qtd > 0 && jaEnt + qe > qtd) {
+                        if (!confirm('A quantidade entregue ultrapassa a quantidade do item. Continuar?')) return;
+                    }
+                    tr._entregas.push({ quantidade: qe, nf: nfe, data: dt });
+                    tr.querySelector('.os-ie-qtd').value = ''; tr.querySelector('.os-ie-nf').value = ''; tr.querySelector('.os-ie-data').value = '';
+                    form.style.display = 'none';
+                    syncEntrega(tr);
+                };
+            }
+        }
+
+        // Recalcula entregas: quantidade entregue, saldo, status derivado e chips.
+        function syncEntrega(tr) {
+            var qtd = parseFloat(tr.querySelector('.os-i-qtd').value) || 0;
+            var lista = tr._entregas || [];
+            var qent = lista.reduce(function (a, x) { return a + (Number(x.quantidade) || 0); }, 0);
+            var saldo = Math.max(qtd - qent, 0);
+            var pc = tr.querySelector('.os-i-pc').value.trim();
+            var estado, cor;
+            if (qtd > 0 && qent >= qtd) { estado = 'Entregue'; cor = '#16a34a'; }
+            else if (qent > 0) { estado = 'Entrega parcial'; cor = '#d97706'; }
+            else if (pc) { estado = (tr.querySelector('.os-i-ent').value === 'agendado') ? 'Agendado' : 'Em andamento'; cor = '#2563eb'; }
+            else { estado = 'Orçado/Previsto'; cor = '#6b7280'; }
+            tr.querySelector('.os-i-sit').innerHTML =
+                '<span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:.74em;' +
+                'background:' + cor + '22;color:' + cor + ';border:1px solid ' + cor + '66;white-space:nowrap">' + estado + '</span>';
+            var info = tr.querySelector('.os-i-entinfo');
+            if (qent > 0 || qtd > 0) {
+                info.textContent = '— entregue ' + (qent).toLocaleString('pt-BR') + ' de ' + (qtd).toLocaleString('pt-BR') +
+                    ' · saldo ' + (saldo).toLocaleString('pt-BR');
+            } else { info.textContent = ''; }
+            var box = tr.querySelector('.os-i-entlist');
+            box.innerHTML = lista.map(function (x, idx) {
+                return '<span style="display:inline-flex;align-items:center;gap:6px;background:#64748b22;' +
+                    'border:1px solid #64748b55;border-radius:14px;padding:3px 10px;font-size:.76em">' +
+                    (Number(x.quantidade) || 0).toLocaleString('pt-BR') + ' un · NF ' + e(x.nf || '—') +
+                    (x.data ? ' · ' + dataBR(x.data) : '') +
+                    (podeEditar ? ' <a href="#" class="os-ie-rm" data-i="' + idx + '" style="color:#dc2626;text-decoration:none">&times;</a>' : '') +
+                    '</span>';
+            }).join('') || '<span class="text-muted" style="font-size:.76em">Nenhuma entrega registrada.</span>';
+            // Status entrega manual só quando ainda não há entrega.
+            var selEnt = tr.querySelector('.os-i-ent');
+            if (selEnt) selEnt.disabled = (!podeEditar) || qent > 0;
+            var addBtn = tr.querySelector('.os-i-addent');
+            if (addBtn) addBtn.style.display = (pc && saldo > 0) ? '' : 'none';
+            if (podeEditar) {
+                Array.prototype.forEach.call(box.querySelectorAll('.os-ie-rm'), function (a) {
+                    a.onclick = function (ev) {
+                        ev.preventDefault();
+                        tr._entregas.splice(parseInt(a.dataset.i, 10), 1);
+                        syncEntrega(tr);
+                    };
+                });
             }
         }
 
@@ -653,12 +754,12 @@ window.SPARE_MODULES.orcamento_spare = {
                     quantidade: parseFloat(tr.querySelector('.os-i-qtd').value) || 0,
                     valor_unitario: parseFloat(tr.querySelector('.os-i-vu').value) || 0,
                     imposto_percent: parseFloat(tr.querySelector('.os-i-imp').value) || 0,
-                    status: tr.querySelector('.os-i-st').value || 'orcado',
                     acordo: tr.dataset.acordo === '1',
+                    fase: tr.querySelector('.os-i-fase').value || '',
                     solicitacao_compra: tr.querySelector('.os-i-sc').value.trim(),
                     pedido_compra: tr.querySelector('.os-i-pc').value.trim(),
                     entrega_status: tr.querySelector('.os-i-ent').value || 'pendente',
-                    nf: tr.querySelector('.os-i-nf').value.trim()
+                    entregas: (tr._entregas || []).slice()
                 };
                 if (o.item_ebs || o.descricao_item || o.quantidade || o.valor_unitario || o.ncm) itens.push(o);
             });

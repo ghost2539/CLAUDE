@@ -10,6 +10,7 @@ Banco próprio (`db/orcamento_spare.py`). Permissão pelo módulo
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Optional
 
@@ -40,19 +41,17 @@ class ItemIn(BaseModel):
     quantidade: float = 0
     valor_unitario: float = 0
     imposto_percent: float = 0
-    status: str = "orcado"
     acordo: bool = False
     acordo_numero: str = ""
     ncm: str = ""
+    fase: str = ""
     solicitacao_compra: str = ""
     pedido_compra: str = ""
     entrega_status: str = "pendente"
-    data_agendamento: str = ""
-    recebido: bool = False
-    nf: str = ""
+    entregas: list[dict] = []
 
     @field_validator("item_ebs", "descricao_item", "acordo_numero", "ncm",
-                     "solicitacao_compra", "pedido_compra", "data_agendamento", "nf")
+                     "fase", "solicitacao_compra", "pedido_compra")
     @classmethod
     def _txt(cls, v: str) -> str:
         return (v or "").strip()[:200]
@@ -61,13 +60,8 @@ class ItemIn(BaseModel):
     @classmethod
     def _entrega(cls, v: str) -> str:
         v = (v or "pendente").strip().lower()
-        return v if v in db.ENTREGA_STATUS else "pendente"
-
-    @field_validator("status")
-    @classmethod
-    def _status(cls, v: str) -> str:
-        v = (v or "orcado").strip().lower()
-        return v if v in db.STATUS_ITEM else "orcado"
+        # 'parcial'/'entregue' são derivados da quantidade; entrada só pendente/agendado.
+        return v if v in ("pendente", "agendado") else "pendente"
 
     @field_validator("quantidade", "valor_unitario", "imposto_percent")
     @classmethod
@@ -131,18 +125,41 @@ def _aplica(p: "db.Projeto", body: ProjetoIn) -> None:
             nome = it.item_ebs or it.descricao_item or ("item " + str(i + 1))
             raise HTTPException(422, f"Informe o preço do item '{nome}' (não é de acordo de compras).")
         pedido = (it.pedido_compra or "").strip()
-        # Status de entrega só vale com pedido; entregue = recebido; NF só se entregue.
-        entrega = it.entrega_status if pedido else "pendente"
-        entregue = entrega == "entregue"
+        # Entregas (parciais, cada uma com sua NF). Só valem com pedido de compra.
+        entregas = []
+        qent = 0.0
+        if pedido:
+            for ent in (it.entregas or []):
+                try:
+                    qe = float(ent.get("quantidade") or 0)
+                except (TypeError, ValueError):
+                    qe = 0.0
+                nfe = str(ent.get("nf") or "").strip()[:60]
+                data = str(ent.get("data") or "").strip()[:10]
+                if qe <= 0 and not nfe:
+                    continue
+                entregas.append({"quantidade": qe, "nf": nfe, "data": data})
+                qent += qe
+        qtd = float(it.quantidade or 0)
+        if qtd > 0:
+            qent = min(qent, qtd)
+        # Status derivado da quantidade entregue; senão, o informado (pendente/agendado).
+        if qtd > 0 and qent >= qtd:
+            entrega = "entregue"
+        elif qent > 0:
+            entrega = "parcial"
+        else:
+            entrega = it.entrega_status if pedido else "pendente"
         p.itens.append(db.Item(
             item_ebs=it.item_ebs, descricao_item=it.descricao_item,
             quantidade=it.quantidade, valor_unitario=it.valor_unitario,
-            imposto_percent=(imp or 0), status=it.status,
+            imposto_percent=(imp or 0),
             acordo=bool(it.acordo), acordo_numero=(it.acordo_numero if it.acordo else ""),
-            ncm=ncm_fmt,
+            ncm=ncm_fmt, fase=it.fase,
             solicitacao_compra=it.solicitacao_compra, pedido_compra=pedido,
-            entrega_status=entrega, data_agendamento=it.data_agendamento,
-            recebido=entregue, nf=(it.nf if entregue else ""),
+            entrega_status=entrega, quantidade_entregue=qent,
+            entregas=json.dumps(entregas, ensure_ascii=False),
+            recebido=(entrega == "entregue"),
             ordem=i))
 
 

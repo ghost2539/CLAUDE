@@ -48,8 +48,12 @@ STATUS_ROTULO = {"orcado": "Orçado/Previsto", "andamento": "Em andamento", "exe
 BUS = ("Renner", "Camicado", "Youcom", "Renner Argentina", "Renner Uruguai")
 
 # Status de entrega do item (após o pedido de compra).
-ENTREGA_STATUS = ("pendente", "agendado", "entregue")
-ENTREGA_ROTULO = {"pendente": "Pendente entrega", "agendado": "Agendado", "entregue": "Entregue"}
+ENTREGA_STATUS = ("pendente", "agendado", "parcial", "entregue")
+ENTREGA_ROTULO = {"pendente": "Pendente entrega", "agendado": "Agendado",
+                  "parcial": "Entrega parcial", "entregue": "Entregue"}
+
+# Fases de compra (semestre).
+FASES = ("1º semestre", "2º semestre")
 
 
 def get_engine():
@@ -171,8 +175,11 @@ class Item(Base):
     # Execução da compra: solicitação (SC), pedido (PC), recebimento e NF.
     solicitacao_compra: Mapped[str] = mapped_column(String(60), default="")
     pedido_compra: Mapped[str] = mapped_column(String(60), default="")
+    fase: Mapped[str] = mapped_column(String(30), default="")   # 1º/2º semestre
     entrega_status: Mapped[str] = mapped_column(String(20), default="pendente")
     data_agendamento: Mapped[str] = mapped_column(String(10), default="")   # YYYY-MM-DD
+    quantidade_entregue: Mapped[float] = mapped_column(Numeric(15, 3), default=0)
+    entregas: Mapped[str] = mapped_column(Text, default="[]")   # JSON [{quantidade,nf,data}]
     recebido: Mapped[bool] = mapped_column(Boolean, default=False)
     nf: Mapped[str] = mapped_column(String(60), default="")
     ordem: Mapped[int] = mapped_column(Integer, default=0)
@@ -180,36 +187,67 @@ class Item(Base):
     projeto: Mapped["Projeto"] = relationship(back_populates="itens")
 
     def to_dict(self) -> dict:
+        import json as _json
         q = _f(self.quantidade)
         vu = _f(self.valor_unitario)
         imp = _f(self.imposto_percent)
-        base = q * vu
-        valor_imposto = base * imp / 100.0
-        st = (self.status or "orcado")
-        if st not in STATUS_ITEM:
-            st = "orcado"
+        unit_ci = vu * (1 + imp / 100.0)           # valor unitário com imposto
+        valor_total = q * unit_ci
+        qent = _f(self.quantidade_entregue)
+        if q > 0:
+            qent = min(qent, q)
+        valor_exec = qent * unit_ci
+        valor_saldo = max(valor_total - valor_exec, 0.0)
+        tem_po = bool((self.pedido_compra or "").strip())
+        # Status de entrega EFETIVO (derivado da quantidade entregue).
+        if q > 0 and qent >= q:
+            entrega = "entregue"
+        elif qent > 0:
+            entrega = "parcial"
+        else:
+            entrega = (self.entrega_status or "pendente") if tem_po else "pendente"
+            if entrega in ("parcial", "entregue"):
+                entrega = "agendado" if tem_po else "pendente"
+        # Situação (consumo) derivada: sem PO = orçado; com PO divide exec/andamento.
+        if not tem_po:
+            sit = "orcado"
+        elif qent >= q and q > 0:
+            sit = "executado"
+        elif qent > 0:
+            sit = "parcial"
+        else:
+            sit = "andamento"
+        try:
+            lista = _json.loads(self.entregas or "[]")
+            if not isinstance(lista, list):
+                lista = []
+        except Exception:  # noqa: BLE001
+            lista = []
         return {
             "id": self.id,
             "item_ebs": self.item_ebs or "",
             "descricao_item": self.descricao_item or "",
             "quantidade": q,
+            "quantidade_entregue": qent,
+            "saldo_qtd": round(max(q - qent, 0.0), 3),
             "valor_unitario": vu,
             "imposto_percent": imp,
-            "status": st,
-            "status_rotulo": STATUS_ROTULO.get(st, st),
             "acordo": bool(self.acordo),
             "acordo_numero": self.acordo_numero or "",
             "ncm": self.ncm or "",
+            "fase": self.fase or "",
             "solicitacao_compra": self.solicitacao_compra or "",
             "pedido_compra": self.pedido_compra or "",
-            "entrega_status": (self.entrega_status or "pendente"),
-            "entrega_rotulo": ENTREGA_ROTULO.get(self.entrega_status or "pendente", "Pendente entrega"),
-            "data_agendamento": self.data_agendamento or "",
+            "tem_po": tem_po,
+            "entrega_status": entrega,
+            "entrega_rotulo": ENTREGA_ROTULO.get(entrega, "Pendente entrega"),
+            "situacao": sit,
+            "entregas": lista,
             "recebido": bool(self.recebido),
             "nf": self.nf or "",
-            "valor_sem_imposto": round(base, 2),
-            "valor_imposto": round(valor_imposto, 2),
-            "valor_total": round(base + valor_imposto, 2),
+            "valor_total": round(valor_total, 2),
+            "valor_executado": round(valor_exec, 2),
+            "valor_saldo": round(valor_saldo, 2),
         }
 
 
@@ -265,8 +303,11 @@ def _migrar_colunas() -> None:
     for coluna, ddl in (
         ("solicitacao_compra", "solicitacao_compra VARCHAR(60) DEFAULT ''"),
         ("pedido_compra", "pedido_compra VARCHAR(60) DEFAULT ''"),
+        ("fase", "fase VARCHAR(30) DEFAULT ''"),
         ("entrega_status", "entrega_status VARCHAR(20) DEFAULT 'pendente'"),
         ("data_agendamento", "data_agendamento VARCHAR(10) DEFAULT ''"),
+        ("quantidade_entregue", "quantidade_entregue NUMERIC(15,3) DEFAULT 0"),
+        ("entregas", "entregas TEXT DEFAULT '[]'"),
         ("recebido", "recebido BOOLEAN DEFAULT 0"),
         ("nf", "nf VARCHAR(60) DEFAULT ''"),
     ):
@@ -429,14 +470,19 @@ def buscar_item_acordo(item_ebs: str = "", acordo_numero: str = "") -> dict | No
 
 
 def totais_por_status() -> dict:
-    """Soma (com imposto) e contagem de itens por situação."""
+    """Soma (com imposto) por situação, com entrega parcial dividindo o valor:
+    sem PO = orçado; com PO, o entregue vai para executado e o saldo para
+    em andamento. A contagem de itens usa a situação efetiva do item."""
     r = {st: {"itens": 0, "valor": 0.0} for st in STATUS_ITEM}
     for it in listar_itens():
-        st = it.get("status") or "orcado"
-        if st not in r:
-            st = "orcado"
-        r[st]["itens"] += 1
-        r[st]["valor"] += it["valor_total"]
+        if not it["tem_po"]:
+            r["orcado"]["itens"] += 1
+            r["orcado"]["valor"] += it["valor_total"]
+        else:
+            r["executado"]["valor"] += it["valor_executado"]
+            r["andamento"]["valor"] += it["valor_saldo"]
+            chave = "executado" if it["situacao"] == "executado" else "andamento"
+            r[chave]["itens"] += 1
     for st in r:
         r[st]["valor"] = round(r[st]["valor"], 2)
     return r
