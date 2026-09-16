@@ -77,7 +77,7 @@
         '.om-kpi-v{font-size:22px;font-weight:700;line-height:1.2;margin-top:6px;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
         '.om-kpi-v .text-muted{font-size:15px;font-weight:600}' +
         '.om-kpi-s{font-size:12px;color:var(--text-muted);margin-top:3px;line-height:1.35}' +
-        '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}' +
+        '.om-g32{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;align-items:start}' +
         '.om-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}' +
         /* cards de gráfico */
         '.om-chart{display:flex;flex-direction:column;min-width:0;position:relative}' +
