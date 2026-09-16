@@ -259,6 +259,27 @@ O espaço em `/consulta-times` é independente do portal, por decisão da
   que têm "Spare" no nome — esses são da área SPARE.
 - **Sem Obsolescência**: a aba não existe em Gestão de Ativos no espaço.
 
+### Recebimento: origem da entrada
+
+O Novo Recebimento começa pela origem, porque ela muda o que se pede:
+
+- **Reversa** — devolução da loja. O ativo já existe no EBS, então basta
+  bipar: a leitura busca os dados e preenche a sessão.
+- **Fornecedor** — compra nova, que não existe em lugar nenhum. Não há o
+  que buscar: o operador digita descrição do item, serial number, PO e NF.
+  Os quatro são obrigatórios — sem série o ativo é impossível de achar
+  depois, sem nota é impossível de conferir com o financeiro.
+
+Origem, PO e NF ficam em `receipt_cycles` (o evento de entrada), não no
+ativo: o mesmo equipamento pode entrar várias vezes, por notas diferentes.
+Uma sessão temporária é de uma origem só; trocar com itens na lista é
+recusado, porque são notas, conferências e destinos diferentes.
+
+Depois disso o caminho é o mesmo dos dois lados: trilha do ativo, espelho
+no ServiceNow (que **cria** o que ainda não existe lá), casamento com
+coleta da reversa e remoção do MDM — os dois últimos são inofensivos para
+compra nova, que não está em nenhum dos dois.
+
 ### Entrada de Ativos: origem por planilha
 
 Além da base por status e da lista digitada, a Entrada aceita planilha.

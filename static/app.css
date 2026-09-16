@@ -590,6 +590,15 @@ input[type="number"].form-control { font-family: var(--sp-num); font-variant-num
 }
 select.form-control-inline { padding-right: 26px; }
 
+/* Controle dentro de célula de tabela: a linha é apertada e o rótulo da
+   opção não pode ser cortado. */
+.form-control-sm {
+    padding: 5px 8px;
+    font-size: 12px;
+    min-width: 116px;
+}
+select.form-control-sm { padding-right: 22px; }
+
 .form-grid { display: grid; gap: 14px 18px; }
 .form-grid.cols-2 { grid-template-columns: 1fr 1fr; }
 

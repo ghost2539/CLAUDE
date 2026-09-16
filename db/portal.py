@@ -169,6 +169,14 @@ class ReceiptCycle(Base):
         ForeignKey("storage_locations.id"), nullable=True
     )
     lot_number: Mapped[str] = mapped_column(String(120), default="", index=True)
+    # De onde o ativo entrou no Spare. REVERSA é o que volta da loja e já
+    # existe no EBS; FORNECEDOR é compra nova, que chega com PO e nota e
+    # ainda não existe em lugar nenhum — por isso os dois campos ao lado.
+    origem_entrada: Mapped[str] = mapped_column(
+        String(20), default="REVERSA", server_default="REVERSA", index=True
+    )
+    po: Mapped[str] = mapped_column(String(60), default="", server_default="", index=True)
+    nf: Mapped[str] = mapped_column(String(60), default="", server_default="", index=True)
     open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(80))
@@ -328,6 +336,10 @@ def migrar_permissoes(renomes: dict[str, str]) -> int:
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+
+    # Coluna nova em tabela que já existe: o create_all não a acrescenta.
+    from db._esquema import migrar_colunas
+    migrar_colunas(Base, engine, "portal")
 
     from sqlalchemy import inspect as sa_inspect, text as sa_text
     insp = sa_inspect(engine)

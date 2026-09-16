@@ -214,6 +214,9 @@ def cycle_dict(c: ReceiptCycle) -> dict[str, Any]:
         "local_id": c.location_id,
         "lote": c.lot_number,
         "aberto": c.open,
+        "origem_entrada": c.origem_entrada or "REVERSA",
+        "po": c.po or "",
+        "nf": c.nf or "",
     }
     d.update(asset_dict(c.asset))
     return d

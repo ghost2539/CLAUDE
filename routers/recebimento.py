@@ -40,6 +40,13 @@ VENDA_DIRETA = "VENDA"
 TRIAGEM = "TRIAGEM"
 DESTINOS_ENTRADA = (VENDA_DIRETA, TRIAGEM)
 
+# De onde o ativo entrou. Reversa é o que volta da loja: já existe no EBS e
+# entra pela leitura. Fornecedor é compra nova, que não existe em lugar
+# nenhum e por isso é digitada, com PO e nota fiscal.
+ORIGEM_REVERSA = "REVERSA"
+ORIGEM_FORNECEDOR = "FORNECEDOR"
+ORIGENS_ENTRADA = (ORIGEM_REVERSA, ORIGEM_FORNECEDOR)
+
 
 # ── Pydantic models ───────────────────────────────────────────────
 
@@ -82,6 +89,10 @@ class BulkSubmitItem(BaseModel):
     custo_asset: float | None = None
     dpis: str | None = None
     fonte: str = "EBS"
+    # Compra do fornecedor: a ordem e a nota que trouxeram o equipamento.
+    # Ficam no ciclo, que é o evento de entrada, não no ativo.
+    po: str = ""
+    nf: str = ""
     # O Recebimento é a porta de entrada e define o próximo destino:
     # venda direta, ou triagem para uma das bancadas. Em triagem, a
     # subcategoria é obrigatória — é ela que diz qual bancada recebe.
@@ -91,6 +102,15 @@ class BulkSubmitItem(BaseModel):
 
 class BulkSubmitIn(BaseModel):
     items: list[BulkSubmitItem]
+    origem: str = ORIGEM_REVERSA
+
+    @field_validator("origem")
+    @classmethod
+    def validar_origem(cls, v: str) -> str:
+        v = (v or ORIGEM_REVERSA).strip().upper()
+        if v not in ORIGENS_ENTRADA:
+            raise ValueError("Origem inválida: informe fornecedor ou reversa.")
+        return v
     # Onde o lote foi guardado. Obrigatório quando o espelho no ServiceNow
     # está ligado: "em estoque" sem dizer onde não fecha inventário depois.
     espaco_corredor: str = ""
@@ -300,6 +320,23 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     if not body.items:
         raise HTTPException(400, "Nenhum ativo para enviar.")
 
+    # Compra de fornecedor não passa pelo EBS: o que identifica o
+    # equipamento é o que o operador digitou. Sem isso o ativo entraria sem
+    # série (impossível de achar depois) ou sem nota (impossível de
+    # conferir com o financeiro).
+    if body.origem == ORIGEM_FORNECEDOR:
+        for pos, item in enumerate(body.items, start=1):
+            faltando = [rotulo for rotulo, valor in (
+                ("descrição do item", item.descricao),
+                ("serial number", item.numero_serie),
+                ("PO", item.po),
+                ("NF", item.nf),
+            ) if not (valor or "").strip()]
+            if faltando:
+                ident = (item.numero_serie or item.descricao or f"item {pos}").strip()
+                raise HTTPException(
+                    400, f"{ident}: informe {', '.join(faltando)}.")
+
     # Destino de entrada de cada ativo, decidido aqui e não adivinhado
     # depois. Em triagem, a subcategoria tem de estar na lista: é ela que
     # diz qual bancada recebe o equipamento.
@@ -342,6 +379,8 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                 "modelo": item.modelo,
                 "fonte": item.fonte or "EBS",
             }
+            if body.origem == ORIGEM_FORNECEDOR:
+                payload["fonte"] = ORIGEM_FORNECEDOR
             if item.custo_asset is not None:
                 payload["custo_asset"] = item.custo_asset
             if item.dpis:
@@ -405,6 +444,9 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     received_date=today,
                     iso_week=f"{iso.year}-S{iso.week:02d}",
                     status="RECEBIDO",
+                    origem_entrada=body.origem,
+                    po=(item.po or "").strip(),
+                    nf=(item.nf or "").strip(),
                     created_by=sd["username"],
                     updated_by=sd["username"],
                 )
