@@ -133,12 +133,121 @@ def dias_uteis(a, b) -> float:
 
 
 # ── Carga da planilha ───────────────────────────────────────────────────────
+_RE_INC = re.compile(r"\b(INC\d{5,})\b", re.IGNORECASE)
+
+
+def _linhas_da_planilha(caminho: str):
+    """Retorna uma lista de linhas (cada linha = lista de células em texto),
+    detectando o formato REAL do arquivo — não confia na extensão.
+
+    O ServiceNow costuma exportar como .xls/.xlsx que na verdade é HTML-tabela
+    ou CSV, ou como .xls binário antigo. Cobrimos todos.
+    """
+    with open(caminho, "rb") as fh:
+        cabeca = fh.read(8)
+
+    # 1) .xlsx de verdade (zip: assinatura PK\x03\x04)
+    if cabeca[:4] == b"PK\x03\x04":
+        import openpyxl
+        wb = openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        return [[c for c in row] for row in ws.iter_rows(values_only=True)]
+
+    # 2) .xls binário antigo (OLE: assinatura D0 CF 11 E0)
+    if cabeca[:4] == b"\xd0\xcf\x11\xe0":
+        try:
+            import xlrd  # type: ignore
+        except ImportError:
+            raise SystemExit(
+                "Arquivo é .xls binário antigo. Instale xlrd (pip install xlrd) "
+                "ou reexporte como CSV / .xlsx real."
+            )
+        wb = xlrd.open_workbook(caminho)
+        sh = wb.sheet_by_index(0)
+        return [[sh.cell_value(r, c) for c in range(sh.ncols)]
+                for r in range(sh.nrows)]
+
+    # 3) Texto: pode ser HTML-tabela (SN "Excel") ou CSV/TSV
+    raw = open(caminho, "rb").read()
+    for enc in ("utf-8-sig", "utf-16", "latin-1"):
+        try:
+            texto = raw.decode(enc)
+            break
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    else:
+        texto = raw.decode("latin-1", "replace")
+
+    baixo = texto.lower()
+    if "<table" in baixo or "<tr" in baixo or "<td" in baixo:
+        return _linhas_html(texto)
+
+    # CSV/TSV — deixa o csv.Sniffer achar o delimitador
+    import csv
+    import io
+    amostra = texto[:4096]
+    try:
+        dialeto = csv.Sniffer().sniff(amostra, delimiters=",;\t|")
+    except csv.Error:
+        class _D(csv.Dialect):
+            delimiter = ";" if amostra.count(";") > amostra.count(",") else ","
+            quotechar = '"'
+            doublequote = True
+            skipinitialspace = True
+            lineterminator = "\n"
+            quoting = csv.QUOTE_MINIMAL
+        dialeto = _D
+    return [list(row) for row in csv.reader(io.StringIO(texto), dialeto)]
+
+
+def _linhas_html(texto: str):
+    """Extrai as linhas da primeira <table> de um export HTML do ServiceNow."""
+    from html.parser import HTMLParser
+    from html import unescape
+
+    class _P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.linhas, self.cel, self.buf = [], None, []
+            self.in_td = False
+            self.parou = False
+
+        def handle_starttag(self, tag, attrs):
+            if self.parou:
+                return
+            if tag == "tr":
+                self.cel = []
+            elif tag in ("td", "th"):
+                self.in_td, self.buf = True, []
+
+        def handle_endtag(self, tag):
+            if self.parou:
+                return
+            if tag in ("td", "th") and self.in_td:
+                self.cel.append(unescape("".join(self.buf)).strip())
+                self.in_td = False
+            elif tag == "tr" and self.cel is not None:
+                self.linhas.append(self.cel)
+                self.cel = None
+            elif tag == "table" and self.linhas:
+                self.parou = True  # só a primeira tabela
+
+        def handle_data(self, data):
+            if self.in_td:
+                self.buf.append(data)
+
+    p = _P()
+    p.feed(texto)
+    return p.linhas
+
+
 def carregar_incs(caminho: str):
-    import openpyxl
-    wb = openpyxl.load_workbook(caminho, read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    rows = ws.iter_rows(values_only=True)
-    hdr = [str(c or "").strip().lower() for c in next(rows)]
+    linhas = _linhas_da_planilha(caminho)
+    linhas = [lin for lin in linhas if any(str(c or "").strip() for c in lin)]
+    if not linhas:
+        raise SystemExit("Planilha vazia ou ilegível.")
+
+    hdr = [str(c or "").strip().lower() for c in linhas[0]]
 
     def idx(*nomes):
         for n in nomes:
@@ -146,19 +255,36 @@ def carregar_incs(caminho: str):
                 return hdr.index(n)
         return None
 
-    i_num = idx("tarefa", "number", "chamado", "incident")
+    i_num = idx("tarefa", "number", "chamado", "incident", "número", "numero")
     i_grp = idx("assignment group", "assignment_group", "grupo")
-    if i_num is None:
-        raise SystemExit("Coluna de número do chamado (Tarefa) não encontrada.")
-    out = []
-    vistos = set()
-    for r in rows:
-        num = str(r[i_num] or "").strip()
+
+    out, vistos = [], set()
+
+    def _add(num, grp=""):
+        num = str(num or "").strip()
+        m = _RE_INC.search(num)
+        if m:
+            num = m.group(1).upper()
         if not num or num in vistos:
-            continue
+            return
         vistos.add(num)
-        grp = str(r[i_grp] or "").strip() if i_grp is not None else ""
-        out.append({"number": num, "grupo_planilha": grp})
+        out.append({"number": num, "grupo_planilha": str(grp or "").strip()})
+
+    if i_num is not None:
+        for r in linhas[1:]:
+            grp = r[i_grp] if (i_grp is not None and i_grp < len(r)) else ""
+            _add(r[i_num] if i_num < len(r) else "", grp)
+    else:
+        # Sem cabeçalho reconhecível: varre tudo procurando padrão INC#####
+        for r in linhas:
+            for c in r:
+                m = _RE_INC.search(str(c or ""))
+                if m:
+                    _add(m.group(1))
+    if not out:
+        raise SystemExit(
+            "Nenhum número de chamado (INC…) encontrado. Confira a coluna 'Tarefa'."
+        )
     return out
 
 
