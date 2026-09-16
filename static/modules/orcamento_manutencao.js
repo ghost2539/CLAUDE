@@ -425,7 +425,7 @@
 
         c.innerHTML = STYLE +
             '<div class="om-top">' +
-                '<h1 class="page-title">Orçamento de Manutenção — Coletores e SLEDs</h1>' +
+                '<h1 class="page-title">Manutenção Bluebird</h1>' +
                 '<label>Ano <select id="om-ano" class="form-control form-control-inline"></select></label>' +
                 '<label>Mês <select id="om-mes" class="form-control form-control-inline"></select></label>' +
                 '<button id="om-refresh" class="btn btn-outline btn-sm">Atualizar</button>' +
