@@ -88,6 +88,8 @@
         'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
         '.om-chart .card-header{font-size:13px;padding:10px 16px}' +
         '.om-chart-body{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:14px 16px 6px;min-height:200px}' +
+        /* donut "Consumo por categoria": mesma altura do card "Aguardando devolução por categoria" (fileira om-g3) */
+        '.om-chart-body[data-chart="categoria"]{min-height:250px}' +
         '.om-chart svg{display:block;width:100%;height:auto;max-height:280px;overflow:visible}' +
         '.om-chart rect,.om-chart circle[data-tip],.om-hb-seg,.om-dl-row[data-tip]{cursor:default}' +
         '.om-dim{opacity:.42}' +
