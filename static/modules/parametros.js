@@ -1371,9 +1371,20 @@ async function renderPermissions(c, S) {
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];
+    // O servidor diz quais ações existem em cada módulo (config.MODULE_ACTIONS);
+    // a grade só oferece essas. O que não existe aparece como "—".
+    var modulosServidor = null;
+    var acoesPorModulo = {};
+
+    function acoesDe(m) {
+        var lista = acoesPorModulo[m];
+        return lista ? lista.map(function (a) { return 'can_' + a; }) : ACTIONS;
+    }
 
     async function load() {
         var d = await S.api('/parametros/permissoes');
+        if (d.modules && d.modules.length) modulosServidor = d.modules;
+        acoesPorModulo = d.module_actions || {};
         document.getElementById('pm-block-external').checked = !!d.block_external;
         var cols = [
             { key: 'username',      label: 'Login' },
@@ -1462,11 +1473,15 @@ async function renderPermissions(c, S) {
         var tbody = box.querySelector('#perm-body');
         var permMap = u.permission_map || {};
 
-        MODULES.forEach(function (m) {
+        (modulosServidor || MODULES).forEach(function (m) {
             var perms = permMap[m] || {};
+            var existentes = acoesDe(m);
             var tr = S.el('tr');
             tr.innerHTML = '<td><strong>' + S.esc(MODULE_LABELS[m] || m) + '</strong></td>' +
                 ACTIONS.map(function (k) {
+                    if (existentes.indexOf(k) === -1) {
+                        return '<td class="text-muted" title="Esta ação não existe neste módulo">—</td>';
+                    }
                     return '<td><input class="perm-check" data-module="' + S.esc(m) +
                         '" data-key="' + k + '" type="checkbox" ' +
                         (perms[k] ? 'checked' : '') + '></td>';

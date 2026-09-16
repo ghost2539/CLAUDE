@@ -33,7 +33,7 @@ from core.security import require_permission, get_session, SESSIONS
 from routers.servicenow import (
     _sn_session_from_portal, _sn_session_from_cookies, _sn_session_valida,
     _sn_query, _sn_query_all, _sn_update, _extract_tracking_code, _TRACKING_RE,
-    _get_http, _login_sso, SN_PROXY,
+    _get_http, _login_sso, _sn_sessao, SN_PROXY,
     INCIDENT_TABLE, DEFAULT_QUEUE,
 )
 from routers.encerramento import FIELDS as ENC_FIELDS, _estado_canonico, CLOSE_CODE, _display
@@ -156,11 +156,7 @@ def _login_fresh():
     if not usuario or not senha:
         return None, ""
     _req, BS = _get_http()
-    s = _req.Session()
-    s.verify = False
-    if SN_PROXY:
-        s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+    s = _sn_sessao()
     try:
         ok = _login_sso(s, usuario, senha, _req, BS)
     except Exception:  # noqa: BLE001

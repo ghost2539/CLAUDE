@@ -106,6 +106,11 @@ def _proxies():
     return None
 
 
+def _verify_tls():
+    from integracoes.http import verificacao_tls
+    return verificacao_tls("servicenow-api")
+
+
 def _checar_conta():
     if not _cfg.SN_API_USER or not _cfg.SN_API_PASS:
         raise RuntimeError(
@@ -122,8 +127,6 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
     Com group_by  → retorna lista de (valor, contagem).
     """
     import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     _checar_conta()
 
     params = {"sysparm_query": query, "sysparm_count": "true"}
@@ -134,7 +137,7 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
     r = requests.get(
         f"{_cfg.SN_API_BASE}/api/now/stats/{table}", params=params,
         auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS), headers={"Accept": "application/json"},
-        proxies=_proxies(), verify=_cfg.VERIFY_SSL, timeout=45,
+        proxies=_proxies(), verify=_verify_tls(), timeout=45,
     )
     if r.status_code == 401:
         raise RuntimeError("ServiceNow 401 — conta de serviço inválida ou sem papel de API.")
@@ -155,8 +158,6 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
 def _sn_rest_get(table: str, query: str, fields: str,
                  display_value: str = "false", limit: int = 8000) -> list[dict]:
     import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     _checar_conta()
 
     proxies = _proxies()
@@ -177,7 +178,7 @@ def _sn_rest_get(table: str, query: str, fields: str,
         r = requests.get(
             url, params=params, auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS),
             headers={"Accept": "application/json"}, proxies=proxies,
-            verify=_cfg.VERIFY_SSL, timeout=45,
+            verify=_verify_tls(), timeout=45,
         )
         if r.status_code == 401:
             raise RuntimeError("ServiceNow 401 — usuário/senha da conta de serviço inválidos ou sem papel de API.")

@@ -277,6 +277,24 @@ class LocalAsset(Base):
     )
 
 
+class PublicEbsQueryAudit(Base):
+    """Cada consulta ao EBS pela API de conversão (`/api/public-assets`):
+    quem, de onde, quantos identificadores e o resultado."""
+    __tablename__ = "public_ebs_query_audit"
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    usuario: Mapped[str] = mapped_column(String(80), default="")
+    identifiers_count: Mapped[int] = mapped_column(Integer, default=0)
+    found_count: Mapped[int] = mapped_column(Integer, default=0)
+    missing_count: Mapped[int] = mapped_column(Integer, default=0)
+    exported: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome: Mapped[str] = mapped_column(String(30), default="SUCCESS")
+    error_message: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+
 class LoadHistory(Base):
     __tablename__ = "load_history"
     id: Mapped[int] = mapped_column(_PK, primary_key=True)

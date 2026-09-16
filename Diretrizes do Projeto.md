@@ -56,12 +56,21 @@ normativo.
 ## Segurança
 
 - Toda tela e toda API exigem sessão autenticada e passam por
-  `require_permission(req, "<módulo>", "<ação>")`. Ações: `view`, `create`,
-  `edit`, `export`, `admin`.
+  `require_permission(req, "<módulo>", "<ação>")`. As ações que existem em
+  cada módulo estão em `config.py: MODULE_ACTIONS` — módulo novo entra lá
+  com as ações que de fato tem; a tela de permissões só oferece essas.
+- `admin` de módulo administra **o módulo**. Usuários, liberações,
+  desativação e o flag `is_admin` são só de administrador do portal
+  (`require_admin`). Mudança de permissão é refletida na sessão viva.
 - Autenticação só por **Logon AD** (SSO/loginsso). SSO exige liberação
   prévia por um administrador (`allowed`).
 - Escrita no ServiceNow sempre **como o usuário logado** (cookies da
-  sessão); leitura pode usar a conta de serviço.
+  sessão); leitura pode usar a conta de serviço. `sys_id` vindo do cliente
+  passa por `sys_id_valido` (32 hexadecimais) — `_sn_update` recusa o resto.
+- Saída HTTP sempre por `integracoes/http.py` (`sessao` / `verificacao_tls`).
+  **`verify=False` no código é proibido**; desligar a verificação é
+  `VERIFY_SSL=false` no ambiente, e fica em log. Proxy que intercepta o TLS
+  pede `PORTAL_CA_BUNDLE`, não desligar.
 - Segredo nunca no código nem no git: cofre primeiro, senão store cifrado
   (`core/notificador.py` e `routers/automacoes.py` são os modelos).
 - CSP é `script-src 'self'`: **`<script>` inline é bloqueado**. JS de página

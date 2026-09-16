@@ -210,8 +210,6 @@ def consultar(tabela: str, query: str, campos: str, *, display=True,
               limite: int = 100000) -> list[dict]:
     """Table API paginada. Mesmo caminho que o portal usa."""
     import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     c = _cfg()
     proxies = ({"http": c.SN_API_PROXY, "https": c.SN_API_PROXY}
                if getattr(c, "SN_API_PROXY", "") else None)

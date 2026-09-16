@@ -127,8 +127,9 @@ class Sessao:
     def __init__(self, usuario: str, senha: str, registrar: Callable[[str], None] | None = None):
         self.usuario = usuario
         self._senha = senha
+        from integracoes.http import verificacao_tls
         self.http = requests.Session()
-        self.http.verify = _c("EBS_FORMS_VERIFY", "false").lower() == "true"
+        self.http.verify = verificacao_tls("ebs-forms", _c("EBS_FORMS_VERIFY", ""))
         self.http.headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Edg/124.0"

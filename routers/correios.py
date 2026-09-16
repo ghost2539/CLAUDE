@@ -104,14 +104,8 @@ _correios_token_cache: dict = {}
 
 
 def _correios_session(proxy=SN_PROXY):
-    import requests as _req
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    sess = _req.Session()
-    sess.verify = False
-    if proxy:
-        sess.proxies = {"https": proxy, "http": proxy}
-    return sess
+    from integracoes.http import sessao
+    return sessao("correios", proxy, user_agent="")
 
 
 def _correios_request(method: str, url: str, **kwargs):

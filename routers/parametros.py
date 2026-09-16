@@ -23,8 +23,10 @@ from db.portal import (
     AccessLog, hash_password,
 )
 from core.security import (get_session, require_permission, client_ip, check_rate_limit,
-                           require_admin_geral, is_admin_geral)
+                           require_admin_geral, is_admin_geral, require_admin,
+                           atualizar_sessoes, encerrar_sessoes, acoes_do_modulo)
 from routers.helpers import reapply_classification, reclassify_all
+from routers.auth import perms_efetivas, _user_payload
 
 _cfg = get_settings()
 MODULES = _cfg.MODULES
@@ -108,29 +110,20 @@ class UserCreateIn(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────
 
 def _get_perms(s, u: User) -> dict:
-    """Read REAL permissions from the database (mirrors auth.py)."""
-    if u.is_admin:
-        return {
-            m: {
-                "can_view": True,
-                "can_create": True,
-                "can_edit": True,
-                "can_export": True,
-                "can_admin": True,
-            }
-            for m in MODULES
-        }
-    rows = s.scalars(select(Permission).where(Permission.user_id == u.id)).all()
-    return {
-        r.module: {
-            "can_view": r.can_view,
-            "can_create": r.can_create,
-            "can_edit": r.can_edit,
-            "can_export": r.can_export,
-            "can_admin": r.can_admin,
-        }
-        for r in rows
-    }
+    """Permissões efetivas (as da base mais a liberação da Consulta Times)."""
+    return perms_efetivas(s, u)
+
+
+def _refletir_na_sessao(s, u: User) -> None:
+    """O que foi gravado passa a valer para quem já está logado: sem isto a
+    sessão seguiria com a cópia antiga por até 8 horas. Desativado ou sem
+    liberação: as sessões caem."""
+    if not u.active or not u.allowed:
+        encerrar_sessoes(u.login)
+        return
+    dados = _user_payload(u, perms_efetivas(s, u))
+    atualizar_sessoes(u.login, **{k: dados[k] for k in
+                                  ("is_admin", "role", "permissions", "permission_map")})
 
 
 # ── Storage Locations ─────────────────────────────────────────────
@@ -477,7 +470,7 @@ def logo_upload(req: Request, logo: UploadFile = File(...)):
 
 @router.get("/permissoes")
 def permissions_list(req: Request):
-    require_permission(req, "parametros", "admin")
+    require_admin(req)
     with SessionLocal() as s:
         out = []
         for u in s.scalars(select(User).order_by(User.login)).all():
@@ -498,65 +491,74 @@ def permissions_list(req: Request):
             })
         ac_row = s.get(Setting, "access_control")
         block_external = (ac_row.value if ac_row else {}).get("block_external", False)
-        return {"usuarios": out, "modules": MODULES, "block_external": block_external}
+        return {"usuarios": out, "modules": MODULES,
+                "module_actions": {m: list(acoes_do_modulo(m)) for m in MODULES},
+                "block_external": block_external}
+
+
+class PermissoesIn(BaseModel):
+    active: bool | None = None
+    allowed: bool | None = None
+    is_admin: bool | None = None
+    permission_map: dict[str, dict[str, bool]] = {}
 
 
 @router.put("/permissoes/{login}")
-def permissions_set(login: str, payload: dict, req: Request):
-    sd = require_permission(req, "parametros", "admin")
+def permissions_set(login: str, body: PermissoesIn, req: Request):
+    """Liberação de acesso. Só administrador do portal chega aqui, e nem ele
+    tira o próprio `is_admin` nem mexe no administrador inicial — evita
+    ficar sem ninguém que possa liberar acesso."""
+    sd = require_admin(req)
     with SessionLocal.begin() as s:
         u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
         if not u:
             raise HTTPException(404, "Usuário não encontrado.")
 
-        if u.login == _cfg.INITIAL_ADMIN_LOGIN and payload.get("active") is False:
-            raise HTTPException(400, "O administrador inicial não pode ser desativado.")
+        inicial = u.login.lower() == (_cfg.INITIAL_ADMIN_LOGIN or "").lower()
+        proprio = u.login.lower() == (sd.get("username") or "").lower()
+        if inicial and (body.active is False or body.allowed is False or body.is_admin is False):
+            raise HTTPException(400, "O administrador inicial não pode ser desativado nem rebaixado.")
+        if proprio and (body.active is False or body.is_admin is False):
+            raise HTTPException(400, "Você não pode desativar nem rebaixar o próprio usuário.")
 
-        u.active = bool(payload.get("active", u.active))
-        u.is_admin = bool(payload.get("is_admin", False))
-        if "allowed" in payload:
-            u.allowed = bool(payload["allowed"])
+        if body.active is not None:
+            u.active = body.active
+        if body.allowed is not None:
+            u.allowed = body.allowed
+        if body.is_admin is not None:
+            u.is_admin = body.is_admin
 
-        requested = payload.get("permission_map") or {}
-        legacy = payload.get("permissions") or []
-
-        # Clear existing permissions for this user
-        existing = s.scalars(
-            select(Permission).where(Permission.user_id == u.id)
-        ).all()
-        for p in existing:
+        for p in s.scalars(select(Permission).where(Permission.user_id == u.id)).all():
             s.delete(p)
         s.flush()
 
         if not u.is_admin:
             for m in MODULES:
-                cfg = requested.get(m)
-                if cfg is None and m in legacy:
-                    cfg = {
-                        "can_view": True,
-                        "can_create": True,
-                        "can_edit": True,
-                        "can_export": True,
-                        "can_admin": False,
-                    }
-                if cfg and cfg.get("can_view"):
-                    s.add(Permission(
-                        user_id=u.id,
-                        module=m,
-                        can_view=True,
-                        can_create=bool(cfg.get("can_create")),
-                        can_edit=bool(cfg.get("can_edit")),
-                        can_export=bool(cfg.get("can_export")),
-                        can_admin=bool(cfg.get("can_admin")),
-                    ))
+                cfg = body.permission_map.get(m)
+                if not cfg or not cfg.get("can_view"):
+                    continue
+                # Só o que existe no módulo entra; o resto é descartado.
+                acoes = acoes_do_modulo(m)
+                s.add(Permission(
+                    user_id=u.id,
+                    module=m,
+                    can_view=True,
+                    can_create=bool(cfg.get("can_create")) and "create" in acoes,
+                    can_edit=bool(cfg.get("can_edit")) and "edit" in acoes,
+                    can_export=bool(cfg.get("can_export")) and "export" in acoes,
+                    can_admin=bool(cfg.get("can_admin")) and "admin" in acoes,
+                ))
+        s.flush()
 
         s.add(AccessLog(
             login=sd["username"],
             auth_source=sd.get("auth_source", "LOCAL"),
             success=True,
             ip=client_ip(req),
-            detail=f"Permissões atualizadas para {u.login}"[:500],
+            detail=(f"Permissões atualizadas para {u.login}"
+                    f" (admin={u.is_admin}, ativo={u.active}, liberado={u.allowed})")[:500],
         ))
+        _refletir_na_sessao(s, u)
 
     return {"ok": True}
 
@@ -565,7 +567,7 @@ def permissions_set(login: str, payload: dict, req: Request):
 
 @router.get("/controle-acesso")
 def access_control_get(req: Request):
-    require_permission(req, "parametros", "admin")
+    require_admin(req)
     with SessionLocal() as s:
         row = s.get(Setting, "access_control")
         return row.value if row else {"block_external": False}
@@ -573,7 +575,7 @@ def access_control_get(req: Request):
 
 @router.put("/controle-acesso")
 def access_control_set(payload: dict, req: Request):
-    sd = require_permission(req, "parametros", "admin")
+    sd = require_admin(req)
     with SessionLocal.begin() as s:
         row = s.get(Setting, "access_control")
         if not row:
@@ -596,7 +598,7 @@ def _gerar_senha_temporaria() -> str:
 
 @router.post("/usuarios")
 def user_create(body: UserCreateIn, req: Request):
-    require_permission(req, "parametros", "admin")
+    require_admin(req)
     check_rate_limit(req)
 
     senha_temporaria = None
@@ -635,8 +637,8 @@ def user_create(body: UserCreateIn, req: Request):
 
 @router.delete("/usuarios/{login}")
 def user_delete(login: str, req: Request):
-    """Exclui um usuário. Só admin; protege o admin inicial e o próprio usuário."""
-    sd = require_permission(req, "parametros", "admin")
+    """Exclui um usuário. Só admin do portal; protege o admin inicial e o próprio usuário."""
+    sd = require_admin(req)
 
     if login.lower() == _cfg.INITIAL_ADMIN_LOGIN.lower():
         raise HTTPException(400, "O administrador inicial não pode ser excluído.")
@@ -658,6 +660,7 @@ def user_delete(login: str, req: Request):
             ip=client_ip(req),
             detail=f"Usuário excluído: {login}"[:500],
         ))
+    encerrar_sessoes(login)
     return {"ok": True}
 
 

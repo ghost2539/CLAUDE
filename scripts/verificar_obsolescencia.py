@@ -77,7 +77,7 @@ ob._cfg.VERIFY_SSL = False; ob._cfg.MDM_CA_BUNDLE = ""
 checar(ob._nova_sessao().verify is False, "VERIFY_SSL=false → sessão do MDM sem verificação (como o ServiceNow)")
 ob._cfg.MDM_CA_BUNDLE = "/tmp/ca-corporativa.pem"
 checar(ob._nova_sessao().verify == "/tmp/ca-corporativa.pem", "MDM_CA_BUNDLE → verifica com a cadeia informada")
-ob._cfg.MDM_CA_BUNDLE = ""; ob._cfg.VERIFY_SSL = True
+ob._cfg.MDM_CA_BUNDLE = ""; ob._cfg.VERIFY_SSL = True; ob._cfg.CA_BUNDLE = ""
 checar(ob._nova_sessao().verify is True, "VERIFY_SSL=true sem CA própria → verificação padrão")
 ob._cfg.VERIFY_SSL = False
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
+import ipaddress
 import secrets
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
 
 from fastapi import Request, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -13,26 +13,61 @@ from config import get_settings
 
 _cfg = get_settings()
 
-# ── Session management ──────────────────────────────────────────
+# ── Sessão ───────────────────────────────────────────────────────
 
+COOKIE_SESSAO = "spare_session"
 _serializer = URLSafeTimedSerializer(_cfg.SESSION_SECRET, salt="portal-spare-v2")
 SESSIONS: dict[str, dict] = {}
+# login (minúsculo) → sids vivos. É o que permite que uma mudança de
+# permissão, desativação ou exclusão alcance quem já está logado.
+_SESSOES_POR_LOGIN: dict[str, set[str]] = defaultdict(set)
+
+
+def _login_de(data: dict) -> str:
+    return (data.get("username") or "").strip().lower()
 
 
 def create_session(data: dict) -> tuple[str, str]:
     sid = secrets.token_urlsafe(32)
     SESSIONS[sid] = data
+    _SESSOES_POR_LOGIN[_login_de(data)].add(sid)
     cookie_value = _serializer.dumps(sid)
     return sid, cookie_value
 
 
-def set_session_cookie(resp: Response, cookie_value: str) -> None:
+def _remover_sessao(sid: str) -> None:
+    data = SESSIONS.pop(sid, None)
+    if data is not None:
+        _SESSOES_POR_LOGIN[_login_de(data)].discard(sid)
+
+
+def encerrar_sessoes(login: str) -> int:
+    """Derruba todas as sessões vivas de um login (desativação, exclusão)."""
+    sids = list(_SESSOES_POR_LOGIN.get((login or "").strip().lower(), ()))
+    for sid in sids:
+        _remover_sessao(sid)
+    return len(sids)
+
+
+def atualizar_sessoes(login: str, **campos) -> int:
+    """Aplica campos novos (permissões, flags) às sessões vivas de um login."""
+    sids = _SESSOES_POR_LOGIN.get((login or "").strip().lower(), ())
+    n = 0
+    for sid in list(sids):
+        data = SESSIONS.get(sid)
+        if data is not None:
+            data.update(campos)
+            n += 1
+    return n
+
+
+def set_session_cookie(resp: Response, cookie_value: str, req: Request | None = None) -> None:
     resp.set_cookie(
-        "spare_session",
+        COOKIE_SESSAO,
         cookie_value,
         httponly=True,
         samesite="lax",
-        secure=bool(_cfg.SSL_CERTFILE),
+        secure=cookie_seguro(req),
         max_age=_cfg.SESSION_TTL,
         path="/",
     )
@@ -43,13 +78,13 @@ def delete_session(cookie_raw: str | None) -> None:
         return
     try:
         sid = _serializer.loads(cookie_raw)
-        SESSIONS.pop(sid, None)
-    except Exception:
-        pass
+    except (BadSignature, SignatureExpired):
+        return
+    _remover_sessao(sid)
 
 
 def get_session(req: Request, required: bool = True) -> dict | None:
-    cookie = req.cookies.get("spare_session")
+    cookie = req.cookies.get(COOKIE_SESSAO)
     if not cookie:
         if required:
             raise HTTPException(401, "Sessão não autenticada.")
@@ -66,21 +101,36 @@ def get_session(req: Request, required: bool = True) -> dict | None:
     return data
 
 
+# ── Permissões ───────────────────────────────────────────────────
+
+ACOES = ("view", "create", "edit", "export", "admin")
+_CHAVE_ACAO = {a: f"can_{a}" for a in ACOES}
+
+
+def acoes_do_modulo(module: str) -> tuple[str, ...]:
+    """Ações que existem de fato no módulo (config.MODULE_ACTIONS); módulo
+    fora da tabela só tem `view`."""
+    return tuple(_cfg.MODULE_ACTIONS.get(module, ("view",)))
+
+
 def require_permission(req: Request, module: str, action: str = "view") -> dict:
     sd = get_session(req)
     if sd.get("is_admin"):
         return sd
     pmap = sd.get("permission_map") or {}
     perms = pmap.get(module, {})
-    key = {
-        "view": "can_view",
-        "create": "can_create",
-        "edit": "can_edit",
-        "export": "can_export",
-        "admin": "can_admin",
-    }[action]
-    if not perms.get(key):
+    if not perms.get(_CHAVE_ACAO[action]):
         raise HTTPException(403, "Permissão insuficiente.")
+    return sd
+
+
+def require_admin(req: Request) -> dict:
+    """Administrador do portal (`is_admin`). Gerir usuários, liberações e o
+    próprio conjunto de administradores é só daqui — `can_admin` de um módulo
+    nunca concede isto."""
+    sd = get_session(req)
+    if not sd.get("is_admin"):
+        raise HTTPException(403, "Ação restrita a administradores do portal.")
     return sd
 
 
@@ -105,23 +155,80 @@ def require_admin_geral(req: Request) -> dict:
     return sd
 
 
+# ── Origem do pedido: proxies confiáveis, IP real, esquema ──────
+
+
+def _redes_confiaveis() -> list:
+    redes = []
+    for item in (_cfg.TRUSTED_PROXIES or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            redes.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            continue
+    return redes
+
+
+_REDES_CONFIAVEIS = _redes_confiaveis()
+
+
+def vem_de_proxy_confiavel(req: Request) -> bool:
+    host = req.client.host if req.client else ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in rede for rede in _REDES_CONFIAVEIS)
+
+
 def client_ip(req: Request) -> str:
-    forwarded = req.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:80]
+    """IP de quem pediu. X-Forwarded-For só vale vindo de um proxy listado
+    em TRUSTED_PROXIES; de qualquer outro cliente é texto forjável."""
+    if vem_de_proxy_confiavel(req):
+        forwarded = req.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:80]
     return (req.client.host if req.client else "")[:80]
 
 
-# ── Rate limiting (in-memory, per-IP) ───────────────────────────
+def esquema_efetivo(req: Request) -> str:
+    """http ou https do ponto de vista do navegador (TLS no uvicorn ou
+    X-Forwarded-Proto de um proxy confiável)."""
+    if vem_de_proxy_confiavel(req):
+        proto = req.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+        if proto in ("http", "https"):
+            return proto
+    return req.url.scheme
+
+
+def cookie_seguro(req: Request | None) -> bool:
+    modo = _cfg.SESSION_COOKIE_SECURE
+    if modo in ("true", "1", "sim", "on"):
+        return True
+    if modo in ("false", "0", "nao", "não", "off"):
+        return False
+    if _cfg.SSL_CERTFILE:
+        return True
+    return req is not None and esquema_efetivo(req) == "https"
+
+
+# ── Rate limiting (em memória, por chave) ────────────────────────
 
 class RateLimiter:
     def __init__(self):
         self._hits: dict[str, list[float]] = defaultdict(list)
+        self._desde_limpeza = 0
 
     def check(self, key: str, limit: int, window: int) -> bool:
         now = time.monotonic()
         hits = self._hits[key]
         self._hits[key] = [t for t in hits if now - t < window]
+        # Sem isto o dicionário só cresce: cada IP forjado vira uma chave.
+        self._desde_limpeza += 1
+        if self._desde_limpeza >= 500 or len(self._hits) > 20000:
+            self.cleanup()
         if len(self._hits[key]) >= limit:
             return False
         self._hits[key].append(now)
@@ -129,6 +236,7 @@ class RateLimiter:
 
     def cleanup(self) -> None:
         now = time.monotonic()
+        self._desde_limpeza = 0
         stale = [k for k, v in self._hits.items() if not v or now - v[-1] > 300]
         for k in stale:
             del self._hits[k]
@@ -145,30 +253,35 @@ def _parse_rate(spec: str) -> tuple[int, int]:
     return count, window
 
 
-def check_rate_limit(req: Request, kind: str = "api") -> None:
+def check_rate_limit(req: Request, kind: str = "api", chave_extra: str = "") -> None:
+    """Limite por IP; `chave_extra` (ex.: o login tentado) acrescenta um
+    segundo balde, para o limite valer mesmo com IPs variados."""
     ip = client_ip(req)
     if kind == "login":
         limit, window = _parse_rate(_cfg.RATE_LIMIT_LOGIN)
     else:
         limit, window = _parse_rate(_cfg.RATE_LIMIT_API)
-    key = f"{kind}:{ip}"
-    if not _limiter.check(key, limit, window):
-        raise HTTPException(429, "Muitas requisições. Tente novamente em breve.")
+    chaves = [f"{kind}:{ip}"]
+    if chave_extra:
+        chaves.append(f"{kind}:{chave_extra}")
+    for chave in chaves:
+        if not _limiter.check(chave, limit, window):
+            raise HTTPException(429, "Muitas requisições. Tente novamente em breve.")
 
 
-# ── Security headers middleware ─────────────────────────────────
+# ── Cabeçalhos de segurança ──────────────────────────────────────
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
         )
-        if _cfg.SSL_CERTFILE:
+        if _cfg.SSL_CERTFILE or esquema_efetivo(request) == "https":
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains"
             )
@@ -179,12 +292,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
             "frame-ancestors 'none'"
         )
         return response
 
 
-# ── Bot protection middleware ───────────────────────────────────
+# ── Bloqueio de scanners por User-Agent ──────────────────────────
 
 class BotProtectionMiddleware(BaseHTTPMiddleware):
     SUSPICIOUS_AGENTS = {
@@ -199,7 +315,7 @@ class BotProtectionMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── Request size limiter ────────────────────────────────────────
+# ── Tamanho máximo do corpo ──────────────────────────────────────
 
 class MaxBodyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

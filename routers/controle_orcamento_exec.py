@@ -66,7 +66,7 @@ _MAX_VALOR = Decimal("9999999999999.99")
 EBS_CAPEX_URL = getattr(_cfg, "EBS_CAPEX_URL", "") or "https://suporte.lojasrenner.com.br/ebs/api/capex/"
 EBS_CAPEX_PROXY = getattr(_cfg, "EBS_CAPEX_PROXY", "") or ""
 EBS_CAPEX_TIMEOUT = int(getattr(_cfg, "EBS_CAPEX_TIMEOUT", 0) or 30)
-EBS_CAPEX_VERIFY = bool(getattr(_cfg, "EBS_CAPEX_VERIFY", False))
+EBS_CAPEX_VERIFY = str(getattr(_cfg, "EBS_CAPEX_VERIFY", "") or "")  # "" segue VERIFY_SSL
 EBS_CAPEX_USER = getattr(_cfg, "EBS_CAPEX_USER", "") or ""
 EBS_CAPEX_PASS = getattr(_cfg, "EBS_CAPEX_PASS", "") or ""
 EBS_CAPEX_TOKEN = getattr(_cfg, "EBS_CAPEX_TOKEN", "") or ""
@@ -493,20 +493,20 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
     if not numeros:
         return {}
     try:
-        import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        import requests as _req  # noqa: F401 — só confere a dependência
     except ImportError:
         raise ValueError("Pacote 'requests' não instalado no servidor.")
+    from integracoes.http import verificacao_tls
 
     params = {"projetos": ",".join(numeros)}
     proxies = {"http": EBS_CAPEX_PROXY, "https": EBS_CAPEX_PROXY} if EBS_CAPEX_PROXY else None
     base_headers = {"Accept": "application/json"}
+    verify = verificacao_tls("ebs-capex", EBS_CAPEX_VERIFY)
 
     def _get(session, headers=None, auth=None):
         return session.get(
             EBS_CAPEX_URL, params=params, timeout=EBS_CAPEX_TIMEOUT,
-            verify=EBS_CAPEX_VERIFY, proxies=proxies,
+            verify=verify, proxies=proxies,
             headers=headers or base_headers, auth=auth,
         )
 
@@ -591,10 +591,9 @@ def _fx_rates() -> dict:
         live = {}
         try:
             import requests as _req
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            from integracoes.http import verificacao_tls
             proxies = {"http": EBS_CAPEX_FX_PROXY, "https": EBS_CAPEX_FX_PROXY} if EBS_CAPEX_FX_PROXY else None
-            r = _req.get(EBS_CAPEX_FX_URL, timeout=10, verify=False, proxies=proxies)
+            r = _req.get(EBS_CAPEX_FX_URL, timeout=10, verify=verificacao_tls("cambio"), proxies=proxies)
             if r.status_code == 200:
                 d = r.json()
                 for chave, moeda in (("ARSBRL", "ARS"), ("UYUBRL", "UYU")):

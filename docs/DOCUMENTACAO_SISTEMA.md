@@ -71,22 +71,25 @@ CSS inline é permitido (`style-src 'unsafe-inline'`). Recursos externos só de
 
 ## 3. Acesso e autenticação
 
-Login com **três tipos** (botões na tela):
-
-| Botão | Tipo | O que faz |
-|---|---|---|
-| **Logon AD** | `AD` | Valida no EBS/AD. Cria o usuário no 1º acesso. |
-| **Logon Rede** | `SSO` | Valida no **loginsso** (Oracle Access Manager). **Só entra quem um admin liberou** (allow-list por usuário de rede). |
-| **Logon Local** | `LOCAL` | Usuário/senha no portal (hash **bcrypt**). |
+Login **só por Logon AD** (`SSO`): a senha de rede é validada no **loginsso**
+(Oracle Access Manager) por uma conexão com **TLS verificado**
+(`integracoes/http.py`; `PORTAL_CA_BUNDLE` quando há proxy interceptador) e
+não é guardada em lugar nenhum. **Só entra quem um admin liberou** (`allowed`).
 
 Regras:
-- **Sessão** por cookie assinado (`itsdangerous`), `HttpOnly`, TTL 480 min. Sessões em memória do processo.
-- **Troca de senha obrigatória DESATIVADA** — Logon Local entra direto (troca voluntária em *Parâmetros → Minha conta*).
-- **SSO exige liberação individual** (allow-list) — o "Controle de acesso externo" (block_external) só afeta AD/SN, **não** o SSO.
+- **Sessão** por cookie assinado (`itsdangerous`), `HttpOnly`, `Secure` em HTTPS
+  (`SESSION_COOKIE_SECURE`), TTL 480 min. Sessões em memória do processo,
+  indexadas por login: mudança de permissão vale na hora; desativar,
+  tirar a liberação ou excluir derruba as sessões vivas.
 - **Bloqueado no SSO fica salvo como pendente** (Permitido=Não) e aparece em *Parâmetros → Usuários e Permissões* para o admin liberar (marcar "Acesso permitido"), ou criar antes via **Novo usuário → Rede/SSO** (entra já liberado; senha é a do AD).
-- **Bloqueio local**: 5 senhas erradas ⇒ 15 min. **Rate limit**: login 5/min, API 120/min.
-- **Permissões por módulo**: `can_view/create/edit/export/admin`. Admin = acesso total; o menu só mostra o permitido.
-- **Ações de escrita no ServiceNow ocorrem como o usuário logado** (cookies SSO da sessão), nunca com conta de serviço.
+- **Rate limit** do login por IP **e por login tentado** (5/min); API 120/min.
+  `X-Forwarded-For` só vale vindo de `TRUSTED_PROXIES`.
+- **Permissões por módulo** com as ações que o módulo tem (`config.MODULE_ACTIONS`):
+  `view`, e conforme o módulo `create/edit/export/admin`. `admin` de módulo administra
+  aquele módulo. **Usuários, liberações e `is_admin` são só de administrador do portal.**
+  O administrador inicial não pode ser rebaixado; ninguém rebaixa a si mesmo.
+- **Ações de escrita no ServiceNow ocorrem como o usuário logado** (cookies SSO da sessão),
+  nunca com conta de serviço. `sys_id` vindo do cliente é validado (32 hexadecimais).
 
 ---
 
@@ -200,6 +203,10 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 | `DATABASE_URL` | — (obrigatório) | Banco do portal. PostgreSQL hoje / MySQL (`mysql+pymysql://...`) no servidor novo. |
 | `PORTAL_SESSION_SECRET` | — (obrigatório) | Segredo de assinatura da sessão. |
 | `SESSION_TTL_MINUTES` | 480 | Duração da sessão. |
+| `SESSION_COOKIE_SECURE` | auto | Cookie só em HTTPS: `auto` (liga quando o pedido chega por https, direto ou via proxy confiável), `true`, `false`. |
+| `TRUSTED_PROXIES` | 127.0.0.1,::1 | Proxies cujos `X-Forwarded-For`/`X-Forwarded-Proto` são aceitos (IP do IP real e do esquema). |
+| `PORTAL_CA_BUNDLE` | "" | PEM com a CA corporativa (+ CA do proxy interceptador) para verificar o TLS de saída. |
+| `PUBLIC_ASSETS_TOKEN` | "" (cofre) | Token do cabeçalho `X-Api-Key` da conversão EBS → ServiceNow. Sem ele, só sessão com `consulta:view`. |
 | `INITIAL_ADMIN_LOGIN` / `INITIAL_ADMIN_PASSWORD` | "" | Admin inicial. |
 | `HOST` / `PORT` / `WORKERS` | 0.0.0.0 / **8901** / 1 | Servidor. |
 | `UPLOAD_MAX_MB` | 50 | Upload máximo. |
@@ -211,7 +218,7 @@ Arquivo de ambiente do serviço: **`/etc/portal_operacoes_spare/environment`**.
 | Variável | Uso |
 |---|---|
 | `EBS_LOGIN_URL` / `EBS_SEARCH_URL` | Endpoints do EBS. |
-| `VERIFY_SSL` | false | Verificação TLS das chamadas. |
+| `VERIFY_SSL` | **true** | Verificação TLS de toda saída (OAM, ServiceNow, EBS, MDM, Correios). `false` só para diagnóstico; fica em log. |
 | `TIMEOUT_SECONDS` / `MAX_WORKERS` | Timeout e paralelismo das consultas. |
 | `CREDENTIALS_DIRECTORY` | Diretório de credenciais protegidas (`ebs_public_username`/`password`) usadas por consulta pública/consulta-times/CAPEX. |
 

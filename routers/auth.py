@@ -95,6 +95,28 @@ def _get_perms(s, u: User) -> dict:
     }
 
 
+def perms_efetivas(s, u: User) -> dict:
+    """Permissões da sessão: as da base mais as que a liberação da Consulta
+    Times confere (a própria, a Consulta e o ServiceNow). É o que o login
+    grava na sessão e o que Parâmetros reaplica quando algo muda."""
+    perms = _get_perms(s, u)
+    if u.is_admin:
+        return perms
+    try:
+        import db.consulta_times as _dbct
+        nivel = _dbct.nivel_do_login(u.login)
+        if nivel:
+            edit = nivel in ("edit", "admin")
+            base = {"can_view": True, "can_create": edit, "can_edit": edit,
+                    "can_export": True, "can_admin": nivel == "admin"}
+            for m in ("consulta_times", "consulta", "servicenow"):
+                if not perms.get(m, {}).get("can_view"):
+                    perms[m] = dict(base)
+    except Exception as exc:  # noqa: BLE001 — módulo fora do ar não trava o login
+        log.warning("consulta_times: liberação não lida: %s", exc)
+    return perms
+
+
 def _user_payload(u: User, perms: dict) -> dict:
     return {
         "username": u.login,
@@ -119,8 +141,6 @@ def _sn_login(username: str, password: str):
     authenticated cookies, or raises ValueError on failure."""
     try:
         import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
         raise ValueError("Pacote 'requests' não instalado no servidor.")
     try:
@@ -128,15 +148,10 @@ def _sn_login(username: str, password: str):
     except ImportError:
         raise ValueError("Pacote 'beautifulsoup4' não instalado no servidor.")
 
-    from routers.servicenow import SERVICENOW_BASE, SN_PROXY, _login_sso, _follow_form_redirects
+    from routers.servicenow import _login_sso, _sn_sessao
 
-    http_session = _req.Session()
-    http_session.verify = False
-    if SN_PROXY:
-        http_session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    http_session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
+    # TLS verificado: a senha de rede só sai para um OAM com certificado válido.
+    http_session = _sn_sessao()
     try:
         ok = _login_sso(http_session, username, password, _req, _BS)
     except Exception as exc:
@@ -205,7 +220,9 @@ def _registrar_falha(login: str, source: str, detail: str, ip: str, pendente: bo
 
 @router.post("/login")
 def auth_login(body: LoginIn, req: Request):
-    check_rate_limit(req, "login")
+    # Dois baldes: por IP e por login tentado — trocar de IP não zera o
+    # limite contra uma conta de rede específica.
+    check_rate_limit(req, "login", chave_extra=f"user:{body.username.lower()}")
 
     login = body.username
     source = body.auth_type
@@ -262,22 +279,7 @@ def auth_login(body: LoginIn, req: Request):
             u.locked_until = None
             u.auth_source = source
 
-            perms = _get_perms(s, u)
-            # Liberação da Consulta Times (por login, fora do portal): dá a
-            # este espaço as permissões que as telas dele conferem — a
-            # própria, a Consulta e o ServiceNow (Entrada/Saída/Mov. interna).
-            try:
-                import db.consulta_times as _dbct
-                _nivel = _dbct.nivel_do_login(u.login)
-                if _nivel and not u.is_admin:
-                    _edit = _nivel in ("edit", "admin")
-                    _p = {"can_view": True, "can_create": _edit, "can_edit": _edit,
-                          "can_export": True, "can_admin": _nivel == "admin"}
-                    for _m in ("consulta_times", "consulta", "servicenow"):
-                        if not perms.get(_m, {}).get("can_view"):
-                            perms[_m] = dict(_p)
-            except Exception as _exc:  # noqa: BLE001 — módulo fora do ar não trava o login
-                log.warning("consulta_times: liberação não lida no login: %s", _exc)
+            perms = perms_efetivas(s, u)
             data = _user_payload(u, perms)
 
             session_data = {
@@ -301,7 +303,7 @@ def auth_login(body: LoginIn, req: Request):
             visual = visual_row.value if visual_row else {}
 
             resp = JSONResponse({**data, "visual_config": visual})
-            set_session_cookie(resp, cookie_value)
+            set_session_cookie(resp, cookie_value, req)
             return resp
 
     except _LoginFailed as e:
@@ -350,18 +352,12 @@ def sn_session_status(req: Request):
     if not sn_cookies:
         return {"active": False, "reason": "no_session"}
     try:
-        import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        from routers.servicenow import SERVICENOW_BASE, SN_PROXY
-        proxies = {"https": SN_PROXY, "http": SN_PROXY} if SN_PROXY else None
-        r = _req.get(
+        from routers.servicenow import SERVICENOW_BASE, _sn_sessao
+        r = _sn_sessao(json=True).get(
             f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
             cookies=sn_cookies,
             timeout=15,
-            verify=False,
             allow_redirects=False,
-            proxies=proxies,
         )
         if r.status_code == 200:
             return {"active": True}

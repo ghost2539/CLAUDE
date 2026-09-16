@@ -11,11 +11,12 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select, func, or_
 
 from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
 from core.security import require_permission, get_session, check_rate_limit
+from integracoes.http import sessao as _sessao_http
 
 _log = logging.getLogger("servicenow")
 
@@ -131,8 +132,6 @@ class UploadIn(BaseModel):
     status: str = ""                 # para origem=status
     identificadores: list[str] = []  # para origem=lista (consulta EBS)
     itens: list[dict] = []           # para origem=itens (linhas já consultadas)
-    usuario: str = ""
-    senha: str = ""
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
     calc_depreciation: bool = True   # sempre calcula; mantido por compatibilidade
@@ -143,14 +142,42 @@ class TestLoginIn(BaseModel):
     senha: str
 
 
-# ── SSO functions (adapted from servicenow_insert.py) ────────────
+# sys_id do ServiceNow: 32 hexadecimais, sempre. Qualquer outra coisa numa
+# encoded query de escrita (`sys_id=X^OR...`) viraria atualização em massa.
+_SYS_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def sys_id_valido(valor: str) -> str:
+    v = (valor or "").strip()
+    if not _SYS_ID_RE.match(v):
+        raise ValueError("sys_id inválido: esperado identificador de 32 caracteres hexadecimais.")
+    return v.lower()
+
+
+class _ComSysId(BaseModel):
+    sys_id: str
+
+    @field_validator("sys_id")
+    @classmethod
+    def _validar_sys_id(cls, v: str) -> str:
+        return sys_id_valido(v)
+
+
+# ── Sessões HTTP com o ServiceNow ────────────────────────────────
+
+def _sn_sessao(proxy: str | None = SN_PROXY, json: bool = False):
+    """Sessão com o ServiceNow: TLS verificado (integracoes.http) e proxy.
+    `json=True` para as chamadas JSONv2; o login SSO navega HTML e fica sem."""
+    s = _sessao_http("servicenow", proxy)
+    if json:
+        s.headers["Accept"] = "application/json"
+    return s
+
 
 def _get_http():
     """Lazy import requests + bs4 with clear error."""
     try:
         import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
         raise HTTPException(501, "Pacote 'requests' não instalado no servidor.")
     try:
@@ -189,11 +216,19 @@ def _follow_form_redirects(session, response, BS, hop=0):
     return _follow_form_redirects(session, r, BS, hop + 1)
 
 
+def _host(url: str) -> str:
+    """Só o host de uma URL: o resto (request_id, encquery do OAM) não vai ao log."""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url or "").netloc or "?"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
 def _login_sso(session, usuario, senha, _req, BS):
     sn_url = f"{SERVICENOW_BASE}/now/nav/ui/classic/params/target/home.do"
-    print(f"[SSO] Step 1: GET {sn_url}")
     r1 = session.get(sn_url, allow_redirects=True, timeout=30)
-    print(f"[SSO] Step 1 result: status={r1.status_code} url={r1.url}")
+    _log.debug("SSO passo 1: %s -> %s (%s)", _host(sn_url), _host(r1.url), r1.status_code)
     soup = BS(r1.text, "html.parser")
     form = soup.find("form")
     if form:
@@ -207,11 +242,11 @@ def _login_sso(session, usuario, senha, _req, BS):
             name = inp.get("name")
             if name:
                 form_fields[name] = inp.get("value", "")
-        print(f"[SSO] Form found: action={login_action} fields={list(form_fields.keys())}")
+        _log.debug("SSO formulário em %s com %d campos", _host(login_action), len(form_fields))
     else:
         login_action = "https://loginsso.lojasrenner.com.br/oam/server/auth_cred_submit"
         form_fields = {}
-        print(f"[SSO] No form found, using default action: {login_action}")
+        _log.debug("SSO sem formulário na página; usando a ação padrão em %s", _host(login_action))
 
     for uf in ["username", "userid", "user", "login", "j_username"]:
         if uf in form_fields:
@@ -227,13 +262,11 @@ def _login_sso(session, usuario, senha, _req, BS):
     else:
         form_fields["password"] = senha
 
-    print(f"[SSO] Step 2: POST {login_action}")
     r2 = session.post(login_action, data=form_fields, allow_redirects=True, timeout=30)
-    print(f"[SSO] Step 2 result: status={r2.status_code} url={r2.url}")
+    _log.debug("SSO passo 2: POST %s -> %s (%s)", _host(login_action), _host(r2.url), r2.status_code)
     r3 = _follow_form_redirects(session, r2, BS)
-    print(f"[SSO] Step 3 (redirects): final url={r3.url}")
     ok = "service-now.com" in r3.url
-    print(f"[SSO] Result: {'OK' if ok else 'FAILED'}")
+    _log.info("SSO %s para %s (fim em %s)", "OK" if ok else "FALHOU", usuario, _host(r3.url))
     return ok
 
 
@@ -391,9 +424,20 @@ def _sn_query_all(session, table, query="", fields="", page_size=500, max_record
 
 
 def _sn_update(session, table, sys_id, updates):
-    """Update a record via JSONv2 API (works with SSO cookies)."""
-    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&sysparm_action=update&sysparm_query=sys_id={sys_id}"
-    r = session.post(url, json=updates, headers={
+    """Atualiza UM registro via JSONv2 (com os cookies do SSO).
+
+    O sys_id é validado aqui também, não só nos modelos de entrada: esta é a
+    única função que escreve por query, e um `^OR` no sys_id atualizaria
+    tudo o que casasse.
+    """
+    try:
+        sys_id = sys_id_valido(sys_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
+    r = session.post(url, params={
+        "sysparm_action": "update", "sysparm_query": f"sys_id={sys_id}",
+    }, json=updates, headers={
         "Content-Type": "application/json",
         "Accept": "application/json",
         "X-Requested-With": "XMLHttpRequest",
@@ -604,32 +648,15 @@ def _parse_date_with_time(value):
 def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     job = _jobs[job_id]
     _req, BS = _get_http()
+    session = _sn_sessao()
 
-    # Create HTTP session
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
-
-    # Autenticação: preferir a sessão SSO do portal (cookies já validados no
-    # login). Só cai para usuário/senha se, por algum motivo, não houver cookies.
+    # Autenticação só pela sessão SSO do portal (cookies validados no login).
     job["phase"] = "login"
-    if params.get("sn_cookies"):
-        session.cookies.update(params["sn_cookies"])
-    else:
-        try:
-            ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
-        except Exception as e:
-            job["status"] = "error"
-            job["error"] = f"Falha no login SSO: {e}"
-            return
-        if not ok:
-            job["status"] = "error"
-            job["error"] = "Login SSO falhou — verifique usuário e senha."
-            return
+    if not params.get("sn_cookies"):
+        job["status"] = "error"
+        job["error"] = "Sessão ServiceNow não ativa. Saia e entre novamente no portal."
+        return
+    session.cookies.update(params["sn_cookies"])
 
     job["phase"] = "lookup"
     cache = {}
@@ -890,19 +917,13 @@ def test_login(body: TestLoginIn, req: Request):
     erros = []
 
     for proxy in tentativas:
-        session = _req.Session()
-        session.verify = False
-        if proxy:
-            session.proxies = {"https": proxy, "http": proxy}
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        session = _sn_sessao(proxy)
         origem = f"proxy {proxy}" if proxy else "conexão direta"
         try:
             ok = _login_sso(session, body.usuario, body.senha, _req, BS)
         except Exception as e:
             msg = f"{origem}: {type(e).__name__}: {e}"
-            print(f"[SSO] Falha via {msg}")
+            _log.warning("SSO falhou via %s", msg)
             erros.append(msg)
             continue
         if not ok:
@@ -928,10 +949,7 @@ def proxy_check(req: Request):
     for nome, proxy in (("com_proxy", SN_PROXY), ("direto", None)):
         if nome == "com_proxy" and not SN_PROXY:
             continue
-        sess = _req.Session()
-        sess.verify = False
-        if proxy:
-            sess.proxies = {"https": proxy, "http": proxy}
+        sess = _sn_sessao(proxy)
         try:
             r = sess.get(f"{SERVICENOW_BASE}/login.do", timeout=15, allow_redirects=True)
             resultado[nome] = {"ok": True, "status": r.status_code, "url_final": r.url}
@@ -951,11 +969,8 @@ def sn_session_status(req: Request):
     if not sn_cookies:
         return {"active": False, "reason": "no_session"}
     try:
-        _req, _ = _get_http()
-        sess = _req.Session()
-        sess.verify = False
-        if SN_PROXY:
-            sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+        _get_http()
+        sess = _sn_sessao()
         sess.cookies.update(sn_cookies)
         url = f"{SERVICENOW_BASE}/sys_user.do?JSONv2&sysparm_action=getRecords&sysparm_record_count=1"
         r = sess.get(url, headers={
@@ -997,9 +1012,9 @@ def start_upload(body: UploadIn, req: Request):
         raise HTTPException(400, "Informe o Aisle and Space (obrigatório).")
 
     # A autenticação usa a sessão do ServiceNow do próprio login do portal
-    # (SSO). Não são mais solicitados usuário/senha nesta tela.
+    # (SSO). Usuário/senha não entram mais neste corpo.
     sn_cookies = sd.get("sn_cookies")
-    if not sn_cookies and not (body.usuario and body.senha):
+    if not sn_cookies:
         raise HTTPException(
             409,
             "Sessão ServiceNow não ativa. Saia e entre novamente no portal "
@@ -1128,8 +1143,6 @@ def start_upload(body: UploadIn, req: Request):
     }
 
     params = {
-        "usuario": body.usuario,
-        "senha": body.senha,
         "sn_cookies": sn_cookies,
         "stockroom": body.stockroom,
         "aisle_space": body.aisle_space,
@@ -1182,14 +1195,7 @@ def _sn_session_from_portal(req):
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Saia e entre novamente no portal (Logon AD).")
     _req, _ = _get_http()
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-    })
+    session = _sn_sessao(json=True)
     session.cookies.update(sn_cookies)
     return session
 
@@ -1200,14 +1206,7 @@ def _sn_session_from_cookies(sn_cookies: dict):
     if not sn_cookies:
         return None
     _req, _ = _get_http()
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-    })
+    session = _sn_sessao(json=True)
     session.cookies.update(sn_cookies)
     return session
 
@@ -1244,14 +1243,7 @@ def list_incidents(
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-    })
+    session = _sn_sessao(json=True)
     session.cookies.update(sn_cookies)
 
     query_parts = [f"assignment_group.name={queue}"]
@@ -1298,14 +1290,7 @@ def count_incidents(
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
-    session = _req.Session()
-    session.verify = False
-    if SN_PROXY:
-        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-    })
+    session = _sn_sessao(json=True)
     session.cookies.update(sn_cookies)
 
     sn_query = f"assignment_group.name={queue}"
@@ -2081,8 +2066,7 @@ class SaidaSearchIn(BaseModel):
     stockroom: str = ""
 
 
-class SaidaMovIn(BaseModel):
-    sys_id: str
+class SaidaMovIn(_ComSysId):
     install_status: str = "In transit"
     location: str = ""
     aisle_space: str = ""
@@ -2167,8 +2151,7 @@ def saida_move(body: SaidaMovIn, req: Request):
     return {"ok": True, "message": "Ativo atualizado com sucesso."}
 
 
-class MovInternaIn(BaseModel):
-    sys_id: str
+class MovInternaIn(_ComSysId):
     stockroom: str = ""
     install_status: str = ""
     aisle_space: str = ""

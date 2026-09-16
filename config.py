@@ -39,7 +39,12 @@ class Settings:
 
     EBS_LOGIN_URL: str = os.getenv("EBS_LOGIN_URL", "")
     EBS_SEARCH_URL: str = os.getenv("EBS_SEARCH_URL", "")
-    VERIFY_SSL: bool = os.getenv("VERIFY_SSL", "false").lower() == "true"
+    # TLS verificado por padrão em toda saída (OAM, ServiceNow, EBS, MDM,
+    # Correios). VERIFY_SSL=false é exceção explícita e fica em log. Com
+    # proxy que intercepta o TLS, PORTAL_CA_BUNDLE aponta a cadeia
+    # corporativa e a verificação segue ligada.
+    VERIFY_SSL: bool = os.getenv("VERIFY_SSL", "true").strip().lower() not in ("false", "0", "nao", "não", "off")
+    CA_BUNDLE: str = (os.getenv("PORTAL_CA_BUNDLE", "") or os.getenv("REQUESTS_CA_BUNDLE", "")).strip()
     TIMEOUT: int = int(os.getenv("TIMEOUT_SECONDS", "15"))
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "40"))
     CREDENTIALS_DIRECTORY: str = os.getenv("CREDENTIALS_DIRECTORY", "")
@@ -71,6 +76,13 @@ class Settings:
 
     SSL_CERTFILE: str = os.getenv("SSL_CERTFILE", "")
     SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
+    # Cookie de sessão só em HTTPS: "auto" liga quando o pedido chegou por
+    # https (TLS no uvicorn ou X-Forwarded-Proto de um proxy confiável);
+    # "true"/"false" fixam. Atrás de proxy com TLS, deixe "auto" ou "true".
+    SESSION_COOKIE_SECURE: str = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
+    # IPs/redes dos proxies reversos cujos X-Forwarded-For/Proto merecem
+    # confiança. Vazio: nenhum cabeçalho de encaminhamento é aceito.
+    TRUSTED_PROXIES: str = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1")
 
     # ── Indicadores (RMR) — módulo isolado em /indicadores ──────────────
     # Banco próprio, separado do resto do sistema. Default: SQLite local.
@@ -297,7 +309,8 @@ class Settings:
     )
     EBS_CAPEX_PROXY: str = os.getenv("EBS_CAPEX_PROXY", "")
     EBS_CAPEX_TIMEOUT: int = int(os.getenv("EBS_CAPEX_TIMEOUT", "30"))
-    EBS_CAPEX_VERIFY: bool = os.getenv("EBS_CAPEX_VERIFY", "false").lower() == "true"
+    # Em branco segue VERIFY_SSL; "true"/"false" fixam só para esta API.
+    EBS_CAPEX_VERIFY: str = os.getenv("EBS_CAPEX_VERIFY", "")
     # Autenticação da API de CAPEX (a API exige credencial em chamadas de servidor).
     # Opção A — Basic auth (usuário/senha):
     EBS_CAPEX_USER: str = os.getenv("EBS_CAPEX_USER", "")
@@ -336,7 +349,7 @@ class Settings:
     EBS_FORMS_RESPONSABILIDADE: str = os.getenv("EBS_FORMS_RESPONSABILIDADE", "RENNER_FA_CONSULTA")
     EBS_FORMS_LIVROS: str = os.getenv("EBS_FORMS_LIVROS", "FA_RENNER,FA_RENNER_FIS")
     EBS_FORMS_PROXY: str = os.getenv("EBS_FORMS_PROXY", "")
-    EBS_FORMS_VERIFY: str = os.getenv("EBS_FORMS_VERIFY", "false")
+    EBS_FORMS_VERIFY: str = os.getenv("EBS_FORMS_VERIFY", "")  # em branco segue VERIFY_SSL
     EBS_FORMS_TIMEOUT: str = os.getenv("EBS_FORMS_TIMEOUT", "40")
     EBS_FORMS_DISPLAY: str = os.getenv("EBS_FORMS_DISPLAY", ":99")
     EBS_FORMS_TELA: str = os.getenv("EBS_FORMS_TELA", "1280x900x24")
@@ -367,16 +380,43 @@ class Settings:
     EBS_FORMS_CLASSE: str = os.getenv("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = os.getenv("EBS_FORMS_ESPERA_JVM", "180")
 
-    MODULES: list[str] = [
-        "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
-        "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
-        # Ciclo do ativo. Sem a lista aqui, a tela de permissões não grava
-        # a linha e require_permission nega para todo não-admin.
-        "trilha", "torre", "atendimento", "preparacao", "separacao",
-        "projetos", "reversa", "inventario", "regularizacao", "externo",
-        "destinacao", "obsolescencia", "consulta_times", "venda",
-    ]
+    # Módulos com permissão por usuário e as AÇÕES que existem em cada um.
+    # A tela de permissões só oferece estas; `permissions_set` descarta o
+    # resto (não há o que "exportar" na tela de boas-vindas). Módulo fora
+    # desta tabela funciona para admin e nega 403 para todo o resto.
+    # Os níveis (view < create/edit < admin) valem só dentro do módulo:
+    # `admin` aqui nunca é administrador do portal (`is_admin`).
+    MODULE_ACTIONS: dict[str, tuple[str, ...]] = {
+        "bemvindo": ("view",),
+        "consulta": ("view", "export"),
+        "recebimento": ("view", "create", "edit", "export", "admin"),
+        "reparos": ("view", "edit", "admin"),
+        "status": ("view",),
+        "parametros": ("view", "admin"),
+        "identificacao": ("view", "create", "admin"),
+        "servicenow": ("view", "create", "edit"),
+        "rastreio": ("view", "edit"),
+        "orcamento": ("view", "edit", "admin"),            # /controle-orcamento
+        "orcamento_spare": ("view", "edit", "admin"),
+        "ebs_forms": ("view", "create", "admin"),
+        "automacoes": ("view", "admin"),
+        "orcamento_manutencao": ("view", "create", "edit", "export", "admin"),
+        "trilha": ("view", "admin"),
+        "torre": ("view", "admin"),
+        "atendimento": ("view", "edit", "admin"),
+        "preparacao": ("view", "edit", "admin"),
+        "separacao": ("view", "create", "edit", "admin"),
+        "projetos": ("view", "create", "edit", "admin"),
+        "reversa": ("view", "create", "edit", "admin"),
+        "inventario": ("view", "create", "edit", "admin"),
+        "regularizacao": ("view", "create", "edit", "admin"),
+        "externo": ("view", "edit", "admin"),
+        "destinacao": ("view", "edit", "admin"),
+        "obsolescencia": ("view",),   # coleta e credencial são do admin do portal
+        "consulta_times": ("view", "edit", "admin"),
+        "venda": ("view", "edit", "admin"),
+    }
+    MODULES: list[str] = list(MODULE_ACTIONS)
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
     }

@@ -85,6 +85,11 @@ def _urls() -> tuple[str, str]:
             (c.get("search_url") or "").strip() or cfg.EBS_SEARCH_URL)
 
 
+def _verify_tls():
+    from integracoes.http import verificacao_tls
+    return verificacao_tls("ebs-api")
+
+
 def login(username: str, password: str) -> dict[str, Any]:
     """Authenticate against EBS and return cookies + bearer token.
 
@@ -105,7 +110,7 @@ def login(username: str, password: str) -> dict[str, Any]:
         _urls()[0],
         json=payload,
         timeout=cfg.TIMEOUT,
-        verify=cfg.VERIFY_SSL,
+        verify=_verify_tls(),
     )
 
     if response.status_code >= 400:
@@ -114,7 +119,7 @@ def login(username: str, password: str) -> dict[str, Any]:
             _urls()[0],
             data=payload,
             timeout=cfg.TIMEOUT,
-            verify=cfg.VERIFY_SSL,
+            verify=_verify_tls(),
         )
 
     if response.status_code >= 400:
@@ -338,7 +343,7 @@ def search_one(auth: dict[str, Any], query: str) -> dict[str, Any]:
             _urls()[1],
             params={"numero": query},
             timeout=cfg.TIMEOUT,
-            verify=cfg.VERIFY_SSL,
+            verify=_verify_tls(),
             headers={"Accept": "application/json"},
         )
 

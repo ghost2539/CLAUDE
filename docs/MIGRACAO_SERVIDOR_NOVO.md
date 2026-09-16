@@ -255,14 +255,15 @@ crontab -e
 ## Anexo — quando houver HTTPS e subpath
 
 O destino final é `https://suporte.lojasrenner.com.br/portal-spare`, com o
-portal atrás de um proxy reverso. Duas coisas mudam quando chegar lá, e
-**ainda não estão feitas**:
+portal atrás de um proxy reverso.
 
-1. `root_path` no uvicorn e o cookie de sessão com `path=/portal-spare`;
-2. `SESSION_COOKIE_SECURE` explícito, para o cookie só trafegar em HTTPS.
+Já pronto no portal: cookie com `Secure` (`SESSION_COOKIE_SECURE=auto` liga
+quando o pedido chega por https), HSTS, e `TRUSTED_PROXIES` dizendo de quais
+proxies aceitar `X-Forwarded-For` / `X-Forwarded-Proto`. Exemplo de nginx em
+`deploy/nginx-portal-spare.conf.example`; no ambiente, `HOST=127.0.0.1`.
 
-O proxy precisa repassar `X-Forwarded-For` (o portal usa para registrar o IP
-nas tentativas de acesso) e `X-Forwarded-Proto`.
+Ainda pendente: `root_path` no uvicorn e o cookie de sessão com
+`path=/portal-spare`, se o portal ficar num subcaminho.
 
 ## Anexo — MySQL no lugar do Postgres
 

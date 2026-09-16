@@ -411,35 +411,21 @@ def credencial_mdm() -> tuple[str, str]:
 
 
 def _verificacao_tls():
-    """O que vai em `verify`: um CA próprio, ou a política geral (VERIFY_SSL).
-
-    O proxy corporativo intercepta o TLS e apresenta a cadeia dele; por isso
-    o ServiceNow roda com verificação desligada, e o MDM segue a mesma
-    política. MDM_CA_BUNDLE liga a verificação com a cadeia certa.
-    """
+    """O que vai em `verify`: a CA própria do MDM (MDM_CA_BUNDLE), senão a
+    política geral do portal (integracoes.http: PORTAL_CA_BUNDLE / VERIFY_SSL)."""
     ca = (getattr(_cfg, "MDM_CA_BUNDLE", "") or "").strip()
     if ca:
         return ca
-    return bool(getattr(_cfg, "VERIFY_SSL", False))
+    from integracoes.http import verificacao_tls
+    return verificacao_tls("mdm")
 
 
 def _nova_sessao():
-    import requests
+    from integracoes.http import sessao
     from routers.servicenow import SN_PROXY
-    try:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    except Exception:  # noqa: BLE001 — só silencia o aviso; sem urllib3 o requests nem existiria
-        pass
-    s = requests.Session()
-    s.verify = _verificacao_tls()
-    # Sem trust_env: REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE no ambiente passam por
-    # cima do verify da sessão, e https_proxy do ambiente entraria na frente
-    # do SN_PROXY. Aqui a política é a configurada, e só ela.
-    s.trust_env = False
-    if SN_PROXY:
-        s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
-    return s
+    # Sem trust_env: https_proxy do ambiente entraria na frente do SN_PROXY.
+    # Aqui a política é a configurada, e só ela.
+    return sessao("mdm", SN_PROXY, verify=_verificacao_tls(), trust_env=False, user_agent="")
 
 
 def _erro_de_rede(exc: Exception, base: str) -> HTTPException:
