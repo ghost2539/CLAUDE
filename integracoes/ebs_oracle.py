@@ -12,8 +12,9 @@ Princípios de segurança (a base é PRODUÇÃO — BASE_REMOVIDA):
   • Trava de linhas (``max_rows``) para não puxar volume gigante ao explorar.
   • Bind variables sempre (``:param``) — nada de concatenar valor em SQL.
 
-Credenciais: vêm do COFRE do EBS (separado do cofre dos Correios), via
-``core.cofre`` — que resolve o loader oficial (`s()`) em qualquer venv.
+Credenciais: lidas DIRETO do ambiente do processo (os.environ), no mesmo
+padrão dos Correios — ORACLE_EBS_DSN / ORACLE_EBS_USER / ORACLE_EBS_PASS
+(EBS_ORACLE_* aceitos como alternativa). Sem cofre.
 """
 from __future__ import annotations
 
@@ -25,19 +26,15 @@ import sys
 import oracledb
 
 
-# ── Segredos (cofre do EBS) ───────────────────────────────────────
-def _secret(nome: str, default=None):
-    """Segredo do EBS lido do ambiente/cofre local via core.cofre.obter."""
-    from core.cofre import obter
-    return obter(nome, default or "") or default
-
-
+# ── Segredos (lidos DIRETO do ambiente, igual ao Correios) ────────
 def _secret_multi(nomes, default=None):
-    """Primeiro nome que tiver valor. O serviço injeta as chaves do cofre
-    corporativo no ambiente com o prefixo EBS_ORACLE_ (ex.: EBS_ORACLE_USER);
-    mantemos ORACLE_EBS_* como alternativa para compatibilidade."""
+    """Primeiro nome que tiver valor no ambiente (os.environ).
+
+    O serviço injeta as chaves no ambiente do processo (mesmo local dos
+    Correios). Os nomes reais são ORACLE_EBS_DSN/USER/PASS; mantemos
+    EBS_ORACLE_* como alternativa por compatibilidade. Sem cofre."""
     for nome in nomes:
-        v = _secret(nome)
+        v = os.environ.get(nome)
         if v:
             return v
     return default
@@ -45,10 +42,10 @@ def _secret_multi(nomes, default=None):
 
 def _config() -> dict:
     return {
-        "user": _secret_multi(("EBS_ORACLE_USER", "ORACLE_EBS_USER"), "USUARIO_REMOVIDO"),
-        "password": _secret_multi(("EBS_ORACLE_PASS", "ORACLE_EBS_PASS")),
-        "dsn": _secret_multi(("EBS_ORACLE_DSN", "ORACLE_EBS_DSN"), "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
-        "lib_dir": _secret_multi(("EBS_ORACLE_CLIENT_LIB_DIR", "ORACLE_CLIENT_LIB_DIR"),
+        "user": _secret_multi(("ORACLE_EBS_USER", "EBS_ORACLE_USER"), "USUARIO_REMOVIDO"),
+        "password": _secret_multi(("ORACLE_EBS_PASS", "EBS_ORACLE_PASS")),
+        "dsn": _secret_multi(("ORACLE_EBS_DSN", "EBS_ORACLE_DSN"), "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
+        "lib_dir": _secret_multi(("ORACLE_CLIENT_LIB_DIR", "EBS_ORACLE_CLIENT_LIB_DIR"),
                                  "/usr/lib/oracle/21/client64/lib"),
     }
 
