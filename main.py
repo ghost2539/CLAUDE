@@ -6,10 +6,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
 from db.portal import init_db
+from core.estatico import EstaticoLimpo
 from core.prefixo import BarraFinalMiddleware, com_prefixo, prefixo
 from core.security import (
     SecurityHeadersMiddleware,
@@ -57,7 +57,10 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware)
 
     # ── Static files ────────────────────────────────────────────────────
-    app.mount("/static", StaticFiles(directory=_cfg.STATIC), name="static")
+    # EstaticoLimpo em vez de StaticFiles: o que o navegador baixa vai sem
+    # os comentários do fonte, que explicam regra de negócio, tabela do EBS
+    # e incidente antigo. No disco o arquivo continua comentado.
+    app.mount("/static", EstaticoLimpo(directory=_cfg.STATIC), name="static")
 
     # ── Page routes ─────────────────────────────────────────────────────
 
@@ -220,7 +223,7 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── EBS Oracle (leitura do BASE_REMOVIDA) — sem banco próprio ──────────────
+    # ── EBS Oracle (leitura da base do EBS) — sem banco próprio ────────────────
     # Aditivo e isolado: sem o driver Oracle ou sem credencial no cofre, o
     # módulo simplesmente não carrega e o portal segue igual.
     try:

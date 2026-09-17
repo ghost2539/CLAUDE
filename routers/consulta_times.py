@@ -153,7 +153,7 @@ def criar_app_espelho():
     """App enxuto: só a tela Consulta de Ativos — Times e seus dois endpoints."""
     from fastapi import FastAPI
     from fastapi.responses import RedirectResponse
-    from fastapi.staticfiles import StaticFiles
+    from core.estatico import EstaticoLimpo
     from core.security import (
         BotProtectionMiddleware, MaxBodyMiddleware, SecurityHeadersMiddleware,
     )
@@ -163,7 +163,9 @@ def criar_app_espelho():
     app.add_middleware(MaxBodyMiddleware)
     app.add_middleware(BotProtectionMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
-    app.mount("/static", StaticFiles(directory=_cfg.STATIC), name="static")
+    # O espelho serve os MESMOS arquivos de /static; sem o limpador aqui,
+    # o vazamento continuaria aberto pela porta antiga.
+    app.mount("/static", EstaticoLimpo(directory=_cfg.STATIC), name="static")
     app.include_router(router)
 
     @app.get("/")

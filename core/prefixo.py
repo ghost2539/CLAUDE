@@ -21,6 +21,7 @@ from __future__ import annotations
 import re as _re
 
 from config import get_settings
+from core.estatico import limpar_texto
 
 _cfg = get_settings()
 
@@ -100,7 +101,17 @@ def com_prefixo(html: str, base: str) -> str:
     Prefixa os `/static/...` do topo e injeta o `<meta name="app-base">`,
     que é como o JavaScript da página descobre onde ficam a API e os
     módulos. Base vazia devolve o HTML como veio.
+
+    Aqui também saem os comentários da página. Toda tela servida por rota
+    Python (index, cockpit, indicadores, obsolescência, times, ebs-forms)
+    lê o arquivo e passa por esta função antes de responder — é o ponto por
+    onde todas passam, então limpar aqui cobre todas de uma vez, sem mexer
+    em cada rota. `/static` tem o seu próprio limpador na entrega.
     """
+    # Antes do prefixo, de propósito: assim o que se reescreve depois é só
+    # o HTML que vai de fato para o navegador, e um href comentado não gera
+    # substituição à toa.
+    html = limpar_texto(html, ".html")
     # O ícone da aba tem rota própria (/favicon.ico), e é ela que serve o
     # arquivo enviado pelo admin. Página que aponta direto para o arquivo
     # padrão em /static nunca vê o ícone novo — foi o que acontecia no
