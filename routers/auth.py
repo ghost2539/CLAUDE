@@ -109,6 +109,7 @@ def _user_payload(u: User, perms: dict) -> dict:
             else [k for k, v in perms.items() if v.get("can_view")]
         ),
         "permission_map": perms,
+        "tema": u.tema or "",
     }
 
 
@@ -388,6 +389,34 @@ def alterar_meu_nome(body: MeuNomeIn, req: Request):
         u.display_name = nome
     sd["display_name"] = nome          # a sessão em memória acompanha
     return {"ok": True, "display_name": nome}
+
+
+class PreferenciasIn(BaseModel):
+    tema: str = ""
+
+
+@router.put("/preferencias")
+def salvar_preferencias(body: PreferenciasIn, req: Request):
+    """Guarda a escolha de tema no usuário, não só no navegador.
+
+    A tela já chamava esta rota, e ela não existia: a escolha morria num
+    aviso de "não consegui guardar a preferência de tema" a cada clique no
+    botão. O navegador continua guardando por conta dele (é o que evita a
+    tela piscar branca antes de a sessão responder); aqui fica a cópia que
+    atravessa a troca de máquina — quem opera muda de estação o tempo todo,
+    e sem isto o tema voltava ao padrão em cada uma.
+    """
+    sd = get_session(req)
+    tema = (body.tema or "").strip().lower()
+    if tema not in ("claro", "escuro", ""):
+        raise HTTPException(422, "Tema inválido.")
+    with SessionLocal.begin() as s:
+        u = s.get(User, sd["user_id"])
+        if not u:
+            raise HTTPException(404, "Usuário não encontrado.")
+        u.tema = tema
+    sd["tema"] = tema          # a sessão em memória acompanha
+    return {"ok": True, "tema": tema}
 
 
 @router.post("/change-password")

@@ -73,6 +73,10 @@ class User(Base):
     last_access: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Tema escolhido na barra do topo. Fica no usuário, e não só no
+    # navegador, porque quem opera troca de máquina o tempo todo: sem isto a
+    # escolha voltava ao padrão a cada estação. Vazio = segue o padrão.
+    tema: Mapped[str] = mapped_column(String(10), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
     )
