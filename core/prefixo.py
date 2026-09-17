@@ -18,6 +18,8 @@ proxy), sem depender de quem edita a unit do systemd.
 """
 from __future__ import annotations
 
+import re as _re
+
 from config import get_settings
 
 _cfg = get_settings()
@@ -99,12 +101,25 @@ def com_prefixo(html: str, base: str) -> str:
     que é como o JavaScript da página descobre onde ficam a API e os
     módulos. Base vazia devolve o HTML como veio.
     """
+    # O ícone da aba tem rota própria (/favicon.ico), e é ela que serve o
+    # arquivo enviado pelo admin. Página que aponta direto para o arquivo
+    # padrão em /static nunca vê o ícone novo — foi o que acontecia no
+    # Controle de Orçamento. Aqui o alvo é trocado na entrega, sem mexer
+    # no HTML de cada módulo.
+    # O `type` vai junto: a rota entrega o que o admin enviou, que pode ser
+    # PNG ou ICO, e um type mentindo svg+xml confunde o navegador.
+    html = _re.sub(r'="/static/favicon\.svg"(\s+type="[^"]*")?', '="/favicon.ico"', html)
+
     marcas = ""
     if base:
-        html = html.replace('="/static/', f'="{base}/static/')
-        # O ícone da aba tem rota própria, fora de /static. Sem esta linha
-        # o navegador o buscava na raiz do domínio e recebia 404.
-        html = html.replace('="/favicon.ico', f'="{base}/favicon.ico')
+        # TODO caminho absoluto de uma página servida por este portal é
+        # deste portal — não existe href="/x" que aponte para outro sistema
+        # (esse viria com http:// ou //). Então todos levam o prefixo, e não
+        # só /static: href="/", "/controle-orcamento", "/obsolescencia" e
+        # "/orcamento-spare" iam para a raiz do domínio e davam 404.
+        # O (?!{base}/) evita prefixar duas vezes quem já veio pronto.
+        html = _re.sub(r'(href|src|action)="/(?!/)(?!' + _re.escape(base.lstrip("/")) + r'/)',
+                       rf'\1="{base}/', html)
         if 'name="app-base"' not in html:
             marcas += f'\n    <meta name="app-base" content="{base}">'
     # O contorno da barra vale mesmo sem prefixo: quem decide é a chave.
