@@ -287,6 +287,133 @@ def classification_edit(id: int, body: ClassificationEditIn, req: Request):
     return {"ok": True, "atualizados": atualizados}
 
 
+# Nomes de coluna aceitos na planilha. Cada um com os apelidos que
+# aparecem nas planilhas que a área já usa — exigir o cabeçalho exato
+# transformaria a importação num jogo de adivinhação.
+_COLUNAS_CLASSIFICACAO = {
+    "padrao_descricao": ["padrao da descricao", "padrao descricao", "padrao",
+                         "descricao", "descricao do bem", "item"],
+    "empresa": ["empresa", "company", "bu"],
+    "categoria": ["categoria", "category"],
+    "modelo": ["modelo", "model"],
+    "ativo": ["ativo", "ativa", "active"],
+}
+
+
+def _sem_acento(x) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", str(x))
+        if unicodedata.category(c) != "Mn"
+    ).strip().lower()
+
+
+@router.post("/classificacoes/importar")
+def classification_import(
+    req: Request,
+    file: UploadFile = File(...),
+    modo: str = Form("ACRESCENTAR"),
+):
+    """Importa regras de classificação de uma planilha (CSV ou Excel).
+
+    A tela só tinha "Nova regra", uma de cada vez. Quem chega com duzentas
+    regras vindas do servidor antigo, ou monta a tabela no Excel, não tem
+    como cadastrar — e cadastrar à mão duzentas vezes não é alternativa, é
+    convite a erro de digitação.
+
+    `modo=SUBSTITUIR` apaga as regras existentes antes; `ACRESCENTAR`
+    (padrão) mantém e atualiza pelo padrão da descrição. O padrão é o mais
+    conservador de propósito: apagar a configuração inteira não pode ser o
+    que acontece quando alguém erra o clique.
+
+    Não reaplica sobre a base de recebimento: isso é caro e já tem botão
+    próprio ("Aplicar em toda a base"). A resposta lembra disso.
+    """
+    require_permission(req, "parametros", "admin")
+    check_rate_limit(req)
+
+    modo = (modo or "ACRESCENTAR").strip().upper()
+    if modo not in ("ACRESCENTAR", "SUBSTITUIR"):
+        raise HTTPException(422, "Modo deve ser ACRESCENTAR ou SUBSTITUIR.")
+
+    sufixo = Path(file.filename or "planilha.csv").suffix.lower()
+    dados = file.file.read()
+    if not dados:
+        raise HTTPException(400, "Arquivo vazio.")
+    try:
+        if sufixo == ".csv":
+            df = pd.read_csv(io.BytesIO(dados), sep=None, engine="python", dtype=str)
+        else:
+            df = pd.read_excel(io.BytesIO(dados), dtype=str)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Não consegui ler o arquivo: {e}")
+
+    achadas = {_sem_acento(c): c for c in df.columns}
+
+    def coluna(chave):
+        for apelido in _COLUNAS_CLASSIFICACAO[chave]:
+            if _sem_acento(apelido) in achadas:
+                return achadas[_sem_acento(apelido)]
+        return None
+
+    mapa = {k: coluna(k) for k in _COLUNAS_CLASSIFICACAO}
+    faltando = [k for k in ("padrao_descricao", "categoria") if not mapa[k]]
+    if faltando:
+        raise HTTPException(
+            400, "Faltam colunas obrigatórias: " + ", ".join(faltando) +
+                 ". O cabeçalho aceita, por exemplo: Padrão da descrição, "
+                 "Empresa, Categoria, Modelo, Ativo.")
+
+    def texto(linha, chave):
+        col = mapa[chave]
+        if not col:
+            return ""
+        v = linha[col]
+        return "" if pd.isna(v) else str(v).strip()
+
+    novas, atualizadas, ignoradas = 0, 0, 0
+    with SessionLocal.begin() as s:
+        if modo == "SUBSTITUIR":
+            for x in s.scalars(select(Classification)).all():
+                s.delete(x)
+            s.flush()
+        # Índice do que já existe, para não duplicar regra igual: a chave é
+        # o par padrão+empresa, que é o que a classificação usa para casar.
+        existentes = {
+            (_sem_acento(x.description_pattern), _sem_acento(x.company)): x
+            for x in s.scalars(select(Classification)).all()
+        }
+        for _, linha in df.iterrows():
+            padrao = texto(linha, "padrao_descricao")
+            categoria = texto(linha, "categoria")
+            if not padrao or not categoria:
+                ignoradas += 1
+                continue
+            empresa = texto(linha, "empresa")
+            modelo = texto(linha, "modelo")
+            bruto = _sem_acento(texto(linha, "ativo"))
+            ativo = bruto not in ("nao", "n", "false", "0", "inativo", "inativa")
+
+            chave = (_sem_acento(padrao), _sem_acento(empresa))
+            atual = existentes.get(chave)
+            if atual:
+                atual.category, atual.model, atual.active = categoria, modelo, ativo
+                atualizadas += 1
+            else:
+                nova = Classification(
+                    description_pattern=padrao, company=empresa,
+                    category=categoria, model=modelo, active=ativo)
+                s.add(nova)
+                existentes[chave] = nova
+                novas += 1
+
+    return {
+        "ok": True, "novas": novas, "atualizadas": atualizadas,
+        "ignoradas": ignoradas, "modo": modo,
+        "aviso": ("As regras foram gravadas. Para aplicá-las aos "
+                  "recebimentos que já existem, use 'Aplicar em toda a base'."),
+    }
+
+
 @router.post("/classificacoes/aplicar-base")
 def classification_apply_all(req: Request):
     """Reaplica todas as regras sobre a base de recebimento inteira."""

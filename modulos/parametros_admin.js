@@ -1703,7 +1703,6 @@ async function renderSequences(c, S) {
    que foi justamente a reclamação. O `_pField` que as duas usam ficou lá,
    porque a Minha conta também precisa dele — o escopo global alcança.
    ─────────────────────────────────────────────────────────────────── */
-/* ── Locais ─────────────────────────────────────────────────────── */
 async function renderLocations(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Locais</h1>' +
@@ -1762,8 +1761,13 @@ async function renderClassifications(c, S) {
         '<h1 class="page-title">Classificações</h1>' +
         '<div class="btn-row mb-3">' +
             '<button id="pm-class-add2" class="btn btn-primary">Nova regra</button>' +
+            '<button id="pm-class-imp" class="btn btn-secondary">Importar planilha</button>' +
+            '<button id="pm-class-modelo" class="btn btn-secondary">Baixar modelo</button>' +
             '<button id="pm-class-apply" class="btn btn-secondary">Aplicar em toda a base</button>' +
         '</div>' +
+        // O seletor fica escondido: o botão acima é que abre, para a barra
+        // de ações não ganhar um campo de arquivo no meio dela.
+        '<input id="pm-class-file" type="file" accept=".csv,.xlsx,.xls" hidden>' +
         '<div id="pm-class-msg"></div>' +
         '<div id="pm-class-list2"></div>';
 
@@ -1823,6 +1827,55 @@ async function renderClassifications(c, S) {
     }
 
     document.getElementById('pm-class-add2').onclick = function () { edit(); };
+
+    document.getElementById('pm-class-modelo').onclick = function () {
+        // Modelo montado aqui mesmo: é um cabeçalho de quatro colunas, e
+        // uma rota no servidor só para devolvê-lo seria peso sem ganho.
+        var csv = 'Padrão da descrição;Empresa;Categoria;Modelo;Ativo\n' +
+                  'COLETOR TC22;Renner;Coletor;TC22;Sim\n' +
+                  'MONITOR DELL;;Monitor;Dell;Sim\n';
+        var url = URL.createObjectURL(new Blob(['\ufeff' + csv],
+                  { type: 'text/csv;charset=utf-8' }));
+        var a = S.el('a', { href: url, download: 'modelo-classificacoes.csv' });
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    document.getElementById('pm-class-imp').onclick = function () {
+        document.getElementById('pm-class-file').click();
+    };
+
+    document.getElementById('pm-class-file').onchange = async function () {
+        var arquivo = this.files && this.files[0];
+        if (!arquivo) return;
+        // Pergunta o modo ANTES de enviar: substituir apaga o que está
+        // gravado, e isso não pode ser o resultado de um clique distraído.
+        var substituir = confirm(
+            'Importar ' + arquivo.name + '.\n\n' +
+            'OK = SUBSTITUIR: apaga as regras atuais e grava só as da planilha.\n' +
+            'Cancelar = ACRESCENTAR: mantém as atuais e atualiza as que casarem.');
+        var fd = new FormData();
+        fd.append('file', arquivo);
+        fd.append('modo', substituir ? 'SUBSTITUIR' : 'ACRESCENTAR');
+        var alvo = document.getElementById('pm-class-msg');
+        try {
+            S.loading(true);
+            var d = await S.api('/parametros/classificacoes/importar',
+                                { method: 'POST', body: fd });
+            alvo.innerHTML = '<div class="alert alert-success">' +
+                d.novas + ' regra(s) nova(s), ' + d.atualizadas + ' atualizada(s), ' +
+                d.ignoradas + ' linha(s) ignorada(s) por falta de padrão ou categoria. ' +
+                S.esc(d.aviso) + '</div>';
+            S.toast('Planilha importada.', 'success');
+            await load();
+        } catch (e) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
+            S.toast(e.message, 'error');
+        } finally {
+            S.loading(false);
+            this.value = '';   // permite reenviar o mesmo arquivo depois de corrigir
+        }
+    };
 
     document.getElementById('pm-class-apply').onclick = async function () {
         if (!confirm('Reaplicar todas as regras sobre a base de recebimento inteira?')) return;
