@@ -145,7 +145,7 @@ for arquivo in ("integracoes/ebs_oracle.py", "routers/ebs_oracle.py",
            and "BASE_REMOVIDA" not in texto,
            f"{arquivo} não tem sobra do expurgo de histórico")
 for arquivo in ("integracoes/ebs_oracle.py", "routers/ebs_oracle.py",
-                "static/modules/parametros.js", ".env.example"):
+                "modulos/parametros.js", ".env.example"):
     texto = (RAIZ / arquivo).read_text(encoding="utf-8")
     checar(not re.search(r"\b\w+[-.\w]*:1521/\w+", texto),
            f"{arquivo} não tem endereço de banco escrito")
@@ -360,7 +360,17 @@ checar("from routers.ebs_oracle import router" in principal,
        "main.py importa o router da base do EBS")
 checar("include_router(ebs_oracle_router)" in principal,
        "e o registra na aplicação — rota escrita e não pendurada não existe")
-js = (RAIZ / "static/modules/parametros.js").read_text(encoding="utf-8")
+# A Base EBS é aba só de admin, e as abas de admin saíram do parametros.js
+# para um arquivo próprio, entregue apenas a quem tem a permissão. A tela é
+# procurada onde ela está hoje, mas as verificações de vazamento valem para
+# os DOIS arquivos — o que não pode aparecer, não pode em nenhum deles.
+js_admin = (RAIZ / "modulos/parametros_admin.js").read_text(encoding="utf-8")
+js_base = (RAIZ / "modulos/parametros.js").read_text(encoding="utf-8")
+js = js_admin + "\n" + js_base
+checar("renderBaseEbs" in js_admin and "renderBaseEbs" not in js_base,
+       "a tela da Base EBS vive no arquivo de admin, não no que todos recebem")
+checar("/ebs-oracle/" not in js_base,
+       "quem não é admin não recebe nem o endereço das rotas da base do EBS")
 for trecho, desc in (("/ebs-oracle/situacao", "mostra a situação das chaves"),
                      ("/ebs-oracle/testar", "tem o botão de testar conexão"),
                      ("/ebs-oracle/consultas", "lista as consultas nomeadas"),
@@ -368,7 +378,7 @@ for trecho, desc in (("/ebs-oracle/situacao", "mostra a situação das chaves"),
                      ("/ebs-oracle/objetos", "procura no catálogo")):
     checar(trecho in js, f"parametros.js {desc}")
 # O corpo da tela, da definição de renderBaseEbs até a próxima função.
-corpo_js = js.split("renderBaseEbs")[-1].split("\nasync function")[0]
+corpo_js = js_admin.split("renderBaseEbs")[-1].split("\nasync function")[0]
 # A tela NÃO exibe o SQL das consultas nomeadas. O bloco "Ver o SQL desta
 # consulta" saiu junto com o campo `sql` da resposta de /consultas: o que a
 # API não manda, a tela não tem como mostrar — e o que a tela não pede,

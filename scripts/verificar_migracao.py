@@ -221,7 +221,7 @@ app_js = texto("static/app.js")
 bloco = app_js[app_js.index("var ROUTES = {"):]
 bloco = bloco[:bloco.index("};")]
 rotas = set(re.findall(r"^\s*'?([a-z_]+)'?\s*:", bloco, re.M))
-arquivos = {f.stem for f in (RAIZ / "static/modules").glob("*.js")}
+arquivos = {f.stem for f in (RAIZ / "modulos").glob("*.js")}
 # servicenow.js é carregado sob demanda pela tela de Gestão de Ativos.
 SOB_DEMANDA = {"servicenow"}
 checar(not (rotas - arquivos - {"bemvindo"}),
@@ -259,8 +259,8 @@ for rel in ("db/capex_spare.py", "db/agendamentos_forn.py", "db/internalizacao.p
 
 
 print("\n[10] Padrão visual mantido nas telas que vieram")
-for rel in ("static/modules/capex_spare.js", "static/modules/agendamentos_forn.js",
-            "static/modules/internalizacao.js", "static/modules/parametros.js"):
+for rel in ("modulos/capex_spare.js", "modulos/agendamentos_forn.js",
+            "modulos/internalizacao.js", "modulos/parametros.js"):
     conteudo = texto(rel)
     hex_fixo = re.findall(r"#[0-9a-fA-F]{3,6}\b", conteudo)
     # '#' de seletor e de âncora não conta: só o que parece cor.
@@ -305,7 +305,7 @@ faltando = sorted(h for h in hrefs_menu if f"`{h}`" not in doc)
 checar(not faltando, f"toda página do menu está no catálogo ({faltando})")
 
 # As abas de Parâmetros, que é onde as telas novas entraram.
-js_param = texto("static/modules/parametros.js")
+js_param = texto("modulos/parametros.js")
 bloco = js_param[js_param.index("var allTabs = ["):]
 bloco = bloco[:bloco.index("];")]
 abas = re.findall(r"\['([a-z-]+)',\s*'([^']+)'\]", bloco)

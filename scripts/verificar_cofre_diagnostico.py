@@ -686,7 +686,7 @@ checar(comum.get("/api/cofre/tudo").status_code == 403,
        "e a lista completa também é só de admin")
 
 print("\n[7] A aba existe na tela de Parâmetros")
-js = (RAIZ / "static/modules/parametros.js").read_text(encoding="utf-8")
+js = (RAIZ / "modulos/parametros.js").read_text(encoding="utf-8")
 checar("['cofre',           'Cofre de segredos']" in js, "a aba está na lista")
 checar("cofre:          renderCofre" in js, "e ligada ao renderizador")
 checar("'cofre', 'ebs-oracle'" in js, "é aba de admin")

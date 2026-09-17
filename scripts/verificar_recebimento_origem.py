@@ -118,7 +118,7 @@ checar(enviar("REVERSA", [{"etiqueta": "ETQ-3", "numero_serie": "SN-REV-3",
        "a subcategoria continua obrigatória para ir à triagem")
 
 print("\n[4] A tela")
-tela = (RAIZ / "static/modules/recebimento.js").read_text(encoding="utf-8")
+tela = (RAIZ / "modulos/recebimento.js").read_text(encoding="utf-8")
 checar("id=\"rec-origem\"" in tela, "a tela começa pela escolha da origem")
 for campo in ("fo-desc", "fo-serie", "fo-po", "fo-nf"):
     checar(campo in tela, f"o formulário do fornecedor tem {campo}")

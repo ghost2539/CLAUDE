@@ -529,7 +529,10 @@
             var script = document.createElement('script');
             // O espaço Times tem os módulos dele, em pasta própria: mexer
             // num lado não muda o outro.
-            var base = APP_BASE + (ESPACO === 'times' ? '/static/modules-times/' : '/static/modules/');
+            // Fora de /static: o módulo passa por uma rota que confere a
+            // permissão antes de entregar. Em /static ele saía para
+            // qualquer um, sem sessão.
+            var base = APP_BASE + (ESPACO === 'times' ? '/modulos-times/' : '/modulos/');
             script.src = base + name + '.js?v=' + Date.now();
             script.onload = function () {
                 delete _loadingModules[name];

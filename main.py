@@ -62,6 +62,17 @@ def create_app() -> FastAPI:
     # e incidente antigo. No disco o arquivo continua comentado.
     app.mount("/static", EstaticoLimpo(directory=_cfg.STATIC), name="static")
 
+    # ── JavaScript dos módulos (com permissão) ──────────────────────────
+    # Não entra no mount de /static de propósito: lá é público, e era assim
+    # que a tela de administração saía sem sessão nenhuma.
+    try:
+        from routers.modulos import router as modulos_router
+        app.include_router(modulos_router)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("startup").error(
+            "Módulo de entrega do JavaScript não carregou (as telas não vão "
+            "abrir): %s", exc, exc_info=True)
+
     # ── Page routes ─────────────────────────────────────────────────────
 
     @app.get("/", response_class=HTMLResponse)

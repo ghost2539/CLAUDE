@@ -84,14 +84,14 @@ checar(r["excluidos"] == 3 and r["total"] == 6, "conta quantos ficaram de fora")
 
 # ── 3. Módulos do espaço são arquivos próprios ─────────────────────
 print("\n[3] Módulos separados")
-portal_dir, times_dir = RAIZ / "static/modules", RAIZ / "static/modules-times"
+portal_dir, times_dir = RAIZ / "modulos", RAIZ / "modulos-times"
 for nome in ("consulta", "gestao_ativos", "servicenow", "consulta_times"):
     checar((times_dir / f"{nome}.js").exists(), f"{nome}.js existe no espaço Times")
 ga = (times_dir / "gestao_ativos.js").read_text()
 checar("'obsolescencia', 'Obsolescência'" not in ga, "Gestão de Ativos do espaço não tem a aba Obsolescência")
 checar("'obsolescencia', 'Obsolescência'" in (portal_dir / "gestao_ativos.js").read_text(),
        "…e o portal continua com ela")
-checar("/static/modules-times/servicenow.js" in ga, "o espaço carrega o servicenow.js dele")
+checar("/modulos-times/servicenow.js" in ga, "o espaço carrega o servicenow.js dele")
 snt = (times_dir / "servicenow.js").read_text()
 checar("'/consulta-times/gestao-ativos'" in snt and "/servicenow/gestao-ativos/config" not in snt,
        "as telas do espaço leem a configuração do espaço")
@@ -99,7 +99,7 @@ checar("/servicenow/gestao-ativos/config" in (portal_dir / "servicenow.js").read
        "…e as do portal leem a do portal")
 checar("SPARE - CD324" not in snt, "nenhum estoque do SPARE embutido no espaço")
 app_js = (RAIZ / "static/app.js").read_text()
-checar("'/static/modules-times/'" in app_js, "o carregador aponta para a pasta do espaço")
+checar("'/modulos-times/'" in app_js, "o carregador aponta para a pasta do espaço")
 
 # ── 3b. Acesso Consulta Times: quatro blocos, montados de uma vez ──
 print("\n[3b] Tela Acesso Consulta Times")

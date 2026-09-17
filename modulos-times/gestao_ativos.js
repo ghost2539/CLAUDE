@@ -1,3 +1,12 @@
+/* ════════════════════════════════════════════════════════════════
+   ESPAÇO CONSULTA TIMES — cópia INDEPENDENTE do módulo do portal.
+
+   Este arquivo é servido só em /consulta-times. Mexer aqui não muda
+   nada no portal, e mexer no portal (static/modules/) não muda nada
+   aqui. A independência é intencional: os dois espaços têm donos e
+   ritmos diferentes. O preço é que uma correção que valha para os
+   dois precisa ser aplicada nos dois arquivos.
+   ════════════════════════════════════════════════════════════════ */
 /* ================================================================
    Módulo: Gestão de Ativos
 
@@ -18,19 +27,14 @@ window.SPARE_MODULES.gestao_ativos = {
 
     render: function (container, sub) {
         var S = window.SPARE;
+        // Sem Obsolescência: o parque é da área SPARE, não deste espaço.
         var TAB_LIST = [
             ['entrada',       'Entrada de Ativos'],
             ['saida',         'Saída de Ativos'],
-            ['movimentacao',  'Movimentação Interna'],
-            ['obsolescencia', 'Obsolescência']
+            ['movimentacao',  'Movimentação Interna']
         ];
         sub = sub || 'entrada';
         S.tabs(TAB_LIST, sub, 'gestao_ativos');
-
-        if (sub === 'obsolescencia') {
-            _gaRenderObsolescencia(container, S);
-            return;
-        }
 
         container.innerHTML = '<div class="spinner-inline">' +
             '<span class="spinner spinner-sm"></span> Carregando...</div>';
@@ -58,7 +62,12 @@ function _gaCarregarTelas() {
     if (_gaCarregando) return _gaCarregando;
     _gaCarregando = new Promise(function (ok, falhou) {
         var s = document.createElement('script');
-        s.src = '/static/modules/servicenow.js?v=' + Date.now();
+        // O caminho sai da rota com permissão, não de /static — e leva o
+        // prefixo do proxy junto: em /portal-spare, um caminho absoluto
+        // apontava para a raiz do domínio e o arquivo nunca vinha.
+        var raiz = document.querySelector('meta[name="app-base"]');
+        raiz = (raiz && raiz.content ? raiz.content : '').replace(/\/+$/, '');
+        s.src = raiz + '/modulos-times/servicenow.js?v=' + Date.now();
         s.onload = function () { _gaCarregando = null; ok(); };
         s.onerror = function () {
             _gaCarregando = null;
