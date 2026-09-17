@@ -107,6 +107,16 @@ checar(com_torre.get("/modulos/venda.js").status_code == 403,
        "ter uma permissão não abre as outras")
 checar(admin.get("/modulos/parametros_admin.js").status_code == 200,
        "o admin recebe as telas de administração")
+# A tela abre essas abas só com `u.is_admin`. Se a rota aceitasse a
+# permissão granular, quem tem "parametros" sem ser admin não veria as abas
+# mas baixaria o arquivo pela URL — o vazamento voltava por uma fresta.
+for chave in ("can_view", "can_admin"):
+    c = cliente(username="p", is_admin=False,
+                permission_map={"parametros": {chave: True}})
+    checar(c.get("/modulos/parametros_admin.js").status_code == 403,
+           f"parametros.{chave} sem ser admin NÃO baixa as telas de administração")
+    checar(c.get("/modulos/parametros.js").status_code == 200,
+           f"mas parametros.{chave} continua com a Minha conta")
 ruins = [n for n in PORTAL if admin.get(f"/modulos/{n}.js").status_code != 200]
 checar(not ruins, f"e todos os módulos do portal (sobraram: {ruins})")
 

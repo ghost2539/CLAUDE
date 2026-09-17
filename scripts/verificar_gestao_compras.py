@@ -297,7 +297,7 @@ try:
     checar(r.status_code == 422, "consulta nomeada inexistente é recusada")
 
     print("\n[10] A tela")
-    js = (RAIZ / "modulos/parametros.js").read_text(encoding="utf-8")
+    js = (RAIZ / "modulos/parametros_admin.js").read_text(encoding="utf-8")
     for trecho, desc in (("/gestao-compras/situacao", "carrega a situação"),
                          ("/gestao-compras/testar", "tem o botão Testar login"),
                          ("/gestao-compras/consultar", "consulta pelo módulo"),

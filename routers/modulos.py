@@ -83,7 +83,15 @@ def _arquivo(diretorio, nome: str):
 def _autorizar(req: Request, nome: str) -> None:
     """Deixa passar, ou levanta 401/403. Sessão sempre; permissão quando há."""
     if nome in SO_ADMIN_PARAMETROS:
-        require_permission(req, "parametros", "view")
+        # `is_admin` e não `require_permission(..., "admin")`: a tela abre
+        # essas abas só para quem tem `u.is_admin`, e a porta precisa ser
+        # exatamente a mesma. Com a permissão granular, quem tivesse
+        # `parametros.can_admin` (ou `can_view`) sem ser admin não veria as
+        # abas mas baixaria o arquivo digitando a URL — o vazamento voltava
+        # por uma fresta, para menos gente.
+        sd = get_session(req)
+        if not sd.get("is_admin"):
+            raise HTTPException(403, "Permissão insuficiente.")
         return
     if nome in SEM_PERMISSAO_PROPRIA:
         get_session(req)  # basta estar logado
