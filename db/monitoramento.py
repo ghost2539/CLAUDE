@@ -117,7 +117,7 @@ ALERTAS_PADRAO: dict = {
     "senha_algo": "",             # fernet | xor  (a senha nunca é devolvida à tela)
     "senha_cifrada": "",
     "remetente": "portal-spare@lojasrenner.com.br",
-    "destinatarios": "raphael.steilein@lojasrenner.com.br",
+    "destinatarios": "",
     "alerta_acesso_negado": True,  # tentativa com credencial válida e sem liberação
     "alerta_falhas": False,        # erros de API/integração/automação
     "intervalo_min": 5,            # janela mínima entre e-mails do mesmo assunto

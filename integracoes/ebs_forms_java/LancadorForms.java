@@ -109,7 +109,7 @@ public class LancadorForms {
         urls.add(new URL(codebase));
         // Jars que o jnlp não declara mas o Forms precisa (ex.: fndi18n.jar,
         // com NLSUtil). Nome curto vale: resolvemos no mesmo diretório dos
-        // jars do jnlp — é o que scripts/ebs_forms_achar_classe.sh sugere.
+        // jars do jnlp.
         String extras = System.getProperty("forms.jars.extra", "");
         for (String extra : extras.split(",")) {
             extra = extra.trim();

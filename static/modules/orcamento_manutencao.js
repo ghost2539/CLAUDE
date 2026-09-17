@@ -68,7 +68,7 @@
         /* painel: pilha, KPIs e grades */
         '.om-stack{display:flex;flex-direction:column;gap:14px;min-width:0}' +
         '.om-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}' +
-        '.om-kpi{display:flex;flex-direction:column;min-width:0;padding:12px 16px 12px;background:var(--bg-panel);border:1px solid var(--border-subtle);border-top:3px solid var(--om-c,var(--color-primary));border-radius:var(--radius)}' +
+        '.om-kpi{display:flex;flex-direction:column;min-width:0;padding:12px 16px 12px;background:var(--bg-panel);border:1px solid var(--border-subtle);border-top:3px solid var(--om-c,var(--color-primary));border-radius:0}' +
         '.om-kpi.om-go{cursor:pointer}' +
         '.om-kpi.om-go:hover,.om-kpi.om-go:focus-visible{background:var(--bg-panel-alt);border-color:var(--border-light);border-top-color:var(--om-c);outline:0}' +
         '.om-kpi-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}' +
@@ -83,7 +83,7 @@
         '.om-chart{display:flex;flex-direction:column;min-width:0;position:relative}' +
         '.om-sub{padding:0 16px 2px;font-size:11px;color:var(--text-muted);line-height:1.4}' +
         '.om-tip{position:absolute;left:0;top:0;z-index:6;pointer-events:none;max-width:calc(100% - 8px);' +
-        'padding:5px 9px;border:1px solid var(--border-light);border-radius:var(--radius);' +
+        'padding:5px 9px;border:1px solid var(--border-light);border-radius:0;' +
         'background:var(--bg-panel-alt);color:var(--text-primary);font-size:12px;line-height:1.3;' +
         'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
         '.om-chart .card-header{font-size:13px;padding:10px 16px}' +
@@ -92,14 +92,14 @@
         '.om-chart rect,.om-chart circle[data-tip],.om-hb-seg,.om-dl-row[data-tip]{cursor:default}' +
         '.om-dim{opacity:.42}' +
         '.om-chart svg text{font-family:inherit;font-size:11px;fill:var(--text-muted)}' +
-        '.om-grid{stroke:rgba(255,255,255,.06);stroke-width:1;shape-rendering:crispEdges}' +
+        '.om-grid{stroke:var(--sp-grid-line);stroke-width:1;shape-rendering:crispEdges}' +
         '.om-cota{stroke:var(--text-secondary);stroke-width:1.2;stroke-dasharray:5 4}' +
         '.om-tk-cota{fill:var(--text-secondary)}' +
         '.om-dtrack{fill:none;stroke:var(--bg-panel-alt);stroke-width:16}' +
         '.om-dc{fill:var(--text-primary);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}' +
         '.om-dc2{fill:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.04em}' +
         '.om-legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:6px 16px 10px;font-size:12px;color:var(--text-secondary)}' +
-        '.om-sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}' +
+        '.om-sw{display:inline-block;width:10px;height:10px;border-radius:0;margin-right:6px;vertical-align:-1px}' +
         '.om-sw-line{height:0;border-top:2px dashed var(--text-secondary);vertical-align:2px;border-radius:0}' +
         '.om-sw-hatch{background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.5) 0 2px,transparent 2px 4px)}' +
         '.om-foot{padding:8px 16px;border-top:1px solid var(--border-subtle);font-size:12px;color:var(--text-muted)}' +
@@ -118,17 +118,17 @@
         '.om-hb{display:flex;flex-direction:column;gap:12px;font-size:12px}' +
         '.om-hb-row{display:grid;grid-template-columns:minmax(72px,112px) minmax(0,1fr) 36px;gap:10px;align-items:center}' +
         '.om-hb-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-        '.om-hb-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;background:var(--bg-panel-alt)}' +
+        '.om-hb-bar{display:flex;height:16px;border-radius:0;overflow:hidden;background:var(--bg-panel-alt)}' +
         '.om-hb-seg{display:block;height:100%}' +
         '.om-hb-t{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}' +
-        '.om-link{color:#7FB2FF;cursor:pointer;text-decoration:none;border-bottom:1px dotted rgba(127,178,255,.5)}' +
-        '.om-link:hover{color:#A9CCFF;border-bottom-style:solid}' +
+        '.om-link{color:var(--sp-kicker);cursor:pointer;text-decoration:none;border-bottom:1px dotted var(--sp-kicker)}' +
+        '.om-link:hover{color:var(--sp-accent-hi);border-bottom-style:solid}' +
         '.om-check{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;font-size:.9rem}' +
         '.om-check input{width:15px;height:15px;accent-color:var(--color-primary);cursor:pointer}' +
         /* detalhamento mensal */
         '.om-det-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
         '.om-seg{display:flex;gap:6px;flex-wrap:wrap}' +
-        '.om-pos{color:#5DD39E}.om-neg{color:#F27980}.om-flat{color:var(--text-muted)}' +
+        '.om-pos{color:var(--sp-ok)}.om-neg{color:var(--sp-alerta)}.om-flat{color:var(--text-muted)}' +
         '.om-scroll{overflow-x:auto}' +
         '.om-mtable{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}' +
         '.om-mtable th,.om-mtable td{padding:6px 10px;text-align:right;white-space:nowrap;border-top:1px solid var(--border-subtle)}' +
@@ -138,44 +138,52 @@
         '.om-mtable tr.om-total td{font-weight:700;background:var(--bg-panel-alt)}' +
         '.om-mtable td.om-dash{color:var(--text-muted)}' +
         '.om-trend{display:inline-block;width:12px;margin-left:4px;font-size:10px;text-align:center}' +
-        '.om-mtable tr.om-hi td{background:rgba(76,141,255,.10)}' +
-        '.om-mtable tr.om-hi td:first-child{background:rgba(76,141,255,.10)}' +
+        '.om-mtable tr.om-hi td{background:var(--sp-badge-teal-bg)}' +
+        '.om-mtable tr.om-hi td:first-child{background:var(--sp-badge-teal-bg)}' +
         '.om-mtable th.om-hi-col{color:var(--text-primary)}' +
         /* listas de pendências */
         '.om-cards2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}' +
         '.om-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-subtle);font-weight:600}' +
+        /* linhas de categoria que abrem nos modelos */
+        '.om-catrow.om-exp{cursor:pointer}' +
+        '.om-catrow.om-exp:hover td{background:var(--bg-panel-alt)}' +
+        '.om-caret{display:inline-block;width:12px;font-size:10px;color:var(--text-secondary);transition:transform .12s}' +
+        '.om-catrow.om-open .om-caret{transform:rotate(90deg)}' +
+        '.om-modrow td{color:var(--text-secondary);font-weight:400;background:var(--bg-panel-alt)}' +
+        '.om-modcel{padding-left:26px !important}' +
         /* reparos / importar / config */
         '.data-table .om-num,.om-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
         '.om-src{font-size:9px;padding:1px 5px;margin-left:5px;vertical-align:middle}' +
         '.om-acoes{white-space:nowrap}' +
         '.om-pager{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)}' +
         '.om-kvrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}' +
-        '.om-info{font-size:12px;color:var(--text-secondary);background:var(--bg-panel-alt);border:1px solid var(--border-subtle);padding:8px 10px;border-radius:var(--radius);display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}' +
+        '.om-info{font-size:12px;color:var(--text-secondary);background:var(--bg-panel-alt);border:1px solid var(--border-subtle);padding:8px 10px;border-radius:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}' +
         '.om-info b{color:var(--text-primary);font-weight:500}' +
         '.om-full{grid-column:1/-1}' +
         '.om-tw{max-height:60vh}' +
         '.om-tw td{white-space:nowrap}' +
         '.om-tw td.om-lote{white-space:normal;min-width:140px;max-width:260px}' +
+        /* RMA com valor alterado à mão: linha em amarelo queimado fraco */
+        '.om-tw tr.om-valor-alterado td{background:rgba(199,145,5,.14)}' +
+        '.om-tw tr.om-valor-alterado:hover td{background:rgba(199,145,5,.22)}' +
         '.om-hint{font-size:12px;color:var(--text-muted);margin:4px 0 0}' +
         /* retorno de reparo */
-        '.om-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.02em}' +
-        'textarea.om-mono{resize:vertical;min-height:150px;line-height:1.5}' +
         '.om-ret-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);gap:14px;align-items:start}' +
         '.om-ret-grid .form-group{margin-bottom:0}' +
         '.om-ret-side{display:flex;flex-direction:column;gap:8px;min-width:0}' +
         '.om-cnt{font-size:13px;font-weight:600;color:var(--text-secondary);font-variant-numeric:tabular-nums;' +
-        'background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:var(--radius);padding:8px 10px;text-align:center}' +
+        'background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:0;padding:8px 10px;text-align:center}' +
         '.om-ret-copy{margin-left:10px;vertical-align:middle}' +
-        '.data-table tr.om-nf td{background:rgba(220,53,69,.12)}' +
-        '.data-table tr.om-nf td:first-child{color:#F27980;font-weight:600}' +
-        '.om-msg-nf{color:#F27980;font-weight:600}' +
-        '.om-msg-warn{color:#E8B94A}' +
+        '.data-table tr.om-nf td{background:var(--sp-badge-acento-bg)}' +
+        '.data-table tr.om-nf td:first-child{color:var(--sp-alerta);font-weight:600}' +
+        '.om-msg-nf{color:var(--sp-alerta);font-weight:600}' +
+        '.om-msg-warn{color:var(--sp-gold)}' +
         '.om-stat-danger::before{background:var(--color-danger)}' +
-        '.om-stat-danger .stat-value{color:#F27980}' +
+        '.om-stat-danger .stat-value{color:var(--sp-alerta)}' +
         /* reincidencia */
         '.om-reinc{font-variant-numeric:tabular-nums;min-width:26px;text-align:center}' +
         '.om-resumo{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;margin-bottom:10px;padding:8px 12px;' +
-        'border:1px solid var(--border-subtle);border-left:3px solid var(--color-gold);border-radius:var(--radius);' +
+        'border:1px solid var(--border-subtle);border-left:3px solid var(--color-gold);border-radius:0;' +
         'background:var(--bg-panel-alt);font-size:12px;color:var(--text-secondary)}' +
         '.om-resumo b{color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums}' +
         '.om-resumo.om-resumo-erro{border-left-color:var(--color-danger)}' +
@@ -193,6 +201,7 @@
     window.SPARE_MODULES.orcamento_manutencao = {
 
         async render(container, sub) {
+            carregarCores();
             S = window.SPARE;
             var p = perms();
             var parsed = parseSub(sub);
@@ -384,13 +393,23 @@
 
     /* ── Painel ───────────────────────────────────────────────────── */
     // Cores fixas por entidade (nunca por posição).
-    var TIPO_COLOR = { CONTRATO: '#4C8DFF', AVULSA: '#C79105' };
-    // Categoria é só Coletor ou SLED; os nomes antigos ficam para o histórico
-    // que ainda não passou pelo recálculo.
-    var CAT_COLOR = { 'Coletor': '#F28C38', 'SLED': '#2FA39A',
-                      'Coletor HF550X': '#C79105', 'Sled RFID': '#2FA39A', 'Sled RFR901': '#4C8DFF' };
-    var CAT_OTHER = '#8A8F98';
-    var EST_COLOR = { ok: '#2FB56B', ok2: '#7BD3A0', bad: '#E5484D', pend: '#FFC107', orc: '#4C8DFF' };
+    // Cores dos gráficos vêm dos tokens do tema em vigor. SVG não aceita
+    // var() em atributo, por isso o valor é lido na hora de desenhar.
+    var TIPO_COLOR = {}, CAT_COLOR = {}, CAT_OTHER = '', EST_COLOR = {};
+    function _tok(nome) {
+        return getComputedStyle(document.documentElement).getPropertyValue(nome).trim() || '#000000';
+    }
+    function carregarCores() {
+        TIPO_COLOR = { CONTRATO: _tok('--sp-serie-b'), AVULSA: _tok('--sp-gold') };
+        // Categoria é só Coletor ou SLED; os nomes antigos ficam para o
+        // histórico que ainda não passou pelo recálculo.
+        CAT_COLOR = { 'Coletor': _tok('--sp-serie-a'), 'SLED': _tok('--sp-serie-b'),
+                      'Coletor HF550X': _tok('--sp-gold'),
+                      'Sled RFID': _tok('--sp-serie-b'), 'Sled RFR901': _tok('--sp-etapa-4') };
+        CAT_OTHER = _tok('--sp-etapa-5');
+        EST_COLOR = { ok: _tok('--sp-ok'), ok2: _tok('--sp-etapa-4'), bad: _tok('--sp-alerta'),
+                      pend: _tok('--sp-gold'), orc: _tok('--sp-etapa-5') };
+    }
     var TIPO_NOME = { CONTRATO: 'Contrato', AVULSA: 'Avulso' };
     var HATCH_ID  = 'om-hatch-avulso';
     // [chave, rótulo, é dinheiro?, subir é bom?, famílias das linhas]
@@ -425,7 +444,7 @@
 
         c.innerHTML = STYLE +
             '<div class="om-top">' +
-                '<h1 class="page-title">Orçamento de Manutenção — Coletores e SLEDs</h1>' +
+                '<h1 class="page-title">Manutenção Bluebird</h1>' +
                 '<label>Ano <select id="om-ano" class="form-control form-control-inline"></select></label>' +
                 '<label>Mês <select id="om-mes" class="form-control form-control-inline"></select></label>' +
                 '<button id="om-refresh" class="btn btn-outline btn-sm">Atualizar</button>' +
@@ -499,6 +518,20 @@
                     if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(b); }
                 });
             }
+        });
+        // Linhas de categoria que abrem nos modelos (aguardando aprovação/devolução).
+        host.querySelectorAll('.om-catrow[data-exp]').forEach(function (row) {
+            function toggle() {
+                var id = row.getAttribute('data-exp');
+                var aberto = row.classList.toggle('om-open');
+                host.querySelectorAll('tr[data-exp-of="' + id + '"]').forEach(function (m) {
+                    m.hidden = !aberto;
+                });
+            }
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+            });
         });
         // Controle segmentado do detalhamento mensal.
         var seg = host.querySelector('.om-seg');
@@ -796,7 +829,7 @@
         var agDevT = sum(d.aguardando_devolucao, 'total'), agDevM = sum(d.aguardando_devolucao, 'ag_manutencao');
 
         var cards = [
-            kpiCard({ icon: 'cota', color: '#C79105', label: 'Cota mensal',
+            kpiCard({ icon: 'cota', color: _tok('--sp-gold'), label: 'Cota mensal',
                 value: semCota ? '<span class="text-muted">não configurada</span>' : money(cota),
                 sub: semCota ? 'defina na aba Configuração' : 'cota anual ' + e(money(t.cota_anual)),
                 title: semCota ? 'Defina a cota do ano na aba Configuração' : '' }),
@@ -807,28 +840,28 @@
             kpiCard({ icon: 'avulso', color: TIPO_COLOR.AVULSA, label: 'Consumo avulso' + per,
                 value: money(t.consumo_atual_avulsa),
                 sub: 'fora da cota — outra linha do orçamento' }),
-            kpiCard({ icon: 'residual', color: semCota ? '#8A8F98' : (residual >= 0 ? '#2FB56B' : '#E5484D'),
+            kpiCard({ icon: 'residual', color: semCota ? _tok('--sp-etapa-4') : (residual >= 0 ? _tok('--sp-ok') : _tok('--sp-alerta')),
                 label: 'Residual' + per,
                 value: semCota ? '<span class="text-muted">–</span>' : money(residual),
                 sub: semCota ? 'cota não configurada' : 'cota − contrato · ' + (residual >= 0 ? 'sobra' : 'acima da cota') }),
-            kpiCard({ icon: 'total', color: '#2FA39A', label: 'Total investido ' + (d.mes ? 'no mês' : 'no ano'),
+            kpiCard({ icon: 'total', color: _tok('--sp-serie-b'), label: 'Total investido ' + (d.mes ? 'no mês' : 'no ano'),
                 value: money(d.total_investido),
                 sub: d.mes
                     ? 'contrato ' + e(abrev(t.consumo_contrato)) + ' · avulso ' + e(abrev(t.consumo_avulsa))
                     : (t.meses_com_consumo
                         ? 'média ' + e(money(t.media_mensal)) + ' em ' + fmtInt(t.meses_com_consumo) + (t.meses_com_consumo === 1 ? ' mês' : ' meses')
                         : 'sem consumo no ano') }),
-            kpiCard({ icon: 'reparo', color: '#2FB56B', label: 'Equipamentos reparados ' + noEscopo(d),
+            kpiCard({ icon: 'reparo', color: _tok('--sp-ok'), label: 'Equipamentos reparados ' + noEscopo(d),
                 value: fmtInt(t.aprovados),
                 sub: 'contrato ' + fmtInt(t.aprovados_contrato) + ' · avulso ' + fmtInt(t.aprovados_avulsa) +
                      (t.garantia > 0 ? ' · ' + fmtInt(t.garantia) + ' em garantia' : '') }),
-            kpiCard({ icon: 'reprov', color: '#E5484D', label: 'Reprovados ' + noEscopo(d),
+            kpiCard({ icon: 'reprov', color: _tok('--sp-alerta'), label: 'Reprovados ' + noEscopo(d),
                 value: fmtInt(t.reprovados),
                 sub: e(money(t.reprovados_valor)) + ' em valor de aquisição' }),
-            kpiCard({ icon: 'aprov', color: '#FFC107', label: 'Aguardando aprovação',
+            kpiCard({ icon: 'aprov', color: _tok('--sp-gold'), label: 'Aguardando aprovação',
                 value: fmtInt(agAprQ), sub: e(money(agAprV)) + ' em orçamentos',
                 go: linkReparos(d, { status: 'AGUARDANDO_APROVACAO' }), title: 'Ver reparos aguardando aprovação' }),
-            kpiCard({ icon: 'devol', color: '#4C8DFF', label: 'Aguardando devolução',
+            kpiCard({ icon: 'devol', color: _tok('--sp-etapa-4'), label: 'Aguardando devolução',
                 value: fmtInt(agDevT), sub: fmtInt(agDevM) + ' aprovados em manutenção',
                 go: linkReparos(d, { status_retorno: 'EM_MANUTENCAO' }), title: 'Ver reparos em manutenção' })
         ];
@@ -877,7 +910,7 @@
             var lbl = mesLabel(i, W);
             var dim = d.mes && d.mes !== v.key ? ' class="om-dim"' : '';
             if (lbl) {
-                s += '<text class="om-tk"' + (d.mes === v.key ? ' fill="var(--text-primary)"' : '') +
+                s += '<text class="om-tk"' + (d.mes === v.key ? ' style="fill:var(--sp-text)"' : '') +
                      ' x="' + (L + i * slot + slot / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + lbl + '</text>';
             }
             var base = 0;
@@ -1218,11 +1251,23 @@
     function aprovacaoHtml(d) {
         var list = d.aguardando_aprovacao || [];
         var tq = 0, tv = 0;
-        var rows = list.map(function (r) {
+        var rows = list.map(function (r, i) {
             tq += Number(r.qtde || 0); tv += Number(r.valor || 0);
-            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
+            var mods = r.modelos || [];
+            var cid = 'apr' + i, exp = mods.length > 0;
+            var head = '<tr class="om-catrow' + (exp ? ' om-exp' : '') + '"' +
+                (exp ? ' data-exp="' + cid + '" role="button" tabindex="0"' : '') + '>' +
+                '<td>' + (exp ? '<span class="om-caret">&#x25B8;</span> ' : '') +
+                    catComFamilia(r.categoria, r.familia) + '</td>' +
                 '<td class="om-num">' + fmtInt(r.qtde) + '</td>' +
                 '<td class="om-num">' + money(r.valor) + '</td></tr>';
+            var det = mods.map(function (m) {
+                return '<tr class="om-modrow" data-exp-of="' + cid + '" hidden>' +
+                    '<td class="om-modcel">' + S.esc(m.modelo) + '</td>' +
+                    '<td class="om-num">' + fmtInt(m.qtde) + '</td>' +
+                    '<td class="om-num">' + money(m.valor) + '</td></tr>';
+            }).join('');
+            return head + det;
         }).join('');
         if (!rows) rows = '<tr><td colspan="3" class="empty-row">Nenhum reparo aguardando aprovação.</td></tr>';
         else rows += '<tr><td><b>TOTAL</b></td><td class="om-num"><b>' + fmtInt(tq) + '</b></td>' +
@@ -1238,10 +1283,21 @@
         var list = d.aguardando_devolucao || [];
         var t = { total: 0, ag_manutencao: 0, ag_orcamento: 0, ag_aprovacao: 0, reprovado: 0 };
         var cols = ['total', 'ag_manutencao', 'ag_orcamento', 'ag_aprovacao', 'reprovado'];
-        var rows = list.map(function (r) {
+        var rows = list.map(function (r, i) {
             cols.forEach(function (k) { t[k] += Number(r[k] || 0); });
-            return '<tr><td>' + catComFamilia(r.categoria, r.familia) + '</td>' +
+            var mods = r.modelos || [];
+            var cid = 'dev' + i, exp = mods.length > 0;
+            var head = '<tr class="om-catrow' + (exp ? ' om-exp' : '') + '"' +
+                (exp ? ' data-exp="' + cid + '" role="button" tabindex="0"' : '') + '>' +
+                '<td>' + (exp ? '<span class="om-caret">&#x25B8;</span> ' : '') +
+                    catComFamilia(r.categoria, r.familia) + '</td>' +
                 cols.map(function (k) { return '<td class="om-num">' + fmtInt(r[k]) + '</td>'; }).join('') + '</tr>';
+            var det = mods.map(function (m) {
+                return '<tr class="om-modrow" data-exp-of="' + cid + '" hidden>' +
+                    '<td class="om-modcel">' + S.esc(m.modelo) + '</td>' +
+                    cols.map(function (k) { return '<td class="om-num">' + fmtInt(m[k]) + '</td>'; }).join('') + '</tr>';
+            }).join('');
+            return head + det;
         }).join('');
         if (!rows) rows = '<tr><td colspan="6" class="empty-row">Nenhum equipamento em manutenção.</td></tr>';
         else rows += '<tr><td><b>TOTAL</b></td>' +
@@ -1504,7 +1560,7 @@
               '" title="ver os ' + e(r.serie_reparos) + ' atendimentos desta série">' +
               e(r.serie) + '</a>'
             : e(r.serie);
-        return '<tr data-i="' + i + '">' +
+        return '<tr data-i="' + i + '"' + (r.valor_alterado ? ' class="om-valor-alterado"' : '') + '>' +
             '<td class="om-mono">' + e(r.rma) + '</td>' +
             '<td>' + serieHtml + '</td>' +
             '<td class="om-num">' + reincHtml(r) + '</td>' +
@@ -1574,8 +1630,11 @@
             '<div class="form-group" id="om-f-categoria-outra-wrap" hidden><label>Nova categoria</label>' +
                 '<input id="om-f-categoria-outra" class="form-control" placeholder="ex.: Coletor S70"' + (ro ? ' disabled' : '') + '></div>' +
             inputHtml('om-f-orcamento', 'Orçamento (R$)', 'number', r.orcamento == null ? '' : r.orcamento, ' step="0.01" min="0"', ro) +
-            '<div class="form-group"><label>&nbsp;</label><label class="checkbox-label">' +
-                '<input id="om-f-garantia" type="checkbox"' + (r.garantia ? ' checked' : '') + (ro ? ' disabled' : '') + '> Reparo em garantia (sem custo)</label></div>' +
+            '<div class="form-group"><label>&nbsp;</label>' +
+                '<div style="display:flex;flex-direction:column;gap:8px">' +
+                    '<label class="checkbox-label"><input id="om-f-garantia" type="checkbox"' + (r.garantia ? ' checked' : '') + (ro ? ' disabled' : '') + '> Reparo em garantia (sem custo)</label>' +
+                    '<label class="checkbox-label"><input id="om-f-valor_alterado" type="checkbox"' + (r.valor_alterado ? ' checked' : '') + (ro ? ' disabled' : '') + '> Valor Alterado</label>' +
+                '</div></div>' +
             selectHtml('om-f-status', 'Status', opts(opcoes, 'status', STATUS_LABEL), r.status || 'AGUARDANDO_APROVACAO', null, ro) +
             selectHtml('om-f-tipo_manutencao', 'Tipo de manutenção', opts(opcoes, 'tipos', TIPO_LABEL), r.tipo_manutencao || 'CONTRATO', null, ro) +
             selectHtml('om-f-status_retorno', 'Status de retorno', opts(opcoes, 'status_retorno', RETORNO_LABEL), r.status_retorno || 'EM_MANUTENCAO', null, ro) +
@@ -1598,6 +1657,8 @@
         var cat = v('om-f-categoria');
         if (cat === '__outra__') cat = v('om-f-categoria-outra').trim();
         var garantia = !!f.querySelector('#om-f-garantia').checked;
+        var alterado = f.querySelector('#om-f-valor_alterado');
+        var valorAlterado = !!(alterado && alterado.checked);
         var orc = num(v('om-f-orcamento'));
         return {
             rma:              v('om-f-rma').trim(),
@@ -1606,6 +1667,7 @@
             categoria:        cat,
             orcamento:        garantia ? 0 : (orc == null ? 0 : orc),
             garantia:         garantia,
+            valor_alterado:   valorAlterado,
             status:           v('om-f-status'),
             tipo_manutencao:  v('om-f-tipo_manutencao'),
             status_retorno:   v('om-f-status_retorno'),

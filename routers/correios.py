@@ -7,14 +7,11 @@ import time
 
 from fastapi import APIRouter, Request, HTTPException
 
-from core.security import require_permission
+from core.security import require_permission, require_admin
 
 router = APIRouter(prefix="/api/servicenow", tags=["Correios"])
 
-# Proxy de saída: VAZIO por padrão. O servidor novo sai direto para a rede;
-# só preencha SN_PROXY onde a saída exigir proxy. Um proxy fixo aqui fazia
-# toda chamada aos Correios tentar um endereço que não existe no destino.
-SN_PROXY = os.environ.get("SN_PROXY", "")
+SN_PROXY = os.environ.get("SN_PROXY", "http://10.115.35.45:8888")
 
 
 # ── O que é, de fato, uma entrega ───────────────────────────────────────
@@ -74,24 +71,19 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Credencial dos Correios lida DIRETO do ambiente (os.environ)."""
-    return os.environ.get(nome, default)
+    """Segredo pelo cofre (core.cofre: corporativo, local, ambiente)."""
+    from core import cofre
+    return cofre.obter(nome) or default
 
 
 def _correios_creds():
-    """Credenciais dos Correios lidas do ambiente, exatamente como o dev passou.
-
-        import os
-        usuario = os.environ['CORREIOS_USUARIO']
-        chave   = os.environ['CORREIOS_CHAVE']
-        cartoes = os.environ['CORREIOS_CARTOES'].split(',')
-    """
-    import os
-    usuario = os.environ['CORREIOS_USUARIO']
-    chave = os.environ['CORREIOS_CHAVE']
-    cartoes = os.environ['CORREIOS_CARTOES'].split(',')
-    dr = os.environ.get('CORREIOS_DR', '64')
-    contrato = os.environ.get('CORREIOS_CONTRATO', '')
+    """Retorna as credenciais dos Correios no momento do uso (não guarda em
+    global), buscando do cofre a cada chamada de autenticação."""
+    usuario = _secret("CORREIOS_USUARIO")
+    chave = _secret("CORREIOS_CHAVE")
+    cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
+    dr = _secret("CORREIOS_DR", "64")
+    contrato = _secret("CORREIOS_CONTRATO", "")
     return usuario, chave, cartoes, dr, contrato
 
 
@@ -101,14 +93,8 @@ _correios_token_cache: dict = {}
 
 
 def _correios_session(proxy=SN_PROXY):
-    import requests as _req
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    sess = _req.Session()
-    sess.verify = False
-    if proxy:
-        sess.proxies = {"https": proxy, "http": proxy}
-    return sess
+    from integracoes.http import sessao
+    return sessao("correios", proxy, user_agent="")
 
 
 def _correios_request(method: str, url: str, **kwargs):
@@ -127,27 +113,22 @@ def _correios_request(method: str, url: str, **kwargs):
     raise HTTPException(502, "Erro ao conectar com Correios — " + " | ".join(erros))
 
 
-_MSG_CREDS = (
-    "Credenciais dos Correios ausentes. Elas vêm do ambiente do "
-    "serviço (variáveis CORREIOS_USUARIO, CORREIOS_CHAVE, "
-    "CORREIOS_CARTOES). Confira que elas estão no environment com que "
-    "o portal-spare sobe."
-)
-
-
 def _check_credenciais():
-    try:
-        usuario, chave, *_ = _correios_creds()
-    except KeyError:
-        raise HTTPException(500, _MSG_CREDS)
+    usuario, chave, *_ = _correios_creds()
     if not usuario or not chave:
-        raise HTTPException(500, _MSG_CREDS)
+        raise HTTPException(
+            500,
+            "Credenciais dos Correios ausentes. No servidor novo elas vêm do "
+            "cofre (vcreports_secret: CORREIOS_USUARIO, CORREIOS_CHAVE, "
+            "CORREIOS_CARTOES); no servidor atual, do ambiente.",
+        )
 
 
 def _correios_authenticate() -> str:
     """Autentica com Correios em duas etapas: token básico + cartão de postagem."""
-    _check_credenciais()
     usuario, chave, cartoes, dr, contrato = _correios_creds()
+    if not usuario or not chave:
+        _check_credenciais()
 
     cached = _correios_token_cache.get("token")
     cached_at = _correios_token_cache.get("obtained_at", 0)
@@ -441,7 +422,9 @@ def correios_rastrear_lote(body: dict, req: Request):
 @router.post("/correios/test")
 def correios_test(req: Request):
     """Testa conexão com Correios mostrando detalhes de cada etapa."""
-    require_permission(req, "rastreio", "view")
+    # Diagnóstico de credencial: só administrador, e a resposta não carrega
+    # usuário completo, cartões nem token.
+    require_admin(req)
     _check_credenciais()
     _correios_token_cache.clear()
 
@@ -452,8 +435,8 @@ def correios_test(req: Request):
 
     result = {
         "config": {
-            "usuario": usuario,
-            "cartoes": cartoes,
+            "usuario": (usuario[:2] + "***") if usuario else "",
+            "cartoes": len(cartoes),
             "proxy": SN_PROXY or "(direto)",
         }
     }
@@ -470,7 +453,7 @@ def correios_test(req: Request):
         )
         result["1_auth_basica"] = {
             "status": r.status_code,
-            "response": r.text[:600],
+            "response": "(token omitido)" if r.status_code in (200, 201) else r.text[:600],
         }
         if r.status_code not in (200, 201):
             return result
@@ -510,7 +493,7 @@ def correios_test(req: Request):
             )
             result[f"2_cartao_{cartao}"] = {
                 "status": r_cp.status_code,
-                "response": r_cp.text[:300],
+                "response": "(token omitido)" if r_cp.status_code in (200, 201) else r_cp.text[:300],
             }
             if r_cp.status_code in (200, 201) and not token_cp:
                 token_cp = r_cp.json().get("token", "")

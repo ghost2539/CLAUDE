@@ -7,13 +7,7 @@
 (function () {
     'use strict';
 
-    // Atrás do proxy, a API mora em /portal-spare/api/... — o <meta app-base>
-    // (injetado pelo servidor) diz o prefixo; sem proxy fica vazio.
-    var APP_BASE = (function () {
-        var m = document.querySelector('meta[name="app-base"]');
-        return (m && m.content ? m.content : '').replace(/\/+$/, '');
-    })();
-    var FONTE = APP_BASE + document.body.getAttribute('data-fonte');
+    var FONTE = document.body.getAttribute('data-fonte');
     var INTERVALO = (parseInt(document.body.getAttribute('data-intervalo'), 10) || 60) * 1000;
 
     var SERIES = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6'];

@@ -36,8 +36,6 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from core.prefixo import com_prefixo, prefixo
-
 from config import get_settings
 from core.security import check_rate_limit
 
@@ -98,7 +96,7 @@ def _titulos(chave: str) -> tuple[str, str, str]:
             pendencia)
 
 
-def _pagina(chave: str, req: Request | None = None) -> HTMLResponse:
+def _pagina(chave: str) -> HTMLResponse:
     caminho = _DIR / f"{chave}.html"
     if not caminho.exists():   # tela ainda não publicada
         return HTMLResponse("<h1>Tela não encontrada.</h1>", status_code=404)
@@ -111,30 +109,27 @@ def _pagina(chave: str, req: Request | None = None) -> HTMLResponse:
     intervalo = int(cfg.get("intervalo") or 60)
     if intervalo > 0:
         html = html.replace('data-intervalo="60"', f'data-intervalo="{max(10, intervalo)}"')
-    # Atrás do proxy em /portal-spare, css/js/favicon e o data-fonte precisam
-    # do prefixo; com_prefixo reescreve os ="/static/ e injeta <meta app-base>,
-    # que o cockpit.js usa para prefixar a fonte de dados.
-    return HTMLResponse(com_prefixo(html, prefixo(req)))
+    return HTMLResponse(html)
 
 
 @router.get("/cockpit-spare", response_class=HTMLResponse)
-def pagina_cockpit_spare(req: Request):
-    return _pagina("cockpit-spare", req)
+def pagina_cockpit_spare():
+    return _pagina("cockpit-spare")
 
 
 @router.get("/dash-recebimento", response_class=HTMLResponse)
-def pagina_dash_recebimento(req: Request):
-    return _pagina("dash-recebimento", req)
+def pagina_dash_recebimento():
+    return _pagina("dash-recebimento")
 
 
 @router.get("/dash-centralreparos", response_class=HTMLResponse)
-def pagina_dash_centralreparos(req: Request):
-    return _pagina("dash-centralreparos", req)
+def pagina_dash_centralreparos():
+    return _pagina("dash-centralreparos")
 
 
 @router.get("/dash-estoques", response_class=HTMLResponse)
-def pagina_dash_estoques(req: Request):
-    return _pagina("dash-estoques", req)
+def pagina_dash_estoques():
+    return _pagina("dash-estoques")
 
 
 # ── Dados ───────────────────────────────────────────────────────────────

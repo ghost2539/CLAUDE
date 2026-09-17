@@ -5,32 +5,12 @@
 (function () {
     "use strict";
 
-    // Prefixo quando o portal é servido num subcaminho do proxy: o router
-    // injeta <meta name="app-base">. Vazio na raiz do domínio.
-    var BASE = (function () {
-        var m = document.querySelector('meta[name="app-base"]');
-        return (m && m.content ? m.content : '').replace(/\/+$/, '');
-    })();
-
-    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
-    // vira GET). Com a marca ligada, a URL já sai com a barra.
-    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
-    function comBarra(url) {
-        if (!API_BARRA) return url;
-        var corte = url.indexOf('?');
-        var base = corte === -1 ? url : url.slice(0, corte);
-        var query = corte === -1 ? '' : url.slice(corte);
-        if (base.charAt(base.length - 1) !== '/') base += '/';
-        return base + query;
-    }
-
-
-
     var AUTO_MS = 120000;              // 2 min
     var SVGNS = "http://www.w3.org/2000/svg";
     var MES_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun",
                     "jul", "ago", "set", "out", "nov", "dez"];
-    var PAL = ["#3B82F6", "#A855F7", "#22C55E", "#F59E0B", "#EC4899", "#06B6D4"];
+    // Paleta LRSA 2025 (padrão de UI SPARE): sem cor fora dela.
+    var PAL = ["#C05B12", "#2F8079", "#C79105", "#E9D39B", "#5FB8AC", "#6E6E6E"];
 
     var state = { auto: true, timer: null, view: "geral", dados: null };
     var tip = document.getElementById("tip");
@@ -148,7 +128,7 @@
                 "stroke-linejoin": "round", "stroke-linecap": "round" }));
         }
         series.forEach(function (d, i) {
-            var c = el("circle", { cx: X(i), cy: Y(d.pct), r: 4.5, fill: "#0A0F1A",
+            var c = el("circle", { cx: X(i), cy: Y(d.pct), r: 4.5, fill: "#0C0C0C",
                 stroke: "var(--good)", "stroke-width": 2.5 });
             c.style.cursor = "pointer";
             c.addEventListener("mousemove", function (ev) {
@@ -281,7 +261,7 @@
 
     // ── carregar / atualizar ─────────────────────────────────
     function carregar() {
-        return fetch(comBarra(BASE + "/api/indicadores/dados"), { credentials: "same-origin" })
+        return fetch("/api/indicadores/dados", { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 state.dados = j.snapshot;
@@ -294,7 +274,7 @@
     function atualizar() {
         var btn = $("#btn-refresh");
         btn.disabled = true; var txt = btn.textContent; btn.textContent = "⏳ Atualizando…";
-        fetch(comBarra(BASE + "/api/indicadores/atualizar"), { method: "POST", credentials: "same-origin" })
+        fetch("/api/indicadores/atualizar", { method: "POST", credentials: "same-origin" })
             .then(function (r) {
                 if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || ("HTTP " + r.status)); });
                 return r.json();

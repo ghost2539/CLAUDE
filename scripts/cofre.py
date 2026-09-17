@@ -23,48 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# ── O cofre certo, antes de importar o core ─────────────────────────────
-# `core.cofre` decide a pasta do cofre na importação, lendo PORTAL_COFRE_DIR.
-# No shell essa variável não existe (ela mora na unit do systemd), e o cofre
-# cairia em ~/.config/portal-spare — a casa de quem executa, que com `sudo` é
-# a do root. Ou seja: o CLI mexeria num cofre que NÃO é o do serviço, e nada
-# no que ele imprime denunciaria isso.
-ENVS_DO_SERVICO = (
-    "/var/www/vcreports/portal-spare/data/environment",
-    "/etc/portal_operacoes_spare_testes/environment",
-    "/etc/portal_operacoes_spare/environment",
-)
-
-
-def _herdar_do_servico() -> str:
-    """Copia PORTAL_COFRE_DIR do arquivo de ambiente do serviço, se houver.
-
-    Só preenche o que ainda não está no ambiente: quem exportou a variável
-    à mão continua mandando. Devolve o arquivo usado, para o CLI dizer.
-    """
-    if os.environ.get("PORTAL_COFRE_DIR"):
-        return "(ambiente)"
-    escolhido = os.environ.get("PORTAL_ENV_FILE", "")
-    candidatos = [escolhido] if escolhido else list(ENVS_DO_SERVICO)
-    for caminho in candidatos:
-        if not caminho:
-            continue
-        try:
-            texto = Path(caminho).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for linha in texto.splitlines():
-            linha = linha.strip().removeprefix("export ").strip()
-            if linha.startswith("PORTAL_COFRE_DIR="):
-                valor = linha.split("=", 1)[1].strip().strip('"').strip("'")
-                if valor:
-                    os.environ["PORTAL_COFRE_DIR"] = valor
-                    return caminho
-    return ""
-
-
-ORIGEM_DO_COFRE = _herdar_do_servico()
-
 from core import cofre  # noqa: E402
 
 # Nomes tratados como segredo ao importar um environment.
@@ -77,9 +35,7 @@ PADRAO_SEGREDO = re.compile(
 # entrega metade do caminho a quem estiver olhando o arquivo.
 SEMPRE_COFRE = {
     "SN_API_USER", "SN_API_USUARIO",
-    "SN_AUTOMACAO_USUARIO",
-    "INITIAL_ADMIN_LOGIN", "INITIAL_ADMIN_PASSWORD",
-    "ORACLE_EBS_USER",
+    "INITIAL_ADMIN_LOGIN",
     "EBS_CAPEX_USER", "EBS_FORMS_USER",
     "SMTP_USUARIO",
     "CORREIOS_USUARIO", "CORREIOS_CARTOES", "CORREIOS_CONTRATO",
@@ -118,9 +74,8 @@ CANDIDATOS: dict[str, list[str]] = {
         "SNOW_SENHA", "SNOW_PASSWORD",
         "SN_TOKEN", "SERVICENOW_TOKEN",
     ],
-    "EBS / Oracle": [
-        "ORACLE_EBS_USER", "ORACLE_EBS_USUARIO", "ORACLE_EBS_PASS",
-        "ORACLE_EBS_SENHA", "EBS_USER", "EBS_USUARIO", "EBS_SENHA",
+    "EBS": [
+        "EBS_USER", "EBS_USUARIO", "EBS_SENHA",
         "EBS_PASSWORD", "EBS_CAPEX_USER", "EBS_CAPEX_PASS", "EBS_CAPEX_TOKEN",
     ],
     "E-mail": ["SMTP_USUARIO", "SMTP_USER", "SMTP_SENHA", "SMTP_PASSWORD"],
@@ -324,19 +279,8 @@ def cmd_acesso(_args) -> int:
     return 1
 
 
-def _dizer_de_onde() -> None:
-    """Sem isto, ninguém percebe que está mexendo no cofre errado."""
-    if ORIGEM_DO_COFRE and ORIGEM_DO_COFRE != "(ambiente)":
-        print(f"(PORTAL_COFRE_DIR veio de {ORIGEM_DO_COFRE})")
-    elif not ORIGEM_DO_COFRE:
-        print("AVISO: PORTAL_COFRE_DIR não definido e não achei o arquivo de "
-              "ambiente do serviço. Este NÃO é necessariamente o cofre que o "
-              "portal usa — confira o caminho abaixo.")
-
-
 def cmd_listar(_args) -> int:
     nomes = cofre.listar()
-    _dizer_de_onde()
     print(f"Cofre local: {cofre.ARQ_COFRE}")
     print(f"Cofre corporativo disponível: {'sim' if cofre.corporativo_disponivel() else 'não'}")
     if not nomes:
@@ -350,11 +294,6 @@ def cmd_listar(_args) -> int:
 
 def cmd_definir(args) -> int:
     valor = args.valor
-    if getattr(args, "stdin", False):
-        # Para copiar um segredo de outro cofre sem ele passar pela tela nem
-        # pelo histórico do shell:
-        #   sudo ler-do-cofre-corporativo | cofre.py definir NOME --stdin
-        valor = sys.stdin.read().strip("\r\n")
     if valor is None:
         valor = getpass.getpass(f"Valor de {args.nome} (não aparece na tela): ")
         if valor != getpass.getpass("Repita: "):
@@ -364,7 +303,6 @@ def cmd_definir(args) -> int:
         print("Valor vazio. Nada foi gravado.")
         return 1
     cofre.definir(args.nome, valor)
-    _dizer_de_onde()
     print(f"'{args.nome}' gravado no cofre ({cofre.ARQ_COFRE}).")
     if cofre.algoritmo() != "fernet":
         print("AVISO: cifra fraca em uso ('cryptography' não carregou). "
@@ -378,15 +316,6 @@ def cmd_remover(args) -> int:
         return 0
     print(f"'{args.nome}' não estava no cofre.")
     return 1
-
-
-# Segredos que o portal busca no cofre sem passar pelo environment — hoje a
-# conta de serviço do ServiceNow. Ficam listados aqui para o `conferir` cobrar
-# a presença deles: como não têm linha no arquivo, ninguém notaria a falta.
-DIRETO_DO_COFRE = (
-    ("SN_API_USER", "conta de serviço do ServiceNow (leitura)"),
-    ("SN_API_PASS", "senha dessa conta"),
-)
 
 
 def cmd_conferir(args) -> int:
@@ -419,26 +348,11 @@ def cmd_conferir(args) -> int:
     for p in problemas:
         print(f"  ! {p}")
 
-    # Segredos que o portal lê DIRETO do cofre, sem linha no environment.
-    # Sem esta conferência eles passariam batido justamente por não estarem
-    # no arquivo — que é o motivo de terem saído de lá.
-    print("\nSegredos lidos direto do cofre (não aparecem no environment):")
-    direto_faltando = []
-    for nome, para_que in DIRETO_DO_COFRE:
-        tem = bool(cofre.obter(nome))
-        print(f"  {nome:28s} {'OK' if tem else 'FALTANDO'}   {para_que}")
-        if not tem:
-            direto_faltando.append(nome)
-    if direto_faltando:
-        print("  Para gravar:")
-        for f in direto_faltando:
-            print(f"    python3 scripts/cofre.py definir {f}")
-
     envfile = Path(args.env or os.environ.get(
         "PORTAL_ENVFILE", Path.home() / ".config" / "portal-spare" / "environment"))
     if not envfile.is_file():
         print(f"\nArquivo de ambiente não encontrado: {envfile}")
-        return 0 if (ok and not direto_faltando) else 1
+        return 0 if ok else 1
 
     print(f"\nReferências ao cofre em {envfile}:")
     faltando = []
@@ -460,7 +374,8 @@ def cmd_conferir(args) -> int:
         print("\nSegredos citados no ambiente e ausentes do cofre:")
         for f in sorted(set(faltando)):
             print(f"  python3 scripts/cofre.py definir {f}")
-    return 0 if (ok and not faltando and not direto_faltando) else 1
+        return 1
+    return 0 if ok else 1
 
 
 def cmd_importar_env(args) -> int:
@@ -560,9 +475,6 @@ def main() -> int:
     p = sub.add_parser("definir", help="Grava ou substitui um segredo.")
     p.add_argument("nome")
     p.add_argument("--valor", help="Evite: fica no histórico do shell.")
-    p.add_argument("--stdin", action="store_true",
-                   help="Lê o valor da entrada padrão (para canos, sem tela "
-                        "nem histórico).")
     p.set_defaults(fn=cmd_definir)
 
     p = sub.add_parser("remover", help="Apaga um segredo.")

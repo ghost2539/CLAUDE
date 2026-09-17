@@ -1,7 +1,7 @@
 """Status router — system health check and dashboard summary."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Request
 from sqlalchemy import select, func, text
@@ -10,6 +10,63 @@ from db.portal import SessionLocal, ReceiptCycle, Repair, LocalAsset, engine
 from core.security import get_session
 
 router = APIRouter(prefix="/api", tags=["Status"])
+
+_INICIO = datetime.now(timezone.utc).isoformat()
+
+
+# ── Qual código está no ar ────────────────────────────────────────
+# Sem isto, "corrigi e não funcionou" e "o serviço não foi reiniciado"
+# são indistinguíveis da tela — e já custaram rodadas inteiras.
+_versao_cache: dict | None = None
+
+
+def versao_do_codigo() -> dict:
+    """Commit, data e ramo do código que este processo está executando."""
+    global _versao_cache
+    if _versao_cache is not None:
+        return _versao_cache
+    import os
+    import subprocess
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parent.parent
+    dados = {"commit": "", "commit_curto": "", "data": "", "ramo": "",
+             "ambiente": os.getenv("AMBIENTE", "producao"),
+             "iniciado_em": _INICIO}
+
+    def _git(*args) -> str:
+        try:
+            saida = subprocess.run(["git", *args], cwd=str(raiz), timeout=5,
+                                   capture_output=True, text=True)
+            return saida.stdout.strip() if saida.returncode == 0 else ""
+        except Exception:  # noqa: BLE001 — sem git, seguimos sem a informação
+            return ""
+
+    dados["commit"] = _git("rev-parse", "HEAD")
+    dados["commit_curto"] = dados["commit"][:8]
+    dados["data"] = _git("log", "-1", "--format=%cI")
+    dados["ramo"] = _git("rev-parse", "--abbrev-ref", "HEAD")
+    dados["assunto"] = _git("log", "-1", "--format=%s")
+    _versao_cache = dados
+    return dados
+
+
+@router.get("/versao")
+def api_versao(req: Request):
+    """Commit em execução. Responde a pergunta "a correção subiu?".
+
+    Aberto de propósito, e só com o essencial: quem precisa conferir se o
+    serviço foi reiniciado costuma estar no terminal do servidor, sem
+    cookie de navegador nenhum. Exigir login aqui transforma a pergunta
+    mais simples do deploy num problema à parte. Com sessão, vem o
+    detalhe completo.
+    """
+    dados = versao_do_codigo()
+    try:
+        get_session(req)
+    except Exception:  # noqa: BLE001 — sem sessão devolve o mínimo
+        return {"commit_curto": dados["commit_curto"], "ramo": dados["ramo"],
+                "ambiente": dados["ambiente"], "iniciado_em": dados["iniciado_em"]}
+    return dados
 
 
 @router.get("/status")

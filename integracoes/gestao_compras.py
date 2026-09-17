@@ -32,6 +32,7 @@ from typing import Any
 import requests
 
 from config import get_settings
+from integracoes import http as http_saida
 
 _log = logging.getLogger("gestao_compras")
 
@@ -104,21 +105,27 @@ def credenciais_configuradas() -> dict:
 
 
 def _nova_sessao() -> requests.Session:
+    """Sessão pela fábrica do portal: TLS verificado, proxy e User-Agent.
+
+    Veio de migracao com `verify` desligado por padrão e sessão montada à
+    mão. Aqui a saída HTTP é sempre a mesma porta — `integracoes/http.py` —
+    e a verificação de certificado segue o VERIFY_SSL do portal. Proxy que
+    intercepta o TLS se resolve com PORTAL_CA_BUNDLE, não desligando a
+    conferência.
+    """
     cfg = get_settings()
-    s = requests.Session()
+    s = http_saida.sessao(
+        cfg.GESTAO_COMPRAS_URL,
+        cfg.GESTAO_COMPRAS_PROXY or None,
+        explicito=cfg.GESTAO_COMPRAS_VERIFY,
+        # Proxy declarado vazio é decisão: não herdar o do perfil do servidor.
+        trust_env=bool(cfg.GESTAO_COMPRAS_PROXY),
+        user_agent="portal-spare/gestao-compras",
+    )
     s.headers.update({
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "application/json",
-        "User-Agent": "portal-spare/gestao-compras",
     })
-    if cfg.GESTAO_COMPRAS_PROXY:
-        s.proxies.update({"http": cfg.GESTAO_COMPRAS_PROXY, "https": cfg.GESTAO_COMPRAS_PROXY})
-    else:
-        # Proxy declarado vazio é decisão: não herdar o do perfil do servidor.
-        s.trust_env = False
-    if not cfg.GESTAO_COMPRAS_VERIFY:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     return s
 
 
@@ -140,7 +147,7 @@ def login(usuario: str, senha: str) -> tuple[requests.Session, dict]:
     try:
         r = s.post(_url("api/auth.php?action=login"),
                    json={"username": usuario, "password": senha},
-                   timeout=cfg.GESTAO_COMPRAS_TIMEOUT, verify=cfg.GESTAO_COMPRAS_VERIFY,
+                   timeout=cfg.GESTAO_COMPRAS_TIMEOUT,
                    allow_redirects=False)
     except requests.RequestException as exc:
         raise GestaoComprasErro(f"Sem resposta de {cfg.GESTAO_COMPRAS_URL}: "
@@ -192,7 +199,7 @@ def verificar() -> dict:
     cfg = get_settings()
     s = _sessao(forcar=True)
     r = s.get(_url("api/auth.php?action=check"),
-              timeout=cfg.GESTAO_COMPRAS_TIMEOUT, verify=cfg.GESTAO_COMPRAS_VERIFY,
+              timeout=cfg.GESTAO_COMPRAS_TIMEOUT,
               allow_redirects=False)
     corpo = _json(r) or {}
     if r.status_code != 200 or not corpo.get("authenticated"):
@@ -222,8 +229,7 @@ def consultar(acao: str, **parametros: Any) -> list[dict]:
     def _tentar(s: requests.Session) -> requests.Response:
         try:
             return s.get(_url("api/oracle.php"), params=query,
-                         timeout=cfg.GESTAO_COMPRAS_TIMEOUT,
-                         verify=cfg.GESTAO_COMPRAS_VERIFY, allow_redirects=False)
+                         timeout=cfg.GESTAO_COMPRAS_TIMEOUT, allow_redirects=False)
         except requests.Timeout as exc:
             raise GestaoComprasErro(
                 f"O Gestão de Compras não respondeu em {cfg.GESTAO_COMPRAS_TIMEOUT} s "

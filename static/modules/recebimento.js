@@ -32,12 +32,29 @@ window.SPARE_MODULES.recebimento = {
 function renderNovo(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Novo Recebimento</h1>' +
+        // De onde o ativo está chegando. Muda o que se pede: reversa volta
+        // da loja e já existe no EBS, então basta bipar; fornecedor é
+        // compra nova, que não existe em lugar nenhum e é digitada.
         '<div class="card mb-3">' +
-            '<div class="card-header">Leitura de Ativo</div>' +
+            '<div class="card-header">Origem da entrada</div>' +
             '<div class="card-body">' +
-                '<input id="scan" class="form-control scan-input" ' +
-                    'placeholder="Bipe ou digite e pressione Enter" autofocus>' +
-                '<div id="scan-feedback" class="mt-2"></div>' +
+                '<div id="rec-origem" class="btn-row" role="group" aria-label="Origem da entrada">' +
+                    '<button type="button" class="btn" data-origem="REVERSA">Reversa</button>' +
+                    '<button type="button" class="btn" data-origem="FORNECEDOR">Fornecedores</button>' +
+                '</div>' +
+                '<p id="rec-origem-nota" class="text-muted mt-2"></p>' +
+            '</div>' +
+        '</div>' +
+        '<div id="rec-entrada"></div>' +
+        // Onde o lote foi guardado. Vai junto para o ServiceNow: sem o
+        // local, o ativo ficaria "em estoque" sem dizer onde.
+        '<div class="card mb-3">' +
+            '<div class="card-header">Onde os ativos foram guardados</div>' +
+            '<div class="card-body">' +
+                '<label for="rec-espaco">Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
+                '<input id="rec-espaco" class="form-control" style="max-width:320px" ' +
+                    'list="rec-corredores" autocomplete="off" placeholder="Ex.: A-12">' +
+                '<datalist id="rec-corredores"></datalist>' +
             '</div>' +
         '</div>' +
         '<div class="btn-row mb-3">' +
@@ -52,15 +69,30 @@ function renderNovo(c, S) {
         '</div>';
 
     var CACHE_KEY = 'spare_recebimento_session';
+    var FORNECEDOR = 'FORNECEDOR';
+    var REVERSA = 'REVERSA';
+    var origem = REVERSA;
+
+    // Destino de entrada por ativo: o Recebimento é a porta do Spare e é
+    // aqui que se decide venda direta ou triagem. A subcategoria manda o
+    // ativo para o backlog da bancada certa, por isso vem de lista.
+    var subcategorias = [];
 
     function saveCache() {
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify(sessionItems)); } catch (_) {}
+        try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ origem: origem, itens: sessionItems }));
+        } catch (_) {}
     }
 
     function loadCache() {
         try {
             var raw = localStorage.getItem(CACHE_KEY);
-            return raw ? JSON.parse(raw) : [];
+            if (!raw) return [];
+            var guardado = JSON.parse(raw);
+            // Sessão gravada antes de existir origem era só a lista.
+            if (Array.isArray(guardado)) return guardado;
+            origem = guardado.origem === FORNECEDOR ? FORNECEDOR : REVERSA;
+            return guardado.itens || [];
         } catch (_) { return []; }
     }
 
@@ -77,14 +109,20 @@ function renderNovo(c, S) {
     }
 
     function drawSession() {
-        var cols = [
-            { key: 'sel', label: '', render: function (_, r, i) {
-                var x = S.el('input', { type: 'checkbox' });
-                x.checked = !!r._selected;
-                x.onchange = function () { r._selected = x.checked; };
-                return x;
-            }},
-            { key: 'hora',        label: 'Hora' },
+        var selecao = { key: 'sel', label: '', render: function (_, r, i) {
+            var x = S.el('input', { type: 'checkbox' });
+            x.checked = !!r._selected;
+            x.onchange = function () { r._selected = x.checked; };
+            return x;
+        }};
+        // O que o fornecedor traz é o que foi digitado; imobilizado,
+        // etiqueta e empresa são do EBS e só existem na reversa.
+        var identificacao = origem === FORNECEDOR ? [
+            { key: 'descricao',    label: 'Descrição do item' },
+            { key: 'numero_serie', label: 'Serial Number' },
+            { key: 'po',           label: 'PO' },
+            { key: 'nf',           label: 'NF' }
+        ] : [
             { key: 'imobilizado', label: 'Imobilizado' },
             { key: 'etiqueta',    label: 'Etiqueta' },
             { key: 'numero_serie',label: 'Nº Série' },
@@ -97,7 +135,34 @@ function renderNovo(c, S) {
                 }
                 return S.esc(v);
             }},
-            { key: 'modelo',      label: 'Modelo' },
+            { key: 'modelo',      label: 'Modelo' }
+        ];
+        var cols = [selecao, { key: 'hora', label: 'Hora' }].concat(identificacao).concat([
+            { key: 'destino_entrada', label: 'Destino', render: function (_, r) {
+                var sel = S.el('select', { className: 'form-control form-control-sm' });
+                sel.innerHTML = '<option value="TRIAGEM">Triagem</option>' +
+                                '<option value="VENDA">Venda direta</option>';
+                sel.value = r.destino_entrada || 'TRIAGEM';
+                sel.onchange = function () {
+                    r.destino_entrada = sel.value;
+                    if (sel.value === 'VENDA') r.subcategoria = '';
+                    drawSession();
+                };
+                return sel;
+            }},
+            { key: 'subcategoria', label: 'Subcategoria', render: function (_, r) {
+                if ((r.destino_entrada || 'TRIAGEM') === 'VENDA') {
+                    return S.el('span', { className: 'text-muted', textContent: '—' });
+                }
+                var sel = S.el('select', { className: 'form-control form-control-sm' });
+                sel.innerHTML = '<option value="">Selecione…</option>' +
+                    subcategorias.map(function (x) {
+                        return '<option value="' + S.esc(x.nome) + '">' + S.esc(x.nome) + '</option>';
+                    }).join('');
+                sel.value = r.subcategoria || '';
+                sel.onchange = function () { r.subcategoria = sel.value; saveCache(); };
+                return sel;
+            }},
             { key: 'situacao',    label: 'Situação', html: true, render: function (v, row) {
                 var out = situacaoBadge(v);
                 if (row._duplicadoLocal) {
@@ -123,7 +188,7 @@ function renderNovo(c, S) {
                 w.appendChild(removeBtn);
                 return w;
             }}
-        ];
+        ]);
         var el = document.getElementById('session-list');
         el.innerHTML = '';
         el.appendChild(S.table(cols, sessionItems));
@@ -151,7 +216,7 @@ function renderNovo(c, S) {
         ];
         fields.forEach(function (x) {
             var g = S.el('div', { className: 'form-group' });
-            g.innerHTML = '<label>' + S.esc(x[0]) + (x[3] ? ' <span style="color:#dc2626">*</span>' : '') + '</label>' +
+            g.innerHTML = '<label>' + S.esc(x[0]) + (x[3] ? ' <span style="color:var(--sp-alerta)">*</span>' : '') + '</label>' +
                 '<input id="' + x[1] + '" class="form-control" value="' + S.esc(x[2] || '') + '">';
             f.appendChild(g);
         });
@@ -160,7 +225,7 @@ function renderNovo(c, S) {
             '<input type="checkbox" id="edit-ready" ' + (item.situacao === 'PRONTO PARA ENVIO' ? 'checked' : '') + '>' +
             ' Pronto para envio</label>';
         f.appendChild(chkGroup);
-        var errEl = S.el('div', { className: 'mt-2', style: 'color:#dc2626;font-size:.85rem' });
+        var errEl = S.el('div', { className: 'mt-2', style: 'color:var(--sp-alerta);font-size:.85rem' });
         f.appendChild(errEl);
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
@@ -231,7 +296,7 @@ function renderNovo(c, S) {
         S.openModal('Selecionar Ativo', f, []);
     }
 
-    document.getElementById('scan').onkeydown = async function (e) {
+    async function aoBipar(e) {
         if (e.key !== 'Enter') return;
         var v = e.target.value.trim();
         if (!v) return;
@@ -288,7 +353,7 @@ function renderNovo(c, S) {
                 var dupMsg = '';
                 if (d.duplicado_local) {
                     var dl = d.duplicado_local;
-                    dupMsg = '<div class="alert alert-danger mt-2" style="border-left:4px solid #e53e3e">' +
+                    dupMsg = '<div class="alert alert-danger mt-2">' +
                         '<strong>Ativo já existe na base local!</strong><br>' +
                         'Etiqueta: <strong>' + S.esc(dl.etiqueta || '—') + '</strong> | ' +
                         'Serial: <strong>' + S.esc(dl.numero_serie || '—') + '</strong> | ' +
@@ -311,7 +376,136 @@ function renderNovo(c, S) {
             e.target.disabled = false;
             e.target.focus();
         }
-    };
+    }
+
+    // Cada origem tem o seu cartão de entrada: um bipa, o outro digita.
+    function montarEntrada() {
+        var alvo = document.getElementById('rec-entrada');
+        var nota = document.getElementById('rec-origem-nota');
+        document.querySelectorAll('#rec-origem button').forEach(function (b) {
+            var ativo = b.dataset.origem === origem;
+            b.className = 'btn ' + (ativo ? 'btn-primary' : 'btn-secondary');
+            b.setAttribute('aria-pressed', String(ativo));
+        });
+
+        if (origem === FORNECEDOR) {
+            nota.textContent = 'Compra nova, que ainda não existe no EBS. ' +
+                'Informe descrição, serial, PO e NF de cada item.';
+            alvo.innerHTML =
+                '<div class="card mb-3">' +
+                    '<div class="card-header">Item do fornecedor</div>' +
+                    '<div class="card-body">' +
+                        '<div class="filter-grid">' +
+                            '<div class="form-group"><label for="fo-desc">Descrição do item <span style="color:var(--sp-alerta)">*</span></label>' +
+                                '<input id="fo-desc" class="form-control" autocomplete="off"></div>' +
+                            '<div class="form-group"><label for="fo-serie">Serial Number <span style="color:var(--sp-alerta)">*</span></label>' +
+                                '<input id="fo-serie" class="form-control" autocomplete="off" spellcheck="false"></div>' +
+                            '<div class="form-group"><label for="fo-po">PO <span style="color:var(--sp-alerta)">*</span></label>' +
+                                '<input id="fo-po" class="form-control" autocomplete="off"></div>' +
+                            '<div class="form-group"><label for="fo-nf">NF <span style="color:var(--sp-alerta)">*</span></label>' +
+                                '<input id="fo-nf" class="form-control" autocomplete="off"></div>' +
+                        '</div>' +
+                        '<div class="btn-row mt-3">' +
+                            '<button id="fo-add" class="btn btn-primary" type="button">Adicionar item</button>' +
+                        '</div>' +
+                        '<div id="fo-feedback" class="mt-2"></div>' +
+                    '</div>' +
+                '</div>';
+            ligarFornecedor();
+        } else {
+            nota.textContent = 'Devolução da loja. O ativo já existe no EBS: ' +
+                'bipe a etiqueta, a série ou o imobilizado.';
+            alvo.innerHTML =
+                '<div class="card mb-3">' +
+                    '<div class="card-header">Leitura de Ativo</div>' +
+                    '<div class="card-body">' +
+                        '<input id="scan" class="form-control scan-input" ' +
+                            'placeholder="Bipe ou digite e pressione Enter" autofocus>' +
+                        '<div id="scan-feedback" class="mt-2"></div>' +
+                    '</div>' +
+                '</div>';
+            var campo = document.getElementById('scan');
+            if (campo) { campo.onkeydown = aoBipar; campo.focus(); }
+        }
+        drawSession();
+    }
+
+    function ligarFornecedor() {
+        var desc = document.getElementById('fo-desc');
+        var serie = document.getElementById('fo-serie');
+        var po = document.getElementById('fo-po');
+        var nf = document.getElementById('fo-nf');
+        var fb = document.getElementById('fo-feedback');
+        var add = document.getElementById('fo-add');
+
+        add.onclick = async function () {
+            var valores = [['descrição do item', desc], ['serial number', serie],
+                           ['PO', po], ['NF', nf]];
+            var faltando = valores.filter(function (x) { return !x[1].value.trim(); });
+            if (faltando.length) {
+                fb.innerHTML = '<div class="alert alert-warning">Informe ' +
+                    faltando.map(function (x) { return x[0]; }).join(', ') + '.</div>';
+                faltando[0][1].focus();
+                return;
+            }
+            add.disabled = true;
+            var item = {
+                hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                empresa: '', imobilizado: '', ativo: '', asset_id: '', etiqueta: '',
+                numero_serie: serie.value.trim(),
+                descricao: desc.value.trim(),
+                po: po.value.trim(),
+                nf: nf.value.trim(),
+                categoria: 'NÃO CLASSIFICADA',
+                modelo: '',
+                fonte: FORNECEDOR,
+                destino_entrada: 'TRIAGEM',
+                subcategoria: '',
+                situacao: 'PRONTO PARA ENVIO',
+                _selected: true,
+                _fornecedor: true
+            };
+            // Série que já está na base é equipamento que o Spare já
+            // conhece: pode ser retrabalho de digitação ou nota repetida.
+            try {
+                var d = await S.api('/recebimento/check-duplicate', {
+                    method: 'POST', body: { identificador: item.numero_serie }
+                });
+                item._duplicadoLocal = d.duplicado ? d.existente : null;
+            } catch (_) { /* a conferência é um aviso, não um bloqueio */ }
+
+            sessionItems.unshift(item);
+            // PO e NF ficam: a mesma nota costuma trazer vários itens.
+            desc.value = '';
+            serie.value = '';
+            drawSession();
+            fb.innerHTML = item._duplicadoLocal
+                ? '<div class="alert alert-warning">Item adicionado, mas a série <strong>' +
+                  S.esc(item.numero_serie) + '</strong> já existe na base.</div>'
+                : '<div class="alert alert-success">Item adicionado à sessão.</div>';
+            add.disabled = false;
+            desc.focus();
+        };
+
+        [desc, serie, po, nf].forEach(function (campo) {
+            campo.onkeydown = function (e) { if (e.key === 'Enter') add.click(); };
+        });
+    }
+
+    document.querySelectorAll('#rec-origem button').forEach(function (b) {
+        b.onclick = function () {
+            if (b.dataset.origem === origem) return;
+            // Lote de compra e devolução de loja não se misturam: são notas,
+            // conferências e destinos diferentes.
+            if (sessionItems.length) {
+                S.toast('Envie ou descarte a sessão atual antes de trocar a origem.', 'warning');
+                return;
+            }
+            origem = b.dataset.origem === FORNECEDOR ? FORNECEDOR : REVERSA;
+            saveCache();
+            montarEntrada();
+        };
+    });
 
     document.getElementById('btn-select-ready').onclick = function () {
         sessionItems.forEach(function (item) {
@@ -327,7 +521,7 @@ function renderNovo(c, S) {
             S.el('button', { className: 'btn btn-danger', textContent: 'Sim, descartar', onClick: function () {
                 sessionItems = [];
                 try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
-                drawSession();
+                montarEntrada();
                 S.closeModal();
                 S.toast('Sessão descartada.', 'info');
             }}),
@@ -348,6 +542,21 @@ function renderNovo(c, S) {
             S.toast(notReady.length + ' ativo(s) selecionado(s) não estão prontos para envio.', 'warning');
             return;
         }
+        var campoEspaco = document.getElementById('rec-espaco');
+        var espaco = (campoEspaco && campoEspaco.value || '').trim();
+        if (!espaco) {
+            S.toast('Informe o Espaço e Corredor onde os ativos ficaram guardados.', 'warning');
+            if (campoEspaco) campoEspaco.focus();
+            return;
+        }
+        var semSub = selected.filter(function (x) {
+            return (x.destino_entrada || 'TRIAGEM') !== 'VENDA' && !x.subcategoria;
+        });
+        if (semSub.length) {
+            S.toast('Informe a subcategoria dos ' + semSub.length +
+                    ' ativo(s) que vão para triagem.', 'warning');
+            return;
+        }
         try {
             S.loading(true);
             var payload = selected.map(function (x) {
@@ -362,17 +571,37 @@ function renderNovo(c, S) {
                     modelo: x.modelo || '',
                     custo_asset: x.custo_asset || null,
                     dpis: x.dpis || null,
-                    fonte: x.fonte || 'EBS'
+                    fonte: x.fonte || 'EBS',
+                    destino_entrada: x.destino_entrada || 'TRIAGEM',
+                    subcategoria: x.subcategoria || '',
+                    po: x.po || '',
+                    nf: x.nf || ''
                 };
             });
             var d = await S.api('/recebimento/bulk-submit', {
                 method: 'POST',
-                body: { items: payload }
+                body: { items: payload, espaco_corredor: espaco, origem: origem }
             });
             var msg = d.criados + ' ativo(s) enviado(s) para a base.';
             if (d.ignorados) msg += ' ' + d.ignorados + ' já possuíam recebimento aberto.';
             if (d.erros && d.erros.length) msg += ' ' + d.erros.length + ' erro(s).';
-            S.toast(msg, d.erros && d.erros.length ? 'warning' : 'success');
+            var sn = d.no_servicenow || {};
+            if (sn.ativo) {
+                var partes = [];
+                if (sn.criados) partes.push(sn.criados + ' criado(s) no ServiceNow');
+                if (sn.atualizados) partes.push(sn.atualizados + ' atualizado(s)');
+                if (sn.incompletos) partes.push(sn.incompletos + ' sem custo/depreciação (não subiram)');
+                if (sn.depreciados) partes.push(sn.depreciados + ' com depreciação calculada');
+                if (sn.sem_depreciacao) partes.push(sn.sem_depreciacao + ' SEM depreciação');
+                if (partes.length) msg += ' ' + partes.join(', ') + '.';
+                if (sn.falhas && sn.falhas.length) msg += ' ServiceNow: ' + sn.falhas[0];
+            }
+            var mdm = d.mdm || {};
+            if (mdm.removidos) msg += ' ' + mdm.removidos + ' coletor(es) removido(s) do MDM.';
+            else if (mdm.pendentes) msg += ' ' + mdm.pendentes + ' remoção(ões) do MDM pendente(s): ' + (mdm.motivo || (mdm.falhas || [])[0] || '');
+            else if (mdm.nao_encontrados) msg += ' ' + mdm.nao_encontrados + ' não localizado(s) no MDM.';
+            S.toast(msg, (d.erros && d.erros.length) || (sn.falhas && sn.falhas.length) ? 'warning' : 'success');
+            mostrarDesfecho(d);
             sessionItems = sessionItems.filter(function (x) { return !x._selected; });
             drawSession();
         } catch (x) {
@@ -382,7 +611,56 @@ function renderNovo(c, S) {
         }
     };
 
-    drawSession();
+    /* O que aconteceu com CADA série, sem ninguém precisar perguntar: a
+       leitura já tem o serial, então a tela responde por ele. */
+    function mostrarDesfecho(d) {
+        var sn = d.no_servicenow || {};
+        var mdm = d.mdm || {};
+        var porItem = sn.por_item || [];
+        var porSerie = mdm.por_serie || {};
+        var seriais = porItem.map(function (x) { return x.serial; });
+        Object.keys(porSerie).forEach(function (s) {
+            if (seriais.indexOf(s) < 0) { seriais.push(s); porItem.push({ serial: s }); }
+        });
+        if (!porItem.length) return;
+
+        var linhas = porItem.map(function (x) {
+            var m = porSerie[(x.serial || '').toUpperCase()] || null;
+            var sn_txt = x.acao || '—';
+            if (x.motivo) sn_txt += ' · ' + x.motivo;
+            var dep = x.depreciacao || (x.acao ? '—' : '');
+            var mdm_txt = '—';
+            if (m) mdm_txt = m.ok ? 'removido do MDM' : ('pendente · ' + (m.detalhe || ''));
+            return '<tr><td class="sep-serie">' + S.esc(x.serial || x.etiqueta || '—') + '</td>' +
+                '<td>' + S.esc(sn_txt) + '</td>' +
+                '<td>' + S.esc(dep) + '</td>' +
+                '<td>' + S.esc(mdm_txt) + '</td></tr>';
+        }).join('');
+
+        var alvo = document.getElementById('rec-desfecho');
+        if (!alvo) {
+            alvo = S.el('div', { id: 'rec-desfecho', className: 'card mb-3' });
+            var lista = document.getElementById('session-list');
+            lista.parentNode.parentNode.insertBefore(alvo, lista.parentNode);
+        }
+        alvo.innerHTML = '<div class="card-header">O que aconteceu com cada ativo</div>' +
+            '<div class="card-body"><div class="table-wrapper"><table class="data-table">' +
+            '<thead><tr><th>Série</th><th>ServiceNow</th><th>Depreciação</th>' +
+            '<th>MDM</th></tr></thead><tbody>' + linhas + '</tbody></table></div></div>';
+    }
+
+    S.api('/recebimento/subcategorias').then(function (d) {
+        subcategorias = d.subcategorias || [];
+        drawSession();
+    }).catch(function () {});
+
+    S.api('/servicenow/gestao-ativos/config').then(function (cfg) {
+        var dl = document.getElementById('rec-corredores');
+        if (dl) dl.innerHTML = (cfg.corredores || []).map(function (x) {
+            return '<option value="' + S.esc(x) + '">'; }).join('');
+    }).catch(function () {});
+
+    montarEntrada();
 
     if (sessionItems.length) {
         S.toast(sessionItems.length + ' ativo(s) restaurado(s) da sessão anterior.', 'info');
@@ -477,6 +755,9 @@ async function renderBase(c, S) {
             var cols = [
                 ['id',                'ID'],
                 ['data_recebimento',  'Data'],
+                ['origem_entrada',    'Origem'],
+                ['po',                'PO'],
+                ['nf',                'NF'],
                 ['empresa',           'Empresa'],
                 ['imobilizado',       'Imobilizado'],
                 ['etiqueta',          'Etiqueta'],
@@ -494,6 +775,11 @@ async function renderBase(c, S) {
                     html: x[0] === 'status' || x[0] === 'categoria',
                     render: x[0] === 'status' ? function (v) { return S.badge(v); } : undefined
                 };
+                if (x[0] === 'origem_entrada') {
+                    col.render = function (v) {
+                        return v === 'FORNECEDOR' ? 'Fornecedor' : 'Reversa';
+                    };
+                }
                 if (x[0] === 'categoria') {
                     col.render = function (v) {
                         if (!v || v === 'NÃO CLASSIFICADA') {
@@ -576,7 +862,7 @@ async function renderBase(c, S) {
 
     document.getElementById('bf-run').onclick = load;
     document.getElementById('bf-snow').onclick = function () {
-        window.location = (window.SPARE.base || '') + '/api/recebimentos/export-servicenow';
+        window.location = '/api/recebimentos/export-servicenow';
     };
     load();
 }
@@ -739,7 +1025,6 @@ function renderLotes(c, S) {
 async function renderModelos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Cadastro de modelos</h1>' +
-        '<p class="text-muted">Ao salvar uma regra ativa, todos os ativos compatíveis são atualizados automaticamente.</p>' +
         '<button id="pm-class-add" class="btn btn-primary mb-3">Nova regra</button>' +
         '<button id="pm-class-import" class="btn btn-secondary mb-3" style="margin-left:8px">Importar planilha</button>' +
         '<div id="pm-class-list"></div>';

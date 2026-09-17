@@ -9,8 +9,12 @@ por cookie, `require_login` que só responde 401 em JSON para XMLHttpRequest,
 `{"data"}` / `{"error"}`, os mesmos códigos). Precisa de `php` no PATH.
 
 O que se prova aqui: que o portal fala o protocolo certo, trata sessão
-caída, mapeia erro do Oracle vindo de lá, valida parâmetro antes de sair, e
-que a senha nunca aparece — nem na resposta, nem no log.
+caída, repassa o erro que vem de lá, valida parâmetro antes de sair, e que a
+senha nunca aparece — nem na resposta, nem no log.
+
+`api/oracle.php` é o nome do endereço do OUTRO lado, não uma ligação do
+portal com banco algum: o portal só fala HTTP com o módulo, e é o módulo que
+consulta a base dele.
 """
 from __future__ import annotations
 
@@ -271,7 +275,7 @@ try:
     cofre.definir("GESTAO_COMPRAS_PASS", SENHA)
     gc.esquecer_sessao()
 
-    print("\n[8] Permissão e sigilo")
+    print("\n[7] Permissão e sigilo")
     anon = TestClient(main.app)
     for caminho in ("/api/gestao-compras/situacao", "/api/gestao-compras/consultar?acao=vendors"):
         checar(anon.get(caminho).status_code in (401, 403), f"{caminho} exige sessão")
@@ -286,26 +290,15 @@ try:
     checar(SENHA not in REGISTRO.read_text(encoding="utf-8").replace(f'"tem_senha":true', ""),
            "o stub registrou que a senha veio, mas o valor nunca foi escrito em log")
 
-    print("\n[9] As consultas nomeadas do caminho direto são as mesmas do módulo")
-    r = cliente.get("/api/ebs-oracle/consultas")
-    nomes = {q["nome"]: q for q in r.json()["consultas"]}
-    checar(set(nomes) == {"saldo", "po", "rc", "acordos", "vendor_lookup", "vendor_items", "busca_po", "catalogo"},
-           "as oito consultas do oracle_helper.py estão semeadas")
-    checar(nomes["busca_po"]["binds"] == ["numero_po", "p_line_num"], "binds derivados do SQL (busca_po)")
-    checar(nomes["po"]["binds"] == ["p_project_number"], "binds derivados do SQL (po)")
-    r = cliente.post("/api/ebs-oracle/consultar", json={"nome": "nao_existe"})
-    checar(r.status_code == 422, "consulta nomeada inexistente é recusada")
-
-    print("\n[10] A tela")
+    print("\n[8] A tela")
     js = (RAIZ / "static/modules/parametros.js").read_text(encoding="utf-8")
     for trecho, desc in (("/gestao-compras/situacao", "carrega a situação"),
                          ("/gestao-compras/testar", "tem o botão Testar login"),
                          ("/gestao-compras/consultar", "consulta pelo módulo"),
-                         ("data-gc=", "mostra só os campos da ação escolhida"),
-                         ("/ebs-oracle/consultas", "oferece as consultas prontas no caminho direto")):
+                         ("data-gc=", "mostra só os campos da ação escolhida")):
         checar(trecho in js, f"parametros.js {desc}")
 
-    print("\n[11] Módulo fora do ar")
+    print("\n[9] Módulo fora do ar")
     # A URL é lida na definição de Settings, então não dá para trocá-la em
     # tempo de teste; derrubar o stub reproduz o caso real com fidelidade.
     servidor.terminate(); servidor.wait(timeout=3)

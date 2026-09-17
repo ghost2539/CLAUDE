@@ -14,10 +14,10 @@ Fluxo de encerramento (exigência do ServiceNow):
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
 
 from core.security import require_permission
 from routers.servicenow import (
+    _ComSysId,
     _sn_session_from_portal,
     _sn_query,
     _sn_update,
@@ -171,8 +171,7 @@ def _sn_query_all_safe(session, sn_query):
     return _sn_query_all(session, INCIDENT_TABLE, sn_query, FIELDS)
 
 
-class EncerrarIn(BaseModel):
-    sys_id: str
+class EncerrarIn(_ComSysId):
     confirmar: bool = False
 
 

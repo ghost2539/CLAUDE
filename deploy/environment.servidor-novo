@@ -73,8 +73,6 @@ INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@
 #   CORREIOS_USUARIO=
 #   CORREIOS_CHAVE=
 #   CORREIOS_CARTOES=
-#   ORACLE_EBS_USER=
-#   ORACLE_EBS_PASS=
 
 # ── Gestão de Compras — PO e projetos do EBS por HTTP ───────────────────
 # O serviço não lê o cofre corporativo; o módulo /gestao_compras (Apache)
