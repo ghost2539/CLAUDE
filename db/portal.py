@@ -73,6 +73,11 @@ class User(Base):
     last_access: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Último perfil de acesso aplicado. É só rótulo: o que vale são as
+    # linhas de `permissions`. Fica aqui para a tela poder dizer "Operador"
+    # em vez de obrigar quem revisa a ler trinta níveis para descobrir que
+    # aquele usuário é igual aos outros do time.
+    perfil: Mapped[str] = mapped_column(String(60), default="", server_default="")
     # Tema escolhido na barra do topo. Fica no usuário, e não só no
     # navegador, porque quem opera troca de máquina o tempo todo: sem isto a
     # escolha voltava ao padrão a cada estação. Vazio = segue o padrão.
@@ -95,6 +100,35 @@ class Permission(Base):
     can_export: Mapped[bool] = mapped_column(Boolean, default=False)
     can_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     __table_args__ = (UniqueConstraint("user_id", "module"),)
+
+
+class AccessProfile(Base):
+    """Conjunto de níveis por módulo, com nome.
+
+    Liberar alguém exigia percorrer trinta módulos. Com o perfil, escolhe-se
+    um e os trinta são preenchidos de uma vez; depois se ajusta a exceção.
+
+    O perfil é MODELO, não vínculo: aplicar copia os níveis para as linhas
+    de permissão do usuário e acaba ali. Quem tem acesso a quê continua
+    respondido por `permissions`, um lugar só — se o perfil fosse consultado
+    na hora de autorizar, mudar um perfil alteraria em silêncio o acesso de
+    gente que ninguém tocou, e a tela de permissões deixaria de dizer a
+    verdade sobre o usuário que está aberto.
+    """
+
+    __tablename__ = "access_profiles"
+    id: Mapped[int] = mapped_column(_PK, primary_key=True)
+    nome: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    descricao: Mapped[str] = mapped_column(String(240), default="")
+    # {modulo: nivel} — os níveis de core/permissoes.py.
+    niveis: Mapped[dict] = mapped_column(JSON, default=dict)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    atualizado_por: Mapped[str] = mapped_column(String(80), default="")
 
 
 class AccessLog(Base):
