@@ -203,8 +203,17 @@ checar(set(nomes) == {"acordos", "busca_po", "catalogo", "po", "po_itens",
 checar(nomes["busca_po"]["binds"] == ["numero_po", "p_line_num"],
        "binds de busca_po saem do SQL, não de uma lista à parte")
 checar(nomes["po"]["binds"] == ["p_project_number"], "binds de po")
-checar(nomes["po_itens"]["binds"] == ["numero_po"],
-       "binds de po_itens, a consulta que alimenta os Agendamentos de Fornecedores")
+# A PO de acordo de compras tem UM número e várias liberações: o que muda de
+# um pedido para outro é o número depois do hífen (2570313-25 → liberação 25).
+# Sem o bind da liberação a consulta somaria as quantidades de todas elas, e o
+# agendamento nasceria pedindo o total do ano.
+checar(sorted(nomes["po_itens"]["binds"]) == ["liberacao", "numero_po"],
+       "po_itens recebe o número da PO E a liberação")
+fonte_agf = (RAIZ / "routers" / "agendamentos_forn.py").read_text(encoding="utf-8")
+checar('"liberacao": liberacao' in fonte_agf,
+       "e o endereço dos Agendamentos passa a liberação que separou do hífen")
+sql_itens = [q for q in d["consultas"] if q["nome"] == "po_itens"]
+checar(bool(sql_itens), "a consulta po_itens continua registrada")
 checar(all(isinstance(q.get("binds"), list) for q in d["consultas"]),
        "toda consulta diz quais parâmetros espera, mesmo quando não espera nenhum")
 

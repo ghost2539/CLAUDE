@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import date
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 import db.agendamentos_forn as db
@@ -196,46 +196,6 @@ def _exigir(req: Request, acao: str) -> dict:
 
 # ── Rotas ─────────────────────────────────────────────────────────────────
 # Teto de tamanho do PDF lido em memória: NF é pequena; acima disso é engano.
-_MAX_PDF = 15 * 1024 * 1024
-
-
-@router.post("/extrair-nf")
-async def extrair_nf(req: Request, arquivo: UploadFile = File(...)):
-    """Lê a NF EM MEMÓRIA (PDF/DANFE ou XML da NF-e) e devolve os campos para
-    pré-preencher.
-
-    O arquivo NUNCA é gravado: os bytes entram, os campos saem, e o upload é
-    descartado. O XML é a fonte exata; o PDF é heurístico — o operador confere.
-    """
-    _exigir(req, "create")
-    nome = (arquivo.filename or "").lower()
-    if not (nome.endswith(".pdf") or nome.endswith(".xml")):
-        raise HTTPException(422, "Envie o PDF (DANFE) ou o XML da NF-e.")
-    dados = await arquivo.read()
-    if not dados:
-        raise HTTPException(422, "Arquivo vazio.")
-    if len(dados) > _MAX_PDF:
-        raise HTTPException(413, "Arquivo grande demais (máx. 15 MB).")
-    try:
-        from core.nf_pdf import extrair, SemBibliotecaPDF
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(503, f"Leitor de NF indisponível: {exc}") from exc
-    try:
-        campos = extrair(dados)
-    except SemBibliotecaPDF as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("Falha ao ler PDF da NF: %s", exc)
-        raise HTTPException(422, "Não foi possível ler este arquivo. Envie o "
-                                 "DANFE em PDF (texto, não imagem) ou o XML da "
-                                 "NF-e.") from exc
-    finally:
-        # Sem persistência: garante que nada do upload fica pendurado.
-        try:
-            await arquivo.close()
-        except Exception:  # noqa: BLE001
-            pass
-    return campos
 
 
 # BUs cujo pedido nasce no EBS. Youcom compra por fora, então digitar a PO
@@ -262,13 +222,25 @@ def consultar_po(numero: str, req: Request, bu: str = ""):
     # ao banco por engano de digitação e dá erro melhor que o do driver.
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,39}", numero):
         raise HTTPException(422, "Número de PO inválido.")
+
+    # Acordo de compras tem UM número de PO e várias liberações; o que muda
+    # de um pedido para outro é o número depois do hífen (2570313-25 é a
+    # liberação 25 da PO 2570313). Sem separar os dois, a consulta somaria as
+    # quantidades de todas as liberações do acordo e o agendamento nasceria
+    # pedindo o total do ano.
+    liberacao = None
+    base = numero
+    casado = re.fullmatch(r"(\d{4,20})-(\d{1,6})", numero)
+    if casado:
+        base, liberacao = casado.group(1), int(casado.group(2))
     if bu and bu not in BUS_COM_EBS:
         raise HTTPException(
             422, f"A BU {bu} não tem pedido no EBS. Informe os equipamentos à mão.")
 
     try:
         from integracoes import ebs_oracle
-        linhas = ebs_oracle.run_named("po_itens", {"numero_po": numero}, max_rows=500)
+        linhas = ebs_oracle.run_named(
+            "po_itens", {"numero_po": base, "liberacao": liberacao}, max_rows=500)
     except ImportError as exc:
         raise HTTPException(
             503, "O driver Oracle não está instalado neste servidor "
@@ -282,12 +254,20 @@ def consultar_po(numero: str, req: Request, bu: str = ""):
         raise HTTPException(502, _erro_limpo(exc)) from exc
 
     if not linhas:
+        if liberacao is not None:
+            raise HTTPException(
+                404, f"A PO {base} não tem a liberação {liberacao} no EBS, "
+                     "ou ela não tem linha ativa. Confira o número depois do hífen.")
         raise HTTPException(404, f"PO {numero} não encontrada no EBS, "
                                  "ou sem linha ativa.")
 
     cab = linhas[0]
     return {
-        "po": cab.get("po_numero") or numero,
+        # Devolve o número como foi digitado, com a liberação: é assim que a
+        # pessoa identifica o pedido, e é o que fica gravado no agendamento.
+        "po": numero,
+        "po_base": cab.get("po_numero") or base,
+        "liberacao": cab.get("liberacao"),
         "fornecedor": cab.get("fornecedor") or "",
         "status": cab.get("status_po") or "",
         "moeda": cab.get("moeda") or "",

@@ -61,16 +61,6 @@ window.SPARE_MODULES.agendamentos_forn = {
             var d = dado || {};
             var host = document.getElementById('agf-form');
             host.innerHTML =
-                '<div class="card" style="background:var(--bg-input);margin-bottom:14px">' +
-                  '<div class="card-body">' +
-                  '<label style="display:block;margin-bottom:6px"><b>Importar da NF (PDF ou XML)</b> ' +
-                  '<span class="text-muted">— preenche NF, PO e itens; confira antes de salvar. O arquivo não é salvo no servidor. O XML da NF-e é a fonte exata.</span></label>' +
-                  '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-                    '<input type="file" id="agf-pdf" accept="application/pdf,.pdf,text/xml,application/xml,.xml" class="form-control" style="max-width:360px">' +
-                    '<button type="button" id="agf-pdf-btn" class="btn btn-secondary btn-sm">Ler NF</button>' +
-                    '<span id="agf-pdf-msg" class="text-muted"></span>' +
-                  '</div></div>' +
-                '</div>' +
                 '<div class="form-grid cols-2">' +
                     campo('BU', '<select id="agf-bu" class="form-control">' + opcoesSelect(OPC.bus, d.bu, true) + '</select>') +
                     campo('Estoque destino *', '<select id="agf-destino" class="form-control">' + opcoesSelect(OPC.destinos, d.estoque_destino, true) + '</select>') +
@@ -107,41 +97,7 @@ window.SPARE_MODULES.agendamentos_forn = {
             document.getElementById('agf-add-equi').onclick = function () { addEqui(); };
             document.getElementById('agf-cancelar').onclick = fecharForm;
             document.getElementById('agf-salvar').onclick = function () { salvar(edit ? d.id : 0); };
-            document.getElementById('agf-pdf-btn').onclick = importarPdf;
             host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-
-        async function importarPdf() {
-            var inp = document.getElementById('agf-pdf');
-            var msg = document.getElementById('agf-pdf-msg');
-            if (!inp.files || !inp.files[0]) { msg.textContent = 'Escolha um PDF primeiro.'; return; }
-            var fd = new FormData();
-            fd.append('arquivo', inp.files[0]);
-            msg.textContent = 'Lendo…';
-            try {
-                // multipart: sem Content-Type manual (o browser põe o boundary).
-                var d = await S.api('/agendamentos-forn/extrair-nf', { method: 'POST', body: fd });
-                // A NF lida vai para a PRIMEIRA linha de pedido (a tela não
-                // tem mais campo solto de NF/PO); as outras POs da mesma nota
-                // o operador acrescenta à mão.
-                if (d.nf || d.po) {
-                    var alvo = document.querySelector('.agf-po-linha') || addPo();
-                    if (d.po) alvo.querySelector('.agf-po').value = d.po;
-                    if (d.nf) alvo.querySelector('.agf-nf').value = d.nf;
-                }
-                if (Array.isArray(d.itens) && d.itens.length) {
-                    document.getElementById('agf-equis').innerHTML = '';
-                    d.itens.forEach(addEqui);
-                }
-                var partes = [];
-                if (d.nf) partes.push('NF ' + d.nf);
-                if (d.po) partes.push('PO ' + d.po);
-                partes.push((d.itens ? d.itens.length : 0) + ' item(ns)');
-                msg.textContent = 'Lido: ' + partes.join(', ') + '. Confira e complete os campos.';
-                if (!d.confiavel) msg.textContent += ' (chave da NF não encontrada — revise com atenção)';
-            } catch (x) {
-                msg.textContent = x.message;
-            }
         }
 
         function campo(rotulo, controle) {
@@ -160,7 +116,11 @@ window.SPARE_MODULES.agendamentos_forn = {
             linha.innerHTML =
                 '<div class="filter-grid">' +
                     '<div class="form-group"><label>PO *</label>' +
-                        '<input class="form-control agf-po" placeholder="número do pedido" value="' + e(ped.po || '') + '"></div>' +
+                        // Acordo de compras tem um número só e várias liberações;
+                        // é o número depois do hífen que diz qual pedido é.
+                        '<input class="form-control agf-po" placeholder="ex.: 2570313-25" ' +
+                        'title="Acordo de compras: número da PO, hífen, e a liberação. ' +
+                        'Compra avulsa: só o número." value="' + e(ped.po || '') + '"></div>' +
                     '<div class="form-group"><label>NF</label>' +
                         '<input class="form-control agf-nf" placeholder="nota que cobre esta PO" value="' + e(ped.nf || '') + '"></div>' +
                     '<div class="form-group"><label>&nbsp;</label><div class="btn-row">' +
