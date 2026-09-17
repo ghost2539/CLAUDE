@@ -1102,11 +1102,15 @@ async function renderBaseEbs(c, S) {
         alvo.appendChild(topo);
 
         alvo.appendChild(S.table([
-            { key: 'rotulo', label: 'O quê' },
-            { key: 'chave', label: 'Chave no cofre' },
+            // Não há mais coluna "O quê": a API devolve o nome da chave, e
+            // um rótulo à parte só existia para repetir a mesma informação.
+            { key: 'chave', label: 'Chave' },
             { key: 'resolvida', label: 'Resolveu', html: true,
               render: function (v) { return selo(v, 'sim', 'não'); } },
             { key: 'fonte', label: 'De onde veio' },
+            // Só chave não-sigilosa traz valor (hoje, o diretório do
+            // Instant Client). Endereço, usuário e senha aparecem como "—":
+            // a tela diz se resolveu e de onde veio, nunca o quê.
             { key: 'valor', label: 'Valor',
               render: function (v) { return v || '—'; } },
             { key: 'no_local', label: '', html: true, render: function (v, linha) {

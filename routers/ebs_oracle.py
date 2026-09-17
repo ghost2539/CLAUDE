@@ -17,6 +17,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
+from core.mascara import sem_dado_de_acesso
 from core.security import check_rate_limit, require_permission
 
 MODULO = "parametros"
@@ -28,7 +29,11 @@ router = APIRouter(prefix="/api/ebs-oracle", tags=["EBS Oracle (leitura)"])
 # para a tela poder dizer se está resolvida — o valor nunca sai daqui.
 CHAVES = ("ORACLE_EBS_USER", "ORACLE_EBS_PASS", "ORACLE_EBS_DSN",
           "ORACLE_CLIENT_LIB_DIR")
-SIGILOSAS = {"ORACLE_EBS_PASS"}
+# Nenhum destes tem o valor mostrado. A senha é a óbvia, mas endereço,
+# porta, instância e usuário identificam ONDE bater e com QUE conta — quem
+# lê essa tela fica a uma senha de entrar no banco de outra área. Sobra o
+# diretório do Instant Client, que é caminho de arquivo do servidor.
+SIGILOSAS = {"ORACLE_EBS_PASS", "ORACLE_EBS_USER", "ORACLE_EBS_DSN"}
 
 # Padrões que `integracoes/ebs_oracle.py::_config()` usa quando o cofre não
 # tem a chave. Repetidos aqui porque aquele módulo importa o driver Oracle no
@@ -149,7 +154,8 @@ def testar(req: Request):
         if _sem_credencial(exc):
             raise HTTPException(503, str(exc)) from exc
         _log.warning("Teste de acesso à base do EBS falhou: %s", exc)
-        raise HTTPException(502, f"Não foi possível ler a base do EBS: {exc}") from exc
+        raise HTTPException(502, "Não foi possível ler a base do EBS: "
+                         + sem_dado_de_acesso(str(exc))) from exc
     return {"ok": True, "acesso": dados}
 
 
@@ -170,7 +176,8 @@ def objetos(req: Request, prefixo: str = "", owner: str = "APPS",
     except ImportError as exc:
         raise HTTPException(503, f"Driver Oracle ausente neste servidor: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Falha ao listar objetos: {exc}") from exc
+        raise HTTPException(502, "Falha ao listar objetos: "
+                         + sem_dado_de_acesso(str(exc))) from exc
     return {"total": len(linhas), "itens": linhas}
 
 
@@ -188,7 +195,8 @@ def descrever(req: Request, objeto: str, owner: str = "APPS"):
     except ImportError as exc:
         raise HTTPException(503, f"Driver Oracle ausente neste servidor: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(502, f"Falha ao descrever {alvo}: {exc}") from exc
+        raise HTTPException(502, f"Falha ao descrever {alvo}: "
+                         + sem_dado_de_acesso(str(exc))) from exc
     if not linhas:
         raise HTTPException(404, f"{owner}.{alvo} não foi encontrado ou a conta "
                                  f"não enxerga esse objeto.")
@@ -306,21 +314,35 @@ def consultar(body: dict, req: Request):
     _exigir(req)
     check_rate_limit(req, "api")
     nome = str((body or {}).get("nome", "") or "").strip().lower()
+    esperados: set[str] | None = None
     if nome:
-        queries, _binds = _consultas_nomeadas()
+        queries, binds_da_consulta = _consultas_nomeadas()
         if nome not in queries:
             raise HTTPException(422, f"Consulta '{nome}' não existe. Veja /api/ebs-oracle/consultas.")
         sql = _validar_sql(queries[nome])
+        esperados = set(binds_da_consulta.get(nome, ()))
     else:
         sql = _validar_sql(str((body or {}).get("sql", "")))
     binds = (body or {}).get("binds") or {}
     if not isinstance(binds, dict):
         raise HTTPException(422, "Os parâmetros devem vir como objeto {nome: valor}.")
     # Nome de bind é identificador; valor vai como bind variable, nunca
-    # concatenado — é o que separa parâmetro de injeção.
-    for nome in binds:
-        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", str(nome)):
-            raise HTTPException(422, f"Nome de parâmetro inválido: {nome}")
+    # concatenado — é o que separa parâmetro de injeção. A variável do laço
+    # não se chama `nome`: essa é a consulta, e reusá-la aqui é armadilha
+    # para quem mexer neste trecho depois.
+    for chave in binds:
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", str(chave)):
+            raise HTTPException(422, f"Nome de parâmetro inválido: {chave}")
+    # Numa consulta nomeada se sabe exatamente quais parâmetros ela usa.
+    # Mandar um que ela não usa abria conexão e voltava ORA-01036 ("illegal
+    # variable name/number") — um erro do banco para um engano que dava para
+    # ver aqui, de graça, e que diz o que fazer.
+    if esperados is not None:
+        sobrando = sorted(set(map(str, binds)) - esperados)
+        if sobrando:
+            raise HTTPException(
+                422, f"A consulta '{nome}' não usa: {', '.join(sobrando)}. "
+                     f"Ela espera: {', '.join(sorted(esperados)) or 'nenhum parâmetro'}.")
     try:
         limite = int((body or {}).get("limite") or _LIMITE_PADRAO)
     except (TypeError, ValueError):
@@ -338,7 +360,8 @@ def consultar(body: dict, req: Request):
         if _sem_credencial(exc):
             raise HTTPException(503, str(exc)) from exc
         _log.warning("Consulta à base do EBS falhou: %s", exc)
-        raise HTTPException(502, f"A base do EBS recusou a consulta: {exc}") from exc
+        raise HTTPException(502, "A base do EBS recusou a consulta: "
+                         + sem_dado_de_acesso(str(exc))) from exc
     ms = int((time.monotonic() - inicio) * 1000)
     colunas = list(linhas[0].keys()) if linhas else []
     return {
