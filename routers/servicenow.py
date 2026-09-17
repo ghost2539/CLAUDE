@@ -1,10 +1,12 @@
 """ServiceNow router — upload de ativos do recebimento para alm_hardware via SSO + JSONv2."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
 import time
+import unicodedata
 import uuid
 from datetime import datetime
 
@@ -13,7 +15,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
 from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
-from core.security import require_permission, get_session
+from core.security import require_permission, get_session, check_rate_limit
+
+_log = logging.getLogger("servicenow")
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -430,6 +434,147 @@ def _insert_record(session, record):
             display = records[0].get("display_name", records[0].get("asset_tag", "N/A"))
             return True, sys_id, display
     return False, "", r.text[:200]
+
+
+# Nome interno da ação e o texto do botão, em qualquer idioma. O nome
+# interno ("...calculate_depreciation...") não é traduzido; o texto é.
+_RE_ANCORA = re.compile(r"<a\b[^>]*>", re.I)
+_RE_ACAO_NOME = re.compile(r'gsft_action_name\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_DEPRECIA = re.compile(r"deprecia", re.I)      # depreciation / depreciação / depreciación
+
+
+def achar_acao_depreciacao(html: str) -> str:
+    """Nome da ação de calcular depreciação na página, ou "".
+
+    Procura em duas frentes: o nome interno da ação (que o ServiceNow não
+    traduz) e o texto visível do link (que ele traduz). Trabalha sobre o
+    HTML cru de propósito — assim dá para verificar com uma página de
+    exemplo em cada idioma, sem depender do parser.
+    """
+    texto = html or ""
+    candidatos: list[tuple[int, str]] = []
+    for m in _RE_ANCORA.finditer(texto):
+        tag = m.group(0)
+        acao = _RE_ACAO_NOME.search(tag)
+        if not acao:
+            continue
+        nome = acao.group(1)
+        # Texto do link: até o </a> correspondente (basta o suficiente).
+        fim = texto.find("</a>", m.end())
+        rotulo = re.sub(r"<[^>]*>", " ", texto[m.end():fim] if fim > 0 else "")
+        casa_nome = bool(_RE_DEPRECIA.search(nome))
+        casa_rotulo = bool(_RE_DEPRECIA.search(rotulo))
+        if not (casa_nome or casa_rotulo):
+            continue
+        # Prefere quem também fala em calcular: "Calculate Depreciation",
+        # "Calcular depreciação" — e não "Depreciation schedule".
+        peso = 2 if re.search(r"calc", nome + " " + rotulo, re.I) else 1
+        candidatos.append((peso, nome))
+    if not candidatos:
+        return ""
+    candidatos.sort(key=lambda x: -x[0])
+    return candidatos[0][1]
+
+
+def _depreciacao_passos(session, sys_id, BS, executar: bool = True) -> dict:
+    """O cálculo da depreciação, passo a passo e com o motivo da parada.
+
+    O caminho é o formulário da interface, não a API: são cinco pontos
+    onde ele pode parar (página não abre, link ausente, formulário
+    ausente, sessão caiu no login, ação desconhecida). Devolver só
+    "não deu" transforma um diagnóstico de dois minutos em três rodadas
+    de tentativa e erro — foi exatamente o que aconteceu.
+    """
+    passos: list[dict] = []
+    resultado = {"sys_id": sys_id, "ok": False, "passos": passos, "motivo": ""}
+
+    def parar(motivo: str) -> dict:
+        resultado["motivo"] = motivo
+        return resultado
+
+    form_url = f"{SERVICENOW_BASE}/alm_hardware.do?sys_id={sys_id}"
+    try:
+        r = session.get(form_url, timeout=30)
+    except Exception as exc:  # noqa: BLE001 — rede/certificado com a causa
+        passos.append({"passo": "abrir formulário", "ok": False, "detalhe": str(exc)[:200]})
+        return parar(f"não foi possível abrir o formulário do ativo: {exc}")
+    caiu_no_login = "login" in (getattr(r, "url", "") or "").lower() or \
+                    "oam" in (getattr(r, "url", "") or "").lower()
+    passos.append({"passo": "abrir formulário", "ok": r.status_code == 200 and not caiu_no_login,
+                   "http": r.status_code, "url": getattr(r, "url", ""),
+                   "tamanho": len(getattr(r, "text", "") or "")})
+    if r.status_code != 200:
+        return parar(f"o formulário do ativo respondeu HTTP {r.status_code}")
+    if caiu_no_login:
+        return parar("a sessão do portal não abre o formulário do ServiceNow "
+                     "(a resposta foi a tela de login). O cálculo da depreciação "
+                     "usa a interface, não a API.")
+
+    soup = BS(r.text, "html.parser")
+    # A ação é achada pelo NOME INTERNO e pelo texto em qualquer idioma: o
+    # ServiceNow de cada usuário pode estar em português, e procurar só por
+    # "Calculate Depreciation" fazia a depreciação não rodar para quem usa
+    # a interface traduzida.
+    action_id = achar_acao_depreciacao(r.text)
+    passos.append({"passo": "achar a ação de calcular depreciação",
+                   "ok": bool(action_id), "acao": action_id})
+    if not action_id:
+        return parar("o formulário abriu, mas não tem a ação de calcular "
+                     "depreciação (nem em inglês nem em português) — "
+                     "verifique se o usuário do portal tem esse botão no "
+                     "ServiceNow.")
+    form_tag = soup.find("form", {"name": "alm_hardware.do"})
+    if not form_tag:
+        form_tag = soup.find("form", {"id": "alm_hardware.do"})
+    passos.append({"passo": "achar o formulário do ativo", "ok": bool(form_tag)})
+    if not form_tag:
+        return parar("a página não trouxe o formulário do ativo.")
+    if not executar:
+        resultado["ok"] = True
+        resultado["motivo"] = ("o caminho está inteiro; o cálculo rodaria "
+                               "(diagnóstico não executa a ação)")
+        return resultado
+    payload = {}
+    for inp in form_tag.find_all("input"):
+        name = inp.get("name")
+        if not name:
+            continue
+        inp_type = inp.get("type", "").lower()
+        if inp_type in ("hidden", "text", ""):
+            payload[name] = inp.get("value", "")
+    for sel in form_tag.find_all("select"):
+        name = sel.get("name")
+        if not name:
+            continue
+        selected = sel.find("option", selected=True)
+        if selected:
+            payload[name] = selected.get("value", "")
+    payload["sys_action"] = action_id
+    payload["sys_uniqueValue"] = sys_id
+    form_action = form_tag.get("action", "alm_hardware.do")
+    if not form_action.startswith("http"):
+        form_action = f"{SERVICENOW_BASE}/{form_action.lstrip('/')}"
+    try:
+        r_dep = session.post(form_action, data=payload, allow_redirects=True, timeout=60)
+    except Exception as exc:  # noqa: BLE001
+        passos.append({"passo": "executar a ação", "ok": False, "detalhe": str(exc)[:200]})
+        return parar(f"falha de rede ao executar a ação: {exc}")
+    url_dep = (getattr(r_dep, "url", "") or "").lower()
+    desconhecida = "Unknown action" in (getattr(r_dep, "text", "") or "")
+    ok = (r_dep.status_code == 200 and "login" not in url_dep
+          and "oam" not in url_dep and not desconhecida)
+    passos.append({"passo": "executar a ação", "ok": ok, "http": r_dep.status_code,
+                   "url": getattr(r_dep, "url", ""),
+                   "acao_desconhecida": desconhecida})
+    if ok:
+        resultado["ok"] = True
+        resultado["motivo"] = "depreciação calculada"
+        return resultado
+    if desconhecida:
+        return parar('o ServiceNow respondeu "Unknown action" à ação de calcular.')
+    if "login" in url_dep or "oam" in url_dep:
+        return parar("a sessão caiu no login ao executar a ação.")
+    return parar(f"a ação respondeu HTTP {r_dep.status_code}")
 
 
 def _calculate_depreciation(session, sys_id, BS):
@@ -1963,6 +2108,95 @@ def refresh_tv_cache(req: Request):
     return {"ok": True, "data": cache_data}
 
 
+# Padrões da marcação automática no recebimento. Ficam aqui porque é
+# aqui que mora o contrato com o ServiceNow; o valor efetivo vem da
+# configuração (Parâmetros → Configuração Módulos).
+RECEBIMENTO_STOCKROOM_PADRAO = "SPARE - CD324"
+RECEBIMENTO_STATUS_PADRAO = "6"          # In stock
+RECEBIMENTO_DEPRECIACAO_PADRAO = "SL 5 Years"
+
+
+def _campo_item(item, *nomes: str) -> str:
+    """Lê um campo do item, aceitando dict ou objeto (compatibilidade)."""
+    for n in nomes:
+        v = item.get(n) if isinstance(item, dict) else getattr(item, n, None)
+        if v:
+            return str(v).strip()
+    return ""
+
+
+def _registro_individual(session, tag: str, serie: str) -> dict | None:
+    """Procura UM ativo por etiqueta ou série. Rede contra duplicidade."""
+    partes = []
+    if tag:
+        partes.append(f"asset_tag={termo_sn(tag, 'etiqueta')}")
+    if serie:
+        partes.append(f"serial_number={termo_sn(serie, 'série')}")
+    if not partes:
+        return None
+    consulta = "^OR".join(partes)
+    try:
+        achados = _sn_query(session, HARDWARE_TABLE, consulta,
+                            "sys_id,asset_tag,serial_number", limit=1,
+                            display_value=False)
+    except Exception:  # noqa: BLE001 — sem resposta, quem chama decide
+        return None
+    if not achados:
+        return None
+
+    def _plain(v):
+        return v.get("value", "") if isinstance(v, dict) else (v or "")
+
+    r = achados[0]
+    return {"sys_id": _plain(r.get("sys_id")),
+            "asset_tag": str(_plain(r.get("asset_tag"))).strip(),
+            "serial_number": str(_plain(r.get("serial_number"))).strip()}
+
+
+def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
+               tag: str = "", serie: str = "", linha: dict | None = None) -> None:
+    """Roda o cálculo de depreciação do ativo recém-escrito.
+
+    Nunca silencia: sem sys_id o registro é reprocurado pelos
+    identificadores, e o que não depreciar entra em `falhas`. Depreciação
+    que falha sem ninguém saber é exatamente o que a área reclamou.
+    """
+    if not sys_id or sys_id == "N/A":
+        achado = _registro_individual(session, tag, serie)
+        sys_id = (achado or {}).get("sys_id", "")
+        if not sys_id:
+            resumo["falhas"].append(
+                f"{rotulo}: subiu, mas o ServiceNow não devolveu o sys_id — "
+                "depreciação não calculada")
+            resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+            if linha is not None:
+                linha["depreciacao"] = "não calculada (sem sys_id)"
+            return
+        if linha is not None:
+            linha["sys_id"] = sys_id
+    try:
+        if _calculate_depreciation(session, sys_id, BS):
+            resumo["depreciados"] = resumo.get("depreciados", 0) + 1
+            if linha is not None:
+                linha["depreciacao"] = "calculada"
+            return
+    except Exception as exc:  # noqa: BLE001 — o ativo já subiu; isto é aviso
+        _log.error("servicenow: depreciação de %s falhou: %s", rotulo, exc)
+        resumo["falhas"].append(f"{rotulo}: cálculo da depreciação falhou — {exc}")
+        resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+        if linha is not None:
+            linha["depreciacao"] = f"falhou: {str(exc)[:120]}"
+        return
+    _log.error("servicenow: o ServiceNow não calculou a depreciação de %s "
+               "(sys_id %s)", rotulo, sys_id)
+    resumo["falhas"].append(
+        f"{rotulo}: o ServiceNow não calculou a depreciação (sys_id {sys_id}). "
+        "Verifique se a sessão do portal ainda abre o formulário do ativo.")
+    resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
+    if linha is not None:
+        linha["depreciacao"] = "não calculada"
+
+
 def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
                                 install_status: str = "", aisle_space: str = "",
                                 criar: bool = True, depreciacao: str = "") -> dict:
@@ -2177,6 +2411,153 @@ def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
     saida["asset_tag"] = achado.get("asset_tag", "")
     saida["serial_number"] = achado.get("serial_number", "")
     return saida
+
+
+def _marcar_existe_sn(session, rows: list[dict]) -> None:
+    """Marca quais linhas já existem no ServiceNow (por asset_tag/serial).
+
+    A mesma conferência que a pré-visualização faz inline; aqui ela é
+    função porque a origem por planilha também precisa dela, e quem sobe
+    um arquivo tem de ver "já existe" antes de mandar, não depois.
+    """
+    from types import SimpleNamespace
+    itens = [SimpleNamespace(asset_tag=r.get("tag_number", ""), serial_number=r.get("serial_number", ""))
+             for r in rows if r.get("encontrado")]
+    tags_ok, ser_ok = set(), set()
+    try:
+        tags_ok, ser_ok = _hardware_existentes(session, itens)
+    except Exception:  # noqa: BLE001 — sem o ServiceNow a conferência some, a tela não
+        pass
+    for r in rows:
+        t = str(r.get("tag_number") or "").strip().upper()
+        s2 = str(r.get("serial_number") or "").strip().upper()
+        r["existe_sn"] = bool((t and t in tags_ok) or (s2 and s2 in ser_ok))
+
+
+# ── Origem por planilha ───────────────────────────────────────────
+# As colunas são as que sobem para o ServiceNow. O modelo para baixar e o
+# arquivo enviado falam a mesma língua: quem preenche vê exatamente o que
+# vai gravar.
+COLUNAS_PLANILHA_ENTRADA: list[tuple[str, str, bool]] = [
+    ("tag_number", "Asset Tag", True),
+    ("serial_number", "Número de Série", True),
+    ("asset_number", "Imobilizado", False),
+    ("model", "Modelo", True),
+    ("category", "Categoria", False),
+    ("company", "Empresa", False),
+    ("description", "Descrição", False),
+    ("cost", "Custo", False),
+    ("dpis", "DPIS (AAAA-MM-DD)", False),
+    ("acquisition_date", "Data de aquisição (AAAA-MM-DD)", False),
+]
+
+
+@router.get("/entrada/planilha-modelo")
+def entrada_planilha_modelo(req: Request):
+    """Planilha modelo com as colunas que sobem para o ServiceNow."""
+    require_permission(req, "servicenow", "view")
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from fastapi.responses import StreamingResponse
+    import io as _io
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ativos"
+    cabecalho = Font(bold=True, color="FFFFFF")
+    fundo = PatternFill("solid", fgColor="C06010")
+    for col, (_chave, rotulo, obrig) in enumerate(COLUNAS_PLANILHA_ENTRADA, start=1):
+        cel = ws.cell(row=1, column=col, value=rotulo + (" *" if obrig else ""))
+        cel.font = cabecalho
+        cel.fill = fundo
+        ws.column_dimensions[cel.column_letter].width = max(16, len(cel.value) + 4)
+    ws.cell(row=2, column=1, value="RN000123")
+    ws.cell(row=2, column=2, value="SN123456789")
+    ws.cell(row=2, column=4, value="PDV Dell 3050")
+    ws.freeze_panes = "A2"
+    aba = wb.create_sheet("Instruções")
+    for i, linha in enumerate([
+        "Uma linha por ativo. A primeira linha é o cabeçalho e não deve ser apagada.",
+        "Colunas com * são obrigatórias: Asset Tag, Número de Série e Modelo.",
+        "Datas em AAAA-MM-DD. Custo apenas com números.",
+        "A linha 2 é um exemplo: apague-a antes de enviar.",
+        "Depois de enviar, confira a pré-visualização e selecione o que vai subir.",
+    ], start=1):
+        aba.cell(row=i, column=1, value=linha)
+    aba.column_dimensions["A"].width = 90
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="modelo_entrada_ativos.xlsx"'})
+
+
+def ler_planilha_entrada(nome: str, conteudo: bytes) -> list[dict]:
+    """Lê a planilha enviada e devolve as linhas no formato da pré-visualização.
+
+    Aceita XLSX e CSV. O cabeçalho é casado pelo rótulo do modelo ou pelo
+    nome técnico da coluna, sem diferenciar acento nem caixa.
+    """
+    import pandas as pd
+    import io as _io
+
+    nome = (nome or "").lower()
+    if nome.endswith((".xlsx", ".xlsm", ".xls")):
+        df = pd.read_excel(_io.BytesIO(conteudo), dtype=str)
+    else:
+        texto = conteudo.decode("utf-8-sig", errors="replace")
+        sep = ";" if texto.count(";") > texto.count(",") else ","
+        df = pd.read_csv(_io.StringIO(texto), sep=sep, dtype=str)
+
+    def limpar(t: str) -> str:
+        t = unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode()
+        return t.strip().lower().rstrip("*").strip()
+
+    colunas = {limpar(c): c for c in df.columns}
+    mapa: dict[str, str] = {}
+    for chave, rotulo, _obrig in COLUNAS_PLANILHA_ENTRADA:
+        for candidato in (rotulo, chave):
+            if limpar(candidato) in colunas:
+                mapa[chave] = colunas[limpar(candidato)]
+                break
+    faltando = [r for c, r, obrig in COLUNAS_PLANILHA_ENTRADA if obrig and c not in mapa]
+    if faltando:
+        raise HTTPException(400, "Planilha sem a(s) coluna(s): " + ", ".join(faltando) +
+                                 ". Baixe o modelo e use o cabeçalho dele.")
+
+    linhas: list[dict] = []
+    for _, r in df.iterrows():
+        def pega(chave: str) -> str:
+            if chave not in mapa:
+                return ""
+            v = r[mapa[chave]]
+            if v is None or (isinstance(v, float) and v != v):   # NaN
+                return ""
+            return str(v).strip()
+
+        tag, serie, modelo = pega("tag_number"), pega("serial_number"), pega("model")
+        if not (tag or serie or modelo):
+            continue                      # linha em branco no meio da planilha
+        falta = [rot for chave, rot in (("tag_number", "Asset Tag"), ("serial_number", "Número de Série"),
+                                        ("model", "Modelo")) if not pega(chave)]
+        linhas.append({
+            "encontrado": not falta,
+            "origem_planilha": True,
+            "tag_number": tag, "serial_number": serie, "model": modelo,
+            "asset_number": pega("asset_number"),
+            "category": pega("category"),
+            "company": _normaliza_company(pega("company")),
+            "description": pega("description"),
+            "cost": pega("cost"),
+            "dpis": pega("dpis"),
+            "acquisition_date": pega("acquisition_date"),
+            "erro": ("Faltando: " + ", ".join(falta)) if falta else "",
+        })
+    if not linhas:
+        raise HTTPException(400, "A planilha não tem nenhuma linha preenchida.")
+    return linhas
 
 
 @router.post("/entrada/planilha")

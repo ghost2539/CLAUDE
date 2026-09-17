@@ -214,6 +214,15 @@ def cycle_dict(c: ReceiptCycle) -> dict[str, Any]:
         "local_id": c.location_id,
         "lote": c.lot_number,
         "aberto": c.open,
+        # A origem e, na compra nova, a PO e a nota. Ficam no ciclo porque
+        # são do EVENTO de entrada, não do ativo: o mesmo equipamento entra
+        # várias vezes, e cada entrada tem a sua. A tela de Recebimento já
+        # mostra a coluna "Origem" (modulos/recebimento.js) — sem estes três
+        # campos ela vinha sempre vazia, e a PO e a nota digitadas na entrada
+        # de fornecedor não apareciam em lugar nenhum depois de gravadas.
+        "origem_entrada": c.origem_entrada or "",
+        "po": c.po or "",
+        "nf": c.nf or "",
     }
     d.update(asset_dict(c.asset))
     return d

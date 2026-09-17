@@ -30,6 +30,9 @@ _DIR = _cfg.STATIC / "consulta-times"
 
 router = APIRouter(tags=["Consulta de Ativos — Times"], include_in_schema=False)
 
+# Nome do módulo no mapa de permissões do portal: é por ele que
+# `nivel_efetivo` lê a liberação de quem entra pelo portal.
+MODULO = "consulta_times"
 LIMITE_IDS = 1000
 
 

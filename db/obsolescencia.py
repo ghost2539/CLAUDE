@@ -190,6 +190,20 @@ PADROES = {
     "limite_anos": "5",
     "limite_sem_ver": "30",
     "modelos_eol": "EF500,EF500R",
+    # Coletor recebido no CD sai do MDM: ele voltou para o estoque, não
+    # está mais com a loja. Vale SÓ para o que passa pelo Recebimento —
+    # nunca para a base inteira. Apagar é irreversível, então o caminho
+    # do console é configurado aqui, e sem ele a remoção só fica na fila.
+    "remover_do_mdm_no_recebimento": "1",
+    # Caminho mapeado na leitura do console (data-action-names traz
+    # DeleteDevice; o id do aparelho é o mesmo da grade, o do
+    # Device/Details/Summary/<id>). Fica configurável porque muda com a
+    # versão do console; em branco, nada é enviado. Sem estas chaves aqui
+    # `gravar_config` descarta o que a tela e a autodescoberta mandam —
+    # e o endpoint que o portal acabou de descobrir não sobrevive.
+    "mdm_remocao_endpoint": "/AirWatch/Devices/DeleteDevice/{id}",
+    "mdm_remocao_metodo": "POST",
+    "mdm_remocao_campo": "SelectedDeviceIds",
     # PDVs no ServiceNow. Deixado configurável porque o rótulo da tela
     # ("Origem da descoberta") pode não bater com o nome interno do campo.
     "pdv_tabela": "cmdb_ci_computer",
