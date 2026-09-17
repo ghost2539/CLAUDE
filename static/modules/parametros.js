@@ -997,8 +997,6 @@ async function renderBaseEbs(c, S) {
                         'min="1" max="5000"></div>' +
                 '</div>' +
                 '<div id="eo-binds" class="filter-grid mt-2"></div>' +
-                '<details class="mt-3"><summary class="text-muted">Ver o SQL desta consulta</summary>' +
-                    '<pre class="om-mono om-pre" id="eo-sql"></pre></details>' +
                 '<div class="btn-row mt-3">' +
                     '<button id="eo-rodar" class="btn btn-primary" type="button">Executar</button>' +
                 '</div>' +
@@ -1034,13 +1032,12 @@ async function renderBaseEbs(c, S) {
     // cada escolha, em vez de oferecer campo que a consulta ignora.
     function montarBinds() {
         var nome = document.getElementById('eo-nome').value;
-        var q = consultas[nome] || { binds: [], sql: '' };
+        var q = consultas[nome] || { binds: [] };
         var host = document.getElementById('eo-binds');
         host.innerHTML = q.binds.map(function (b) {
             return '<div class="form-group"><label for="eo-b-' + e(b) + '">' + e(b) + '</label>' +
                 '<input id="eo-b-' + e(b) + '" class="form-control" data-bind="' + e(b) + '"></div>';
         }).join('') || '<p class="text-muted mb-0">Esta consulta não pede parâmetro.</p>';
-        document.getElementById('eo-sql').textContent = q.sql || '';
     }
 
     async function carregar() {

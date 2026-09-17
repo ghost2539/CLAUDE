@@ -43,11 +43,10 @@ GRUPOS: tuple[tuple[str, tuple[str, ...]], ...] = (
 ALTERNATIVAS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Usuário do EBS", ("ORACLE_EBS_USER", "ORACLE_EBS_USUARIO",
                         "ORACLE_USER", "ORACLE_USERNAME", "EBS_ORACLE_USER",
-                        "EBS_USER", "BASE_REMOVIDA_USER", "DB_ORACLE_USER")),
+                        "EBS_USER", "DB_ORACLE_USER")),
     ("Senha do EBS", ("ORACLE_EBS_PASS", "ORACLE_EBS_PASSWORD",
                       "ORACLE_EBS_SENHA", "ORACLE_PASS", "ORACLE_PASSWORD",
-                      "EBS_ORACLE_PASS", "EBS_PASS", "BASE_REMOVIDA_PASS",
-                      "DB_ORACLE_PASS")),
+                      "EBS_ORACLE_PASS", "EBS_PASS", "DB_ORACLE_PASS")),
     ("Endereço do EBS", ("ORACLE_EBS_DSN", "ORACLE_DSN", "EBS_ORACLE_DSN",
                          "ORACLE_EBS_TNS", "ORACLE_TNS", "EBS_DSN")),
 )

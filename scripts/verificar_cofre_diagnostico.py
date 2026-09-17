@@ -320,7 +320,7 @@ else:
     LOADER.write_text(
         "<?php\n"
         "function secret($k) {\n"
-        "  $m = ['ORACLE_EBS_USUARIO' => 'USUARIO_REMOVIDO',\n"
+        "  $m = ['ORACLE_EBS_USUARIO' => 'usuario-de-teste',\n"
         "        'ORACLE_EBS_SENHA' => 'senha-do-php-que-nao-pode-sair'];\n"
         "  return $m[$k] ?? null;\n"
         "}\n", encoding="utf-8")
@@ -329,7 +329,7 @@ else:
     os.environ["VCREPORTS_SECRETS_CMD"] = f"{PHP} {PONTE} {{chave}}"
     cofre_php = importlib.reload(cofre)
 
-    checar(cofre_php._corporativo("ORACLE_EBS_USUARIO") == "USUARIO_REMOVIDO",
+    checar(cofre_php._corporativo("ORACLE_EBS_USUARIO") == "usuario-de-teste",
            "a ponte entrega o valor que só o PHP enxerga")
     checar(cofre_php.fonte("ORACLE_EBS_SENHA") == "cofre corporativo",
            "e o portal contabiliza como cofre corporativo")
@@ -342,7 +342,7 @@ else:
     r16 = cliente.post("/api/cofre/sondar-varios",
                        json={"nomes": "ORACLE_EBS_USUARIO ORACLE_EBS_SENHA"})
     achados = {i["chave"]: i for i in r16.json()["itens"]}
-    checar(achados["ORACLE_EBS_USUARIO"]["valor"] == "USUARIO_REMOVIDO",
+    checar(achados["ORACLE_EBS_USUARIO"]["valor"] == "usuario-de-teste",
            "a sondagem pela tela também acha, pela ponte")
     checar("senha-do-php-que-nao-pode-sair" not in r16.text,
            "e a senha vinda do PHP continua sem sair na resposta")
@@ -491,7 +491,7 @@ print("\n[3q] O loader de verdade: _load() com cache, exportando para o ambiente
 # "ambiente" para quem olha só o os.environ — foi esse o erro a corrigir.
 mod6 = types.ModuleType("vcreports_secrets")
 _COFRE_DO_TIME = {"CORREIOS_USUARIO": "conta-do-cofre", "CORREIOS_CHAVE": "chave-do-cofre-que-nao-pode-sair",
-                  "ORACLE_EBS_USER": "USUARIO_REMOVIDO", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"}
+                  "ORACLE_EBS_USER": "usuario-de-teste", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"}
 def _load6():
     for k, v in _COFRE_DO_TIME.items():
         os.environ.setdefault(k, v)   # exporta, como o load_dotenv
@@ -531,7 +531,7 @@ COFRE_REAL.write_text(
     "# cofre central\n"
     "CORREIOS_USUARIO=conta-do-cofre\n"
     "CORREIOS_CHAVE='chave-do-cofre-que-nao-pode-sair'\n"
-    "ORACLE_EBS_USER=USUARIO_REMOVIDO\n"
+    "ORACLE_EBS_USER=usuario-de-teste\n"
     'ORACLE_EBS_PASS="senha-do-cofre-que-nao-pode-sair"\n', encoding="utf-8")
 
 
@@ -550,7 +550,7 @@ m = carregar_loader_real()
 
 checar(cofre.caminho_do_loader() == str(COFRE_REAL), "o portal calcula o arquivo do loader pela regra dele (VCREPORTS_SECRETS_FILE)")
 checar(cofre._cache_do_loader(m) == {"CORREIOS_USUARIO": "conta-do-cofre", "CORREIOS_CHAVE": "chave-do-cofre-que-nao-pode-sair",
-                                      "ORACLE_EBS_USER": "USUARIO_REMOVIDO", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"},
+                                      "ORACLE_EBS_USER": "usuario-de-teste", "ORACLE_EBS_PASS": "senha-do-cofre-que-nao-pode-sair"},
        "o cache do loader real tem exatamente o que está no arquivo, aspas tratadas")
 checar(cofre.obter("ORACLE_EBS_PASS") == "senha-do-cofre-que-nao-pode-sair", "obter() entrega a senha do EBS vinda do cofre — pelo loader")
 checar(cofre.fonte("ORACLE_EBS_PASS") == "cofre corporativo", "e diz que veio do cofre corporativo")
@@ -614,7 +614,7 @@ cofre._modulo, cofre._modulo_via = mod4, "import direto (loader que só ecoa o a
 # A prova do topo usa CORREIOS_USUARIO, e no servidor ela está no ambiente —
 # que é exatamente a condição que produzia o falso positivo.
 os.environ["CORREIOS_USUARIO"] = "conta-de-servico"
-os.environ["ORACLE_EBS_USER"] = "USUARIO_REMOVIDO"
+os.environ["ORACLE_EBS_USER"] = "usuario-de-teste"
 d22 = cliente.get("/api/cofre/diagnostico").json()
 ebs = {c["chave"]: c for g in d22["grupos"] if g["nome"] == "Base EBS (Oracle)"
        for c in g["chaves"]}["ORACLE_EBS_USER"]

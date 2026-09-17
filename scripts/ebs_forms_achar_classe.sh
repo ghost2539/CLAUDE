@@ -19,7 +19,10 @@ echo "   $BASE/$CLASSE.class -> HTTP $COD"
 
 echo
 echo "== 2. lista oficial de jars (o frmservlet em modo applet publica 'archive')"
-for U in "http://$HOST/forms/frmservlet?config=BASE_REMOVIDA" "http://$HOST/forms/frmservlet"; do
+# O nome da configuração do Forms é dado de ambiente, não vai no código.
+URLS="http://$HOST/forms/frmservlet"
+[ -n "${EBS_FORMS_CONFIG:-}" ] && URLS="http://$HOST/forms/frmservlet?config=$EBS_FORMS_CONFIG $URLS"
+for U in $URLS; do
   ARCH="$(C -A 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1)' "$U" \
         | tr ',' '\n' | grep -oE '[A-Za-z0-9_./-]+\.jar' | sort -u)"
   if [ -n "$ARCH" ]; then echo "   de $U:"; echo "$ARCH" | sed 's/^/     /'; break; fi

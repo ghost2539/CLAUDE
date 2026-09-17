@@ -5,7 +5,7 @@ Este módulo entrega apenas a CAMADA DE ACESSO (conexão + credenciais pelo cofr
 e um executor de consultas seguro. As CONSULTAS em si são configuradas por quem
 usa (dicionário ``QUERIES`` abaixo, ou passando o SQL direto para ``query()``).
 
-Princípios de segurança (a base é PRODUÇÃO — BASE_REMOVIDA):
+Princípios de segurança (a base é de PRODUÇÃO de outra área):
   • Só-leitura: cada consulta roda em transação ``SET TRANSACTION READ ONLY`` e a
     conexão nunca faz commit (rollback + close no finally). Qualquer DML falha.
   • Timeout por chamada (``call_timeout``) para não travar sessão no banco.
@@ -26,28 +26,71 @@ import sys
 import oracledb
 
 
-# ── Segredos (lidos DIRETO do ambiente, igual ao Correios) ────────
+# ── Segredos (ambiente primeiro, igual ao Correios; cofre depois) ─
 def _secret_multi(nomes, default=None):
-    """Primeiro nome que tiver valor no ambiente (os.environ).
+    """Primeiro nome que tiver valor: no ambiente, senão no cofre local.
 
     O serviço injeta as chaves no ambiente do processo (mesmo local dos
-    Correios). Os nomes reais são ORACLE_EBS_DSN/USER/PASS; mantemos
-    EBS_ORACLE_* como alternativa por compatibilidade. Sem cofre."""
+    Correios), e é de lá que a conexão que está no ar lê — por isso o
+    ambiente continua vindo primeiro, e nada muda para quem já roda.
+
+    O cofre entra como segunda parada porque a tela de Parâmetros procura
+    nos dois (`core.cofre.obter` é cofre local → ambiente). Sem esta linha,
+    chave gravada pela tela aparecia como "resolvida" e a conexão falhava
+    assim mesmo: a tela dizia uma coisa e o portal fazia outra.
+
+    Os nomes reais são ORACLE_EBS_DSN/USER/PASS; EBS_ORACLE_* fica como
+    alternativa por compatibilidade.
+    """
     for nome in nomes:
         v = os.environ.get(nome)
+        if v:
+            return v
+    # Import aqui dentro: este módulo roda também como script pela linha de
+    # comando, e lá o pacote do portal pode não estar no caminho.
+    try:
+        from core.cofre import obter as _do_cofre
+    except Exception:  # noqa: BLE001
+        return default
+    for nome in nomes:
+        v = _do_cofre(nome, "")
         if v:
             return v
     return default
 
 
+class EbsOracleSemCredencial(RuntimeError):
+    """Falta chave para conectar. A mensagem diz qual, e onde gravar."""
+
+
 def _config() -> dict:
-    return {
-        "user": _secret_multi(("ORACLE_EBS_USER", "EBS_ORACLE_USER"), "USUARIO_REMOVIDO"),
-        "password": _secret_multi(("ORACLE_EBS_PASS", "EBS_ORACLE_PASS")),
-        "dsn": _secret_multi(("ORACLE_EBS_DSN", "EBS_ORACLE_DSN"), "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
+    """Endereço e credencial do banco. Sem eles, erro claro em vez de chute.
+
+    Aqui havia host, instância e usuário escritos como valor padrão. Eram
+    dado de acesso e saíram do repositório; o que sobrou era um marcador
+    que PARECIA valor e fazia o portal tentar conectar num host que não
+    existe — o erro vinha do driver, sobre resolução de nome, e não dizia
+    a ninguém que o que faltava era configuração.
+
+    Agora o que falta é nomeado. O valor vem do ambiente do serviço, que é
+    como este módulo sempre leu.
+    """
+    cfg = {
+        "user": _secret_multi(("ORACLE_EBS_USER", "EBS_ORACLE_USER"), ""),
+        "password": _secret_multi(("ORACLE_EBS_PASS", "EBS_ORACLE_PASS"), ""),
+        "dsn": _secret_multi(("ORACLE_EBS_DSN", "EBS_ORACLE_DSN"), ""),
+        # Caminho de instalação da máquina, não segredo: padrão pode ficar.
         "lib_dir": _secret_multi(("ORACLE_CLIENT_LIB_DIR", "EBS_ORACLE_CLIENT_LIB_DIR"),
                                  "/usr/lib/oracle/21/client64/lib"),
     }
+    faltando = [nome for nome, chave in
+                (("ORACLE_EBS_DSN", "dsn"), ("ORACLE_EBS_USER", "user"),
+                 ("ORACLE_EBS_PASS", "password")) if not cfg[chave]]
+    if faltando:
+        raise EbsOracleSemCredencial(
+            "Credencial da base do EBS ausente: " + ", ".join(faltando) +
+            ". Grave no environment do serviço (data/environment, e reinicie) ou pela tela Parâmetros → Base EBS.")
+    return cfg
 
 
 # ── Cliente Oracle (modo thick com Instant Client) ────────────────
@@ -291,6 +334,44 @@ WHERE pha.type_lookup_code IN ('BLANKET','CONTRACT') AND pha.authorization_statu
   AND TRUNC(SYSDATE) >= TRUNC(NVL(pha.start_date, SYSDATE))
   AND (pha.end_date IS NULL OR TRUNC(SYSDATE) <= TRUNC(pha.end_date))
 ORDER BY hou.name, pha.segment1, pl.line_num
+""",
+    # ── Nossa consulta: os itens de uma PO, para o Agendamento ──────────
+    # A busca_po acima veio do módulo do outro time e devolve uma linha por
+    # DISTRIBUIÇÃO: o mesmo item repete quando há várias entregas ou vários
+    # projetos rateando. Para a tela de Agendamento isso é ruído — ela
+    # precisa de "10 desktops, 20 leitores", uma linha por item.
+    #
+    # Então aqui agrega por linha do pedido e devolve o que a tela usa:
+    # descrição, unidade, quantidade pedida, já recebida e o que falta.
+    # Linha cancelada fica de fora; quantidade_pendente é o que se espera
+    # receber de verdade.
+    "po_itens": """
+SELECT ph.segment1                                   AS po_numero,
+       s.vendor_name                                 AS fornecedor,
+       ph.authorization_status                       AS status_po,
+       ph.currency_code                              AS moeda,
+       pl.line_num                                   AS linha,
+       LTRIM(msib.segment1, '0')                     AS item_ebs,
+       NVL(pl.item_description, msib.description)    AS descricao,
+       NVL(pl.unit_meas_lookup_code, msib.primary_uom_code) AS unidade,
+       SUM(NVL(pll.quantity, 0))                     AS quantidade_pedida,
+       SUM(NVL(pll.quantity_received, 0))            AS quantidade_recebida,
+       SUM(NVL(pll.quantity, 0) - NVL(pll.quantity_received, 0)) AS quantidade_pendente,
+       MAX(NVL(pll.price_override, pl.unit_price))   AS preco_unitario
+FROM APPS.PO_HEADERS_ALL ph
+JOIN APPS.PO_LINES_ALL          pl  ON pl.po_header_id = ph.po_header_id
+JOIN APPS.PO_LINE_LOCATIONS_ALL pll ON pll.po_line_id  = pl.po_line_id
+LEFT JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = ph.vendor_id
+LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib
+       ON msib.inventory_item_id = pl.item_id
+      AND msib.organization_id   = pll.ship_to_organization_id
+WHERE ph.segment1 = :numero_po
+  AND NVL(pl.cancel_flag, 'N') = 'N'
+  AND NVL(pll.cancel_flag, 'N') = 'N'
+GROUP BY ph.segment1, s.vendor_name, ph.authorization_status, ph.currency_code,
+         pl.line_num, msib.segment1, pl.item_description, msib.description,
+         pl.unit_meas_lookup_code, msib.primary_uom_code
+ORDER BY pl.line_num
 """,
     "busca_po": """
 SELECT h.segment1 AS po_numero, ppa.segment1 AS projeto_numero, ppa.name AS projeto_nome,

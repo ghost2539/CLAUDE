@@ -1,4 +1,4 @@
-"""Teste de leitura da base Oracle do EBS (BASE_REMOVIDA), pela tela.
+"""Teste de leitura da base Oracle do EBS, pela tela.
 
 A camada de acesso é `integracoes/ebs_oracle.py`: conexão só-leitura, com
 timeout, teto de linhas e bind variables. Aqui ficam só as rotas que a tela
@@ -32,14 +32,32 @@ SIGILOSAS = {"ORACLE_EBS_PASS"}
 
 # Padrões que `integracoes/ebs_oracle.py::_config()` usa quando o cofre não
 # tem a chave. Repetidos aqui porque aquele módulo importa o driver Oracle no
-# topo, e a tela precisa responder mesmo sem o driver instalado. Sem isto, a
-# tela diria "faltando" para valor que na prática funciona — e mandaria
-# alguém caçar um problema que não existe.
+# topo, e a tela precisa responder mesmo sem o driver instalado.
+#
+# Usuário e endereço NÃO têm padrão, de propósito: endereço, porta, instância
+# e usuário do banco são segredo, e um padrão aqui significa duas coisas
+# ruins ao mesmo tempo — o dado de acesso volta para dentro do código, e a
+# tela diz "resolvida" para uma chave que ninguém configurou, mandando o
+# portal tentar um banco que não existe. Sem a chave no cofre a situação é
+# "ausente", e `_config()` recusa a conexão dizendo qual chave falta.
+# Só o diretório do Instant Client tem padrão: é caminho de arquivo do
+# servidor, não credencial.
 PADROES = {
-    "ORACLE_EBS_USER": "USUARIO_REMOVIDO",
-    "ORACLE_EBS_DSN": "BANCO_REMOVIDO:1521/BASE_REMOVIDA",
     "ORACLE_CLIENT_LIB_DIR": "/usr/lib/oracle/21/client64/lib",
 }
+
+
+def _sem_credencial(exc: Exception) -> bool:
+    """A falha foi 'ninguém configurou' e não 'o banco recusou'?
+
+    São dois problemas com donos diferentes: chave que falta é trabalho de
+    quem administra o cofre, e o portal precisa dizer QUAL chave. Antes de
+    separá-los, a tela devolvia um erro de rede e mandava caçar firewall.
+    O nome da classe é comparado por texto porque o módulo de acesso importa
+    o driver Oracle no topo: onde o driver não está instalado, o import falha
+    e não haveria classe para comparar.
+    """
+    return type(exc).__name__ == "EbsOracleSemCredencial"
 
 
 def _exigir(req: Request) -> dict:
@@ -128,8 +146,10 @@ def testar(req: Request):
             503, "O driver Oracle não está instalado neste servidor "
                  f"(pip install oracledb). Detalhe: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
-        _log.warning("Teste de acesso ao BASE_REMOVIDA falhou: %s", exc)
-        raise HTTPException(502, f"Não foi possível ler o BASE_REMOVIDA: {exc}") from exc
+        if _sem_credencial(exc):
+            raise HTTPException(503, str(exc)) from exc
+        _log.warning("Teste de acesso à base do EBS falhou: %s", exc)
+        raise HTTPException(502, f"Não foi possível ler a base do EBS: {exc}") from exc
     return {"ok": True, "acesso": dados}
 
 
@@ -222,16 +242,23 @@ def _consultas_nomeadas() -> tuple[dict, dict]:
 
 @router.get("/consultas")
 def consultas(req: Request):
-    """As consultas nomeadas (as mesmas do módulo Gestão de Compras) e seus binds."""
+    """As consultas nomeadas (as mesmas do módulo Gestão de Compras) e seus binds.
+
+    O TEXTO do SQL não vai junto, de propósito. Ele traz esquema, tabelas e
+    colunas do EBS — o mapa da base de outra área — e a resposta desta rota
+    fica visível em qualquer aba de rede do navegador, salva em HAR e colada
+    em chamado. A tela só precisa saber o NOME da consulta e quais parâmetros
+    pedir; quem precisa ler o SQL o lê em integracoes/ebs_oracle.py.
+    """
     _exigir(req)
     queries, binds = _consultas_nomeadas()
-    return {"consultas": [{"nome": n, "binds": list(binds.get(n, ())), "sql": queries[n]}
+    return {"consultas": [{"nome": n, "binds": list(binds.get(n, ()))}
                           for n in sorted(queries)]}
 
 
 @router.post("/consultar")
 def consultar(body: dict, req: Request):
-    """Roda um SELECT no BASE_REMOVIDA e devolve as linhas.
+    """Roda um SELECT na base do EBS e devolve as linhas.
 
     A credencial vem por `core.cofre.obter`, ou seja, passa pelo loader do
     cofre antes de qualquer outra fonte — nada é lido de arquivo por conta
@@ -269,8 +296,10 @@ def consultar(body: dict, req: Request):
     except ImportError as exc:
         raise HTTPException(503, f"Driver Oracle ausente neste servidor: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
-        _log.warning("Consulta ao BASE_REMOVIDA falhou: %s", exc)
-        raise HTTPException(502, f"O BASE_REMOVIDA recusou a consulta: {exc}") from exc
+        if _sem_credencial(exc):
+            raise HTTPException(503, str(exc)) from exc
+        _log.warning("Consulta à base do EBS falhou: %s", exc)
+        raise HTTPException(502, f"A base do EBS recusou a consulta: {exc}") from exc
     ms = int((time.monotonic() - inicio) * 1000)
     colunas = list(linhas[0].keys()) if linhas else []
     return {

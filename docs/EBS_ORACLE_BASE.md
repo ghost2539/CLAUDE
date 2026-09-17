@@ -1,6 +1,6 @@
 # EBS Oracle — base de acesso e catálogo padrão
 
-Referência da **camada de acesso** ao Oracle E-Business Suite (produção `BASE_REMOVIDA`)
+Referência da **camada de acesso** ao Oracle E-Business Suite (base de produção)
 e do **dicionário de objetos padrão** (não customizados) sobre os quais montamos
 as consultas. As consultas de negócio são configuradas por nós; aqui fica a base.
 
@@ -15,18 +15,27 @@ Tudo vem do **cofre do EBS** (separado do cofre dos Correios), via
 
 | Segredo | Default | Papel |
 |---|---|---|
-| `ORACLE_EBS_USER` | `USUARIO_REMOVIDO` | Usuário de leitura/monitoração no banco. |
+| `ORACLE_EBS_USER` | — (obrigatório) | Usuário de leitura no banco. Só no cofre. |
 | `ORACLE_EBS_PASS` | — (obrigatório) | Senha do usuário. Só no cofre. |
-| `ORACLE_EBS_DSN` | `BANCO_REMOVIDO:1521/BASE_REMOVIDA` | Destino: **SCAN do RAC : porta / service name**. `BASE_REMOVIDA` = **produção**. |
+| `ORACLE_EBS_DSN` | — (obrigatório) | Destino, no formato **host : porta / service name**. Só no cofre. |
 | `ORACLE_CLIENT_LIB_DIR` | `/usr/lib/oracle/21/client64/lib` | Oracle **Instant Client 21** (modo *thick*). |
 
-**Anatomia do DSN** `BANCO_REMOVIDO:1521/BASE_REMOVIDA`:
-- `BANCO_REMOVIDO` — endereço **SCAN** do cluster RAC (balanceia entre os nós).
-- `1521` — porta do listener.
-- `BASE_REMOVIDA` — **service name** do banco de produção.
+Só o diretório do Instant Client tem padrão no código, porque é caminho de
+arquivo do servidor. As outras três **não têm padrão nenhum, de propósito**:
+endereço, porta, instância e usuário do banco são tão segredo quanto a senha.
+Sem a chave no cofre, o portal recusa a conexão dizendo qual chave falta — em
+vez de tentar um banco inventado e devolver um erro de rede que não explica
+nada.
 
-Formato alternativo (Easy Connect com failover já é resolvido pelo SCAN). Se um
-dia precisarem apontar para outro ambiente, troca-se só o service name no cofre.
+**Anatomia do DSN** (`host:porta/service_name`, Easy Connect):
+- **host** — endereço do banco; num cluster RAC é o nome **SCAN**, que já
+  balanceia entre os nós e resolve o failover.
+- **porta** — porta do listener (1521 na instalação padrão).
+- **service name** — qual base daquele servidor. É o que se troca para
+  apontar o portal para outro ambiente, e a troca é no cofre, não no código.
+
+Os valores de cada campo ficam no cofre e não são documentados aqui: quem
+precisa deles pede ao time que administra o cofre.
 
 ---
 

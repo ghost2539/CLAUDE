@@ -87,7 +87,7 @@ A 8901 está acima de 1024, então o serviço a abre sem privilégio.
 | `api.correios.com.br` | 443 |
 | `ebscorporativo.lojasrenner.com.br` | 80 e 443 |
 | `suporte.lojasrenner.com.br` | 443 |
-| base Oracle EBS (`BANCO_REMOVIDO`) | 1521 |
+| base Oracle do EBS | 1521 |
 | relay SMTP interno | 25 ou 587 *(se os alertas por e-mail forem usados)* |
 
 ## 7. Publicação em `suporte.lojasrenner.com.br/portal-spare`
