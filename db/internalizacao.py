@@ -41,6 +41,23 @@ DATABASE_URL: str = getattr(
 # Ciclo do processo: pendente → (dados lançados) → concluída.
 STATUS = {"PENDENTE": "Pendente", "CONCLUIDA": "Concluída"}
 
+# Etapas de CADA equipamento depois do lançamento. Por equipamento, e não
+# por remessa: numa nota com dez desktops, se sete aparecerem no EBS e três
+# não, os sete seguem. Segurar todos pelo atraso de um é o que faz fila
+# parar sem motivo.
+ETAPA_PATRIMONIO = "PATRIMONIO"   # esperando o serial aparecer no EBS
+ETAPA_ENTRADA = "ENTRADA"         # liberado, esperando o técnico
+ETAPA_CONCLUIDO = "CONCLUIDO"     # subiu no ServiceNow e virou estoque
+ETAPAS = {
+    ETAPA_PATRIMONIO: "Aguardando patrimônio",
+    ETAPA_ENTRADA: "Pronto para entrada",
+    ETAPA_CONCLUIDO: "Concluído",
+}
+
+# BUs cujo patrimônio nasce no EBS. Youcom compra por fora: lá não há o que
+# consultar, e quem confirma é uma pessoa.
+BUS_COM_EBS = ("Renner", "Camicado")
+
 _engine = None
 _factory = None
 _ready = False
@@ -147,6 +164,29 @@ class Ativo(Base):
     criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
 
+    # ── Depois do lançamento ────────────────────────────────────────────
+    etapa: Mapped[str] = mapped_column(
+        String(20), default=ETAPA_PATRIMONIO, server_default=ETAPA_PATRIMONIO,
+        index=True)
+    # O que a consulta ao EBS achou, e quando. Guardado porque a conferência
+    # depois não pode depender do banco do EBS estar de pé — e porque saber
+    # QUANDO apareceu é o que explica a demora de uma remessa.
+    ebs_encontrado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    ebs_ativo: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    ebs_descricao: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    # Youcom: quem confirmou à mão, já que não há EBS para consultar.
+    confirmado_por: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    confirmado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    # ── Entrada de equipamento (técnico de gestão de ativos) ────────────
+    espaco_corredor: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    sn_sys_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    entrada_por: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    entrada_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    # O ativo criado no estoque do portal ao concluir. É o elo entre este
+    # fluxo e a Consulta, a Separação e o resto — sem ele, "entrou em
+    # estoque" seria só uma palavra na tela.
+    asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
     processo: Mapped["Processo"] = relationship(back_populates="ativos")
 
     def to_dict(self) -> dict:
@@ -156,6 +196,19 @@ class Ativo(Base):
             "descricao": self.descricao or "",
             "plaqueta": self.plaqueta or "",
             "numero_serie": self.numero_serie or "",
+            "etapa": self.etapa or ETAPA_PATRIMONIO,
+            "etapa_rotulo": ETAPAS.get(self.etapa or ETAPA_PATRIMONIO, ""),
+            "ebs_encontrado_em": (self.ebs_encontrado_em.isoformat()
+                                  if self.ebs_encontrado_em else ""),
+            "ebs_ativo": self.ebs_ativo or "",
+            "ebs_descricao": self.ebs_descricao or "",
+            "confirmado_por": self.confirmado_por or "",
+            "confirmado_em": self.confirmado_em.isoformat() if self.confirmado_em else "",
+            "espaco_corredor": self.espaco_corredor or "",
+            "sn_sys_id": self.sn_sys_id or "",
+            "entrada_por": self.entrada_por or "",
+            "entrada_em": self.entrada_em.isoformat() if self.entrada_em else "",
+            "asset_id": self.asset_id,
         }
 
 
@@ -165,6 +218,9 @@ def init_db() -> None:
         if _ready:
             return
         Base.metadata.create_all(get_engine())
+        # Colunas novas em tabela que já existe: create_all não acrescenta.
+        from db._esquema import migrar_colunas
+        migrar_colunas(Base, get_engine(), "internalizacao")
         _ready = True
 
 

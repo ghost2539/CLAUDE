@@ -8,7 +8,24 @@
 window.SPARE_MODULES = window.SPARE_MODULES || {};
 window.SPARE_MODULES.internalizacao = {
 
-    async render(container) {
+    // Três etapas, três telas. A etapa é de CADA equipamento: numa nota com
+    // dez desktops, se sete aparecerem no EBS e três não, os sete seguem.
+    async render(container, sub) {
+        var S = window.SPARE;
+        var ABAS = [
+            ['lancamento',  'Lançamento'],
+            ['patrimonio',  'Patrimônio'],
+            ['entrada',     'Entrada de Equipamento']
+        ];
+        sub = sub || 'lancamento';
+        if (!ABAS.some(function (x) { return x[0] === sub; })) sub = 'lancamento';
+        S.tabs(ABAS, sub, 'internalizacao');
+        if (sub === 'patrimonio') return telaPatrimonio(container, S);
+        if (sub === 'entrada') return telaEntrada(container, S);
+        return this._lancamento(container);
+    },
+
+    async _lancamento(container) {
         var S = window.SPARE, e = S.esc;
         var u = S.user() || {};
         var pm = (u.permission_map || {}).internalizacao || {};
@@ -219,3 +236,215 @@ window.SPARE_MODULES.internalizacao = {
         carregar();
     }
 };
+
+
+/* ── Patrimônio ─────────────────────────────────────────────────────
+   Onde o equipamento espera o serial aparecer no EBS. Renner e Camicado
+   têm o patrimônio criado lá e a consulta responde sozinha; Youcom compra
+   por fora, não há o que consultar, e uma pessoa confirma no botão.
+   ─────────────────────────────────────────────────────────────────── */
+async function telaPatrimonio(c, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var pm = (u.permission_map || {}).internalizacao || {};
+    var podeEditar = !!(u.is_admin || pm.can_edit);
+
+    c.innerHTML =
+        '<h1 class="page-title">Patrimônio</h1>' +
+        '<p class="text-muted">Equipamentos lançados, esperando virar ativo. ' +
+            'Renner e Camicado: a consulta procura o número de série no EBS. ' +
+            'Youcom: a entrada é confirmada aqui, porque não há patrimônio no ' +
+            'EBS para encontrar.</p>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="pat-consultar" class="btn btn-primary"' +
+                (podeEditar ? '' : ' disabled') + '>Consultar EBS agora</button>' +
+            '<button id="pat-confirmar" class="btn btn-secondary"' +
+                (podeEditar ? '' : ' disabled') + '>Confirmar entrada (marcados)</button>' +
+        '</div>' +
+        '<div id="pat-msg"></div>' +
+        '<div id="pat-lista"></div>';
+
+    async function carregar() {
+        var alvo = document.getElementById('pat-lista');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        try {
+            var d = await S.api('/internalizacao/fluxo/patrimonio');
+            alvo.innerHTML = '';
+            if (!d.total) {
+                alvo.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhum equipamento esperando patrimônio.' }));
+                return;
+            }
+            alvo.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.total + ' equipamento(s): ' + d.aguardando_ebs +
+                    ' esperando o EBS, ' + d.aguardando_confirmacao +
+                    ' esperando confirmação manual.' }));
+            alvo.appendChild(S.table([
+                { key: 'id', label: '', html: true, render: function (v, r) {
+                    // Só quem não tem EBS pode ser confirmado à mão: marcar
+                    // os outros daria a impressão de que dá para pular a
+                    // conferência que existe para pegar serial trocado.
+                    if (r.tem_ebs) return '<span class="text-muted" title="Esta BU tem patrimônio no EBS: use a consulta">—</span>';
+                    return '<input class="pat-alvo" type="checkbox" value="' + e(String(v)) + '">';
+                } },
+                { key: 'bu', label: 'BU' },
+                { key: 'nf', label: 'NF' },
+                { key: 'fornecedor', label: 'Fornecedor' },
+                { key: 'descricao', label: 'Equipamento' },
+                { key: 'numero_serie', label: 'Nº de série' },
+                { key: 'plaqueta', label: 'Plaqueta' },
+                { key: 'tem_ebs', label: 'Espera', html: true, render: function (v) {
+                    return v ? '<span class="badge badge-info">EBS</span>'
+                             : '<span class="badge badge-warning">Confirmação</span>';
+                } },
+                { key: 'data_recebimento', label: 'Recebido em' }
+            ], d.itens));
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('pat-consultar').onclick = async function () {
+        var b = this, txt = b.textContent;
+        b.disabled = true; b.textContent = 'Consultando…';
+        var msg = document.getElementById('pat-msg');
+        try {
+            var d = await S.api('/internalizacao/fluxo/patrimonio/consultar',
+                                { method: 'POST' });
+            var partes = [d.encontrados + ' de ' + d.consultados + ' encontrado(s) no EBS'];
+            if (d.erros) partes.push(d.erros + ' consulta(s) falharam');
+            msg.innerHTML = '<div class="alert alert-' +
+                (d.encontrados ? 'success' : 'info') + '">' +
+                e(d.aviso || partes.join('; ') + '.') + '</div>';
+            if (d.encontrados) S.toast(d.encontrados + ' equipamento(s) liberados.', 'success');
+            await carregar();
+        } catch (x) {
+            // 503 é configuração (credencial do EBS), não erro de quem clicou.
+            var texto = x.status === 503
+                ? 'Falta credencial da base do EBS. ' + x.message : x.message;
+            msg.innerHTML = '<div class="alert alert-danger">' + e(texto) + '</div>';
+            S.toast(texto, x.status === 503 ? 'warning' : 'error');
+        } finally { b.disabled = false; b.textContent = txt; }
+    };
+
+    document.getElementById('pat-confirmar').onclick = async function () {
+        var ids = [];
+        c.querySelectorAll('.pat-alvo:checked').forEach(function (ch) {
+            ids.push(parseInt(ch.value, 10));
+        });
+        if (!ids.length) return S.toast('Marque ao menos um equipamento.', 'warning');
+        if (!confirm('Confirmar a entrada de ' + ids.length + ' equipamento(s)?\n\n' +
+                     'Eles seguem para a Entrada de Equipamento.')) return;
+        try {
+            var d = await S.api('/internalizacao/fluxo/patrimonio/confirmar',
+                                { method: 'POST', body: { ids: ids } });
+            S.toast(d.confirmados.length + ' equipamento(s) confirmados.', 'success');
+            await carregar();
+        } catch (x) { S.toast(x.message, 'error'); }
+    };
+
+    carregar();
+}
+
+
+/* ── Entrada de Equipamento ─────────────────────────────────────────
+   O técnico de gestão de ativos informa o espaço e corredor, o ativo sobe
+   no ServiceNow e o equipamento entra no estoque do portal. É o passo que
+   faz "entrou em estoque" significar alguma coisa: sem ele o equipamento
+   ficaria concluído aqui e invisível na Consulta.
+   ─────────────────────────────────────────────────────────────────── */
+async function telaEntrada(c, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var pm = (u.permission_map || {}).internalizacao || {};
+    var podeEditar = !!(u.is_admin || pm.can_edit);
+
+    c.innerHTML =
+        '<h1 class="page-title">Entrada de Equipamento</h1>' +
+        '<p class="text-muted">Equipamentos com patrimônio resolvido. Informe o ' +
+            'espaço e corredor, conclua, e eles sobem no ServiceNow e entram no ' +
+            'estoque do portal.</p>' +
+        '<div class="filter-grid mb-2">' +
+            '<div class="form-group"><label for="ent-espaco">Espaço e corredor *</label>' +
+                '<input id="ent-espaco" class="form-control" placeholder="ex.: A-12" ' +
+                'title="Sem isto o ServiceNow recebe o ativo sem lugar, e ninguém acha o equipamento na prateleira"></div>' +
+        '</div>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="ent-concluir" class="btn btn-primary"' +
+                (podeEditar ? '' : ' disabled') + '>Concluir entrada (marcados)</button>' +
+            '<button id="ent-todos" class="btn btn-secondary" type="button">Marcar todos</button>' +
+        '</div>' +
+        '<div id="ent-msg"></div>' +
+        '<div id="ent-lista"></div>';
+
+    async function carregar() {
+        var alvo = document.getElementById('ent-lista');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        try {
+            var d = await S.api('/internalizacao/fluxo/entrada');
+            alvo.innerHTML = '';
+            if (!d.total) {
+                alvo.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhum equipamento pronto para entrada.' }));
+                return;
+            }
+            alvo.appendChild(S.table([
+                { key: 'id', label: '', html: true, render: function (v) {
+                    return '<input class="ent-alvo" type="checkbox" value="' + e(String(v)) + '">';
+                } },
+                { key: 'bu', label: 'BU' },
+                { key: 'nf', label: 'NF' },
+                { key: 'descricao', label: 'Equipamento' },
+                { key: 'numero_serie', label: 'Nº de série' },
+                { key: 'ebs_ativo', label: 'Ativo (EBS)', render: function (v) { return v || '—'; } },
+                { key: 'plaqueta', label: 'Plaqueta' },
+                { key: 'confirmado_por', label: 'Confirmado por',
+                  render: function (v) { return v || '—'; } }
+            ], d.itens));
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('ent-todos').onclick = function () {
+        var todos = c.querySelectorAll('.ent-alvo');
+        var marcar = Array.prototype.some.call(todos, function (x) { return !x.checked; });
+        todos.forEach(function (x) { x.checked = marcar; });
+    };
+
+    document.getElementById('ent-concluir').onclick = async function () {
+        var espaco = document.getElementById('ent-espaco').value.trim();
+        if (!espaco) {
+            document.getElementById('ent-espaco').focus();
+            return S.toast('Informe o espaço e corredor.', 'warning');
+        }
+        var ids = [];
+        c.querySelectorAll('.ent-alvo:checked').forEach(function (ch) {
+            ids.push(parseInt(ch.value, 10));
+        });
+        if (!ids.length) return S.toast('Marque ao menos um equipamento.', 'warning');
+        if (!confirm('Concluir ' + ids.length + ' equipamento(s) em "' + espaco + '"?\n\n' +
+                     'Eles sobem no ServiceNow e entram no estoque do portal.')) return;
+        var b = this, txt = b.textContent;
+        b.disabled = true; b.textContent = 'Concluindo…';
+        var msg = document.getElementById('ent-msg');
+        try {
+            var d = await S.api('/internalizacao/fluxo/entrada', {
+                method: 'POST', body: { ids: ids, espaco_corredor: espaco } });
+            // O aviso existe quando o estoque entrou mas o ServiceNow não
+            // confirmou: dizer só "concluído" esconderia trabalho pendente.
+            msg.innerHTML = d.aviso
+                ? '<div class="alert alert-warning">' + e(d.aviso) + '</div>'
+                : '<div class="alert alert-success">' + d.concluidos.length +
+                  ' equipamento(s) no estoque e marcados no ServiceNow.</div>';
+            S.toast(d.concluidos.length + ' equipamento(s) concluídos.',
+                    d.aviso ? 'warning' : 'success');
+            await carregar();
+        } catch (x) {
+            msg.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        } finally { b.disabled = false; b.textContent = txt; }
+    };
+
+    carregar();
+}

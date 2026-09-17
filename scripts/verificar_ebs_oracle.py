@@ -194,9 +194,15 @@ print("\n[5] As consultas nomeadas, com os binds derivados do próprio SQL")
 r = cliente.get("/api/ebs-oracle/consultas")
 d = r.json()
 nomes = {q["nome"]: q for q in d["consultas"]}
-checar(set(nomes) == {"acordos", "busca_po", "catalogo", "po", "po_itens",
-                      "rc", "saldo", "vendor_items", "vendor_lookup"},
-       "as nove consultas de negócio estão lá")
+checar(set(nomes) == {"acordos", "ativo_por_serial", "busca_po", "catalogo",
+                      "po", "po_itens", "rc", "saldo", "vendor_items",
+                      "vendor_lookup"},
+       "as dez consultas de negócio estão lá")
+# É ela que a tela Internalização → Patrimônio usa para saber se o
+# equipamento já virou ativo fixo no EBS. A busca é pelo SERIAL porque é o
+# que o portal tem na mão: a plaqueta é o próprio EBS quem atribui.
+checar(nomes["ativo_por_serial"]["binds"] == ["numero_serie"],
+       "ativo_por_serial procura pelo número de série")
 # BINDS é derivado de QUERIES por regex sobre o próprio SQL. Uma lista escrita
 # à parte seria uma segunda verdade: mexeriam no SQL e o formulário da tela
 # continuaria pedindo o parâmetro velho — ou deixaria de pedir o novo.
