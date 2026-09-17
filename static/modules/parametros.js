@@ -962,8 +962,18 @@ async function renderCompras(c, S) {
    caminho por onde o dado vem. Aqui, conexão direta; lá, HTTP pelo
    módulo do outro time.
 
-   O que a tela executa são as consultas NOMEADAS. SQL digitado não
-   existe: o SQL fica no código, versionado e revisável.
+   Duas formas de consultar, de propósito:
+
+   • as consultas NOMEADAS, que ficam no código, versionadas e revisáveis —
+     é o que os módulos do portal usam em produção;
+   • a consulta LIVRE, para escrever e testar um SELECT aqui mesmo antes de
+     ele virar consulta nomeada. Quem chega nesta aba já é admin de
+     Parâmetros, a sessão no banco é só-leitura e o servidor recusa
+     qualquer coisa que não comece em SELECT ou WITH.
+
+   O texto das consultas nomeadas NÃO vem do servidor: ele traz esquema,
+   tabela e coluna do EBS, e a resposta da API fica visível na aba de rede
+   do navegador. Quem precisa ler o SQL o lê em integracoes/ebs_oracle.py.
    ─────────────────────────────────────────────────────────────────── */
 async function renderBaseEbs(c, S) {
     var e = S.esc;
@@ -1003,6 +1013,34 @@ async function renderBaseEbs(c, S) {
                 '<div id="eo-resultado" class="mt-3"></div>' +
             '</div>' +
         '</div>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Consulta livre</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted mt-0">Escreva o SELECT e rode aqui antes de ele virar ' +
+                    'consulta nomeada. Só leitura: o servidor recusa o que não começar em ' +
+                    'SELECT ou WITH, e aceita uma consulta por vez.</p>' +
+                '<div class="form-group">' +
+                    '<label for="eo-sql-livre">SQL</label>' +
+                    '<textarea id="eo-sql-livre" class="form-control om-mono" rows="8" spellcheck="false" ' +
+                        'placeholder="SELECT ph.segment1, ph.creation_date\n' +
+                        '  FROM APPS.PO_HEADERS_ALL ph\n' +
+                        ' WHERE ph.segment1 = :numero_po"></textarea>' +
+                '</div>' +
+                '<p class="text-muted mb-0">Valor vai por parâmetro, nunca colado no texto: ' +
+                    'escreva <code>:nome</code> no SQL e o campo aparece abaixo.</p>' +
+                '<div id="eo-livre-binds" class="filter-grid mt-2"></div>' +
+                '<div class="filter-grid mt-2">' +
+                    '<div class="form-group"><label for="eo-livre-limite">Máximo de linhas</label>' +
+                        '<input id="eo-livre-limite" class="form-control" type="number" value="200" ' +
+                        'min="1" max="5000"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="eo-livre-rodar" class="btn btn-primary" type="button">Executar</button>' +
+                    '<button id="eo-livre-limpar" class="btn btn-secondary" type="button">Limpar</button>' +
+                '</div>' +
+                '<div id="eo-livre-resultado" class="mt-3"></div>' +
+            '</div>' +
+        '</div>' +
         '<div class="card">' +
             '<div class="card-header">Procurar objeto</div>' +
             '<div class="card-body">' +
@@ -1018,6 +1056,7 @@ async function renderBaseEbs(c, S) {
                     '<button id="eo-buscar" class="btn btn-primary" type="button">Procurar</button>' +
                 '</div>' +
                 '<div id="eo-objetos" class="mt-3"></div>' +
+                '<div id="eo-colunas" class="mt-3"></div>' +
             '</div>' +
         '</div>';
 
@@ -1083,13 +1122,109 @@ async function renderBaseEbs(c, S) {
             alvo.appendChild(S.el('div', { className: 'alert alert-warning mt-3',
                 textContent: d.driver.detalhe || 'Driver Oracle ausente neste servidor.' }));
         }
-        if (!d.completo) {
+        // A API não devolve um "completo": ela devolve a situação de cada
+        // chave. Ler uma chave que não existe dava sempre undefined, e o
+        // aviso aparecia até com tudo configurado — ruído que ensina a
+        // ignorar aviso.
+        var faltando = (d.chaves || []).filter(function (k) {
+            return !k.resolvida && k.chave !== 'ORACLE_CLIENT_LIB_DIR';
+        }).map(function (k) { return k.chave; });
+        if (faltando.length) {
             alvo.appendChild(S.el('div', { className: 'alert alert-info mt-3',
-                textContent: 'Grave o que falta com: python3 scripts/cofre.py definir <CHAVE>' }));
+                textContent: 'Falta gravar: ' + faltando.join(', ') +
+                    '. Use: python3 scripts/cofre.py definir <CHAVE>' }));
         }
         if (d.cofre_detalhe) {
             alvo.appendChild(S.el('p', { className: 'text-muted mb-0 mt-3',
                 textContent: 'Cofre: ' + d.cofre_detalhe }));
+        }
+    }
+
+    // As duas consultas (nomeada e livre) mostram o resultado igual. Uma
+    // função só evita que uma delas ganhe melhoria e a outra fique para trás.
+    function mostrarLinhas(saida, d) {
+        saida.innerHTML = '';
+        if (!d.total) {
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
+            return;
+        }
+        saida.appendChild(S.el('p', { className: 'text-muted',
+            textContent: d.total + ' linha(s) em ' + d.ms + ' ms.' +
+                (d.truncado ? ' Cortado no limite de ' + d.limite + ' — pode haver mais.' : '') }));
+        saida.appendChild(S.table(d.colunas.map(function (col) {
+            return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
+        }), d.linhas));
+    }
+
+    // Erro do servidor vira texto que diz de quem é o problema. 503 é
+    // configuração (não adianta mexer no SQL), 502 é o banco, 422 é o que
+    // foi digitado. Sem isso, os três chegam iguais e todo mundo culpa a rede.
+    function explicar(x) {
+        var m = x && x.message ? x.message : 'Falhou.';
+        if (x && x.status === 503) return 'Falta credencial da base do EBS. ' + m;
+        if (x && x.status === 502) return 'A base do EBS recusou: ' + m;
+        return m;
+    }
+
+    // Parâmetro se escreve :nome no SQL e vai como bind variable. Achar os
+    // nomes aqui é o que permite oferecer um campo para cada um — e é o que
+    // tira de quem escreve a tentação de colar valor dentro do texto.
+    function bindsDoSql(sql) {
+        // Some com o que está entre aspas antes de procurar: ':' dentro de
+        // string (um horário, por exemplo) não é parâmetro.
+        var limpo = String(sql || '').replace(/'(?:[^']|'')*'/g, "''")
+                                     .replace(/"(?:[^"])*"/g, '""');
+        var achados = [], vistos = {}, m;
+        var re = /(^|[^:\w$]):([A-Za-z_][A-Za-z0-9_]{0,63})/g;
+        while ((m = re.exec(limpo)) !== null) {
+            if (!vistos[m[2]]) { vistos[m[2]] = 1; achados.push(m[2]); }
+        }
+        return achados;
+    }
+
+    function montarBindsLivres() {
+        var host = document.getElementById('eo-livre-binds');
+        var nomes = bindsDoSql(document.getElementById('eo-sql-livre').value);
+        // O que já foi digitado se mantém: reescrever o formulário a cada
+        // tecla apagaria o valor no meio da frase.
+        var antes = {};
+        Array.prototype.forEach.call(host.querySelectorAll('[data-bind]'), function (el) {
+            antes[el.getAttribute('data-bind')] = el.value;
+        });
+        host.innerHTML = nomes.map(function (b) {
+            return '<div class="form-group"><label for="eo-lb-' + e(b) + '">' + e(b) + '</label>' +
+                '<input id="eo-lb-' + e(b) + '" class="form-control" data-bind="' + e(b) + '" ' +
+                'value="' + e(antes[b] || '') + '"></div>';
+        }).join('');
+    }
+
+    function valoresDosBinds(seletor) {
+        var binds = {};
+        Array.prototype.forEach.call(c.querySelectorAll(seletor + ' [data-bind]'), function (el) {
+            var v = el.value.trim();
+            if (v) binds[el.getAttribute('data-bind')] = v;
+        });
+        return binds;
+    }
+
+    async function verColunas(owner, objeto) {
+        var saida = document.getElementById('eo-colunas');
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Lendo o catálogo…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/descrever?objeto=' + encodeURIComponent(objeto) +
+                                '&owner=' + encodeURIComponent(owner || 'APPS'));
+            saida.innerHTML = '';
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: (owner || 'APPS') + '.' + objeto }));
+            saida.appendChild(S.table([
+                { key: 'column_name', label: 'Coluna' },
+                { key: 'data_type', label: 'Tipo' },
+                { key: 'data_length', label: 'Tamanho' },
+                { key: 'nullable', label: 'Aceita nulo' }
+            ], d.colunas || []));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(explicar(x)) + '</div>';
         }
     }
 
@@ -1139,34 +1274,54 @@ async function renderBaseEbs(c, S) {
         var saida = document.getElementById('eo-resultado');
         var nome = document.getElementById('eo-nome').value;
         if (!nome) { S.toast('Escolha uma consulta.', 'warning'); return; }
-        var binds = {};
-        Array.prototype.forEach.call(c.querySelectorAll('#eo-binds [data-bind]'), function (el) {
-            var v = el.value.trim();
-            if (v) binds[el.getAttribute('data-bind')] = v;
-        });
+        var binds = valoresDosBinds('#eo-binds');
         var limite = parseInt(document.getElementById('eo-limite').value, 10) || 200;
         saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando…</div>';
         try {
-            var d = await S.api('/ebs-oracle/consultar', {
+            mostrarLinhas(saida, await S.api('/ebs-oracle/consultar', {
                 method: 'POST', body: { nome: nome, binds: binds, limite: limite }
-            });
-            saida.innerHTML = '';
-            if (!d.total) {
-                saida.appendChild(S.el('p', { className: 'text-muted',
-                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
-                return;
-            }
-            saida.appendChild(S.el('p', { className: 'text-muted',
-                textContent: d.total + ' linha(s) em ' + d.ms + ' ms.' +
-                    (d.truncado ? ' Cortado no limite de ' + d.limite + ' — pode haver mais.' : '') }));
-            saida.appendChild(S.table(d.colunas.map(function (col) {
-                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
-            }), d.linhas));
+            }));
         } catch (x) {
-            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
+            saida.innerHTML = '<div class="alert alert-danger">' + e(explicar(x)) + '</div>';
+            S.toast(explicar(x), 'error');
         }
     };
+
+    // O formulário de parâmetros se refaz enquanto se escreve o SQL: é a
+    // forma de mostrar, sem explicar, que :nome é parâmetro e não texto.
+    document.getElementById('eo-sql-livre').addEventListener('input', montarBindsLivres);
+
+    document.getElementById('eo-livre-limpar').onclick = function () {
+        document.getElementById('eo-sql-livre').value = '';
+        document.getElementById('eo-livre-resultado').innerHTML = '';
+        montarBindsLivres();
+    };
+
+    document.getElementById('eo-livre-rodar').onclick = async function () {
+        var saida = document.getElementById('eo-livre-resultado');
+        var sql = document.getElementById('eo-sql-livre').value.trim();
+        if (!sql) { S.toast('Escreva a consulta.', 'warning'); return; }
+        var limite = parseInt(document.getElementById('eo-livre-limite').value, 10) || 200;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando…</div>';
+        try {
+            mostrarLinhas(saida, await S.api('/ebs-oracle/consultar', {
+                method: 'POST',
+                body: { sql: sql, binds: valoresDosBinds('#eo-livre-binds'), limite: limite }
+            }));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(explicar(x)) + '</div>';
+            S.toast(explicar(x), 'error');
+        }
+    };
+
+    // Ctrl+Enter roda: quem está afinando um SELECT repete isso dezenas de
+    // vezes, e tirar a mão do teclado a cada rodada cansa.
+    document.getElementById('eo-sql-livre').addEventListener('keydown', function (ev) {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+            ev.preventDefault();
+            document.getElementById('eo-livre-rodar').click();
+        }
+    });
 
     document.getElementById('eo-buscar').onclick = async function () {
         var saida = document.getElementById('eo-objetos');
@@ -1182,10 +1337,20 @@ async function renderBaseEbs(c, S) {
                 saida.appendChild(S.el('p', { className: 'text-muted', textContent: 'Nada encontrado.' }));
                 return;
             }
+            // Para escrever a consulta é preciso o nome da coluna, e ele
+            // está a um clique daqui. Sem isto, quem monta um SELECT sai da
+            // tela para procurar o layout da tabela em outro lugar.
             saida.appendChild(S.table([
                 { key: 'owner', label: 'Owner' },
                 { key: 'object_name', label: 'Objeto' },
-                { key: 'object_type', label: 'Tipo' }
+                { key: 'object_type', label: 'Tipo' },
+                { key: 'object_name', label: '', render: function (v, row) {
+                    return S.el('button', {
+                        className: 'btn btn-secondary btn-sm', type: 'button',
+                        textContent: 'Colunas',
+                        onClick: function () { verColunas(row.owner, row.object_name); }
+                    });
+                } }
             ], d.itens));
         } catch (x) {
             saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';

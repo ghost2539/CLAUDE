@@ -206,8 +206,47 @@ _LIMITE_PADRAO = 200
 _LIMITE_TETO = 5000
 
 
+def _sem_comentarios_sql(texto: str) -> str:
+    """Tira `--` e `/* */` do SQL, respeitando o que está entre aspas.
+
+    Quem testa uma consulta nesta tela cola o SQL de onde estava escrevendo,
+    com comentário no topo. Sem isto, `-- rascunho` na primeira linha fazia a
+    checagem de "começa em SELECT" reprovar, e um `;` dentro de um comentário
+    reprovava por "duas consultas" — as duas mensagens mandando corrigir algo
+    que não era o problema.
+
+    O que sobra daqui é o que vai ser validado E executado: o texto conferido
+    e o texto que roda no banco são o mesmo, sem uma segunda leitura no meio
+    onde um comentário pudesse esconder alguma coisa.
+    """
+    saida: list[str] = []
+    i, n = 0, len(texto)
+    while i < n:
+        c = texto[i]
+        if c == "'":
+            # Em Oracle a aspa dentro da string é dobrada ('') — o laço sai
+            # dela naturalmente e volta a entrar, o que dá no mesmo.
+            j = texto.find("'", i + 1)
+            j = n if j < 0 else j + 1
+            saida.append(texto[i:j])
+            i = j
+            continue
+        if texto.startswith("--", i):
+            j = texto.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if texto.startswith("/*", i):
+            j = texto.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            saida.append(" ")
+            continue
+        saida.append(c)
+        i += 1
+    return "".join(saida)
+
+
 def _validar_sql(sql: str) -> str:
-    limpo = (sql or "").strip().rstrip(";").strip()
+    limpo = _sem_comentarios_sql(sql or "").strip().rstrip(";").strip()
     if not limpo:
         raise HTTPException(422, "Escreva a consulta.")
     if len(limpo) > 20000:
