@@ -74,10 +74,11 @@ apaga o DSN — e os pedaços dele — antes de a mensagem chegar à tela.
 `docs/EBS_ORACLE_BASE.md` continua fora: era catálogo de tabelas com o
 endereço da base no cabeçalho.
 
-Há dois caminhos para o mesmo dado, e a escolha é operacional: direto
-(este módulo, quando o serviço alcança a base) ou por HTTP (o módulo
-`/gestao_compras`, que consulta do lado de lá). **As consultas são as
-mesmas, com os mesmos nomes e os mesmos binds**, de propósito.
+Houve dois caminhos para o mesmo dado: direto (este módulo, quando o
+serviço alcança a base) ou por HTTP (o módulo `/gestao_compras`, que
+consultava do lado de lá). A ponte HTTP e a aba que a usava saíram do
+portal; sobrou o caminho direto, **com as mesmas consultas, os mesmos
+nomes e os mesmos binds** do lado de lá.
 
 ### Ponte `/api/cofre/testar-php` e `scripts/cofre_php.php`
 A tela mandava um caminho de arquivo `.php` e o portal o executava. Um

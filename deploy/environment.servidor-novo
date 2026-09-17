@@ -76,14 +76,6 @@ INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@
 #   ORACLE_EBS_USER=
 #   ORACLE_EBS_PASS=
 
-# ── Gestão de Compras — PO e projetos do EBS por HTTP ───────────────────
-# O serviço não lê o cofre corporativo; o módulo /gestao_compras (Apache)
-# lê e expõe as consultas. Tudo tem padrão no código; só descomente para
-# mudar. Credencial NÃO vai aqui: GESTAO_COMPRAS_USER / GESTAO_COMPRAS_PASS
-# no cofre (sem elas, vale a conta de serviço EBS_PUBLIC_USER / _PASS).
-#GESTAO_COMPRAS_URL=https://suporte.lojasrenner.com.br/gestao_compras/
-#GESTAO_COMPRAS_TIMEOUT=90
-
 # ── EBS — API REST ──────────────────────────────────────────────────────
 EBS_LOGIN_URL=https://suporte.lojasrenner.com.br/ebs/api/auth/login
 EBS_SEARCH_URL=https://suporte.lojasrenner.com.br/ebs/api/estoque/busca-imobilizado

@@ -145,9 +145,6 @@ checar(True, "nenhum verify=False escondido no código de produto")
 http = texto("integracoes/http.py")
 checar("PORTAL_CA_BUNDLE" in http or "CA_BUNDLE" in http,
        "o caminho para proxy que intercepta TLS é a CA corporativa, não desligar a conferência")
-gc = texto("integracoes/gestao_compras.py")
-checar("http_saida.sessao(" in gc and "verify=cfg.GESTAO_COMPRAS_VERIFY" not in gc,
-       "a ponte com o Gestão de Compras sai pela fábrica de sessões do portal")
 
 
 print("\n[4] Segredo: cofre ligado, e nada de credencial solta no ambiente")
@@ -171,9 +168,8 @@ checar("def _segredo(" in cfg or "from core.cofre import" in cfg or "_env(" in c
 
 print("\n[5] Proxy: variável declarada e vazia é decisão, não 'continue procurando'")
 checar("def _proxy(" in cfg, "config.py tem o _proxy() que respeita a variável vazia")
-checar(re.search(r"SN_API_PROXY[^=]*=\s*_proxy\(", cfg) is not None
-       and re.search(r"GESTAO_COMPRAS_PROXY[^=]*=\s*_proxy\(", cfg) is not None,
-       "e os dois proxies de saída passam por ele")
+checar(re.search(r"SN_API_PROXY[^=]*=\s*_proxy\(", cfg) is not None,
+       "e o proxy de saída passa por ele")
 ambiente = texto("deploy/environment.servidor-novo")
 checar("HTTPS_PROXY=" in ambiente and "SN_PROXY=" in ambiente,
        "o environment do servidor declara os proxies vazios — é essa decisão que _proxy() honra")
@@ -208,7 +204,7 @@ for no in ast.walk(arvore):
 
 # A espinha (auth, consulta, recebimento, parâmetros…) não é isolada de
 # propósito: sem ela não existe portal para seguir de pé.
-OPCIONAIS = {"capex_spare_router", "gestao_compras_router", "agendamentos_forn_router",
+OPCIONAIS = {"capex_spare_router", "agendamentos_forn_router",
              "internalizacao_router", "cofre_router", "orcamento_spare_router",
              "controle_orcamento_exec_router", "indicadores_router", "cockpit_router"}
 faltando = sorted(OPCIONAIS - dentro_de_try)
@@ -239,8 +235,8 @@ acoes = get_settings().MODULE_ACTIONS
 for modulo in ("capex_spare", "agendamentos_forn", "internalizacao"):
     checar(modulo in acoes and "view" in acoes[modulo],
            f"{modulo} está em MODULE_ACTIONS com 'view'")
-# Gestão de Compras e Cofre moram dentro de Parâmetros: a permissão é a de lá.
-for rel in ("routers/gestao_compras.py", "routers/cofre.py"):
+# O Cofre mora dentro de Parâmetros: a permissão é a de lá.
+for rel in ("routers/cofre.py",):
     checar('MODULO = "parametros"' in texto(rel),
            f"{rel} usa a permissão de Parâmetros, e não uma chave nova sem tela")
 

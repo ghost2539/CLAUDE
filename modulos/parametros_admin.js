@@ -3,9 +3,9 @@
 
    Saiu de `parametros.js` porque aquele arquivo desce para TODO
    usuário no login: a aba "Minha conta" é de todos, e junto ia o
-   código das onze abas de admin — inclusive a Base EBS, com a forma
-   das consultas ao Oracle. Aqui só há tela de admin, e o arquivo só
-   é pedido quando uma delas é aberta.
+   código das abas de admin — inclusive a Base EBS, com a forma das
+   consultas ao Oracle. Aqui só há tela de admin, e o arquivo só é
+   pedido quando uma delas é aberta.
 
    Roda como script solto, carregado depois de `parametros.js`: o que
    os dois lados usam (`_pField`) continua lá e é alcançado pelo
@@ -555,170 +555,11 @@ async function renderCofre(c, S) {
     carregar();
 }
 
-/* ── Gestão de Compras ──────────────────────────────────────────────
-   O portal não fala com a base do EBS: quem fala é o módulo
-   /gestao_compras (Apache), que já expõe PO, projetos e acordos por
-   HTTP. Aqui o portal é cliente dele — e esta tela é o lugar de
-   conferir se a credencial do cofre abre a sessão de lá.
-   ─────────────────────────────────────────────────────────────────── */
-async function renderCompras(c, S) {
-    var e = S.esc;
-    c.innerHTML =
-        '<h1 class="page-title">Gestão de Compras</h1>' +
-        '<p class="text-muted">O portal consulta PO, projetos e acordos pelo módulo ' +
-            '<span class="om-mono">/gestao_compras</span>, como cliente HTTP. ' +
-            'A credencial vem do cofre — nada é digitado nesta tela.</p>' +
-        '<div class="card mb-3">' +
-            '<div class="card-header">Situação</div>' +
-            '<div class="card-body" id="gc-situacao">' +
-                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
-            '</div>' +
-            '<div class="card-footer btn-row">' +
-                '<button id="gc-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
-                '<button id="gc-testar" class="btn btn-primary btn-sm" type="button">Testar login</button>' +
-            '</div>' +
-        '</div>' +
-        '<div class="card mb-3" id="gc-teste-card" hidden>' +
-            '<div class="card-header">Resultado do teste</div>' +
-            '<div class="card-body" id="gc-teste"></div>' +
-        '</div>' +
-        '<div class="card">' +
-            '<div class="card-header">Consulta</div>' +
-            '<div class="card-body">' +
-                '<div class="filter-grid">' +
-                    '<div class="form-group"><label for="gc-acao">Ação</label>' +
-                        '<select id="gc-acao" class="form-control"></select></div>' +
-                    '<div class="form-group" data-gc="project"><label for="gc-project">Projeto (segment1)</label>' +
-                        '<input id="gc-project" class="form-control" placeholder="ex.: 26.0123"></div>' +
-                    '<div class="form-group" data-gc="po"><label for="gc-po">Número da PO</label>' +
-                        '<input id="gc-po" class="form-control"></div>' +
-                    '<div class="form-group" data-gc="line"><label for="gc-line">Linha (opcional)</label>' +
-                        '<input id="gc-line" class="form-control" type="number" min="1"></div>' +
-                    '<div class="form-group" data-gc="vendor"><label for="gc-vendor">Fornecedor</label>' +
-                        '<input id="gc-vendor" class="form-control"></div>' +
-                    '<div class="form-group" data-gc="days"><label for="gc-days">Dias até vencer</label>' +
-                        '<input id="gc-days" class="form-control" type="number" value="90" min="1"></div>' +
-                    '<div class="form-group" data-gc="org"><label for="gc-org">Unidade (opcional)</label>' +
-                        '<input id="gc-org" class="form-control"></div>' +
-                    '<div class="form-group" data-gc="projects"><label for="gc-projects">Projetos (vírgula)</label>' +
-                        '<input id="gc-projects" class="form-control"></div>' +
-                '</div>' +
-                '<div class="btn-row mt-3">' +
-                    '<button id="gc-consultar" class="btn btn-primary" type="button">Consultar</button>' +
-                '</div>' +
-                '<div id="gc-resultado" class="mt-3"></div>' +
-            '</div>' +
-        '</div>';
-
-    var acoes = {};
-
-    // Cada ação tem os próprios parâmetros; os campos que não servem somem,
-    // em vez de ficarem lá convidando a preencher o que o módulo ignora.
-    function mostrarCampos() {
-        var usados = acoes[document.getElementById('gc-acao').value] || [];
-        Array.prototype.forEach.call(c.querySelectorAll('[data-gc]'), function (el) {
-            el.hidden = usados.indexOf(el.getAttribute('data-gc')) === -1;
-        });
-    }
-
-    function selo(ok, sim, nao) {
-        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
-            e(ok ? sim : nao) + '</span>';
-    }
-
-    async function carregar() {
-        var alvo = document.getElementById('gc-situacao');
-        var d;
-        try { d = await S.api('/gestao-compras/situacao'); }
-        catch (x) {
-            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            return;
-        }
-        var cr = d.credenciais || {};
-        acoes = d.acoes || {};
-        var sel = document.getElementById('gc-acao');
-        sel.innerHTML = Object.keys(acoes).map(function (a) {
-            return '<option value="' + e(a) + '">' + e(a) + '</option>';
-        }).join('');
-        sel.onchange = mostrarCampos;
-        mostrarCampos();
-
-        alvo.innerHTML =
-            '<p><b>Módulo:</b> <span class="om-mono">' + e(d.url) + '</span> ' +
-                '<span class="text-muted">— timeout ' + e(d.timeout) + ' s, TLS ' +
-                (d.verify_ssl ? 'verificado' : 'sem verificação') +
-                (d.proxy ? ', proxy ' + e(d.proxy) : ', saída direta') + '</span></p>' +
-            '<p><b>Usuário:</b> ' + (cr.usuario
-                ? '<span class="om-mono">' + e(cr.usuario) + '</span> <span class="text-muted">(' +
-                  e(cr.usuario_chave) + ', ' + e(cr.usuario_fonte) + ')</span>'
-                : selo(false, '', 'não definido')) +
-            ' &nbsp; <b>Senha:</b> ' + (cr.senha_definida
-                ? selo(true, 'definida', '') + ' <span class="text-muted">(' +
-                  e(cr.senha_chave) + ', ' + e(cr.senha_fonte) + ')</span>'
-                : selo(false, '', 'não definida')) + '</p>' +
-            (cr.usuario && cr.senha_definida ? '' :
-                '<div class="alert alert-warning mb-0">Grave no cofre: ' +
-                '<span class="om-mono">python3 scripts/cofre.py definir GESTAO_COMPRAS_USER</span> ' +
-                'e <span class="om-mono">GESTAO_COMPRAS_PASS</span>.</div>');
-    }
-
-    document.getElementById('gc-atualizar').onclick = carregar;
-
-    document.getElementById('gc-testar').onclick = async function () {
-        var card = document.getElementById('gc-teste-card');
-        var saida = document.getElementById('gc-teste');
-        card.hidden = false;
-        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Entrando no módulo…</div>';
-        try {
-            var d = await S.api('/gestao-compras/testar', { method: 'POST' });
-            var u = d.usuario || {};
-            saida.innerHTML = '<div class="alert alert-success">Sessão aberta como <b>' +
-                e(u.username || '?') + '</b>' + (u.role ? ' (' + e(u.role) + ')' : '') + '.</div>';
-            S.toast('O módulo aceitou a credencial.', 'success');
-        } catch (x) {
-            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
-        }
-    };
-
-    document.getElementById('gc-consultar').onclick = async function () {
-        var saida = document.getElementById('gc-resultado');
-        var acao = document.getElementById('gc-acao').value;
-        if (!acao) { S.toast('Escolha uma ação.', 'warning'); return; }
-        var q = { acao: acao };
-        (acoes[acao] || []).forEach(function (nome) {
-            var campo = document.getElementById('gc-' + nome);
-            var v = campo ? String(campo.value).trim() : '';
-            if (v) q[nome] = v;
-        });
-        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando pelo módulo…</div>';
-        try {
-            var d = await S.api('/gestao-compras/consultar?' + new URLSearchParams(q).toString());
-            saida.innerHTML = '';
-            if (!d.total) {
-                saida.appendChild(S.el('p', { className: 'text-muted',
-                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
-                return;
-            }
-            saida.appendChild(S.el('p', { className: 'text-muted',
-                textContent: d.total + ' linha(s) em ' + d.ms + ' ms, pela API do módulo.' }));
-            saida.appendChild(S.table(d.colunas.map(function (col) {
-                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
-            }), d.linhas));
-        } catch (x) {
-            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
-        }
-    };
-
-    carregar();
-}
-
 /* ── Base EBS ───────────────────────────────────────────────────────
-   Leitura direta da base do EBS. Existe em paralelo com a aba Gestão
-   de Compras: as consultas são as mesmas, pelos mesmos nomes — muda o
-   caminho por onde o dado vem. Aqui, conexão direta; lá, HTTP pelo
-   módulo do outro time.
+   Leitura direta da base do EBS. Havia dois caminhos para o mesmo dado:
+   este, direto, e a aba Gestão de Compras, que ia por HTTP ao módulo do
+   outro time. A aba saiu do portal; sobrou este caminho, e as consultas
+   nomeadas continuam com os nomes e os binds de lá.
 
    Duas formas de consultar, de propósito:
 
@@ -1614,7 +1455,7 @@ async function renderPermissions(c, S) {
         atendimento: 'Atendimento', separacao: 'Separação',
         projetos: 'Projetos de Loja', reversa: 'Logística Reversa',
         inventario: 'Inventário', regularizacao: 'Regularização',
-        obsolescencia: 'Obsolescência do parque', automacoes: 'Automações',
+        obsolescencia: 'Obsolescência do parque',
         ebs_forms: 'EBS Forms',
         preparacao: 'Preparação (configuração e estoque)',
         destinacao: 'Destinação (baixa, venda, descarte, doação)',
@@ -1631,8 +1472,10 @@ async function renderPermissions(c, S) {
         orcamento_spare: 'Orçamento SPARE',        // CAPEX da área
         orcamento_manutencao: 'Orçamento (manutenção)',  // coletores e SLEDs (na sidebar)
         ebs_forms: 'EBS Forms (RPA)',
-        // A aba é de todos; "Administrar" é quem configura a rotina e as regras
-        automacoes: 'Automações'
+        // A chave segue 'automacoes' (a permissão já existe nos usuários);
+        // só o nome no menu mudou. "Visualizar" abre a tela e deixa mexer nas
+        // regras; "Administrar" é quem configura a rotina.
+        automacoes: 'ServiceNow'
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];
@@ -1851,6 +1694,155 @@ async function renderSequences(c, S) {
         }
     ];
     document.getElementById('pm-seq').appendChild(S.table(cols, d.sequencias));
+}
+
+/* ── Locais e Classificações ────────────────────────────────────────
+   Vieram do `parametros.js` no dia em que as duas abas passaram a ser só
+   de admin. Esconder a aba e deixar o código descer para todo mundo não
+   protegia nada: o arquivo continuava inteiro no devtools de qualquer um,
+   que foi justamente a reclamação. O `_pField` que as duas usam ficou lá,
+   porque a Minha conta também precisa dele — o escopo global alcança.
+   ─────────────────────────────────────────────────────────────────── */
+/* ── Locais ─────────────────────────────────────────────────────── */
+async function renderLocations(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Locais</h1>' +
+        '<button id="pm-local-add" class="btn btn-primary mb-3">Novo local</button>' +
+        '<div id="pm-locations"></div>';
+
+    async function load() {
+        var d = await S.api('/parametros/locais');
+        var cols = [
+            { key: 'nome',      label: 'Nome' },
+            { key: 'descricao', label: 'Descrição' },
+            { key: 'ativo',     label: 'Ativo' },
+            {
+                key: 'a', label: '',
+                render: function (_, r) {
+                    var b = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                    b.onclick = function () { edit(r); };
+                    return b;
+                }
+            }
+        ];
+        var el = document.getElementById('pm-locations');
+        el.innerHTML = '';
+        el.appendChild(S.table(cols, d.locais));
+    }
+
+    function edit(r) {
+        r = r || {};
+        var f = S.el('div');
+        f.appendChild(_pField('Nome', 'pm-ln', r.nome || ''));
+        f.appendChild(_pField('Descrição', 'pm-ld', r.descricao || ''));
+        var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        saveBtn.onclick = async function () {
+            await S.api('/parametros/locais' + (r.id ? '/' + r.id : ''), {
+                method: r.id ? 'PUT' : 'POST',
+                body: {
+                    nome:      document.getElementById('pm-ln').value,
+                    descricao: document.getElementById('pm-ld').value,
+                    ativo:     r.ativo !== false
+                }
+            });
+            S.closeModal();
+            S.toast('Local salvo.', 'success');
+            load();
+        };
+        S.openModal(r.id ? 'Editar local' : 'Novo local', f, [saveBtn]);
+    }
+
+    document.getElementById('pm-local-add').onclick = function () { edit(); };
+    load();
+}
+
+/* ── Classificações ─────────────────────────────────────────────── */
+async function renderClassifications(c, S) {
+    c.innerHTML =
+        '<h1 class="page-title">Classificações</h1>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="pm-class-add2" class="btn btn-primary">Nova regra</button>' +
+            '<button id="pm-class-apply" class="btn btn-secondary">Aplicar em toda a base</button>' +
+        '</div>' +
+        '<div id="pm-class-msg"></div>' +
+        '<div id="pm-class-list2"></div>';
+
+    async function load() {
+        var d = await S.api('/parametros/classificacoes');
+        var cols = [
+            { key: 'padrao_descricao', label: 'Padrão' },
+            { key: 'empresa',          label: 'Empresa' },
+            { key: 'categoria',        label: 'Categoria' },
+            { key: 'modelo',           label: 'Modelo' },
+            { key: 'ativo',            label: 'Ativa' },
+            {
+                key: 'a', label: '',
+                render: function (_, r) {
+                    var b = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                    b.onclick = function () { edit(r); };
+                    return b;
+                }
+            }
+        ];
+        var el = document.getElementById('pm-class-list2');
+        el.innerHTML = '';
+        el.appendChild(S.table(cols, d.regras));
+    }
+
+    function edit(r) {
+        r = r || {};
+        var f = S.el('div');
+        [
+            ['Padrão da descrição', 'pm-cp2', r.padrao_descricao],
+            ['Empresa (opcional)',   'pm-ce2', r.empresa],
+            ['Categoria',           'pm-cc2', r.categoria],
+            ['Modelo',              'pm-cm2', r.modelo]
+        ].forEach(function (x) { f.appendChild(_pField(x[0], x[1], x[2])); });
+
+        var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        saveBtn.onclick = async function () {
+            try {
+                await S.api('/parametros/classificacoes' + (r.id ? '/' + r.id : ''), {
+                    method: r.id ? 'PUT' : 'POST',
+                    body: {
+                        padrao_descricao: document.getElementById('pm-cp2').value,
+                        empresa:          document.getElementById('pm-ce2').value,
+                        categoria:        document.getElementById('pm-cc2').value,
+                        modelo:           document.getElementById('pm-cm2').value,
+                        ativo:            true
+                    }
+                });
+                S.closeModal();
+                S.toast('Regra salva.', 'success');
+                load();
+            } catch (e) {
+                S.toast(e.message, 'error');
+            }
+        };
+        S.openModal(r.id ? 'Editar regra' : 'Nova regra', f, [saveBtn]);
+    }
+
+    document.getElementById('pm-class-add2').onclick = function () { edit(); };
+
+    document.getElementById('pm-class-apply').onclick = async function () {
+        if (!confirm('Reaplicar todas as regras sobre a base de recebimento inteira?')) return;
+        var b = this, t = b.textContent;
+        b.disabled = true; b.textContent = 'Aplicando…';
+        try {
+            S.loading(true);
+            var d = await S.api('/parametros/classificacoes/aplicar-base', { method: 'POST' });
+            document.getElementById('pm-class-msg').innerHTML =
+                '<div class="alert alert-success">' + d.analisados + ' ativo(s) analisado(s); ' +
+                d.atualizados + ' reclassificado(s); ' + d.sem_regra + ' sem regra que case.</div>';
+            S.toast('Base reclassificada.', 'success');
+        } catch (e) {
+            S.toast(e.message, 'error');
+        } finally {
+            S.loading(false); b.disabled = false; b.textContent = t;
+        }
+    };
+
+    load();
 }
 
 /* ── TV ─────────────────────────────────────────────────────────── */
@@ -2281,13 +2273,14 @@ function _sepLinhaTipo(rotulo, id, valor, consulta) {
    inteiro (a rota autenticada pode responder outra coisa). */
 window.SPARE_PARAMETROS_ADMIN = {
     'visual':         renderVisual,
+    'locais':         renderLocations,
+    'classificacoes': renderClassifications,
     'permissoes':     renderPermissions,
     'sequencias':     renderSequences,
     'config-modulos': renderConfigModulos,
     'separacao':      renderSeparacaoConfig,
     'monitoramento':  renderMonitoramento,
     'cofre':          renderCofre,
-    'compras':        renderCompras,
     'base-ebs':       renderBaseEbs,
     'acessos':        renderAcessos,
     'dashboards':     renderDashboards

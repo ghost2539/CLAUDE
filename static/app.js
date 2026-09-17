@@ -53,6 +53,7 @@
         capex_spare:    'CAPEX Spare',
         agendamentos_forn: 'Agendamentos Forn.',
         internalizacao: 'Internalização',
+        servicenow_automacoes: 'ServiceNow',
         status:         'Status',
         parametros:     'Configuração'
     };

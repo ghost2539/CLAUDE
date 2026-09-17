@@ -246,18 +246,6 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── Gestão de Compras — PO e projetos do EBS pela API do módulo PHP ──
-    # O serviço não lê o cofre; o módulo /gestao_compras (Apache) lê e já
-    # expõe as consultas. Cliente HTTP, sem banco próprio, isolado.
-    try:
-        from routers.gestao_compras import router as gestao_compras_router
-        app.include_router(gestao_compras_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("gestao_compras").error(
-            "Módulo Gestão de Compras NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
     # ── Monitoramento (saúde e falhas) — banco próprio ──────────────────
     # Aditivo: só observa. Falha aqui nunca derruba o portal.
     try:

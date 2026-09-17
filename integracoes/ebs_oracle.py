@@ -254,10 +254,9 @@ def sql_livre(texto: str, max_rows: int = 200) -> list[dict]:
 # ── Registro de consultas (VOCÊS configuram aqui) ─────────────────
 # Preencha com as consultas de negócio. Sempre use bind variables (:param).
 # As consultas do módulo Gestão de Compras (oracle_helper.py do time), tal e
-# qual. Aqui elas rodam pelo caminho direto — que só funciona quando o
-# serviço alcança o cofre. Enquanto não alcança, as mesmas consultas chegam
-# por HTTP via integracoes/gestao_compras.py; os nomes e os binds são os
-# mesmos nos dois caminhos, de propósito.
+# qual: os nomes e os binds são os de lá, de propósito. Elas continuam aqui
+# porque quem as usa é a Base EBS — a ponte HTTP que também as chamava saiu
+# do portal junto com a aba Gestão de Compras.
 QUERIES: dict[str, str] = {
     "saldo": """
 WITH proj AS (

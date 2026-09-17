@@ -45,13 +45,17 @@ _NOME_VALIDO = _re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # quando a tela muda de lugar no menu.
 PERMISSAO_DE = {
     "gestao_ativos": "servicenow",
+    # A tela de automação de chamados saiu de dentro de Parâmetros e virou o
+    # item "ServiceNow" do menu. A CHAVE ficou sendo "automacoes": renomear
+    # tiraria o acesso de quem já o tem, numa mudança que é só de lugar.
+    "servicenow_automacoes": "automacoes",
 }
 
 # Módulos que qualquer pessoa logada recebe. Dois motivos diferentes:
 #
 # - `parametros` porque a aba "Minha conta" mora nele e é de todo mundo.
 #   Exigir a permissão "parametros" aqui tirava a conta de todos os que não
-#   são admin. As onze telas de administração NÃO estão neste arquivo: elas
+#   são admin. As telas de administração NÃO estão neste arquivo: elas
 #   vivem em `parametros_admin`, logo abaixo, que essa permissão protege.
 # - os demais são telas genéricas, sem item de menu com `data-perm`.
 SEM_PERMISSAO_PROPRIA = {
