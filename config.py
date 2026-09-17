@@ -352,12 +352,127 @@ class Settings:
     EBS_FORMS_CLASSE: str = _env("EBS_FORMS_CLASSE", "")
     EBS_FORMS_ESPERA_JVM: str = _env("EBS_FORMS_ESPERA_JVM", "180")
 
+    # Módulos com permissão por usuário e as AÇÕES que existem em cada um.
+    # A tela de permissões só oferece estas; `permissions_set` descarta o
+    # resto (não há o que "exportar" na tela de boas-vindas). Módulo fora
+    # desta tabela funciona para admin e nega 403 para todo o resto.
+    # Os níveis (view < create/edit < admin) valem só dentro do módulo:
+    # `admin` aqui nunca é administrador do portal (`is_admin`).
+    MODULE_ACTIONS: dict[str, tuple[str, ...]] = {
+        "bemvindo": ("view",),
+        "consulta": ("view", "export"),
+        "recebimento": ("view", "create", "edit", "export", "admin"),
+        "reparos": ("view", "edit", "admin"),
+        "status": ("view",),
+        "parametros": ("view", "admin"),
+        "identificacao": ("view", "create", "admin"),
+        "servicenow": ("view", "create", "edit"),
+        "rastreio": ("view", "edit"),
+        "orcamento": ("view", "edit", "admin"),            # /controle-orcamento
+        # CAPEX Spare: projetos de investimento e suas linhas de item. O
+        # nome da chave é "orcamento_spare" porque é assim que o módulo
+        # está no ar, com dados em data/db/orcamento_spare.db — renomear
+        # apontaria a tela para um banco vazio.
+        "orcamento_spare": ("view", "create", "edit", "admin"),
+        # Agenda de entrega do fornecedor e a conferência do que chegou.
+        "agendamentos_forn": ("view", "create", "edit", "export", "admin"),
+        "internalizacao": ("view", "create", "edit", "export", "admin"),
+        "ebs_forms": ("view", "create", "admin"),
+        "automacoes": ("view", "admin"),
+        "orcamento_manutencao": ("view", "create", "edit", "export", "admin"),
+        "trilha": ("view", "admin"),
+        "torre": ("view", "admin"),
+        "atendimento": ("view", "edit", "admin"),
+        "preparacao": ("view", "edit", "admin"),
+        "separacao": ("view", "create", "edit", "admin"),
+        "projetos": ("view", "create", "edit", "admin"),
+        "reversa": ("view", "create", "edit", "admin"),
+        "inventario": ("view", "create", "edit", "admin"),
+        "regularizacao": ("view", "create", "edit", "admin"),
+        "externo": ("view", "edit", "admin"),
+        "destinacao": ("view", "edit", "admin"),
+        "obsolescencia": ("view",),   # coleta e credencial são do admin do portal
+        "consulta_times": ("view", "edit", "admin"),
+        "venda": ("view", "edit", "admin"),
+    }
+
     MODULES: list[str] = [
         "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
         "identificacao", "servicenow", "rastreio", "orcamento",
         "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
         "agendamentos_forn", "internalizacao"
     ]
+    # ── Bancos dos módulos que vieram da linha de desenvolvimento ──────
+    # Um banco por módulo, isolado: erro num não contamina outro. O padrão
+    # é um arquivo em data/db/ e só se declara para mudar de lugar.
+    # ── Atendimento a chamados (A20) ────────────────────────────────────
+    ATENDIMENTO_DATABASE_URL: str = _env(
+        "ATENDIMENTO_DATABASE_URL",
+        _sqlite("atendimento"),
+    )
+    # ── Bancadas de triagem e reparo (A02, A03, A04) ────────────────────
+    BANCADA_DATABASE_URL: str = _env(
+        "BANCADA_DATABASE_URL",
+        _sqlite("bancada"),
+    )
+    # ── Consulta Times (acesso específico) ──────────────────────────────
+    CONSULTA_TIMES_DATABASE_URL: str = _env(
+        "CONSULTA_TIMES_DATABASE_URL",
+        _sqlite("consulta_times"),
+    )
+    # ── Destinação (A09 a A13) ──────────────────────────────────────────
+    DESTINACAO_DATABASE_URL: str = _env(
+        "DESTINACAO_DATABASE_URL",
+        _sqlite("destinacao"),
+    )
+    # ── Assistência externa e devolução a terceiros (A05, A14) ──────────
+    EXTERNO_DATABASE_URL: str = _env(
+        "EXTERNO_DATABASE_URL",
+        _sqlite("externo"),
+    )
+    # ── Inventário e contagem (A18) ─────────────────────────────────────
+    INVENTARIO_DATABASE_URL: str = _env(
+        "INVENTARIO_DATABASE_URL",
+        _sqlite("inventario"),
+    )
+    # ── Preparação: configuração, montagem e internalização ─────────────
+    PREPARACAO_DATABASE_URL: str = _env(
+        "PREPARACAO_DATABASE_URL",
+        _sqlite("preparacao"),
+    )
+    # ── Projetos de loja (A16) ──────────────────────────────────────────
+    PROJETOS_DATABASE_URL: str = _env(
+        "PROJETOS_DATABASE_URL",
+        _sqlite("projetos"),
+    )
+    # ── Regularização de ativo (A19) ────────────────────────────────────
+    REGULARIZACAO_DATABASE_URL: str = _env(
+        "REGULARIZACAO_DATABASE_URL",
+        _sqlite("regularizacao"),
+    )
+    # ── Logística reversa (A17) ─────────────────────────────────────────
+    REVERSA_DATABASE_URL: str = _env(
+        "REVERSA_DATABASE_URL",
+        _sqlite("reversa"),
+    )
+    # ── Separação e Expedição (A15) ─────────────────────────────────────
+    SEPARACAO_DATABASE_URL: str = _env(
+        "SEPARACAO_DATABASE_URL",
+        _sqlite("separacao"),
+    )
+    # ── Trilha do Ativo (núcleo de rastreabilidade e relógios) ──────────
+    # Banco próprio: é a espinha dos processos e não divide arquivo com
+    # nenhum módulo de tela.
+    TRILHA_DATABASE_URL: str = _env(
+        "TRILHA_DATABASE_URL",
+        _sqlite("trilha"),
+    )
+    # ── Venda de ativos (A11) ───────────────────────────────────────────
+    VENDA_DATABASE_URL: str = _env(
+        "VENDA_DATABASE_URL",
+        _sqlite("venda"),
+    )
+
     CLOSED_STATUSES: set[str] = {
         "VENDA", "ENVIADO LOJA", "INTERNALIZADO", "S/ REPARO", "DESCARTE"
     }

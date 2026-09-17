@@ -1,0 +1,37 @@
+# Proxy reverso HTTPS na frente do portal (uvicorn em 127.0.0.1:8901).
+#
+#   cp deploy/nginx-portal-spare.conf.example /etc/nginx/conf.d/portal-spare.conf
+#   # ajuste server_name e os certificados; depois: nginx -t && systemctl reload nginx
+#
+# No arquivo de ambiente do portal: HOST=127.0.0.1, TRUSTED_PROXIES=127.0.0.1,::1
+# e SESSION_COOKIE_SECURE=auto (o cookie sai com Secure porque o proxy manda
+# X-Forwarded-Proto=https). O uvicorn já confia em cabeçalhos vindos de
+# 127.0.0.1 (--forwarded-allow-ips padrão).
+
+server {
+    listen 80;
+    server_name portal-spare.exemplo.com.br;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name portal-spare.exemplo.com.br;
+
+    ssl_certificate     /etc/pki/tls/certs/portal-spare.crt;
+    ssl_certificate_key /etc/pki/tls/private/portal-spare.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 50m;        # mesmo teto do UPLOAD_MAX_MB
+
+    location / {
+        proxy_pass         http://127.0.0.1:8901;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;         # uploads e consultas ao ServiceNow demoram
+    }
+}

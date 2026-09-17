@@ -24,6 +24,7 @@ window.SPARE_MODULES.servicenow = {
             relatorios: _snRenderRelatorios
         };
         (handlers[sub] || _snRenderUpload)(container, S);
+        _gaCarregarConfig(S);
     }
 
 };
@@ -31,8 +32,6 @@ window.SPARE_MODULES.servicenow = {
 /* ================================================================
    SN Login Bar — componente reutilizável de login ServiceNow
    ================================================================ */
-
-var _snKeepAliveTimer = null;
 
 /* A partir da unificação do login (Logon AD via ServiceNow), a sessão do SN
    já vem do próprio login do portal. Estas telas não pedem mais usuário/senha:
@@ -43,10 +42,9 @@ function _snLoginBarHtml() {
         '<div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">' +
             '<div style="font-size:.9rem">' +
                 '<strong>ServiceNow</strong>' +
-                '<span style="color:var(--text-secondary)"> — conectado automaticamente pelo login do portal (Logon AD).</span>' +
                 '<div id="sn-bar-status" style="font-size:.82rem;color:var(--text-secondary);margin-top:.25rem"></div>' +
             '</div>' +
-            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:10px;background:#dc262620;color:#dc2626;white-space:nowrap">Verificando…</span>' +
+            '<span id="sn-session-badge" style="font-size:.8rem;padding:2px 10px;border-radius:0;background:var(--sp-alerta)20;color:var(--sp-alerta);white-space:nowrap">Verificando…</span>' +
         '</div>' +
     '</div>';
 }
@@ -63,43 +61,33 @@ function _snSetBadge(active) {
     if (badge) {
         if (active) {
             badge.textContent = 'Conectado';
-            badge.style.background = '#16a34a20';
-            badge.style.color = '#16a34a';
+            badge.style.background = 'var(--sp-ok)20';
+            badge.style.color = 'var(--sp-ok)';
         } else {
             badge.textContent = 'Sessão expirada';
-            badge.style.background = '#dc262620';
-            badge.style.color = '#dc2626';
+            badge.style.background = 'var(--sp-alerta)20';
+            badge.style.color = 'var(--sp-alerta)';
         }
     }
     if (st) {
         st.innerHTML = active
             ? ''
-            : '<span style="color:#dc2626">Sessão do ServiceNow expirou. Saia e entre novamente no portal (Logon AD) para renovar.</span>';
+            : '<span style="color:var(--sp-alerta)">Sessão do ServiceNow expirou. Saia e entre novamente no portal (Logon AD) para renovar.</span>';
     }
 }
 
+/* Só confere e mostra o status. Quem renova a sessão do ServiceNow é o
+   keep-alive global do portal (app.js), que roda em qualquer tela e volta
+   a pingar quando a aba reaparece. O temporizador que existia aqui era um
+   segundo ping para o mesmo endpoint e desligava de vez no primeiro
+   "inativo" — bastava um falso negativo para a renovação parar. */
 function _snCheckSession(S, onSuccess) {
     S.api('/servicenow/session-status')
         .then(function (d) {
             _snSetBadge(d.active);
-            if (d.active) { _snStartKeepAlive(S); if (onSuccess) onSuccess(); }
+            if (d.active && onSuccess) onSuccess();
         })
         .catch(function () { _snSetBadge(false); });
-}
-
-function _snStartKeepAlive(S) {
-    if (_snKeepAliveTimer) return;
-    // Renova a sessão do ServiceNow a cada 5 minutos enquanto a tela estiver
-    // aberta (o endpoint session-status atualiza os cookies no servidor).
-    _snKeepAliveTimer = setInterval(function () {
-        S.api('/servicenow/session-status')
-            .then(function (d) { _snSetBadge(d.active); if (!d.active) _snStopKeepAlive(); })
-            .catch(function () {});
-    }, 5 * 60 * 1000);
-}
-
-function _snStopKeepAlive() {
-    if (_snKeepAliveTimer) { clearInterval(_snKeepAliveTimer); _snKeepAliveTimer = null; }
 }
 
 
@@ -112,16 +100,15 @@ var _snData = [];
 function _snRenderUpload(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Entrada de Estoque</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Upload de ativos para alm_hardware via a sua sessão do ServiceNow.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Origem dos ativos</div>' +
             '<div class="card-body">' +
-                '<label>Como deseja subir os ativos?</label>' +
+                '<label>Origem</label>' +
                 '<select id="sn-origem" class="form-control" style="max-width:420px">' +
                     '<option value="status">Base de recebimentos (por status)</option>' +
                     '<option value="lista">Lista de ativos</option>' +
+                    '<option value="planilha">Planilha de ativos</option>' +
                 '</select>' +
             '</div>' +
         '</div>' +
@@ -136,8 +123,6 @@ function _snRenderUpload(container, S) {
                         '<option value="">Selecione…</option></select>' +
                     '<button class="btn btn-primary" id="sn-status-load">Carregar</button>' +
                 '</div>' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
-                    'Carregue os ativos do status e selecione quais subir.</p>' +
             '</div>' +
         '</div>' +
 
@@ -156,6 +141,22 @@ function _snRenderUpload(container, S) {
             '</div>' +
         '</div>' +
 
+        // ── Origem: planilha ────────────────────────────────────────
+        '<div class="card mb-3" id="sn-src-planilha" style="display:none">' +
+            '<div class="card-header">Planilha de ativos</div>' +
+            '<div class="card-body">' +
+                '<p style="margin:0 0 .6rem">Baixe o modelo, preencha uma linha por ativo e envie.</p>' +
+                '<div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center">' +
+                    '<button class="btn btn-outline" id="sn-plan-modelo">Baixar planilha modelo</button>' +
+                    '<input type="file" id="sn-plan-arquivo" accept=".xlsx,.xls,.csv" class="form-control" style="max-width:320px">' +
+                    '<button class="btn btn-primary" id="sn-plan-enviar">Enviar planilha</button>' +
+                '</div>' +
+                '<p style="color:var(--text-secondary);font-size:.85rem;margin-top:.5rem">' +
+                    'Obrigatórios: Asset Tag, Número de Série e Modelo. O modelo traz as demais colunas ' +
+                    'que sobem para o ServiceNow.</p>' +
+            '</div>' +
+        '</div>' +
+
         // ── Pré-visualização (conferir e selecionar antes de subir) ─
         '<div class="card mb-3" id="sn-preview-card" style="display:none">' +
             '<div class="card-header">Conferir e selecionar</div>' +
@@ -168,13 +169,12 @@ function _snRenderUpload(container, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Configuração ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'Moeda padrão BRL para todos os ativos. A depreciação é sempre calculada após a inclusão.</p>' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                     '<div><label>Stockroom</label>' +
-                        '<input id="sn-stockroom" class="form-control" value="SPARE - CD324"></div>' +
-                    '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
-                        '<input id="sn-aisle" class="form-control" placeholder="Obrigatório"></div>' +
+                        '<select id="sn-stockroom" class="form-control"><option>SPARE - CD324</option></select></div>' +
+                    '<div><label>Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
+                        '<input id="sn-aisle" class="form-control" list="ga-corredores" placeholder="Obrigatório" autocomplete="off">' +
+                        '<datalist id="ga-corredores"></datalist></div>' +
                 '</div>' +
             '</div>' +
         '</div>' +
@@ -184,10 +184,7 @@ function _snRenderUpload(container, S) {
         '<div class="card mb-3">' +
             '<div class="card-header">Enviar ao ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p style="color:var(--text-secondary);font-size:.85rem;margin-bottom:1rem">' +
-                    'Carregue/consulte os ativos acima, selecione e clique em Subir. ' +
-                    'O envio usa a sua sessão do ServiceNow (login do portal).</p>' +
-                '<button class="btn btn-primary" id="sn-upload" style="background:#c06010;border-color:#c06010">' +
+                '<button class="btn btn-primary" id="sn-upload">' +
                     'Subir selecionados</button>' +
                 '<div id="sn-login-status" style="margin-top:.5rem;font-size:.85rem"></div>' +
             '</div>' +
@@ -197,17 +194,17 @@ function _snRenderUpload(container, S) {
             '<div class="card-header">Progresso</div>' +
             '<div class="card-body">' +
                 '<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">' +
-                    '<div style="flex:1;background:var(--bg-input);border-radius:8px;height:24px;overflow:hidden">' +
-                        '<div id="sn-bar" style="height:100%;background:#c06010;border-radius:8px;transition:width .3s;width:0%"></div>' +
+                    '<div style="flex:1;background:var(--bg-input);border-radius:0;height:24px;overflow:hidden">' +
+                        '<div id="sn-bar" style="height:100%;background:var(--sp-accent);transition:width .3s;width:0%"></div>' +
                     '</div>' +
                     '<span id="sn-pct" style="min-width:60px;text-align:right;font-weight:600">0%</span>' +
                 '</div>' +
                 '<div id="sn-phase" style="color:var(--text-secondary);margin-bottom:.5rem"></div>' +
                 '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem">' +
                     '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700" id="sn-s-total">0</div><div style="color:var(--text-secondary);font-size:.85rem">Total</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#16a34a" id="sn-s-ok">0</div><div style="color:var(--text-secondary);font-size:.85rem">Inseridos</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#dc2626" id="sn-s-err">0</div><div style="color:var(--text-secondary);font-size:.85rem">Erros</div></div>' +
-                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:#2563eb" id="sn-s-dep">0</div><div style="color:var(--text-secondary);font-size:.85rem">Depreciação</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-ok)" id="sn-s-ok">0</div><div style="color:var(--text-secondary);font-size:.85rem">Inseridos</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-alerta)" id="sn-s-err">0</div><div style="color:var(--text-secondary);font-size:.85rem">Erros</div></div>' +
+                    '<div style="text-align:center"><div style="font-size:1.8rem;font-weight:700;color:var(--sp-teal-text)" id="sn-s-dep">0</div><div style="color:var(--text-secondary);font-size:.85rem">Depreciação</div></div>' +
                 '</div>' +
                 '<div id="sn-results" style="max-height:300px;overflow:auto"></div>' +
             '</div>' +
@@ -237,6 +234,7 @@ function _snRenderUpload(container, S) {
         if (sel) sel.style.display = (o === 'selecao') ? '' : 'none';
         document.getElementById('sn-src-status').style.display = (o === 'status') ? '' : 'none';
         document.getElementById('sn-src-lista').style.display = (o === 'lista') ? '' : 'none';
+        document.getElementById('sn-src-planilha').style.display = (o === 'planilha') ? '' : 'none';
         // limpa a pré-visualização ao trocar de origem
         document.getElementById('sn-preview-card').style.display = 'none';
         window._snPreviewRows = [];
@@ -248,6 +246,13 @@ function _snRenderUpload(container, S) {
     if (loadBtn) loadBtn.addEventListener('click', function () { _snPreview(S, 'status'); });
     var consBtn = document.getElementById('sn-lista-consultar');
     if (consBtn) consBtn.addEventListener('click', function () { _snPreview(S, 'lista'); });
+
+    var planModelo = document.getElementById('sn-plan-modelo');
+    if (planModelo) planModelo.addEventListener('click', function () {
+        window.location.href = '/api/servicenow/entrada/planilha-modelo';
+    });
+    var planEnviar = document.getElementById('sn-plan-enviar');
+    if (planEnviar) planEnviar.addEventListener('click', function () { _snEnviarPlanilha(S); });
 
     document.getElementById('sn-upload').addEventListener('click', function () { _snStartUpload(S); });
     _snLoginBarBind(S);
@@ -356,6 +361,26 @@ function _snPreview(S, origem) {
         .finally(function () { btn.disabled = false; btn.textContent = t; });
 }
 
+/* Planilha: mesma pré-visualização das outras origens, para conferir e
+   selecionar antes de subir. */
+function _snEnviarPlanilha(S) {
+    var campo = document.getElementById('sn-plan-arquivo');
+    var arquivo = campo && campo.files && campo.files[0];
+    if (!arquivo) { S.toast('Escolha a planilha preenchida.', 'warning'); return; }
+    var btn = document.getElementById('sn-plan-enviar');
+    btn.disabled = true; var t = btn.textContent; btn.textContent = 'Enviando…';
+    var fd = new FormData(); fd.append('arquivo', arquivo);
+    S.api('/servicenow/entrada/planilha', { method: 'POST', body: fd })
+        .then(function (d) {
+            window._snPreviewRows = d.rows || [];
+            _snRenderPreview(S, window._snPreviewRows);
+            var invalidas = window._snPreviewRows.filter(function (r) { return !r.encontrado; }).length;
+            if (invalidas) S.toast(invalidas + ' linha(s) sem campo obrigatório não serão enviadas.', 'warning');
+        })
+        .catch(function (e) { S.toast(e.message, 'error'); })
+        .finally(function () { btn.disabled = false; btn.textContent = t; });
+}
+
 function _snRenderPreview(S, rows) {
     var card = document.getElementById('sn-preview-card');
     var info = document.getElementById('sn-preview-info');
@@ -370,7 +395,7 @@ function _snRenderPreview(S, rows) {
     var jaSN = rows.filter(function (r) { return r.existe_sn; }).length;
     info.innerHTML = enc + ' ativo(s) encontrado(s)' +
         (jaSN ? ' · <strong>' + jaSN + ' já no ServiceNow (serão atualizados)</strong>' : '') +
-        (rows.length - enc ? ' · <span style="color:#dc2626">' + (rows.length - enc) + ' não encontrado(s) no EBS</span>' : '');
+        (rows.length - enc ? ' · <span style="color:var(--sp-alerta)">' + (rows.length - enc) + ' não encontrado(s) no EBS</span>' : '');
 
     var html = '<table class="data-table" style="min-width:1050px"><thead><tr>' +
         '<th><input type="checkbox" id="snp-all" checked></th>' +
@@ -379,9 +404,10 @@ function _snRenderPreview(S, rows) {
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         var ok = !!r.encontrado;
-        var sn = r.existe_sn ? '<span style="color:#2563eb;font-weight:600">Sim (atualiza)</span>'
-            : '<span style="color:#16a34a">Novo</span>';
-        var sit = ok ? '' : '<span style="color:#dc2626">Não encontrado no EBS</span>';
+        var sn = r.existe_sn ? '<span style="color:var(--sp-teal-text);font-weight:600">Sim (atualiza)</span>'
+            : '<span style="color:var(--sp-ok)">Novo</span>';
+        var sit = ok ? '' : '<span style="color:var(--sp-alerta)">' +
+            S.esc(r.erro || (r.origem_planilha ? 'Linha incompleta' : 'Não encontrado no EBS')) + '</span>';
         html += '<tr>' +
             '<td><input type="checkbox" class="snp-row" value="' + i + '"' + (ok ? ' checked' : ' disabled') + '></td>' +
             '<td style="font-weight:600">' + S.esc(r.tag_number || '') + '</td>' +
@@ -404,7 +430,7 @@ function _snRenderPreview(S, rows) {
 
 async function _snStartUpload(S) {
     var aisle = document.getElementById('sn-aisle').value.trim();
-    if (!aisle) { S.toast('Informe o Aisle and Space (obrigatório).', 'warning'); return; }
+    if (!aisle) { S.toast('Informe o Espaço e Corredor (obrigatório).', 'warning'); return; }
 
     var rows = window._snPreviewRows || [];
     if (!rows.length) { S.toast('Carregue/consulte os ativos antes de subir.', 'warning'); return; }
@@ -464,7 +490,7 @@ function _snRenderErroReport(S, d) {
     var linhas = erros.map(function (r) {
         var motivos = (r.motivos && r.motivos.length) ? r.motivos.join(' | ') : (r.detail || '');
         return '<tr><td>' + r.idx + '</td><td>' + S.esc(r.serie || '') + '</td><td>' +
-            S.esc(r.etiqueta || '') + '</td><td style="color:#dc2626">' + S.esc(motivos) + '</td></tr>';
+            S.esc(r.etiqueta || '') + '</td><td style="color:var(--sp-alerta)">' + S.esc(motivos) + '</td></tr>';
     }).join('');
     box.innerHTML =
         '<div class="alert alert-danger" style="margin-bottom:.6rem">' +
@@ -530,11 +556,11 @@ function _snPollJob(S, jobId) {
                 for (var i = 0; i < d.results.length; i++) {
                     var r = d.results[i];
                     var statusBadge = r.status === 'ok'
-                        ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                        : '<span style="color:#dc2626;font-weight:600">ERRO</span>';
+                        ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                        : '<span style="color:var(--sp-alerta);font-weight:600">ERRO</span>';
                     var depBadge = '';
-                    if (r.depreciation === 'ok') depBadge = '<span style="color:#16a34a">OK</span>';
-                    else if (r.depreciation === 'falhou') depBadge = '<span style="color:#eab308">Falhou</span>';
+                    if (r.depreciation === 'ok') depBadge = '<span style="color:var(--sp-ok)">OK</span>';
+                    else if (r.depreciation === 'falhou') depBadge = '<span style="color:var(--sp-gold)">Falhou</span>';
                     else depBadge = '—';
                     var detalhe = r.status === 'ok' ? (r.display || '') : (r.detail || '');
                     html += '<tr>' +
@@ -544,7 +570,7 @@ function _snPollJob(S, jobId) {
                         '<td>' + S.esc(r.empresa || '') + '</td>' +
                         '<td>' + statusBadge + '</td>' +
                         '<td>' + depBadge + '</td>' +
-                        '<td style="font-size:.8rem;color:' + (r.status === 'ok' ? 'inherit' : '#dc2626') + '">' +
+                        '<td style="font-size:.8rem;color:' + (r.status === 'ok' ? 'inherit' : 'var(--sp-alerta)') + '">' +
                             S.esc(detalhe) + '</td>' +
                         '</tr>';
                 }
@@ -565,7 +591,7 @@ function _snPollJob(S, jobId) {
                 _snPollTimer = null;
                 document.getElementById('sn-upload').disabled = false;
                 document.getElementById('sn-phase').textContent = 'Erro: ' + d.error;
-                document.getElementById('sn-phase').style.color = '#dc2626';
+                document.getElementById('sn-phase').style.color = 'var(--sp-alerta)';
                 S.toast(d.error, 'error');
             }
         }).catch(function (e) {
@@ -585,8 +611,6 @@ function _snPollJob(S, jobId) {
 function _snRenderSaida(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Saída de Estoque</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Busca global e movimentação de ativos no ServiceNow.</p>' +
 
         _snLoginBarHtml() +
 
@@ -601,7 +625,7 @@ function _snRenderSaida(container, S) {
                     'Definir os dados de destino abaixo e aplicá-los a todos os ativos ao buscar' +
                 '</label>' +
                 '<div id="sa-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
-                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:0">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
                         '<div><label>BU</label>' +
                             '<select id="sa-bu" class="form-control">' +
@@ -619,12 +643,13 @@ function _snRenderSaida(container, S) {
                             '<select id="sa-location" class="form-control">' +
                                 '<option value="">Informe BU e código da loja</option>' +
                             '</select></div>' +
-                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Novo Status <span style="color:var(--sp-alerta)">*</span></label>' +
                             _saStatusSelectHtml('sa-new-status', 'In transit', '') + '</div>' +
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
-                        '<label>Observações <span style="color:#dc2626">*</span> (nº do chamado ou motivo)</label>' +
-                        '<input id="sa-notes" class="form-control" placeholder="Ex.: INC0012345 ou devolução de estoque"></div>' +
+                        '<label>Observações <span style="color:var(--sp-alerta)">*</span> (nº do chamado ou motivo)</label>' +
+                        '<input id="sa-notes" class="form-control" list="ga-anotacoes" placeholder="Ex.: INC0012345 ou devolução de estoque" autocomplete="off">' +
+                        '<datalist id="ga-anotacoes"></datalist></div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
                     '<button class="btn btn-primary" id="sa-search">Buscar ativos</button></div>' +
@@ -742,7 +767,7 @@ function _saSearch(S) {
             _saRenderList(S, window._saAssets, d.nao_encontrados || [], d.solicitados || ids.length);
         })
         .catch(function (e) {
-            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+            prog.innerHTML = '<span style="color:var(--sp-alerta)">' + S.esc(e.message) + '</span>';
         });
 }
 
@@ -760,7 +785,7 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
     var info = document.getElementById('sa-found-info');
     var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
     if (naoEncontrados.length) {
-        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+        msg += ' <span style="color:var(--sp-alerta)">Não encontrados (' + naoEncontrados.length + '): ' +
             S.esc(naoEncontrados.join(', ')) + '</span>';
     }
     info.innerHTML = msg;
@@ -811,7 +836,7 @@ function _saRenderList(S, assets, naoEncontrados, solicitados) {
             } else {
                 cell.textContent = inp.value.trim() ? 'Loja não encontrada' : '—';
                 cell.setAttribute('data-loc', '');
-                cell.style.color = inp.value.trim() ? '#dc2626' : '';
+                cell.style.color = inp.value.trim() ? 'var(--sp-alerta)' : '';
             }
         });
     });
@@ -875,8 +900,8 @@ function _saMoveAll(S) {
     function setProg() {
         var pct = Math.round(done / total * 100);
         prog.innerHTML =
-            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
-            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:var(--sp-accent);transition:width .2s"></div></div>' +
             '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
             done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
     }
@@ -886,7 +911,7 @@ function _saMoveAll(S) {
     function next() {
         if (idx >= selected.length) {
             btn.disabled = false;
-            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+            result.innerHTML = '<span style="color:' + (fail ? 'var(--sp-gold)' : 'var(--sp-ok)') + ';font-weight:600">' +
                 'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
             S.toast('Saída concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
             return;
@@ -907,9 +932,9 @@ function _saMoveAll(S) {
         };
 
         S.api('/servicenow/saida/move', { method: 'POST', body: body })
-            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .then(function () { cell.innerHTML = '<span style="color:var(--sp-ok)">✓</span>'; ok++; })
             .catch(function (e) {
-                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                cell.innerHTML = '<span style="color:var(--sp-alerta)" title="' + S.esc(e.message) + '">✗</span>';
                 fail++;
             })
             .then(function () { done++; idx++; setProg(); next(); });
@@ -923,6 +948,29 @@ function _saMoveAll(S) {
    ================================================================ */
 
 var _miStockrooms = ['SPARE - CD324', 'SPARE-ADM15', 'SPARE-CD504'];
+var _gaCorredores = [];
+var _gaAnotacoes = [];
+/* Estoques, corredores e anotações vêm de Configuração; aplicados na hora. */
+function _gaCarregarConfig(S) {
+    return S.api('/servicenow/gestao-ativos/config').then(function (c) {
+        if (c.estoques && c.estoques.length) _miStockrooms = c.estoques;
+        _gaCorredores = c.corredores || [];
+        _gaAnotacoes = c.anotacoes || [];
+        var dl = document.getElementById('ga-corredores');
+        if (dl) dl.innerHTML = _gaCorredores.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
+        var da = document.getElementById('ga-anotacoes');
+        if (da) da.innerHTML = _gaAnotacoes.map(function (x) { return '<option value="' + S.esc(x) + '">'; }).join('');
+        var st = document.getElementById('sn-stockroom');
+        if (st && st.tagName === 'SELECT') {
+            var atual = st.value;
+            st.innerHTML = _miStockrooms.map(function (x) { return '<option value="' + S.esc(x) + '">' + S.esc(x) + '</option>'; }).join('');
+            if (atual) st.value = atual;
+        }
+        document.querySelectorAll('select.mi-stockroom').forEach(function (sel) {
+            var v = sel.value; sel.innerHTML = _miStockroomSelectHtml('', v).replace(/^<select[^>]*>|<\/select>$/g, '');
+        });
+    }).catch(function () {});
+}
 
 function _miStockroomSelectHtml(cls, val) {
     var h = '<select class="form-control' + (cls ? ' ' + cls : '') + '"><option value="">Selecione…</option>';
@@ -935,8 +983,6 @@ function _miStockroomSelectHtml(cls, val) {
 function _snRenderMovInterna(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Movimentação Interna</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Movimenta ativos entre estoques internos, espaços e corredores.</p>' +
 
         _snLoginBarHtml() +
 
@@ -951,9 +997,9 @@ function _snRenderMovInterna(container, S) {
                     'Definir os dados abaixo e aplicá-los a todos os ativos ao buscar' +
                 '</label>' +
                 '<div id="mi-defaults" style="display:none;margin-top:.8rem;padding:.8rem;' +
-                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:6px">' +
+                    'background:var(--bg-root);border:1px solid var(--border-color);border-radius:0">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">' +
-                        '<div><label>Estoque destino <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Estoque destino <span style="color:var(--sp-alerta)">*</span></label>' +
                             _miStockroomSelectHtml('mi-stockroom', 'SPARE - CD324') + '</div>' +
                         '<div><label>BU</label>' +
                             '<select id="mi-bu" class="form-control">' +
@@ -965,13 +1011,14 @@ function _snRenderMovInterna(container, S) {
                             '</select></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem">' +
-                        '<div><label>Novo Status <span style="color:#dc2626">*</span></label>' +
+                        '<div><label>Novo Status <span style="color:var(--sp-alerta)">*</span></label>' +
                             _saStatusSelectHtml('mi-new-status', 'In stock', '') + '</div>' +
-                        '<div><label>Aisle and Space <span style="color:#dc2626">*</span></label>' +
-                            '<input id="mi-aisle" class="form-control" placeholder="Ex.: A-12"></div>' +
+                        '<div><label>Espaço e Corredor <span style="color:var(--sp-alerta)">*</span></label>' +
+                            '<input id="mi-aisle" class="form-control" list="ga-corredores" placeholder="Ex.: A-12" autocomplete="off">' +
+                            '<datalist id="ga-corredores"></datalist></div>' +
                     '</div>' +
                     '<div style="margin-top:.8rem">' +
-                        '<label>Observações <span style="color:#dc2626">*</span></label>' +
+                        '<label>Observações <span style="color:var(--sp-alerta)">*</span></label>' +
                         '<input id="mi-notes" class="form-control" placeholder="Motivo da movimentação"></div>' +
                 '</div>' +
                 '<div style="margin-top:1rem">' +
@@ -1020,7 +1067,7 @@ function _miSearch(S) {
             _miRenderList(S, window._miAssets, d.nao_encontrados || [], d.solicitados || ids.length);
         })
         .catch(function (e) {
-            prog.innerHTML = '<span style="color:#dc2626">' + S.esc(e.message) + '</span>';
+            prog.innerHTML = '<span style="color:var(--sp-alerta)">' + S.esc(e.message) + '</span>';
         });
 }
 
@@ -1034,7 +1081,7 @@ function _miRenderList(S, assets, naoEncontrados, solicitados) {
     var info = document.getElementById('mi-found-info');
     var msg = assets.length + ' de ' + solicitados + ' ativo(s) encontrado(s).';
     if (naoEncontrados.length) {
-        msg += ' <span style="color:#dc2626">Não encontrados (' + naoEncontrados.length + '): ' +
+        msg += ' <span style="color:var(--sp-alerta)">Não encontrados (' + naoEncontrados.length + '): ' +
             S.esc(naoEncontrados.join(', ')) + '</span>';
     }
     info.innerHTML = msg;
@@ -1048,7 +1095,7 @@ function _miRenderList(S, assets, naoEncontrados, solicitados) {
     var html = '<table class="data-table" style="min-width:1250px"><thead><tr>' +
         '<th><input type="checkbox" id="mi-check-all" checked></th>' +
         '<th>Asset Tag</th><th>Série</th><th>Nome</th><th>Local Atual</th><th>Status Atual</th>' +
-        '<th>Estoque Destino *</th><th>Novo Status *</th><th>Aisle/Space *</th><th>Obs *</th><th>OK</th>' +
+        '<th>Estoque Destino *</th><th>Novo Status *</th><th>Espaço e Corredor *</th><th>Obs *</th><th>OK</th>' +
         '</tr></thead><tbody>';
 
     for (var i = 0; i < assets.length; i++) {
@@ -1092,7 +1139,7 @@ function _miMoveAll(S) {
         var statAtual = selected[i].children[5].textContent.trim();
         if (!statAtual) { S.toast('Status atual ausente em uma linha marcada.', 'warning'); return; }
         if (!stk) { S.toast('Selecione o Estoque destino em todas as linhas.', 'warning'); return; }
-        if (!ai) { S.toast('Aisle and Space é obrigatório em todas as linhas.', 'warning'); return; }
+        if (!ai) { S.toast('Espaço e Corredor é obrigatório em todas as linhas.', 'warning'); return; }
         if (!ob) { S.toast('Observações é obrigatória em todas as linhas.', 'warning'); return; }
     }
 
@@ -1108,8 +1155,8 @@ function _miMoveAll(S) {
     function setProg() {
         var pct = Math.round(done / total * 100);
         prog.innerHTML =
-            '<div style="height:10px;background:#e5e7eb;border-radius:6px;overflow:hidden">' +
-            '<div style="height:100%;width:' + pct + '%;background:#3b82f6;transition:width .2s"></div></div>' +
+            '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
+            '<div style="height:100%;width:' + pct + '%;background:var(--sp-accent);transition:width .2s"></div></div>' +
             '<div style="font-size:.8rem;color:var(--text-secondary);margin-top:2px">' +
             done + '/' + total + ' — ' + ok + ' ok, ' + fail + ' erro</div>';
     }
@@ -1119,7 +1166,7 @@ function _miMoveAll(S) {
     function next() {
         if (idx >= selected.length) {
             btn.disabled = false;
-            result.innerHTML = '<span style="color:' + (fail ? '#d97706' : '#16a34a') + ';font-weight:600">' +
+            result.innerHTML = '<span style="color:' + (fail ? 'var(--sp-gold)' : 'var(--sp-ok)') + ';font-weight:600">' +
                 'Concluído: ' + ok + ' movimentado(s), ' + fail + ' com erro.</span>';
             S.toast('Movimentação concluída: ' + ok + ' ok, ' + fail + ' erro.', fail ? 'warning' : 'success');
             return;
@@ -1141,9 +1188,9 @@ function _miMoveAll(S) {
         };
 
         S.api('/servicenow/mov-interna/move', { method: 'POST', body: body })
-            .then(function () { cell.innerHTML = '<span style="color:#16a34a">✓</span>'; ok++; })
+            .then(function () { cell.innerHTML = '<span style="color:var(--sp-ok)">✓</span>'; ok++; })
             .catch(function (e) {
-                cell.innerHTML = '<span style="color:#dc2626" title="' + S.esc(e.message) + '">✗</span>';
+                cell.innerHTML = '<span style="color:var(--sp-alerta)" title="' + S.esc(e.message) + '">✗</span>';
                 fail++;
             })
             .then(function () { done++; idx++; setProg(); next(); });
@@ -1159,8 +1206,6 @@ function _miMoveAll(S) {
 function _snRenderCorreios(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Chamados Correios</h1>' +
-        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
-            'Incidentes com códigos de rastreio (campo correlation_display).</p>' +
 
         _snLoginBarHtml() +
 
@@ -1240,7 +1285,7 @@ function _snRenderCorreios(container, S) {
                     for (var j = 0; j < entries.length; j++) {
                         html += '<tr><td style="font-weight:600">' + S.esc(field) + '</td>' +
                             '<td>' + S.esc(entries[j].incident) + '</td>' +
-                            '<td style="color:' + (entries[j].value === '(vazio)' ? 'var(--text-secondary)' : '#c06010') + '">' +
+                            '<td style="color:' + (entries[j].value === '(vazio)' ? 'var(--text-secondary)' : 'var(--sp-kicker)') + '">' +
                                 S.esc(entries[j].value) + '</td></tr>';
                     }
                 }
@@ -1250,14 +1295,14 @@ function _snRenderCorreios(container, S) {
                 var det = d.detected_tracking_codes || {};
                 var detKeys = Object.keys(det);
                 if (detKeys.length) {
-                    html += '<h3 style="margin:16px 0 8px;color:#198754">Códigos de rastreio detectados automaticamente</h3>';
+                    html += '<h3 style="margin:16px 0 8px;color:var(--sp-ok)">Códigos de rastreio detectados automaticamente</h3>';
                     html += '<table class="data-table"><thead><tr><th>Campo</th><th>Incidente</th><th>Código</th></tr></thead><tbody>';
                     for (var k = 0; k < detKeys.length; k++) {
                         var items = det[detKeys[k]];
                         for (var m = 0; m < items.length; m++) {
-                            html += '<tr><td style="font-weight:600;color:#198754">' + S.esc(detKeys[k]) + '</td>' +
+                            html += '<tr><td style="font-weight:600;color:var(--sp-ok)">' + S.esc(detKeys[k]) + '</td>' +
                                 '<td>' + S.esc(items[m].incident) + '</td>' +
-                                '<td style="font-weight:600;color:#c06010">' + S.esc(items[m].value) + '</td></tr>';
+                                '<td style="font-weight:600;color:var(--sp-kicker)">' + S.esc(items[m].value) + '</td></tr>';
                         }
                     }
                     html += '</tbody></table>';
@@ -1307,7 +1352,7 @@ function _snRenderCorreios(container, S) {
                 for (var i = 0; i < d.eventos.length; i++) {
                     var ev = d.eventos[i];
                     var isFirst = i === 0;
-                    var dotColor = isFirst ? '#198754' : '#666';
+                    var dotColor = isFirst ? 'var(--sp-ok)' : 'var(--sp-faint)';
                     var dtStr = '';
                     if (ev.data) {
                         try {
@@ -1317,7 +1362,7 @@ function _snRenderCorreios(container, S) {
                         } catch (_) { dtStr = ev.data; }
                     }
                     html += '<div style="position:relative;padding-bottom:20px;' +
-                        (i < d.eventos.length - 1 ? 'border-left:2px solid #333;margin-left:6px;padding-left:24px' : 'margin-left:6px;padding-left:24px') + '">' +
+                        (i < d.eventos.length - 1 ? 'border-left:2px solid var(--sp-border);margin-left:6px;padding-left:24px' : 'margin-left:6px;padding-left:24px') + '">' +
                         '<div style="position:absolute;left:-7px;top:2px;width:14px;height:14px;border-radius:50%;background:' + dotColor + '"></div>' +
                         '<div style="font-weight:600;font-size:.95rem">' + S.esc(ev.descricao) + '</div>' +
                         (ev.detalhe ? '<div style="color:var(--text-secondary);font-size:.85rem">' + S.esc(ev.detalhe) + '</div>' : '') +
@@ -1330,7 +1375,7 @@ function _snRenderCorreios(container, S) {
 
                 // Info do objeto
                 if (d.tipo || d.dt_prevista) {
-                    html += '<div style="margin-top:16px;padding:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.9rem">' +
+                    html += '<div style="margin-top:16px;padding:12px;background:var(--sp-badge-teal-bg);border:1px solid var(--sp-teal-border);border-radius:0;font-size:.9rem">' +
                         '<div style="display:flex;gap:24px;flex-wrap:wrap">' +
                             (d.tipo ? '<div><span style="color:var(--text-secondary)">Tipo:</span> <strong>' + S.esc(d.tipo) + '</strong>' +
                                 (d.tipo_nome ? ' — ' + S.esc(d.tipo_nome) : '') + '</div>' : '') +
@@ -1351,8 +1396,8 @@ function _snRenderCorreios(container, S) {
                                 edt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                         } catch (_) { entDt = ent.data; }
                     }
-                    html += '<div style="margin-top:20px;padding:16px;background:rgba(25,135,84,.1);border:1px solid rgba(25,135,84,.3);border-radius:8px">' +
-                        '<div style="font-weight:700;font-size:1rem;color:#198754;margin-bottom:8px">' +
+                    html += '<div style="margin-top:20px;padding:16px;background:var(--sp-badge-teal-bg);border:1px solid var(--sp-teal-border);border-radius:0">' +
+                        '<div style="font-weight:700;font-size:1rem;color:var(--sp-ok);margin-bottom:8px">' +
                             'COMPROVANTE DE ENTREGA</div>' +
                         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.9rem">' +
                             '<div><span style="color:var(--text-secondary)">Status:</span> ' + S.esc(ent.descricao) + '</div>' +
@@ -1367,7 +1412,7 @@ function _snRenderCorreios(container, S) {
                             (ent.recebedor_comentario ? '<div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Obs:</span> ' + S.esc(ent.recebedor_comentario) + '</div>' : '') +
                         '</div>' +
                         '<div style="margin-top:12px">' +
-                            '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:#198754;border-color:#198754">' +
+                            '<button class="btn btn-sm btn-outline" id="co-ar-btn" style="color:var(--sp-ok);border-color:var(--sp-ok)">' +
                                 'Comprovante de entrega</button>' +
                             '<div id="co-ar-result" style="margin-top:8px"></div>' +
                         '</div>' +
@@ -1394,12 +1439,12 @@ function _snRenderCorreios(container, S) {
                                 var arHtml = '<div style="font-size:.9rem">';
                                 if (comp.imagem) {
                                     arHtml += '<div style="margin-bottom:8px"><img src="data:image/jpeg;base64,' + comp.imagem +
-                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                 }
                                 if (comp.assinatura) {
                                     arHtml += '<div style="margin-bottom:8px"><strong>Assinatura:</strong><br>' +
                                         '<img src="data:image/png;base64,' + comp.assinatura +
-                                        '" style="max-width:300px;border:1px solid #333;border-radius:4px" /></div>';
+                                        '" style="max-width:300px;border:1px solid var(--sp-border);border-radius:0" /></div>';
                                 }
                                 if (comp.nome) {
                                     arHtml += '<div><span style="color:var(--text-secondary)">Nome:</span> ' + S.esc(comp.nome) + '</div>';
@@ -1433,7 +1478,7 @@ function _snRenderCorreios(container, S) {
                                             : (gimg.conteudo ? 'data:' + (gimg.tipo || 'image/jpeg') + ';base64,' + gimg.conteudo : '');
                                         if (src) {
                                             arHtml += '<div style="margin:8px 0"><img src="' + src +
-                                                '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                         }
                                     }
                                 }
@@ -1448,10 +1493,10 @@ function _snRenderCorreios(container, S) {
                                                 var img = imgs[ii];
                                                 if (typeof img === 'string') {
                                                     arHtml += '<div style="margin:8px 0"><img src="data:image/jpeg;base64,' + img +
-                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                                 } else if (img.conteudo) {
                                                     arHtml += '<div style="margin:8px 0"><img src="data:' + (img.tipo || 'image/jpeg') + ';base64,' + img.conteudo +
-                                                        '" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #333" /></div>';
+                                                        '" style="max-width:100%;max-height:400px;border-radius:0;border:1px solid var(--sp-border)" /></div>';
                                                 }
                                             }
                                         }
@@ -1470,7 +1515,7 @@ function _snRenderCorreios(container, S) {
                                 arResult.innerHTML = arHtml;
                             })
                             .catch(function (e) {
-                                arResult.innerHTML = '<div style="color:#dc2626;font-size:.85rem">' + S.esc(e.message) + '</div>';
+                                arResult.innerHTML = '<div style="color:var(--sp-alerta);font-size:.85rem">' + S.esc(e.message) + '</div>';
                             })
                             .finally(function () {
                                 arBtn.disabled = false;
@@ -1480,7 +1525,7 @@ function _snRenderCorreios(container, S) {
                 }
             })
             .catch(function (e) {
-                body.innerHTML = '<div style="padding:1rem;color:#dc2626">' + S.esc(e.message) + '</div>';
+                body.innerHTML = '<div style="padding:1rem;color:var(--sp-alerta)">' + S.esc(e.message) + '</div>';
             });
     }
 
@@ -1531,7 +1576,7 @@ function _snRenderCorreios(container, S) {
                             (hasValidCode
                                 ? '<button class="btn btn-sm btn-outline co-track-btn" ' +
                                     'data-code="' + S.esc(trackCode) + '" ' +
-                                    'style="font-weight:600;color:#c06010">' +
+                                    'style="font-weight:600;color:var(--sp-kicker)">' +
                                     S.esc(trackCode) + '</button>'
                                 : '<span style="color:var(--text-secondary);font-size:.85rem" title="' +
                                     S.esc(trackCode) + '">' +
@@ -1586,12 +1631,12 @@ async function _coAutoRastrear(lista, S, reloadFn) {
             if (entregue) {
                 _coCellEncerrar(cell, item, S, reloadFn);
             } else if (d && !d.encontrado) {
-                cell.innerHTML = '<span style="color:#6b7280;font-size:.82rem">Não encontrado</span>';
+                cell.innerHTML = '<span style="color:var(--sp-faint);font-size:.82rem">Não encontrado</span>';
             } else {
-                cell.innerHTML = '<span style="color:#2563eb;font-size:.82rem;font-weight:600">Aguardando Entrega</span>';
+                cell.innerHTML = '<span style="color:var(--sp-teal-text);font-size:.82rem;font-weight:600">Aguardando Entrega</span>';
             }
         } catch (err) {
-            cell.innerHTML = '<span style="color:#dc2626;font-size:.8rem" title="' +
+            cell.innerHTML = '<span style="color:var(--sp-alerta);font-size:.8rem" title="' +
                 S.esc(err.message || '') + '">Erro no rastreio</span>';
         }
     }
@@ -1601,7 +1646,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
     cell.innerHTML = '';
     var wrap = S.el('div', { style: 'display:flex;align-items:center;gap:6px' });
     wrap.appendChild(S.el('span', {
-        style: 'color:#16a34a;font-weight:600;font-size:.82rem', textContent: 'Entregue'
+        style: 'color:var(--sp-ok);font-weight:600;font-size:.82rem', textContent: 'Entregue'
     }));
     var btn = S.el('button', { className: 'btn btn-sm btn-primary', textContent: 'Encerrar' });
     btn.onclick = function () {
@@ -1614,7 +1659,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
         })
             .then(function (r) {
                 S.toast('Chamado ' + (r.encerrado || item.number) + ' encerrado.', 'success');
-                cell.innerHTML = '<span style="color:#16a34a;font-weight:600">Encerrado ✓</span>';
+                cell.innerHTML = '<span style="color:var(--sp-ok);font-weight:600">Encerrado ✓</span>';
             })
             .catch(function (err) {
                 S.toast(err.message || 'Falha ao encerrar.', 'error');
@@ -1628,7 +1673,7 @@ function _coCellEncerrar(cell, item, S, reloadFn) {
 function _snShowError(targetId, err, S, retryFn) {
     var el = document.getElementById(targetId);
     var isSn = err.message && err.message.indexOf('ServiceNow') !== -1;
-    var html = '<div style="padding:1rem;color:#dc2626">' + S.esc(err.message) + '</div>';
+    var html = '<div style="padding:1rem;color:var(--sp-alerta)">' + S.esc(err.message) + '</div>';
     if (isSn) {
         html += '<div style="padding:0 1rem .5rem"><button class="btn btn-sm btn-primary" id="' + targetId + '-relogin">Reconectar ServiceNow</button></div>';
     }
@@ -1745,7 +1790,7 @@ function _relLoad(S) {
     S.api('/servicenow/relatorios/sla?' + qp)
         .then(function (d) {
             document.getElementById('rel-sla').style.display = '';
-            var pctColor = d.compliance_pct >= 90 ? '#16a34a' : d.compliance_pct >= 70 ? '#ca8a04' : '#dc2626';
+            var pctColor = d.compliance_pct >= 90 ? 'var(--sp-ok)' : d.compliance_pct >= 70 ? 'var(--sp-gold)' : 'var(--sp-alerta)';
             var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;text-align:center;margin-bottom:1.5rem">' +
                 '<div class="stat-card accent-green"><div class="stat-value" style="color:' + pctColor + '">' + d.compliance_pct + '%</div>' +
                 '<div class="stat-label">Conformidade</div></div>' +
@@ -1753,7 +1798,7 @@ function _relLoad(S) {
                 '<div class="stat-label">Total SLAs</div></div>' +
                 '<div class="stat-card accent-orange"><div class="stat-value">' + d.met + '</div>' +
                 '<div class="stat-label">Dentro do SLA</div></div>' +
-                '<div class="stat-card" style="border-top:4px solid #dc2626"><div class="stat-value" style="color:#dc2626">' + d.breached + '</div>' +
+                '<div class="stat-card" style="border-top:4px solid var(--sp-alerta)"><div class="stat-value" style="color:var(--sp-alerta)">' + d.breached + '</div>' +
                 '<div class="stat-label">Violados</div></div>' +
                 '</div>';
 
@@ -1764,8 +1809,8 @@ function _relLoad(S) {
                     var bp = d.by_priority[p];
                     var bpPct = bp.total > 0 ? Math.round((bp.met / bp.total) * 100) : 0;
                     html += '<tr><td style="font-weight:600">' + S.esc(p) + '</td>' +
-                        '<td>' + bp.total + '</td><td style="color:#16a34a">' + bp.met + '</td>' +
-                        '<td style="color:#dc2626">' + bp.breached + '</td>' +
+                        '<td>' + bp.total + '</td><td style="color:var(--sp-ok)">' + bp.met + '</td>' +
+                        '<td style="color:var(--sp-alerta)">' + bp.breached + '</td>' +
                         '<td style="font-weight:600">' + bpPct + '%</td></tr>';
                 });
                 html += '</tbody></table>';

@@ -7,28 +7,14 @@
 (function () {
     "use strict";
 
-    // Prefixo quando o portal é servido num subcaminho do proxy: o router
-    // injeta <meta name="app-base">. Vazio na raiz do domínio.
-    var BASE = (function () {
-        var m = document.querySelector('meta[name="app-base"]');
-        return (m && m.content ? m.content : '').replace(/\/+$/, '');
-    })();
+    // Tema escolhido no portal (cache local do mesmo usuário); a página
+    // não tem alternador próprio.
+    try {
+        document.documentElement.dataset.tema =
+            localStorage.getItem("spare-tema") === "escuro" ? "escuro" : "claro";
+    } catch (_) { /* sem storage: fica no claro */ }
 
-    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
-    // vira GET). Com a marca ligada, a URL já sai com a barra.
-    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
-    function comBarra(url) {
-        if (!API_BARRA) return url;
-        var corte = url.indexOf('?');
-        var base = corte === -1 ? url : url.slice(0, corte);
-        var query = corte === -1 ? '' : url.slice(corte);
-        if (base.charAt(base.length - 1) !== '/') base += '/';
-        return base + query;
-    }
-
-
-
-    var API = BASE + "/api/ebs-forms";
+    var API = "/api/ebs-forms";
     var MODULO = "ebs_forms";
     var INTERVALO_POLL = 3000;
 
@@ -72,7 +58,7 @@
             opt.headers["Content-Type"] = "application/json";
             opt.body = JSON.stringify(corpo);
         }
-        return fetch(comBarra(API + caminho), opt).then(function (r) {
+        return fetch(API + caminho, opt).then(function (r) {
             if (r.status === 401) {
                 window.location.href = "/";
                 throw new Error("Sessão expirada.");
@@ -131,7 +117,7 @@
 
     // ── sessão / permissões ────────────────────────────────────────────
     function carregarSessao() {
-        return fetch(comBarra(BASE + "/api/auth/me"), { credentials: "same-origin" })
+        return fetch("/api/auth/me", { credentials: "same-origin" })
             .then(function (r) { if (!r.ok) throw new Error("sem sessão"); return r.json(); })
             .then(function (me) {
                 var mapa = (me.permission_map || {})[MODULO] || {};

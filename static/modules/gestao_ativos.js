@@ -42,6 +42,9 @@ window.SPARE_MODULES.gestao_ativos = {
                 movimentacao: window._snRenderMovInterna
             };
             (handlers[sub] || window._snRenderUpload)(container, S);
+            // Sem isto os estoques, corredores e anotações configurados nunca
+            // chegam à tela: ela ficava com a lista embutida no código.
+            if (window._gaCarregarConfig) window._gaCarregarConfig(S);
         }, function (e) {
             container.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
         });
@@ -55,7 +58,7 @@ function _gaCarregarTelas() {
     if (_gaCarregando) return _gaCarregando;
     _gaCarregando = new Promise(function (ok, falhou) {
         var s = document.createElement('script');
-        s.src = ((window.SPARE && window.SPARE.base) || '') + '/static/modules/servicenow.js?v=' + Date.now();
+        s.src = '/static/modules/servicenow.js?v=' + Date.now();
         s.onload = function () { _gaCarregando = null; ok(); };
         s.onerror = function () {
             _gaCarregando = null;
@@ -76,15 +79,7 @@ function _gaCarregarTelas() {
 function _gaRenderObsolescencia(container, S) {
     container.innerHTML =
         '<h1 class="page-title">Obsolescência do Parque</h1>' +
-        '<p class="page-subtitle">Painel dedicado, em tela cheia, com a situação ' +
-            'de obsolescência dos coletores.</p>' +
         '<div class="card"><div class="card-body">' +
-            '<p style="margin:0 0 12px">O painel abre em uma aba separada, fora da ' +
-                'moldura do portal, para ser apresentado em reunião. O acesso continua ' +
-                'exigindo o login da rede.</p>' +
-            '<p style="margin:0 0 16px;color:var(--text-secondary);font-size:.9rem">' +
-                'Fonte dos dados: MDM de Coletores (Workspace ONE / AirWatch), coletado ' +
-                'em segundo plano pelo portal.</p>' +
             '<button id="ga-obs-abrir" class="btn btn-primary">Abrir painel de Obsolescência</button>' +
         '</div></div>';
 

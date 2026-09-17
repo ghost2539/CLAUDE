@@ -17,10 +17,12 @@ window.SPARE_MODULES.parametros = {
             ['permissoes',      'Usuários e Permissões'],
             ['sequencias',      'Sequências'],
             ['config-modulos',  'Configuração Módulos'],
+            ['separacao',       'Ciclo do ativo'],
             ['automacoes',      'Automações'],
-            ['monitoramento',   'Monitoramento'],
             ['cofre',           'Cofre de segredos'],
-            ['ebs-oracle',      'Base EBS (Oracle)'],
+            ['compras',         'Gestão de Compras'],
+            ['base-ebs',        'Base EBS'],
+            ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
             ['dashboards',      'Dashboards'],
             ['conta',           'Minha conta']
@@ -30,8 +32,8 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'monitoramento', 'cofre', 'ebs-oracle', 'acessos',
-                         'dashboards'];
+                         'separacao', 'monitoramento', 'cofre', 'compras', 'base-ebs',
+                         'acessos', 'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -49,10 +51,12 @@ window.SPARE_MODULES.parametros = {
             permissoes:     renderPermissions,
             sequencias:     renderSequences,
             'config-modulos': renderConfigModulos,
+            separacao:      renderSeparacaoConfig,
             automacoes:     renderAutomacoes,
-            monitoramento:  renderMonitoramento,
             cofre:          renderCofre,
-            'ebs-oracle':   renderEbsOracle,
+            compras:        renderCompras,
+            'base-ebs':     renderBaseEbs,
+            monitoramento:  renderMonitoramento,
             acessos:        renderAcessos,
             dashboards:     renderDashboards,
             conta:          renderAccount
@@ -84,7 +88,6 @@ function _pField(label, id, value, type) {
 function renderConfigModulos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Configuração Módulos</h1>' +
-        '<p class="text-muted">Configurações administrativas das bases dos módulos.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — Importar base histórica</div>' +
@@ -136,17 +139,46 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
+            '<div class="card-header">Consulta — colunas padrão</div>' +
+            '<div class="card-body" id="cm-consulta-cols"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Gestão de Ativos — estoques, corredores e anotações</div>' +
+            '<div class="card-body" id="cm-ga"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">EBS — API de consulta</div>' +
+            '<div class="card-body" id="cm-ebs"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — famílias e prefixos</div>' +
+            '<div class="card-body" id="cm-familias"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
+            '<div class="card-header">Recebimento — marcação no ServiceNow</div>' +
+            '<div class="card-body">' +
+                '<div id="cm-rec-sn"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
+            '</div>' +
+        '</div>' +
+
+        '<div class="card mb-3">' +
             '<div class="card-header">Indicadores — filtros do ServiceNow</div>' +
             '<div class="card-body">' +
-                '<p class="text-muted">Ajusta as consultas do painel de Indicadores. ' +
-                    'Estados do incident são numéricos: 1 Novo · 2 Em andamento · 3 Em espera · ' +
-                    '6 Resolvido · 7 Encerrado · 8 Cancelado.</p>' +
                 '<div id="cm-ind-form"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
             '</div>' +
         '</div>';
 
     _renderIndicadoresConfig(S);
     _renderValorHora(S);
+    _renderRecebimentoSN(S);
+    _renderConsultaColunas(S);
+    _renderGestaoAtivos(S);
+    _renderFamilias(S);
+    _renderEbs(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -177,6 +209,156 @@ function renderConfigModulos(c, S) {
             document.getElementById('cm-local-result').innerHTML =
                 '<div class="alert alert-success">' +
                 d.validos + ' válidos; ' + d.rejeitados + ' rejeitados.</div>';
+        } catch (x) {
+            S.toast(x.message, 'error');
+        } finally {
+            S.loading(false);
+        }
+    };
+}
+
+/* EBS: URLs da API de consulta. Aplicado na próxima consulta, sem reiniciar. */
+async function _renderEbs(S) {
+    var host = document.getElementById('cm-ebs');
+    if (!host) return;
+    var d;
+    try { d = await S.api('/parametros/ebs'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    var a = d.api || {};
+    function campo(id, rotulo, val) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<input id="' + id + '" class="form-control" value="' + S.esc(val || '') + '" placeholder="https://…"></div>';
+    }
+    host.innerHTML =
+        '<div class="form-grid cols-2">' +
+            campo('ebs-login', 'API — URL de login', a.login_url) +
+            campo('ebs-search', 'API — URL de busca', a.search_url) +
+        '</div>' +
+        '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button></div>';
+    var v = function (id) { return document.getElementById(id).value.trim(); };
+    document.getElementById('ebs-salvar').onclick = async function () {
+        try {
+            await S.api('/parametros/ebs', { method: 'PUT', body: { login_url: v('ebs-login'), search_url: v('ebs-search') } });
+            S.toast('EBS reconfigurado. Vale na próxima consulta.', 'success'); _renderEbs(S);
+        } catch (e) { S.toast(e.message, 'error'); }
+    };
+}
+
+/* Que palavra do modelo manda o ativo para qual bancada; prefixos de duplicidade. */
+async function _renderFamilias(S) {
+    var host = document.getElementById('cm-familias');
+    if (!host) return;
+    var c;
+    try { c = await S.api('/recebimento/familias'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    function area(id, rotulo, lista) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<textarea id="' + id + '" class="form-control" rows="3" placeholder="um por linha">' + S.esc((lista || []).join('\n')) + '</textarea></div>';
+    }
+    host.innerHTML = '<div class="form-grid cols-2">' +
+        area('fam-frota', 'Mobilidade (coletor, sled…)', c.frota) +
+        area('fam-conect', 'Conectividade (AP, switch…)', c.conectividade) +
+        area('fam-dup', 'Prefixos de duplicidade entre empresas', c.prefixos_duplicidade) + '</div>' +
+        '<button id="fam-salvar" class="btn btn-primary mt-2">Salvar</button>';
+    document.getElementById('fam-salvar').onclick = async function () {
+        var linhas = function (id) { return document.getElementById(id).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+        try {
+            await S.api('/parametros/config/recebimento_familias', { method: 'PUT', body: {
+                frota: linhas('fam-frota'), conectividade: linhas('fam-conect'), prefixos_duplicidade: linhas('fam-dup') } });
+            S.toast('Configuração salva.', 'success');
+        } catch (e) { S.toast(e.message, 'error'); }
+    };
+}
+
+/* Listas das telas de Entrada / Saída / Movimentação interna. */
+async function _renderGestaoAtivos(S) {
+    var host = document.getElementById('cm-ga');
+    if (!host) return;
+    var c;
+    try { c = await S.api('/servicenow/gestao-ativos/config'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    function area(id, rotulo, lista) {
+        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
+            '<textarea id="' + id + '" class="form-control" rows="4" placeholder="um por linha">' + S.esc((lista || []).join('\n')) + '</textarea></div>';
+    }
+    host.innerHTML = '<div class="form-grid cols-2">' +
+        area('ga-estoques', 'Estoques (stockroom)', c.estoques) +
+        area('ga-corredores-cfg', 'Corredores e espaços sugeridos', c.corredores) +
+        area('ga-anotacoes-cfg', 'Anotações sugeridas na saída', c.anotacoes) + '</div>' +
+        '<button id="ga-salvar" class="btn btn-primary mt-2">Salvar</button>';
+    document.getElementById('ga-salvar').onclick = async function () {
+        var linhas = function (id) { return document.getElementById(id).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+        try {
+            await S.api('/parametros/config/gestao_ativos', { method: 'PUT', body: {
+                estoques: linhas('ga-estoques'), corredores: linhas('ga-corredores-cfg'), anotacoes: linhas('ga-anotacoes-cfg') } });
+            S.toast('Configuração salva.', 'success');
+        } catch (e) { S.toast(e.message, 'error'); }
+    };
+}
+
+/* Colunas padrão da Consulta (cada usuário pode reduzir a sua). */
+async function _renderConsultaColunas(S) {
+    var host = document.getElementById('cm-consulta-cols');
+    if (!host) return;
+    var p;
+    try { p = await S.api('/consulta/colunas'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
+    host.innerHTML = '';
+    var grade = S.el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 16px' });
+    p.disponiveis.forEach(function (c) {
+        var l = S.el('label', { style: 'display:flex;gap:8px;align-items:center' });
+        var cb = S.el('input', { type: 'checkbox', value: c.chave }); cb.checked = p.padrao.indexOf(c.chave) >= 0;
+        l.appendChild(cb); l.appendChild(document.createTextNode(c.rotulo)); grade.appendChild(l);
+    });
+    host.appendChild(grade);
+    host.appendChild(S.el('button', { className: 'btn btn-primary mt-2', textContent: 'Salvar', onClick: async function () {
+        var sel = Array.from(grade.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+        if (!sel.length) { S.toast('Escolha ao menos uma coluna.', 'warning'); return; }
+        try { await S.api('/parametros/config/consulta_colunas_padrao', { method: 'PUT', body: { colunas: sel } }); S.toast('Colunas padrão salvas.', 'success'); }
+        catch (e) { S.toast(e.message, 'error'); }
+    } }));
+}
+
+/* Marcação do recebimento no ServiceNow (dentro de Configuração Módulos). */
+async function _renderRecebimentoSN(S) {
+    var host = document.getElementById('cm-rec-sn');
+    if (!host) return;
+    var cfg = {};
+    try {
+        cfg = await S.api('/parametros/config/recebimento_servicenow') || {};
+    } catch (e) {
+        host.innerHTML = '<div class="alert alert-danger">Não foi possível carregar: ' +
+            S.esc(e.message) + '</div>';
+        return;
+    }
+    var ativo = cfg.ativo !== false;
+    host.innerHTML =
+        '<div class="form-group">' +
+            '<label><input type="checkbox" id="rsn-ativo"' + (ativo ? ' checked' : '') +
+            '> Marcar em estoque ao receber</label>' +
+        '</div>' +
+        '<div class="form-grid cols-2">' +
+            '<div class="form-group"><label>Depósito (stockroom)</label>' +
+                '<input id="rsn-stockroom" class="form-control" value="' +
+                S.esc(cfg.stockroom || '') + '" placeholder="SPARE - CD324">' +
+                '<small class="text-muted">padrão: SPARE - CD324</small>' +
+            '</div>' +
+            '<div class="form-group"><label>Estado (install_status)</label>' +
+                '<input id="rsn-status" class="form-control" value="' +
+                S.esc(cfg.install_status || '') + '" placeholder="6">' +
+                '<small class="text-muted">padrão: 6 (Em estoque)</small>' +
+            '</div>' +
+        '</div>' +
+        '<button class="btn btn-primary mt-2" id="rsn-salvar">Salvar</button>';
+
+    document.getElementById('rsn-salvar').onclick = async function () {
+        try {
+            S.loading(true);
+            await S.api('/parametros/config/recebimento_servicenow', {
+                method: 'PUT',
+                body: {
+                    ativo: document.getElementById('rsn-ativo').checked,
+                    stockroom: document.getElementById('rsn-stockroom').value.trim(),
+                    install_status: document.getElementById('rsn-status').value.trim()
+                }
+            });
+            S.toast('Configuração salva.', 'success');
         } catch (x) {
             S.toast(x.message, 'error');
         } finally {
@@ -250,17 +432,15 @@ async function _renderIndicadoresConfig(S) {
 async function renderAutomacoes(c, S) {
     // A aba é de todos, e as REGRAS também: qualquer usuário cria, edita e
     // exclui regra, e roda a rotina (que age no ServiceNow com a sessão de
-    // quem clicou). Só a CONFIGURAÇÃO da rotina — horários, cofre, credencial
-    // — pede "Administrar" no módulo Automações.
+    // quem clicou). Só a CONFIGURAÇÃO (campo do rastreio) pede "Administrar"
+    // no módulo Automações.
     var usuario = S.user() || {};
     var permAutom = (usuario.permission_map || {}).automacoes || {};
     var ehAdmin = !!(usuario.is_admin || permAutom.can_admin);
     c.innerHTML =
         '<h1 class="page-title">Automações</h1>' +
-        '<p class="text-muted">Rotina que encerra ou encaminha chamados entregues, ' +
-            'com o seu usuário. Só age quando o último evento do rastreio é ENTREGUE.</p>' +
         '<div class="card mb-3"><div class="card-header">' +
-            (ehAdmin ? 'Configuração da rotina' : 'Situação da rotina') + '</div>' +
+            (ehAdmin ? 'Configuração da rotina' : 'Rotina') + '</div>' +
             '<div class="card-body" id="au-cfg"><div class="spinner-inline">' +
             '<span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -276,85 +456,47 @@ async function renderAutomacoes(c, S) {
             '<div class="card-body" id="au-logs"></div></div>';
 
     // ── Config ──
+    // Não há agendador nem conta de serviço: a rotina só roda pelo botão,
+    // com a sessão de quem clicou, e os apontamentos saem em nome dele.
     async function loadCfg() {
         var cfg = await S.api('/automacoes/config');
         var host = document.getElementById('au-cfg');
+        var ultima = cfg.ultima_execucao
+            ? (S.esc(cfg.ultima_execucao) + (cfg.ultimo_usuario ? ' por ' + S.esc(cfg.ultimo_usuario) : ''))
+            : '—';
+        var aviso =
+            '<p class="text-muted" style="margin:0 0 12px;font-size:.85rem">' +
+            'A rotina busca os rastreios dos chamados da fila e aplica as regras ' +
+            '<strong>com o seu usuário do ServiceNow</strong>: encerramentos e ' +
+            'encaminhamentos ficam registrados em seu nome. Não há execução automática.</p>';
         if (cfg.somente_leitura) {
-            host.innerHTML =
+            host.innerHTML = aviso +
                 '<div class="form-grid cols-2">' +
-                    '<div class="form-group"><label>Rotina automática</label>' +
-                        '<div style="padding-top:6px;font-weight:600">' +
-                        (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</div></div>' +
-                    '<div class="form-group"><label>Horários</label>' +
-                        '<div style="padding-top:6px">' + S.esc(cfg.horarios || '') + '</div></div>' +
-                    '<div class="form-group"><label>Sessão para a rotina</label>' +
-                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
-                        (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
-                        '</div></div>' +
+                    '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
+                        '<div style="padding-top:6px">' + S.esc(cfg.tracking_field || 'sys_tags') + '</div></div>' +
                     '<div class="form-group"><label>Última execução</label>' +
-                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' +
-                        S.esc(cfg.ultima_execucao || '—') + '</div></div>' +
+                        '<div style="padding-top:6px;font-size:.85rem;color:var(--text-secondary)">' + ultima + '</div></div>' +
                 '</div>' +
-                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Exec Now</button>' +
-                '<span class="text-muted" style="margin-left:10px">' +
-                'A configuração da rotina é do administrador.</span></div>';
+                '<div class="mt-2"><button id="au-run" class="btn btn-primary">Executar agora</button></div>';
             ligarBotaoRodar();
             return;
         }
-        var modo100 = cfg.cofre_disponivel
-            ? '<span style="color:#16a34a;font-weight:600">Cofre disponível</span> — a rotina roda 100% automática.'
-            : (cfg.tem_credencial
-                ? '<span style="color:#16a34a;font-weight:600">Credencial salva</span> (usuário ' + S.esc(cfg.credencial_usuario || '') + ') — roda 100% automática.'
-                : '<span style="color:#d97706;font-weight:600">Sem credencial</span> — a rotina só roda quando há sessão sua ativa.');
-        host.innerHTML =
+        host.innerHTML = aviso +
             '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
-                    '<input type="checkbox" id="au-enabled"' + (cfg.enabled ? ' checked' : '') + '> ' +
-                    '<strong>Rotina automática ' + (cfg.enabled ? 'LIGADA' : 'DESLIGADA') + '</strong></label></div>' +
-                '<div class="form-group"><label>Horários (horas, separadas por vírgula)</label>' +
-                    '<input id="au-horarios" class="form-control" value="' + S.esc(cfg.horarios || '7,12,16') + '"></div>' +
                 '<div class="form-group"><label>Campo do rastreio no incidente</label>' +
                     '<input id="au-tfield" class="form-control" value="' + S.esc(cfg.tracking_field || 'sys_tags') + '">' +
                     '<small class="text-muted">padrão: sys_tags</small></div>' +
-                '<div class="form-group"><label>Sessão para a rotina</label>' +
-                    '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' +
-                    (cfg.tem_sessao ? ('Ativa (usuário ' + S.esc(cfg.usuario || '') + ')') : 'Nenhuma sessão salva') +
-                    (cfg.ultima_execucao ? ('<br>Última execução: ' + S.esc(cfg.ultima_execucao)) : '') +
-                    '</div></div>' +
+                '<div class="form-group"><label>Última execução</label>' +
+                    '<div style="font-size:.85rem;color:var(--text-secondary);padding-top:8px">' + ultima + '</div></div>' +
             '</div>' +
-            '<hr style="border-color:var(--border-color);margin:14px 0">' +
-            '<div style="font-weight:600;margin-bottom:4px">Automação 100% (sem depender de login)</div>' +
-            '<div style="font-size:.85rem;margin-bottom:8px">' + modo100 + '</div>' +
-            '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label>Chave do usuário no cofre</label>' +
-                    '<input id="au-cofre-user-key" class="form-control" value="' + S.esc(cfg.cofre_user_key || 'SN_AUTOMACAO_USUARIO') + '"></div>' +
-                '<div class="form-group"><label>Chave da senha no cofre</label>' +
-                    '<input id="au-cofre-pass-key" class="form-control" value="' + S.esc(cfg.cofre_pass_key || 'SN_AUTOMACAO_SENHA') + '"></div>' +
-            '</div>' +
-            '<div style="font-size:.8rem;color:var(--text-secondary);margin-bottom:8px">' +
-                'No servidor novo, grave a credencial no cofre com essas chaves — ela tem prioridade. ' +
-                'Enquanto o cofre não existir, informe abaixo para guardar criptografado.</div>' +
-            '<div class="form-grid cols-2">' +
-                '<div class="form-group"><label>Usuário (AD) para a automação</label>' +
-                    '<input id="au-cred-user" class="form-control" value="' + S.esc(cfg.credencial_usuario || '') + '" placeholder="seu usuário de rede"></div>' +
-                '<div class="form-group"><label>Senha (AD)</label>' +
-                    '<input id="au-cred-senha" type="password" class="form-control" placeholder="' +
-                    (cfg.tem_credencial ? '•••••• (salva)' : 'informe para guardar') + '"></div>' +
-            '</div>' +
-            '<div class="mt-2"><button id="au-cfg-save" class="btn btn-primary">Salvar configuração</button> ' +
-            '<button id="au-run" class="btn btn-secondary" style="margin-left:8px">Exec Now</button> ' +
+            '<div class="mt-2"><button id="au-cfg-save" class="btn btn-secondary">Salvar configuração</button> ' +
+            '<button id="au-run" class="btn btn-primary" style="margin-left:8px">Executar agora</button> ' +
             '<span id="au-cfg-msg" class="text-muted" style="margin-left:10px"></span></div>';
 
         document.getElementById('au-cfg-save').onclick = async function () {
             try {
                 await S.api('/automacoes/config', { method: 'PUT', body: {
-                    enabled: document.getElementById('au-enabled').checked,
-                    horarios: document.getElementById('au-horarios').value.trim(),
-                    tracking_field: document.getElementById('au-tfield').value.trim(),
-                    cofre_user_key: document.getElementById('au-cofre-user-key').value.trim(),
-                    cofre_pass_key: document.getElementById('au-cofre-pass-key').value.trim(),
-                    cred_user: document.getElementById('au-cred-user').value.trim(),
-                    cred_senha: document.getElementById('au-cred-senha').value
+                    tracking_field: document.getElementById('au-tfield').value.trim()
                 }});
                 document.getElementById('au-cfg-msg').textContent = 'Configuração salva.';
                 S.toast('Configuração salva.', 'success');
@@ -368,7 +510,7 @@ async function renderAutomacoes(c, S) {
         var btn = document.getElementById('au-run');
         if (!btn) return;
         btn.onclick = async function () {
-            if (!confirm('Rodar a rotina agora com o seu usuário?')) return;
+            if (!confirm('Executar a rotina agora com o SEU usuário do ServiceNow? Os apontamentos sairão em seu nome.')) return;
             var b = this; b.disabled = true; var t = b.textContent; b.textContent = 'Rodando…';
             try {
                 var d = await S.api('/automacoes/run', { method: 'POST' });
@@ -394,7 +536,7 @@ async function renderAutomacoes(c, S) {
             { key: 'a', label: '', render: function (_, r) {
                 var w = S.el('div', { className: 'btn-row' });
                 var e = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
-                var x = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                var x = S.el('button', { className: 'btn btn-sm btn-outline-danger', textContent: 'Excluir' });
                 e.onclick = function () { editRegra(r); };
                 x.onclick = function () {
                     if (!confirm('Excluir a regra "' + (r.nome || '') + '"?')) return;
@@ -488,368 +630,324 @@ async function renderAutomacoes(c, S) {
 }
 
 /* ── Monitoramento (saúde e falhas) ─────────────────────────────── */
-/* Base EBS (Oracle) — provar o acesso antes de qualquer consulta.
-   Nenhuma senha é digitada aqui: a credencial vem por referência do cofre,
-   e a tela mostra só de onde cada valor foi resolvido. */
-// O cofre visto de DENTRO do serviço. No servidor, quem roda o portal e quem
-// abre um terminal são usuários diferentes: o CLI responde pelo shell, e só
-// esta tela responde pelo processo que faz as consultas de verdade.
+/* ── Cofre de segredos ──────────────────────────────────────────────
+   O que o PROCESSO do portal alcança. Rodar o CLI no terminal responde
+   sobre o seu usuário, não sobre o serviço — são ambientes diferentes, e
+   no servidor só o serviço lê o cofre corporativo. Nenhum valor de
+   segredo aparece: de cada chave se diz apenas se resolveu, de onde veio
+   e quantos caracteres tem. */
 async function renderCofre(c, S) {
     var e = S.esc;
     c.innerHTML =
         '<h1 class="page-title">Cofre de segredos</h1>' +
-        '<p class="text-muted">O que o <b>processo do portal</b> alcança. Nenhum valor de ' +
-            'segredo aparece aqui — só de onde veio e quantos caracteres tem.</p>' +
-        '<div class="card mb-3"><div class="card-header">Sondar nomes no cofre</div>' +
-            '<div class="card-body">' +
-            '<p class="text-muted" style="margin-top:0">O cofre corporativo responde por nome, ' +
-            'uma chave de cada vez — não dá para listar. Cole os nomes candidatos (vírgula, ' +
-            'espaço ou um por linha) e veja quais respondem.</p>' +
-            '<div class="form-group"><textarea id="cf-nomes" class="form-control" rows="3" ' +
-            'placeholder="ORACLE_EBS_USUARIO, ORACLE_EBS_SENHA, MYSQL_LOCAL_PASS"></textarea></div>' +
-            '<div class="btn-row"><button id="cf-sondar" class="btn btn-primary btn-sm">Sondar</button></div>' +
-            '<div id="cf-sondagem" class="mt-3"></div>' +
-            '<hr>' +
-            '<p class="text-muted">O cofre do time é mantido em PHP. Como só o serviço ' +
-            'alcança o cofre, quem roda o teste é o próprio portal — no seu terminal o ' +
-            'resultado seria sobre o seu usuário, não sobre ele.</p>' +
-            '<div class="filter-grid">' +
-                '<div class="form-group"><label for="cf-php-loader">Loader PHP</label>' +
-                    '<input id="cf-php-loader" class="form-control" ' +
-                    'value="/usr/local/lib/vcreports/secrets.php"></div>' +
-                '<div class="form-group"><label for="cf-php-chave">Chave de prova</label>' +
-                    '<input id="cf-php-chave" class="form-control" value="CORREIOS_USUARIO"></div>' +
+        '<p class="text-muted">O que o <b>processo do portal</b> alcança. ' +
+            'Nenhum valor de segredo aparece aqui, só de onde veio e o tamanho.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="cf-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
             '</div>' +
-            '<div class="btn-row"><button id="cf-php" class="btn btn-secondary btn-sm">Testar pelo PHP</button></div>' +
-            '<div id="cf-php-saida" class="mt-3"></div>' +
-            '</div></div>' +
-        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<span>Situação</span>' +
-            '<span><button id="cf-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
-            '<button id="cf-tudo" class="btn btn-sm btn-secondary" style="margin-left:6px">Ver ambiente e cofre local</button> ' +
-            '<button id="cf-correios" class="btn btn-sm btn-primary" style="margin-left:6px">Testar Correios</button></span>' +
-            '</div><div class="card-body" id="cf-situacao">' +
-            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
-        '<div class="card mb-3" id="cf-tudo-card" style="display:none">' +
-            '<div class="card-header">Ambiente e cofre local</div>' +
-            '<div class="card-body" id="cf-tudo-corpo"></div></div>' +
-        '<div class="card" id="cf-teste-card" style="display:none">' +
+            '<div class="card-footer btn-row">' +
+                '<button id="cf-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="cf-correios" class="btn btn-primary btn-sm" type="button">Testar Correios</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Sondar nomes</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted" style="margin-top:0">O cofre corporativo responde por ' +
+                    'nome, uma chave de cada vez — não dá para listar. Cole os nomes ' +
+                    'candidatos (vírgula, espaço ou um por linha) e veja quais respondem.</p>' +
+                '<div class="form-group"><label for="cf-nomes">Nomes</label>' +
+                    '<textarea id="cf-nomes" class="form-control" rows="3" ' +
+                    'placeholder="CORREIOS_USUARIO, SN_API_USER"></textarea></div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="cf-sondar" class="btn btn-primary" type="button">Sondar</button>' +
+                '</div>' +
+                '<div id="cf-sondagem" class="mt-3"></div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card" id="cf-teste-card" hidden>' +
             '<div class="card-header">Teste dos Correios</div>' +
-            '<div class="card-body" id="cf-teste"></div></div>';
+            '<div class="card-body" id="cf-teste"></div>' +
+        '</div>';
 
-    function badge(ok, sim, nao) {
-        return ok ? '<span class="badge badge-success">' + sim + '</span>'
-                  : '<span class="badge badge-danger">' + nao + '</span>';
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
     }
 
-    function linha(k) {
-        var onde = [];
-        if (k.no_corporativo) onde.push('corporativo');
-        if (k.no_local) onde.push('local');
-        if (k.no_ambiente) onde.push('ambiente');
-        // Sombreamento é a falha silenciosa clássica: o cofre local responde
-        // primeiro e o corporativo, correto, nunca é consultado.
-        // A ordem é corporativo → local → ambiente. Quando mais de uma fonte
-        // tem a chave, a que vence pode não ser a que alguém acabou de
-        // configurar — e é sempre aí que se perde tempo.
-        var aviso = '';
-        if (k.sombreado) aviso += ' <span class="badge badge-warning" title="' +
-            e((k.fontes_com_valor || []).join(' e ')) +
-            ' têm esta chave. Vale a primeira da ordem: corporativo, local, ambiente.">' +
-            'em ' + (k.fontes_com_valor || []).length + ' fontes</span>';
-        if (k.indistinguivel) aviso += ' <span class="badge badge-warning" ' +
-            'title="O loader resolve cofre → ambiente. Ele devolveu o mesmo valor que ' +
-            'está na variável de ambiente, então não dá para saber se o cofre respondeu.">' +
-            'pode ser só o ambiente</span>';
-        if (k.divergente) aviso += ' <span class="badge badge-danger" ' +
-            'title="As fontes têm valores diferentes para esta chave.">' +
-            'valores diferentes</span>';
-        else if (k.no_local && !k.no_corporativo && !k.no_ambiente)
-            aviso += ' <span class="badge badge-warning" ' +
-                'title="Só o cofre local tem esta chave.">só no local</span>';
-        return '<tr><td class="om-mono">' + e(k.chave) + '</td>' +
-            '<td>' + badge(k.resolvida, 'resolvida', 'faltando') + aviso + '</td>' +
-            '<td>' + e(k.fonte || '—') +
-                (onde.length ? ' <span class="text-muted">(está em: ' + e(onde.join(', ')) + ')</span>' : '') + '</td>' +
-            '<td>' + (k.valor ? e(k.valor)
-                              : (k.resolvida ? '<span class="text-muted">' + k.tamanho + ' caracteres</span>'
-                                             : '<span class="text-muted">—</span>')) + '</td></tr>';
-    }
-
-    // Cada parte do diagnóstico responde por si. Quando uma falha, ela
-    // aparece nomeada — some da tela é o que não pode.
-    function errosHtml(erros) {
-        var nomes = Object.keys(erros || {});
-        if (!nomes.length) return '';
-        return '<div class="alert alert-danger"><b>Parte do diagnóstico falhou.</b>' +
-            '<ul style="margin:6px 0 0">' + nomes.map(function (n) {
-                return '<li>' + e(n) + ': <span class="om-mono">' + e(erros[n]) + '</span></li>';
-            }).join('') + '</ul></div>';
-    }
-
-    // O módulo do cofre importa, mas nada resolve? Então o problema não é o
-    // módulo: é o arquivo que ELE lê, ou o nome da chave. Estas duas seções
-    // respondem as duas perguntas sem precisar de acesso ao servidor.
-    // O prefixo também vem do ambiente. Sem ele o navegador busca CSS e JS
-    // no lugar errado e a tela aparece crua — sintoma que não parece ter
-    // nada a ver com a causa, e por isso mora aqui.
-    function prefixoHtml(pf) {
-        if (!pf) return '';
-        return '<p><b>Prefixo do portal:</b> ' +
-            (pf.em_uso
-                ? '<span class="om-mono">' + e(pf.em_uso) + '</span> <span class="text-muted">(' +
-                  e(pf.origem) + ')</span>'
-                : '<span class="badge badge-danger">nenhum</span> <span class="text-muted">— ' +
-                  'atrás de um proxy em subcaminho, CSS e JS vão ser buscados no lugar errado ' +
-                  'e a tela abre sem estilo</span>') + '</p>';
-    }
-
-    // Se uma credencial funciona sem estar no cofre nem na unit, ela veio
-    // daqui — e é aqui que se acrescenta a próxima, sem mexer na unit.
-    function ambienteHtml(a) {
-        if (!a) return '';
-        var cab = '<h3 class="mt-3">Arquivo de ambiente do serviço</h3>';
-        if (!a.existe) return cab + '<p class="text-muted om-mono">' +
-            e(a.erro || 'não encontrado') + '</p>';
-        if (!a.legivel) return cab + '<p class="om-mono">' + e(a.caminho) +
-            ' — <span class="badge badge-danger">' + e(a.erro || 'sem leitura') + '</span></p>';
-        var chaves = a.chaves || [];
-        return cab + '<p class="om-mono">' + e(a.caminho) +
-            ' — <span class="badge badge-success">legível</span> ' + chaves.length + ' variável(is)</p>' +
-            (chaves.length
-                ? '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                  '<th>Variável</th><th>Como está definida</th></tr></thead><tbody>' +
-                  chaves.map(function (k) {
-                      // O caso que derruba a tela: está no arquivo e não
-                      // chegou ao processo — o systemd não leu a linha.
-                      var perdida = k.chegou_ao_processo === false
-                          ? ' <span class="badge badge-danger" title="O systemd não carregou ' +
-                            'esta linha. Valor com espaço, aspas abertas ou cifrão sem escape ' +
-                            'derruba a variável — e às vezes as seguintes junto.">' +
-                            'não chegou ao processo</span>' : '';
-                      var como = k.marcador
-                          ? '<span class="badge badge-info">marcador do cofre</span> ' +
-                            '<span class="om-mono">@cofre:' + e(k.aponta_para) + '@</span>' +
-                            ' <span class="text-muted">— só resolve se o cofre responder</span>'
-                          : (k.vazio ? '<span class="badge badge-warning">vazia</span>'
-                                     : '<span class="badge badge-success">valor direto</span>');
-                      return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + como + perdida + '</td></tr>';
-                  }).join('') + '</tbody></table></div>'
-                : '') +
-            '<p class="text-muted">Valores nunca aparecem — só o nome e se é valor direto ou ' +
-            'marcador. Acrescentar uma variável aqui não exige mexer na unit: basta reiniciar ' +
-            'o serviço.</p>';
-    }
-
-    function inventarioHtml(inv) {
-        if (!inv) return '';
-        return '<h3 class="mt-3">Loader do cofre corporativo</h3>' +
-            '<p><b>Módulo:</b> ' +
-            (inv.modulo_carregado
-                ? '<span class="badge badge-success">carregado</span> <span class="text-muted">' +
-                  e(inv.modulo_via || '') + '</span>' +
-                  (inv.funcao ? ' <span class="text-muted">— função ' + e(inv.funcao) + '()</span>' : '')
-                : '<span class="badge badge-danger">não carregado</span>') + '</p>' +
-            (inv.comando_externo
-                ? '<p><b>Comando externo:</b> <span class="om-mono">' + e(inv.comando_externo) +
-                  '</span> <span class="text-muted">— quando configurado, é ele que resolve ' +
-                  'antes do loader Python.</span></p>'
-                : '') +
-            '<p><b>Arquivo que o loader lê:</b> <span class="om-mono">' + e(inv.arquivo_do_loader || '') +
-                '</span> <span class="text-muted">(' + e(inv.arquivo_por || '') + ')</span> ' +
-                '<button id="cf-reler" class="btn btn-sm btn-secondary" style="margin-left:6px">Reler o cofre</button></p>' +
-            '<div id="cf-reler-saida"></div>' +
-            (inv.sabe_listar
-                ? '<p><b>Chaves que o loader carregou do cofre</b> <span class="text-muted">(' +
-                  e(inv.listagem_por) + '):</span></p><p class="om-mono">' + e((inv.nomes || []).join(', ')) + '</p>' +
-                  '<p class="text-muted">Lista cheia significa: o serviço lê o cofre pelo loader, do mesmo ' +
-                  'jeito que o módulo do time lê. O que não está nesta lista não existe no cofre que ' +
-                  'este serviço alcança — é nome errado ou chave não provisionada.</p>'
-                : (inv.loader_tem_cache
-                    ? '<p class="text-muted">O loader está carregado, mas o <span class="om-mono">_load()</span> dele não ' +
-                      'conseguiu ler esse arquivo para este usuário (é o "cofre nao legivel" do log). O cache é fixo ' +
-                      'por processo: depois que a leitura for liberada, clique em Reler ou reinicie o serviço. ' +
-                      'Enquanto isso, o que responde é o que está no ambiente.</p>'
-                    : '<p class="text-muted">Este loader não expõe cache; só responde por nome. Use a sondagem abaixo.</p>'));
-    }
-
-    function alternativasHtml(lista) {
-        if (!lista || !lista.length) return '';
-        return '<h3 class="mt-3">O nome da chave é outro?</h3>' +
-            '<p class="text-muted">Apelidos plausíveis da credencial do EBS, sondados de uma vez. ' +
-            'Se nenhum resolve, o problema não é o nome.</p>' +
-            lista.map(function (g) {
-                return '<div class="table-wrapper mb-2"><table class="data-table"><thead><tr>' +
-                    '<th>' + e(g.nome) + '</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                    '</tr></thead><tbody>' + (g.chaves || []).map(linha).join('') +
-                    '</tbody></table></div>';
-            }).join('');
+    function tabelaChaves(itens) {
+        return S.table([
+            { key: 'chave', label: 'Chave' },
+            { key: 'resolvida', label: 'Resolveu', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } },
+            { key: 'fonte', label: 'De onde veio' },
+            { key: 'tamanho', label: 'Tamanho', render: function (v) { return v || '—'; } },
+            { key: 'sombreado', label: '', html: true, render: function (v) {
+                // Sombreamento é a falha silenciosa clássica: uma fonte
+                // responde antes e a que alguém acabou de configurar nunca
+                // é consultada.
+                return v ? '<span class="badge badge-warning" title="A chave existe em mais de uma fonte; ' +
+                    'vence a primeira da ordem">sombreada</span>' : '';
+            } }
+        ], itens);
     }
 
     async function carregar() {
-        var host = document.getElementById('cf-situacao');
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
-        try {
-            var d = await S.api('/cofre/diagnostico');
-            host.innerHTML =
-                '<p><b>Usuário do serviço:</b> <span class="om-mono">' + e(d.usuario_do_servico || '?') + '</span></p>' +
-                '<p><b>Cofre corporativo:</b> ' +
-                    badge(d.corporativo_ok, 'disponível', 'indisponível') +
-                    ' <span class="text-muted">' + e(d.corporativo_detalhe || '') + '</span></p>' +
-                errosHtml(d.erros) +
-                '<div class="table-wrapper mb-3"><table class="data-table"><tbody>' +
-                    '<tr><td><b>Cofre local</b></td><td class="om-mono">' + e(d.cofre_local || '') + '</td>' +
-                    '<td>' + (d.cofre_local_existe
-                        ? '<span class="badge badge-info">existe</span> <span class="text-muted">' +
-                          e(d.algoritmo || '') + '</span>'
-                        : '<span class="text-muted">não existe</span>') + '</td></tr>' +
-                '</tbody></table></div>' + prefixoHtml(d.prefixo) +
-                ambienteHtml(d.ambiente_do_servico) +
-                inventarioHtml(d.inventario) +
-                (d.grupos || []).map(function (g) {
-                    return '<h3 class="mt-3">' + e(g.nome) + '</h3>' +
-                        '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                        '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                        '</tr></thead><tbody>' + (g.chaves || []).map(linha).join('') +
-                        '</tbody></table></div>';
-                }).join('') + alternativasHtml(d.alternativas);
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        var alvo = document.getElementById('cf-situacao');
+        var d;
+        try { d = await S.api('/cofre/diagnostico'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        var topo = S.el('div', { className: 'stats-grid mb-3' });
+        [['Cofre corporativo', d.corporativo_ok ? 'alcança' : 'não alcança', d.corporativo_ok],
+         ['Usuário do serviço', d.usuario_do_servico || '—', true],
+         ['Cofre local', d.cofre_local_existe ? 'existe' : 'ausente', d.cofre_local_existe]
+        ].forEach(function (x) {
+            var cartao = S.el('div', { className: 'stat-card' + (x[2] ? '' : ' accent-orange') });
+            cartao.appendChild(S.el('div', { className: 'stat-value', textContent: x[1] }));
+            cartao.appendChild(S.el('div', { className: 'stat-label', textContent: x[0] }));
+            topo.appendChild(cartao);
+        });
+        alvo.innerHTML = '';
+        alvo.appendChild(topo);
+        if (d.corporativo_detalhe) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-info mb-3',
+                textContent: d.corporativo_detalhe }));
+        }
+        // Quando o cofre não alcança, o que resolve é permissão de arquivo:
+        // dono, grupo e modo dizem exatamente o que pedir ao time. Quando
+        // alcança, a lista de nomes responde "a chave existe com outro nome?".
+        var inv = d.inventario || {};
+        var ac = inv.acesso || {};
+        if (ac.caminho) {
+            var linhas = [
+                ['Arquivo do cofre', ac.caminho],
+                ['Situação', !ac.existe ? 'não existe neste caminho'
+                    : (ac.legivel ? 'legível por este serviço' : 'existe, mas sem permissão de leitura')],
+                ['Dono / grupo / modo', ac.existe
+                    ? (ac.dono || '?') + ' / ' + (ac.grupo || '?') + ' / ' + (ac.modo || '?') : '—'],
+                ['Serviço roda como', (ac.usuario_atual || '—') +
+                    ((ac.grupos_atuais || []).length ? ' (' + ac.grupos_atuais.join(', ') + ')' : '')],
+                ['Nomes no cofre', inv.sabe_listar ? (inv.nomes || []).join(', ')
+                    : 'não dá para listar daqui — sonde por nome abaixo']
+            ];
+            var dl = S.el('div', { className: 'card mb-3' });
+            dl.appendChild(S.el('div', { className: 'card-header', textContent: 'Acesso ao cofre corporativo' }));
+            var corpo = S.el('div', { className: 'card-body' });
+            corpo.appendChild(S.table([
+                { key: 'o', label: 'O quê' },
+                { key: 'q', label: 'Qual' }
+            ], linhas.map(function (l) { return { o: l[0], q: l[1] }; })));
+            if (ac.erro) {
+                corpo.appendChild(S.el('div', { className: 'alert alert-warning mt-3', textContent: ac.erro }));
+            }
+            dl.appendChild(corpo);
+            alvo.appendChild(dl);
+        }
+        (d.grupos || []).forEach(function (g) {
+            alvo.appendChild(S.el('h2', { className: 'page-title', style: 'font-size:15px;margin:18px 0 8px',
+                textContent: g.nome }));
+            alvo.appendChild(tabelaChaves(g.chaves || []));
+        });
+        var erros = Object.keys(d.erros || {});
+        if (erros.length) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-warning mt-3',
+                textContent: 'Não consegui checar: ' + erros.join(', ') }));
         }
     }
 
     document.getElementById('cf-atualizar').onclick = carregar;
 
-    // O botão nasce dentro do HTML que carregar() monta; por isso o ouvinte
-    // fica no container, e vale para cada remontagem.
-    c.addEventListener('click', async function (ev) {
-        if (!ev.target || ev.target.id !== 'cf-reler') return;
-        var host = document.getElementById('cf-reler-saida');
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Relendo…</div>';
-        try {
-            var d = await S.api('/cofre/reler', { method: 'POST' });
-            host.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'warning') + '">' + e(d.detalhe) + '</div>';
-            if (d.ok) carregar();
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-        }
-    });
-
     document.getElementById('cf-sondar').onclick = async function () {
-        var host = document.getElementById('cf-sondagem');
         var nomes = document.getElementById('cf-nomes').value;
+        var saida = document.getElementById('cf-sondagem');
         if (!nomes.trim()) { S.toast('Informe ao menos um nome.', 'warning'); return; }
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Sondando…</div>';
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Sondando…</div>';
         try {
-            var d = await S.api('/cofre/sondar-varios', {
-                method: 'POST', body: JSON.stringify({ nomes: nomes })
-            });
-            host.innerHTML =
-                '<p><b>' + d.resolvidas + '</b> de ' + d.total + ' responderam.</p>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                '</tr></thead><tbody>' + (d.itens || []).map(linha).join('') +
-                '</tbody></table></div>';
+            var d = await S.api('/cofre/sondar-varios', { method: 'POST', body: { nomes: nomes } });
+            saida.innerHTML = '';
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.resolvidas + ' de ' + d.total + ' responderam.' }));
+            saida.appendChild(tabelaChaves(d.itens || []));
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-        }
-    };
-
-    document.getElementById('cf-php').onclick = async function () {
-        var host = document.getElementById('cf-php-saida');
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Rodando o PHP…</div>';
-        try {
-            var d = await S.api('/cofre/testar-php', {
-                method: 'POST',
-                body: JSON.stringify({
-                    loader: document.getElementById('cf-php-loader').value.trim(),
-                    chave: document.getElementById('cf-php-chave').value.trim()
-                })
-            });
-            // Quando funciona, o que falta e uma linha na unit — entao ela ja
-            // vem escrita, em vez de virar mais uma ida e volta.
-            var receita = d.ok
-                ? '<p>Para o portal passar a resolver por aqui, acrescente na unit:</p>' +
-                  '<pre class="om-mono" style="white-space:pre-wrap">' +
-                  e('Environment="VCREPORTS_SECRETS_CMD=' + d.comando_para_a_unit + '"') +
-                  (d.variavel_do_loader
-                      ? '\n' + e('Environment="' + d.variavel_do_loader + '"') : '') +
-                  '\nsudo systemctl daemon-reload && sudo systemctl restart portal-spare' +
-                  '</pre>'
-                : '';
-            host.innerHTML =
-                '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
-                (d.ok ? 'O PHP leu <b>' + e(d.chave) + '</b> no cofre — ' + e(d.detalhe) + '.' +
-                        (d.retirada_do_ambiente
-                            ? ' <br><small>Atenção: esta chave também está no ambiente do ' +
-                              'serviço, e o loader resolve cofre → ambiente. O valor pode ter ' +
-                              'vindo de lá, não do cofre.</small>'
-                            : ' <br><small>A chave não está no ambiente do serviço, então o ' +
-                              'valor só pode ter vindo do cofre.</small>')
-                      : e(d.detalhe)) + '</div>' + receita;
-            S.toast(d.ok ? 'O serviço alcança o cofre pelo PHP.' : 'O PHP também não leu.',
-                    d.ok ? 'success' : 'error');
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
-        }
-    };
-
-    document.getElementById('cf-tudo').onclick = async function () {
-        var card = document.getElementById('cf-tudo-card');
-        var host = document.getElementById('cf-tudo-corpo');
-        card.style.display = '';
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Lendo…</div>';
-        try {
-            var d = await S.api('/cofre/tudo');
-            var f = d.por_fonte || {};
-            host.innerHTML =
-                '<p><b>' + d.total + '</b> chave(s) — ' +
-                    (f['cofre corporativo'] || 0) + ' do cofre corporativo, ' +
-                    (f['cofre local'] || 0) + ' do cofre local, ' +
-                    (f['ambiente'] || 0) + ' do ambiente.</p>' +
-                '<div class="form-group"><input id="cf-filtro" class="form-control" ' +
-                    'placeholder="filtrar por nome (ex.: ORACLE, CORREIOS)"></div>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                '</tr></thead><tbody id="cf-tudo-linhas">' +
-                (d.itens || []).map(linha).join('') + '</tbody></table></div>' +
-                '<p class="text-muted" style="margin-bottom:0">Só o que é enumerável: as ' +
-                'variáveis do processo e o cofre local. O cofre corporativo não entra aqui ' +
-                'porque o loader não sabe listar — para ele, use a sondagem por nome. ' +
-                'Valor só aparece quando o nome não denuncia um segredo.</p>';
-            // Filtro no cliente: a lista já está toda aqui, e ir ao servidor
-            // a cada tecla só serviria para deixar a tela lenta.
-            var campo = document.getElementById('cf-filtro');
-            campo.oninput = function () {
-                var termo = campo.value.trim().toUpperCase();
-                document.getElementById('cf-tudo-linhas').innerHTML =
-                    (d.itens || []).filter(function (i) {
-                        return !termo || i.chave.indexOf(termo) !== -1;
-                    }).map(linha).join('');
-            };
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
         }
     };
 
     document.getElementById('cf-correios').onclick = async function () {
         var card = document.getElementById('cf-teste-card');
-        var host = document.getElementById('cf-teste');
-        card.style.display = '';
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Autenticando…</div>';
+        var saida = document.getElementById('cf-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Testando…</div>';
         try {
             var d = await S.api('/cofre/testar-correios', { method: 'POST' });
-            host.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
-                e(d.detalhe || '') + '</div>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                '</tr></thead><tbody>' + (d.chaves || []).map(linha).join('') +
-                '</tbody></table></div>';
-            S.toast(d.ok ? 'Cofre e Correios respondendo.' : (d.detalhe || 'Falhou.'),
-                    d.ok ? 'success' : 'error');
+            saida.innerHTML = '<div class="alert alert-' + (d.ok ? 'success' : 'danger') + '">' +
+                e(d.detalhe || (d.ok ? 'Credencial aceita.' : 'Credencial recusada.')) + '</div>';
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    carregar();
+}
+
+
+/* ── Gestão de Compras ──────────────────────────────────────────────
+   O portal não fala com a base do EBS: quem fala é o módulo
+   /gestao_compras (Apache), que já expõe PO, projetos e acordos por
+   HTTP. Aqui o portal é cliente dele — e esta tela é o lugar de
+   conferir se a credencial do cofre abre a sessão de lá.
+   ─────────────────────────────────────────────────────────────────── */
+async function renderCompras(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Gestão de Compras</h1>' +
+        '<p class="text-muted">O portal consulta PO, projetos e acordos pelo módulo ' +
+            '<span class="om-mono">/gestao_compras</span>, como cliente HTTP. ' +
+            'A credencial vem do cofre — nada é digitado nesta tela.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="gc-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+            '<div class="card-footer btn-row">' +
+                '<button id="gc-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="gc-testar" class="btn btn-primary btn-sm" type="button">Testar login</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3" id="gc-teste-card" hidden>' +
+            '<div class="card-header">Resultado do teste</div>' +
+            '<div class="card-body" id="gc-teste"></div>' +
+        '</div>' +
+        '<div class="card">' +
+            '<div class="card-header">Consulta</div>' +
+            '<div class="card-body">' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="gc-acao">Ação</label>' +
+                        '<select id="gc-acao" class="form-control"></select></div>' +
+                    '<div class="form-group" data-gc="project"><label for="gc-project">Projeto (segment1)</label>' +
+                        '<input id="gc-project" class="form-control" placeholder="ex.: 26.0123"></div>' +
+                    '<div class="form-group" data-gc="po"><label for="gc-po">Número da PO</label>' +
+                        '<input id="gc-po" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="line"><label for="gc-line">Linha (opcional)</label>' +
+                        '<input id="gc-line" class="form-control" type="number" min="1"></div>' +
+                    '<div class="form-group" data-gc="vendor"><label for="gc-vendor">Fornecedor</label>' +
+                        '<input id="gc-vendor" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="days"><label for="gc-days">Dias até vencer</label>' +
+                        '<input id="gc-days" class="form-control" type="number" value="90" min="1"></div>' +
+                    '<div class="form-group" data-gc="org"><label for="gc-org">Unidade (opcional)</label>' +
+                        '<input id="gc-org" class="form-control"></div>' +
+                    '<div class="form-group" data-gc="projects"><label for="gc-projects">Projetos (vírgula)</label>' +
+                        '<input id="gc-projects" class="form-control"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="gc-consultar" class="btn btn-primary" type="button">Consultar</button>' +
+                '</div>' +
+                '<div id="gc-resultado" class="mt-3"></div>' +
+            '</div>' +
+        '</div>';
+
+    var acoes = {};
+
+    // Cada ação tem os próprios parâmetros; os campos que não servem somem,
+    // em vez de ficarem lá convidando a preencher o que o módulo ignora.
+    function mostrarCampos() {
+        var usados = acoes[document.getElementById('gc-acao').value] || [];
+        Array.prototype.forEach.call(c.querySelectorAll('[data-gc]'), function (el) {
+            el.hidden = usados.indexOf(el.getAttribute('data-gc')) === -1;
+        });
+    }
+
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('gc-situacao');
+        var d;
+        try { d = await S.api('/gestao-compras/situacao'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        var cr = d.credenciais || {};
+        acoes = d.acoes || {};
+        var sel = document.getElementById('gc-acao');
+        sel.innerHTML = Object.keys(acoes).map(function (a) {
+            return '<option value="' + e(a) + '">' + e(a) + '</option>';
+        }).join('');
+        sel.onchange = mostrarCampos;
+        mostrarCampos();
+
+        alvo.innerHTML =
+            '<p><b>Módulo:</b> <span class="om-mono">' + e(d.url) + '</span> ' +
+                '<span class="text-muted">— timeout ' + e(d.timeout) + ' s, TLS ' +
+                (d.verify_ssl ? 'verificado' : 'sem verificação') +
+                (d.proxy ? ', proxy ' + e(d.proxy) : ', saída direta') + '</span></p>' +
+            '<p><b>Usuário:</b> ' + (cr.usuario
+                ? '<span class="om-mono">' + e(cr.usuario) + '</span> <span class="text-muted">(' +
+                  e(cr.usuario_chave) + ', ' + e(cr.usuario_fonte) + ')</span>'
+                : selo(false, '', 'não definido')) +
+            ' &nbsp; <b>Senha:</b> ' + (cr.senha_definida
+                ? selo(true, 'definida', '') + ' <span class="text-muted">(' +
+                  e(cr.senha_chave) + ', ' + e(cr.senha_fonte) + ')</span>'
+                : selo(false, '', 'não definida')) + '</p>' +
+            (cr.usuario && cr.senha_definida ? '' :
+                '<div class="alert alert-warning mb-0">Grave no cofre: ' +
+                '<span class="om-mono">python3 scripts/cofre.py definir GESTAO_COMPRAS_USER</span> ' +
+                'e <span class="om-mono">GESTAO_COMPRAS_PASS</span>.</div>');
+    }
+
+    document.getElementById('gc-atualizar').onclick = carregar;
+
+    document.getElementById('gc-testar').onclick = async function () {
+        var card = document.getElementById('gc-teste-card');
+        var saida = document.getElementById('gc-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Entrando no módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/testar', { method: 'POST' });
+            var u = d.usuario || {};
+            saida.innerHTML = '<div class="alert alert-success">Sessão aberta como <b>' +
+                e(u.username || '?') + '</b>' + (u.role ? ' (' + e(u.role) + ')' : '') + '.</div>';
+            S.toast('O módulo aceitou a credencial.', 'success');
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('gc-consultar').onclick = async function () {
+        var saida = document.getElementById('gc-resultado');
+        var acao = document.getElementById('gc-acao').value;
+        if (!acao) { S.toast('Escolha uma ação.', 'warning'); return; }
+        var q = { acao: acao };
+        (acoes[acao] || []).forEach(function (nome) {
+            var campo = document.getElementById('gc-' + nome);
+            var v = campo ? String(campo.value).trim() : '';
+            if (v) q[nome] = v;
+        });
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando pelo módulo…</div>';
+        try {
+            var d = await S.api('/gestao-compras/consultar?' + new URLSearchParams(q).toString());
+            saida.innerHTML = '';
+            if (!d.total) {
+                saida.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
+                return;
+            }
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.total + ' linha(s) em ' + d.ms + ' ms, pela API do módulo.' }));
+            saida.appendChild(S.table(d.colunas.map(function (col) {
+                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
+            }), d.linhas));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
             S.toast(x.message, 'error');
         }
     };
@@ -857,130 +955,162 @@ async function renderCofre(c, S) {
     carregar();
 }
 
-async function renderEbsOracle(c, S) {
+
+/* ── Base EBS ───────────────────────────────────────────────────────
+   Leitura direta da base do EBS. Existe em paralelo com a aba Gestão
+   de Compras: as consultas são as mesmas, pelos mesmos nomes — muda o
+   caminho por onde o dado vem. Aqui, conexão direta; lá, HTTP pelo
+   módulo do outro time.
+
+   O que a tela executa são as consultas NOMEADAS. SQL digitado não
+   existe: o SQL fica no código, versionado e revisável.
+   ─────────────────────────────────────────────────────────────────── */
+async function renderBaseEbs(c, S) {
     var e = S.esc;
     c.innerHTML =
-        '<h1 class="page-title">Base EBS (Oracle)</h1>' +
-        '<p class="text-muted">Leitura direta do BASE_REMOVIDA, só para consulta. A credencial é ' +
-            'resolvida por referência no cofre — nada é digitado nesta tela.</p>' +
-        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<span>Situação</span>' +
-            '<span><button id="eo-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
-            '<button id="eo-testar" class="btn btn-sm btn-primary" style="margin-left:6px">Testar conexão</button></span>' +
-            '</div><div class="card-body" id="eo-situacao">' +
-            '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div></div>' +
-        '<div class="card mb-3" id="eo-teste-card" style="display:none">' +
+        '<h1 class="page-title">Base EBS</h1>' +
+        '<p class="text-muted">Leitura direta da base do EBS, só-leitura, com teto de linhas e ' +
+            'de tempo. A credencial vem do cofre — endereço, usuário e senha não aparecem ' +
+            'nesta tela nem ficam no repositório.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="eo-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+            '<div class="card-footer btn-row">' +
+                '<button id="eo-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="eo-testar" class="btn btn-primary btn-sm" type="button">Testar conexão</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3" id="eo-teste-card" hidden>' +
             '<div class="card-header">Resultado do teste</div>' +
-            '<div class="card-body" id="eo-teste"></div></div>' +
-        '<div class="card mb-3"><div class="card-header">Consulta</div><div class="card-body">' +
-            '<p class="text-muted" style="margin-top:0">Só leitura: a sessão é aberta como ' +
-            'READ ONLY e a consulta precisa começar por SELECT ou WITH. A credencial vem do ' +
-            'cofre pelo loader, como no resto do portal.</p>' +
-            '<div class="form-group"><label for="eo-nome">Consulta pronta (as mesmas do Gestão de Compras)</label>' +
-                '<select id="eo-nome" class="form-control"><option value="">— escrever o SQL —</option></select></div>' +
-            '<div class="form-group"><label for="eo-sql">SQL</label>' +
-                '<textarea id="eo-sql" class="form-control om-mono" rows="5" ' +
-                'placeholder="select * from apps.csi_item_instances where instance_number = :serie"></textarea></div>' +
-            '<div class="filter-grid">' +
-                '<div class="form-group"><label for="eo-binds">Parâmetros (opcional)</label>' +
-                    '<input id="eo-binds" class="form-control om-mono" ' +
-                    'placeholder=\'{"serie": "HF550123456"}\'></div>' +
-                '<div class="form-group"><label for="eo-limite">Máximo de linhas</label>' +
-                    '<input id="eo-limite" class="form-control" type="number" value="200" ' +
-                    'min="1" max="5000"></div>' +
+            '<div class="card-body" id="eo-teste"></div>' +
+        '</div>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Consulta</div>' +
+            '<div class="card-body">' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="eo-nome">Consulta</label>' +
+                        '<select id="eo-nome" class="form-control"></select></div>' +
+                    '<div class="form-group"><label for="eo-limite">Máximo de linhas</label>' +
+                        '<input id="eo-limite" class="form-control" type="number" value="200" ' +
+                        'min="1" max="5000"></div>' +
+                '</div>' +
+                '<div id="eo-binds" class="filter-grid mt-2"></div>' +
+                '<details class="mt-3"><summary class="text-muted">Ver o SQL desta consulta</summary>' +
+                    '<pre class="om-mono om-pre" id="eo-sql"></pre></details>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="eo-rodar" class="btn btn-primary" type="button">Executar</button>' +
+                '</div>' +
+                '<div id="eo-resultado" class="mt-3"></div>' +
             '</div>' +
-            '<div class="btn-row mt-2"><button id="eo-rodar" class="btn btn-primary btn-sm">Executar</button></div>' +
-            '<div id="eo-resultado" class="mt-3"></div>' +
-        '</div></div>' +
-        '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<span>PO e projetos via Gestão de Compras (API)</span>' +
-            '<span><button id="gc-atualizar" class="btn btn-sm btn-secondary">Atualizar</button> ' +
-            '<button id="gc-testar" class="btn btn-sm btn-primary" style="margin-left:6px">Testar login</button></span>' +
-            '</div><div class="card-body">' +
-            '<p class="text-muted" style="margin-top:0">O serviço do portal não lê o cofre corporativo. ' +
-            'O módulo /gestao_compras (Apache) lê, e já expõe as consultas de PO e projetos por HTTP. ' +
-            'Aqui o portal chama esse módulo como cliente — o cofre fica onde está.</p>' +
-            '<div id="gc-situacao"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
-            '<div id="gc-teste" class="mt-2"></div>' +
-            '<hr>' +
-            '<div class="filter-grid">' +
-                '<div class="form-group"><label for="gc-acao">Ação</label>' +
-                    '<select id="gc-acao" class="form-control"></select></div>' +
-                '<div class="form-group" data-gc="project"><label for="gc-project">Projeto (segment1)</label>' +
-                    '<input id="gc-project" class="form-control" placeholder="ex.: 26.0123"></div>' +
-                '<div class="form-group" data-gc="po"><label for="gc-po">Número da PO</label>' +
-                    '<input id="gc-po" class="form-control"></div>' +
-                '<div class="form-group" data-gc="line"><label for="gc-line">Linha (opcional)</label>' +
-                    '<input id="gc-line" class="form-control" type="number" min="1"></div>' +
-                '<div class="form-group" data-gc="vendor"><label for="gc-vendor">Fornecedor</label>' +
-                    '<input id="gc-vendor" class="form-control"></div>' +
-                '<div class="form-group" data-gc="days"><label for="gc-days">Dias até vencer</label>' +
-                    '<input id="gc-days" class="form-control" type="number" value="90" min="1"></div>' +
-                '<div class="form-group" data-gc="org"><label for="gc-org">Unidade (opcional)</label>' +
-                    '<input id="gc-org" class="form-control"></div>' +
-                '<div class="form-group" data-gc="projects"><label for="gc-projects">Projetos (vírgula)</label>' +
-                    '<input id="gc-projects" class="form-control"></div>' +
+        '</div>' +
+        '<div class="card">' +
+            '<div class="card-header">Procurar objeto</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted mt-0">Lista tabelas e views que a conta enxerga. ' +
+                    'Só catálogo — nenhum dado de negócio é lido aqui.</p>' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="eo-prefixo">Prefixo (mín. 3 letras)</label>' +
+                        '<input id="eo-prefixo" class="form-control" placeholder="ex.: PO_HEADERS"></div>' +
+                    '<div class="form-group"><label for="eo-owner">Owner</label>' +
+                        '<input id="eo-owner" class="form-control" value="APPS"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="eo-buscar" class="btn btn-primary" type="button">Procurar</button>' +
+                '</div>' +
+                '<div id="eo-objetos" class="mt-3"></div>' +
             '</div>' +
-            '<div class="btn-row mt-2"><button id="gc-consultar" class="btn btn-primary btn-sm">Consultar</button></div>' +
-            '<div id="gc-resultado" class="mt-3"></div>' +
-        '</div></div>' +
-        '<div class="card"><div class="card-header">Procurar objeto</div><div class="card-body">' +
-            '<p class="text-muted" style="margin-top:0">Lista tabelas e views que a conta enxerga. ' +
-            'Só catálogo — nenhum dado de negócio é lido aqui.</p>' +
-            '<div class="filter-grid">' +
-                '<div class="form-group"><label for="eo-prefixo">Prefixo (mín. 3 letras)</label>' +
-                    '<input id="eo-prefixo" class="form-control" placeholder="ex.: CSI_ITEM"></div>' +
-                '<div class="form-group"><label for="eo-owner">Owner</label>' +
-                    '<input id="eo-owner" class="form-control" value="APPS"></div>' +
-            '</div>' +
-            '<div class="btn-row mt-2"><button id="eo-buscar" class="btn btn-primary btn-sm">Procurar</button></div>' +
-            '<div id="eo-objetos" class="mt-3"></div>' +
-        '</div></div>';
+        '</div>';
 
-    function linhaChave(k) {
-        var marcas = {
-            cofre:   '<span class="badge badge-success">do cofre</span>',
-            padrao:  '<span class="badge badge-info">padrão do código</span>',
-            ausente: '<span class="badge badge-danger">faltando</span>'
-        };
-        var marca = marcas[k.situacao] || (k.resolvida
-            ? '<span class="badge badge-success">resolvida</span>'
-            : '<span class="badge badge-danger">faltando</span>');
-        var onde = [];
-        if (k.no_corporativo) onde.push('corporativo');
-        if (k.no_local) onde.push('local');
-        var aviso = (k.no_local && !k.no_corporativo)
-            ? ' <span class="badge badge-warning" title="Só o cofre local tem esta chave. ' +
-              'Se o valor estiver errado, é aqui que ele está.">só no local</span>' : '';
-        return '<tr><td class="om-mono">' + e(k.chave) + '</td><td>' + marca + aviso + '</td>' +
-            '<td>' + e(k.fonte || '—') +
-                (onde.length ? ' <span class="text-muted">(está em: ' + e(onde.join(', ')) + ')</span>' : '') +
-            '</td>' +
-            '<td>' + (k.valor ? e(k.valor) : '<span class="text-muted">—</span>') + '</td></tr>';
+    var consultas = {};
+
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
+    }
+
+    // Cada consulta tem os próprios parâmetros; o formulário se refaz a
+    // cada escolha, em vez de oferecer campo que a consulta ignora.
+    function montarBinds() {
+        var nome = document.getElementById('eo-nome').value;
+        var q = consultas[nome] || { binds: [], sql: '' };
+        var host = document.getElementById('eo-binds');
+        host.innerHTML = q.binds.map(function (b) {
+            return '<div class="form-group"><label for="eo-b-' + e(b) + '">' + e(b) + '</label>' +
+                '<input id="eo-b-' + e(b) + '" class="form-control" data-bind="' + e(b) + '"></div>';
+        }).join('') || '<p class="text-muted mb-0">Esta consulta não pede parâmetro.</p>';
+        document.getElementById('eo-sql').textContent = q.sql || '';
     }
 
     async function carregar() {
-        var host = document.getElementById('eo-situacao');
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        var alvo = document.getElementById('eo-situacao');
+        var d;
+        try { d = await S.api('/ebs-oracle/situacao'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        alvo.innerHTML = '';
+        var topo = S.el('div', { className: 'stats-grid mb-3' });
+        [['Credencial', d.completo ? 'completa' : 'incompleta', d.completo],
+         ['Driver Oracle', d.driver.instalado ? ('instalado ' + (d.driver.versao || '')) : 'ausente',
+          d.driver.instalado],
+         ['Cofre corporativo', d.cofre_corporativo ? 'alcança' : 'não alcança', d.cofre_corporativo]
+        ].forEach(function (x) {
+            var cart = S.el('div', { className: 'stat-card' + (x[2] ? '' : ' accent-orange') });
+            cart.appendChild(S.el('div', { className: 'stat-value', textContent: x[1] }));
+            cart.appendChild(S.el('div', { className: 'stat-label', textContent: x[0] }));
+            topo.appendChild(cart);
+        });
+        alvo.appendChild(topo);
+
+        alvo.appendChild(S.table([
+            { key: 'rotulo', label: 'O quê' },
+            { key: 'chave', label: 'Chave no cofre' },
+            { key: 'resolvida', label: 'Resolveu', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } },
+            { key: 'fonte', label: 'De onde veio' },
+            { key: 'valor', label: 'Valor',
+              render: function (v) { return v || '—'; } },
+            { key: 'no_local', label: '', html: true, render: function (v, linha) {
+                // Sombreamento: o cofre local vence o corporativo, então um
+                // valor velho ali derruba o certo sem ninguém ver.
+                return (v && !linha.no_corporativo)
+                    ? '<span class="badge badge-warning" title="Só o cofre local tem esta chave">só no local</span>'
+                    : '';
+            } }
+        ], d.chaves));
+
+        if (!d.driver.instalado) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-warning mt-3',
+                textContent: d.driver.detalhe || 'Driver Oracle ausente neste servidor.' }));
+        }
+        if (!d.completo) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-info mt-3',
+                textContent: 'Grave o que falta com: python3 scripts/cofre.py definir <CHAVE>' }));
+        }
+        if (d.cofre_detalhe) {
+            alvo.appendChild(S.el('p', { className: 'text-muted mb-0 mt-3',
+                textContent: 'Cofre: ' + d.cofre_detalhe }));
+        }
+    }
+
+    async function carregarConsultas() {
+        var sel = document.getElementById('eo-nome');
         try {
-            var d = await S.api('/ebs-oracle/situacao');
-            var drv = d.driver || {};
-            host.innerHTML =
-                '<p><b>Cofre corporativo:</b> ' +
-                    (d.cofre_corporativo ? '<span class="badge badge-success">disponível</span>'
-                                         : '<span class="badge badge-danger">indisponível</span>') +
-                    ' <span class="text-muted">' + e(d.cofre_detalhe || '') + '</span></p>' +
-                '<p><b>Driver Oracle:</b> ' +
-                    (drv.instalado ? '<span class="badge badge-success">instalado</span> ' + e(drv.versao || '')
-                                   : '<span class="badge badge-danger">ausente</span> ' + e(drv.detalhe || '')) + '</p>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                '<th>Chave</th><th>Situação</th><th>Fonte</th><th>Valor</th>' +
-                '</tr></thead><tbody>' + (d.chaves || []).map(linhaChave).join('') +
-                '</tbody></table></div>' +
-                '<p class="text-muted" style="margin-bottom:0">A senha nunca aparece: dela só se ' +
-                'mostra se foi resolvida e de onde.</p>';
+            var d = await S.api('/ebs-oracle/consultas');
+            consultas = {};
+            (d.consultas || []).forEach(function (q) { consultas[q.nome] = q; });
+            sel.innerHTML = (d.consultas || []).map(function (q) {
+                return '<option value="' + e(q.nome) + '">' + e(q.nome) + '</option>';
+            }).join('');
+            sel.onchange = montarBinds;
+            montarBinds();
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            sel.innerHTML = '';
+            document.getElementById('eo-binds').innerHTML =
+                '<div class="alert alert-danger">' + e(x.message) + '</div>';
         }
     }
 
@@ -988,218 +1118,91 @@ async function renderEbsOracle(c, S) {
 
     document.getElementById('eo-testar').onclick = async function () {
         var card = document.getElementById('eo-teste-card');
-        var host = document.getElementById('eo-teste');
-        card.style.display = '';
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Conectando…</div>';
+        var saida = document.getElementById('eo-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Conectando…</div>';
         try {
             var d = await S.api('/ebs-oracle/testar', { method: 'POST' });
-            var a = d.acesso || {};
-            host.innerHTML = '<div class="alert alert-success">Conexão estabelecida.</div>' +
-                '<div class="table-wrapper"><table class="data-table"><tbody>' +
-                Object.keys(a).map(function (k) {
-                    return '<tr><td><b>' + e(k) + '</b></td><td>' + e(a[k]) + '</td></tr>';
-                }).join('') + '</tbody></table></div>';
-            S.toast('BASE_REMOVIDA respondeu.', 'success');
+            saida.innerHTML = '';
+            saida.appendChild(S.el('div', { className: 'alert alert-success',
+                textContent: 'Conectado.' }));
+            saida.appendChild(S.table([
+                { key: 'o', label: 'O quê' }, { key: 'q', label: 'Qual' }
+            ], Object.keys(d.acesso || {}).map(function (k) {
+                return { o: k, q: String(d.acesso[k]) };
+            })));
+            S.toast('A base respondeu.', 'success');
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
             S.toast(x.message, 'error');
         }
     };
-
-    // As consultas nomeadas vêm do servidor: escolher uma preenche o SQL e
-    // mostra os binds esperados, para o parâmetro não sair errado.
-    (async function () {
-        try {
-            var d = await S.api('/ebs-oracle/consultas');
-            var sel = document.getElementById('eo-nome');
-            var mapa = {};
-            (d.consultas || []).forEach(function (q) {
-                mapa[q.nome] = q;
-                var o = document.createElement('option');
-                o.value = q.nome; o.textContent = q.nome + (q.binds.length ? '  (' + q.binds.join(', ') + ')' : '');
-                sel.appendChild(o);
-            });
-            sel.onchange = function () {
-                var q = mapa[sel.value];
-                if (!q) return;
-                document.getElementById('eo-sql').value = q.sql.trim();
-                document.getElementById('eo-binds').value = q.binds.length
-                    ? JSON.stringify(q.binds.reduce(function (acc, b) { acc[b] = ''; return acc; }, {}))
-                    : '';
-            };
-        } catch (x) { /* sem lista, a caixa de SQL continua servindo */ }
-    })();
 
     document.getElementById('eo-rodar').onclick = async function () {
-        var host = document.getElementById('eo-resultado');
-        var sql = document.getElementById('eo-sql').value;
-        if (!sql.trim()) { S.toast('Escreva a consulta.', 'warning'); return; }
+        var saida = document.getElementById('eo-resultado');
+        var nome = document.getElementById('eo-nome').value;
+        if (!nome) { S.toast('Escolha uma consulta.', 'warning'); return; }
         var binds = {};
-        var bruto = document.getElementById('eo-binds').value.trim();
-        if (bruto) {
-            try { binds = JSON.parse(bruto); }
-            catch (x) { S.toast('Parâmetros não são um JSON válido.', 'error'); return; }
-        }
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando o BASE_REMOVIDA…</div>';
+        Array.prototype.forEach.call(c.querySelectorAll('#eo-binds [data-bind]'), function (el) {
+            var v = el.value.trim();
+            if (v) binds[el.getAttribute('data-bind')] = v;
+        });
+        var limite = parseInt(document.getElementById('eo-limite').value, 10) || 200;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando…</div>';
         try {
             var d = await S.api('/ebs-oracle/consultar', {
-                method: 'POST',
-                body: JSON.stringify({
-                    sql: sql, binds: binds,
-                    limite: parseInt(document.getElementById('eo-limite').value, 10) || 200
-                })
+                method: 'POST', body: { nome: nome, binds: binds, limite: limite }
             });
+            saida.innerHTML = '';
             if (!d.total) {
-                host.innerHTML = '<p class="text-muted">Nenhuma linha (' + d.ms + ' ms).</p>';
+                saida.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
                 return;
             }
-            host.innerHTML =
-                '<p>' + d.total + ' linha(s) em ' + d.ms + ' ms.' +
-                (d.truncado ? ' <span class="badge badge-warning">cortado no limite de ' +
-                    d.limite + '</span>' : '') + '</p>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                d.colunas.map(function (c) { return '<th>' + e(c) + '</th>'; }).join('') +
-                '</tr></thead><tbody>' + d.linhas.map(function (r) {
-                    return '<tr>' + d.colunas.map(function (c) {
-                        return '<td>' + e(r[c] == null ? '' : r[c]) + '</td>';
-                    }).join('') + '</tr>';
-                }).join('') + '</tbody></table></div>';
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.total + ' linha(s) em ' + d.ms + ' ms.' +
+                    (d.truncado ? ' Cortado no limite de ' + d.limite + ' — pode haver mais.' : '') }));
+            saida.appendChild(S.table(d.colunas.map(function (col) {
+                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
+            }), d.linhas));
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
             S.toast(x.message, 'error');
         }
     };
-
-    // Tabela genérica: colunas na ordem em que apareceram, valor nulo em branco.
-    function tabelaHtml(colunas, linhas) {
-        return '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-            colunas.map(function (c) { return '<th>' + e(c) + '</th>'; }).join('') +
-            '</tr></thead><tbody>' + linhas.map(function (r) {
-                return '<tr>' + colunas.map(function (c) {
-                    return '<td>' + e(r[c] == null ? '' : r[c]) + '</td>';
-                }).join('') + '</tr>';
-            }).join('') + '</tbody></table></div>';
-    }
-
-    var gcAcoes = {};
-
-    // Cada ação tem os próprios parâmetros; os campos que não servem somem,
-    // em vez de ficarem lá convidando a preencher o que o módulo vai ignorar.
-    function gcMostrarCampos() {
-        var acao = document.getElementById('gc-acao').value;
-        var usados = gcAcoes[acao] || [];
-        Array.prototype.forEach.call(c.querySelectorAll('[data-gc]'), function (el) {
-            el.style.display = usados.indexOf(el.getAttribute('data-gc')) === -1 ? 'none' : '';
-        });
-    }
-
-    async function gcCarregar() {
-        var host = document.getElementById('gc-situacao');
-        try {
-            var d = await S.api('/gestao-compras/situacao');
-            var cr = d.credenciais || {};
-            gcAcoes = d.acoes || {};
-            var sel = document.getElementById('gc-acao');
-            sel.innerHTML = Object.keys(gcAcoes).map(function (a) {
-                return '<option value="' + e(a) + '">' + e(a) + '</option>';
-            }).join('');
-            sel.onchange = gcMostrarCampos;
-            gcMostrarCampos();
-            host.innerHTML =
-                '<p><b>Módulo:</b> <span class="om-mono">' + e(d.url) + '</span>' +
-                    ' <span class="text-muted">— timeout ' + e(d.timeout) + ' s, TLS ' +
-                    (d.verify_ssl ? 'verificado' : 'sem verificação') +
-                    (d.proxy ? ', proxy ' + e(d.proxy) : ', saída direta') + '</span></p>' +
-                '<p><b>Usuário:</b> ' + (cr.usuario
-                    ? '<span class="om-mono">' + e(cr.usuario) + '</span> <span class="text-muted">(' +
-                      e(cr.usuario_chave) + ', ' + e(cr.usuario_fonte) + ')</span>'
-                    : '<span class="badge badge-danger">não definido</span>') +
-                ' &nbsp; <b>Senha:</b> ' + (cr.senha_definida
-                    ? '<span class="badge badge-success">definida</span> <span class="text-muted">(' +
-                      e(cr.senha_chave) + ', ' + e(cr.senha_fonte) + ')</span>'
-                    : '<span class="badge badge-danger">não definida</span>') + '</p>' +
-                (cr.usuario && cr.senha_definida ? '' :
-                    '<p class="text-muted">Grave no cofre: <span class="om-mono">python3 scripts/cofre.py ' +
-                    'definir GESTAO_COMPRAS_USER</span> e <span class="om-mono">GESTAO_COMPRAS_PASS</span>. ' +
-                    'Sem elas vale a conta de serviço do EBS público (EBS_PUBLIC_USER / EBS_PUBLIC_PASS).</p>');
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-        }
-    }
-
-    document.getElementById('gc-atualizar').onclick = gcCarregar;
-
-    document.getElementById('gc-testar').onclick = async function () {
-        var host = document.getElementById('gc-teste');
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Entrando no módulo…</div>';
-        try {
-            var d = await S.api('/gestao-compras/testar', { method: 'POST' });
-            var u = d.usuario || {};
-            host.innerHTML = '<div class="alert alert-success">Sessão aberta no Gestão de Compras como <b>' +
-                e(u.username || '?') + '</b>' + (u.role ? ' (' + e(u.role) + ')' : '') + '.</div>';
-            S.toast('O módulo aceitou a credencial.', 'success');
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
-        }
-    };
-
-    document.getElementById('gc-consultar').onclick = async function () {
-        var host = document.getElementById('gc-resultado');
-        var acao = document.getElementById('gc-acao').value;
-        var q = { acao: acao };
-        (gcAcoes[acao] || []).forEach(function (nome) {
-            var v = (document.getElementById('gc-' + nome) || {}).value;
-            if (v !== undefined && String(v).trim() !== '') q[nome] = String(v).trim();
-        });
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando pelo módulo…</div>';
-        try {
-            var d = await S.api('/gestao-compras/consultar?' + new URLSearchParams(q).toString());
-            host.innerHTML = d.total
-                ? '<p>' + d.total + ' linha(s) em ' + d.ms + ' ms, pela API do módulo.</p>' +
-                  tabelaHtml(d.colunas, d.linhas)
-                : '<p class="text-muted">Nenhuma linha (' + d.ms + ' ms).</p>';
-        } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
-            S.toast(x.message, 'error');
-        }
-    };
-
-    gcCarregar();
 
     document.getElementById('eo-buscar').onclick = async function () {
-        var host = document.getElementById('eo-objetos');
+        var saida = document.getElementById('eo-objetos');
         var prefixo = document.getElementById('eo-prefixo').value.trim();
         var owner = document.getElementById('eo-owner').value.trim() || 'APPS';
         if (prefixo.length < 3) { S.toast('Informe ao menos 3 letras.', 'warning'); return; }
-        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Procurando…</div>';
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Procurando…</div>';
         try {
             var d = await S.api('/ebs-oracle/objetos?prefixo=' + encodeURIComponent(prefixo) +
                                 '&owner=' + encodeURIComponent(owner));
-            var itens = d.itens || [];
-            if (!itens.length) { host.innerHTML = '<p class="text-muted">Nada encontrado.</p>'; return; }
-            var colunas = Object.keys(itens[0]);
-            host.innerHTML = '<p class="text-muted">' + d.total + ' objeto(s).</p>' +
-                '<div class="table-wrapper"><table class="data-table"><thead><tr>' +
-                colunas.map(function (k) { return '<th>' + e(k) + '</th>'; }).join('') +
-                '</tr></thead><tbody>' + itens.map(function (r) {
-                    return '<tr>' + colunas.map(function (k) {
-                        return '<td>' + e(r[k] == null ? '' : r[k]) + '</td>';
-                    }).join('') + '</tr>';
-                }).join('') + '</tbody></table></div>';
+            saida.innerHTML = '';
+            if (!d.total) {
+                saida.appendChild(S.el('p', { className: 'text-muted', textContent: 'Nada encontrado.' }));
+                return;
+            }
+            saida.appendChild(S.table([
+                { key: 'owner', label: 'Owner' },
+                { key: 'object_name', label: 'Objeto' },
+                { key: 'object_type', label: 'Tipo' }
+            ], d.itens));
         } catch (x) {
-            host.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
         }
     };
 
     carregar();
+    carregarConsultas();
 }
+
 
 async function renderMonitoramento(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Monitoramento</h1>' +
-        '<p class="text-muted">Saúde do servidor e dos serviços, e registro de falhas de API, ' +
-            'integrações e automações.</p>' +
         '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Saúde</span>' +
             '<span><button id="mo-refresh" class="btn btn-sm btn-secondary">Atualizar</button> ' +
@@ -1224,8 +1227,8 @@ async function renderMonitoramento(c, S) {
             '<div class="card-body" id="mo-falhas"></div></div>';
 
     function barra(pct, alerta, critico) {
-        var cor = pct >= critico ? '#dc2626' : (pct >= alerta ? '#d97706' : '#16a34a');
-        return '<div style="background:var(--bg-input,#eee);border-radius:6px;height:8px;overflow:hidden;margin-top:6px">' +
+        var cor = pct >= critico ? 'var(--sp-alerta)' : (pct >= alerta ? 'var(--sp-gold)' : 'var(--sp-ok)');
+        return '<div style="background:var(--sp-border-soft);height:8px;overflow:hidden;margin-top:6px">' +
             '<div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + cor + '"></div></div>';
     }
     function tile(titulo, valor, sub, extra) {
@@ -1242,7 +1245,7 @@ async function renderMonitoramento(c, S) {
             var sv = d.servidor || {}, mem = sv.memoria || {}, dk = sv.disco || {},
                 cg = sv.carga || {}, up = sv.uptime || {}, ap = d.aplicacao || {},
                 lim = d.limiares || {}, f = d.falhas || {};
-            var mapa = { ok: ['#16a34a', 'Tudo certo'], alerta: ['#d97706', 'Atenção'], critico: ['#dc2626', 'Crítico'] };
+            var mapa = { ok: ['var(--sp-ok)', 'Tudo certo'], alerta: ['var(--sp-gold)', 'Atenção'], critico: ['var(--sp-alerta)', 'Crítico'] };
             var st = mapa[d.status] || mapa.ok;
             var html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
                 '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + st[0] + '"></span>' +
@@ -1265,8 +1268,8 @@ async function renderMonitoramento(c, S) {
                 '<th>Banco</th><th>Tipo</th><th>Status</th><th>Tamanho</th><th>Detalhe</th></tr></thead><tbody>';
             (d.bancos || []).forEach(function (b) {
                 html += '<tr><td><b>' + S.esc(b.nome) + '</b></td><td>' + S.esc(b.tipo) + '</td>' +
-                    '<td>' + (b.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + (b.ok ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                                   : '<span style="color:var(--sp-alerta);font-weight:600">FALHA</span>') + '</td>' +
                     '<td>' + (b.tamanho_mb ? b.tamanho_mb + ' MB' : '—') + '</td>' +
                     '<td style="font-size:.8rem;color:var(--text-secondary)">' + S.esc(b.detalhe || '') + '</td></tr>';
             });
@@ -1291,7 +1294,7 @@ async function renderMonitoramento(c, S) {
                 { key: 'quando', label: 'Quando', render: function (v) {
                     return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
                 { key: 'severidade', label: 'Sev.', html: true, render: function (v) {
-                    var cor = v === 'erro' ? '#dc2626' : (v === 'alerta' ? '#d97706' : '#16a34a');
+                    var cor = v === 'erro' ? 'var(--sp-alerta)' : (v === 'alerta' ? 'var(--sp-gold)' : 'var(--sp-ok)');
                     return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
                 { key: 'origem', label: 'Origem' },
                 { key: 'alvo', label: 'Alvo' },
@@ -1323,8 +1326,8 @@ async function renderMonitoramento(c, S) {
             var html = '<table class="data-table"><thead><tr><th>Serviço</th><th>Status</th><th>Tempo</th><th>Detalhe</th></tr></thead><tbody>';
             (d.resultados || []).forEach(function (r) {
                 html += '<tr><td><b>' + S.esc(r.servico) + '</b></td>' +
-                    '<td>' + (r.ok ? '<span style="color:#16a34a;font-weight:600">OK</span>'
-                                   : '<span style="color:#dc2626;font-weight:600">FALHA</span>') + '</td>' +
+                    '<td>' + (r.ok ? '<span style="color:var(--sp-ok);font-weight:600">OK</span>'
+                                   : '<span style="color:var(--sp-alerta);font-weight:600">FALHA</span>') + '</td>' +
                     '<td>' + r.ms + ' ms</td>' +
                     '<td style="font-size:.8rem">' + S.esc(r.detalhe || '') + '</td></tr>';
             });
@@ -1344,7 +1347,6 @@ async function renderMonitoramento(c, S) {
 async function renderAcessos(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Acessos &amp; Alertas</h1>' +
-        '<p class="text-muted">Tentativas de acesso negadas e envio de alertas por e-mail.</p>' +
 
         '<div class="card mb-3"><div class="card-header" ' +
             'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -1386,9 +1388,9 @@ async function renderAcessos(c, S) {
             var d = await S.api('/monitor/acessos?' + p);
             var r = d.resumo || {};
             var html = '<div class="stats-grid" style="margin-bottom:12px">' +
-                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#d97706">' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:var(--sp-gold)">' +
                     (r.nao_autorizado || 0) + '</div><div class="stat-label">Sem liberação</div></div>' +
-                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:#dc2626">' +
+                '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem;color:var(--sp-alerta)">' +
                     (r.credencial || 0) + '</div><div class="stat-label">Credencial inválida</div></div>' +
                 '<div class="stat-card"><div class="stat-value" style="font-size:1.5rem">' +
                     (r.bloqueios_403 || 0) + '</div><div class="stat-label">Bloqueios dentro do portal</div></div>' +
@@ -1400,7 +1402,7 @@ async function renderAcessos(c, S) {
                 { key: 'login', label: 'Usuário' },
                 { key: 'tipo', label: 'Tipo', html: true, render: function (v) {
                     var nao = v === 'nao_autorizado';
-                    return '<span style="color:' + (nao ? '#d97706' : '#dc2626') + ';font-weight:600">' +
+                    return '<span style="color:' + (nao ? 'var(--sp-gold)' : 'var(--sp-alerta)') + ';font-weight:600">' +
                         (nao ? 'Sem liberação' : 'Credencial') + '</span>'; } },
                 { key: 'origem', label: 'Autenticação' },
                 { key: 'ip', label: 'IP' },
@@ -1422,7 +1424,7 @@ async function renderAcessos(c, S) {
                 ], d.pendentes));
                 ph.insertAdjacentHTML('beforeend',
                     '<p class="text-muted mt-2">Libere o acesso em ' +
-                    '<b>Parâmetros → Usuários e Permissões</b>.</p>');
+                    '<b>Configuração → Usuários e Permissões</b>.</p>');
             }
         } catch (e) {
             host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>';
@@ -1480,8 +1482,7 @@ async function renderAcessos(c, S) {
                     '<button id="al-test" class="btn btn-outline" style="margin-left:8px">Enviar e-mail de teste</button>' +
                 '</div>' +
                 '<div id="al-result" class="mt-2"></div>' +
-                '<p class="text-muted mt-2" style="font-size:.8rem">A senha é guardada cifrada no banco de ' +
-                    'monitoramento. Quando existir chave <b>SMTP_SENHA</b> no cofre, ela tem prioridade.</p>';
+                '';
 
             document.getElementById('al-save').onclick = async function () {
                 var limpar = document.getElementById('al-limpar');
@@ -1538,8 +1539,8 @@ async function renderAcessos(c, S) {
                     return v ? new Date(v).toLocaleString('pt-BR') : ''; } },
                 { key: 'usuario', label: 'Usuário' },
                 { key: 'acao', label: 'Ação', html: true, render: function (v) {
-                    var cor = v === 'negado' ? '#dc2626'
-                            : (v === 'abrir' ? '#6b7280' : '#2563eb');
+                    var cor = v === 'negado' ? 'var(--sp-alerta)'
+                            : (v === 'abrir' ? 'var(--sp-faint)' : 'var(--sp-teal-text)');
                     return '<span style="color:' + cor + ';font-weight:600">' + S.esc(v) + '</span>'; } },
                 { key: 'ip', label: 'IP' },
                 { key: 'detalhe', label: 'Detalhe' }
@@ -1559,18 +1560,13 @@ async function renderAcessos(c, S) {
 
 /* ── Visual ─────────────────────────────────────────────────────── */
 async function renderVisual(c, S) {
+    // Cores não se configuram: o portal segue o padrão de UI SPARE (paleta
+    // LRSA 2025) nos dois temas. Aqui ficam só os textos.
     c.innerHTML = '<h1 class="page-title">Administração visual</h1>';
     var d = await S.api('/parametros/config/visual');
     var fields = [
         ['nome_app',     'Nome da aplicação'],
-        ['subtitulo',    'Subtítulo'],
-        ['login_title',  'Título do login'],
-        ['footer',       'Rodapé'],
-        ['cor_primaria', 'Cor primária',    'color'],
-        ['cor_fundo',    'Cor de fundo',    'color'],
-        ['cor_painel',   'Cor dos painéis', 'color'],
-        ['cor_texto',    'Cor do texto',    'color'],
-        ['cor_destaque', 'Cor de destaque', 'color']
+        ['footer',       'Rodapé']
     ];
     var form = S.el('div', { className: 'form-grid cols-2' });
     fields.forEach(function (f) {
@@ -1600,6 +1596,65 @@ async function renderVisual(c, S) {
     btnRow.appendChild(saveBtn);
     btnRow.appendChild(resetBtn);
     c.appendChild(btnRow);
+    c.appendChild(await _cardIcone(S));
+}
+
+/* Ícone do portal (favicon). Só o admin geral altera; os demais só veem. */
+async function _cardIcone(S) {
+    var info = {};
+    try { info = await S.api('/parametros/favicon'); } catch (e) { info = {}; }
+    var card = S.el('div', { className: 'card mt-3' });
+    card.appendChild(S.el('div', { className: 'card-header', textContent: 'Ícone do portal' }));
+    var body = S.el('div', { className: 'card-body' });
+    var linha = S.el('div', { style: 'display:flex;align-items:center;gap:16px;flex-wrap:wrap' });
+    var img = S.el('img', { src: '/favicon.ico?v=' + (info.versao || 0), alt: '',
+        style: 'width:48px;height:48px;background:var(--sp-th-bg);border:1px solid var(--sp-border);padding:4px' });
+    linha.appendChild(img);
+    var txt = S.el('div');
+    txt.appendChild(S.el('div', { textContent: info.personalizado ? 'Ícone personalizado' : 'Ícone padrão' }));
+    if (info.personalizado && info.atualizado_por) {
+        txt.appendChild(S.el('div', { className: 'text-muted', style: 'font-size:12px',
+            textContent: 'Alterado por ' + info.atualizado_por + (info.atualizado_em ? ' em ' + info.atualizado_em.split('-').reverse().join('/') : '') }));
+    }
+    linha.appendChild(txt);
+    body.appendChild(linha);
+
+    if (info.pode_alterar) {
+        var acoes = S.el('div', { className: 'btn-row mt-2', style: 'align-items:center;gap:8px' });
+        var arq = S.el('input', { type: 'file', accept: '.svg,.png,.ico,image/svg+xml,image/png,image/x-icon' });
+        var enviar = S.el('button', { className: 'btn btn-primary btn-sm', textContent: 'Enviar' });
+        enviar.onclick = async function () {
+            if (!arq.files || !arq.files[0]) { S.toast('Escolha um arquivo SVG, PNG ou ICO.', 'error'); return; }
+            var fd = new FormData(); fd.append('arquivo', arq.files[0]);
+            try {
+                var r = await S.api('/parametros/favicon', { method: 'POST', body: fd });
+                _aplicarIcone(r.versao); S.toast('Ícone atualizado.', 'success');
+                card.replaceWith(await _cardIcone(S));
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        acoes.appendChild(arq); acoes.appendChild(enviar);
+        if (info.personalizado) {
+            var restaurar = S.el('button', { className: 'btn btn-outline btn-sm', textContent: 'Restaurar padrão' });
+            restaurar.onclick = async function () {
+                try {
+                    await S.api('/parametros/favicon', { method: 'DELETE' });
+                    _aplicarIcone(Date.now()); S.toast('Ícone padrão restaurado.', 'success');
+                    card.replaceWith(await _cardIcone(S));
+                } catch (e) { S.toast(e.message, 'error'); }
+            };
+            acoes.appendChild(restaurar);
+        }
+        body.appendChild(acoes);
+        body.appendChild(S.el('div', { className: 'text-muted mt-1', style: 'font-size:12px',
+            textContent: 'SVG, PNG ou ICO, até 256 KB. Vale para todas as páginas do portal.' }));
+    }
+    card.appendChild(body);
+    return card;
+}
+
+function _aplicarIcone(versao) {
+    var link = document.querySelector('link[rel="icon"]');
+    if (link) link.href = '/favicon.ico?v=' + versao;
 }
 
 /* ── Locais ─────────────────────────────────────────────────────── */
@@ -1659,10 +1714,6 @@ async function renderLocations(c, S) {
 async function renderClassifications(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Classificações</h1>' +
-        '<p class="text-muted">Regras de classificação automática de ativos por descrição EBS. ' +
-            'Salvar uma regra já reclassifica os ativos que casam com ela; use ' +
-            '<b>Aplicar em toda a base</b> para passar todas as regras de novo sobre ' +
-            'a base de recebimento inteira (inclusive o que está como NÃO CLASSIFICADA).</p>' +
         '<div class="btn-row mb-3">' +
             '<button id="pm-class-add2" class="btn btn-primary">Nova regra</button>' +
             '<button id="pm-class-apply" class="btn btn-secondary">Aplicar em toda a base</button>' +
@@ -1785,29 +1836,44 @@ async function _renderValorHora(S) {
 async function renderPermissions(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Usuários e Permissões</h1>' +
-        '<p class="text-muted">Usuários ServiceNow são registrados automaticamente no primeiro login. ' +
-            'Selecione Editar para definir acesso por módulo.</p>' +
         '<div class="card mb-3"><div class="card-header">Controle de Acesso Externo</div>' +
             '<div class="card-body">' +
                 '<label class="checkbox-label">' +
                     '<input id="pm-block-external" type="checkbox"> ' +
-                    'Bloquear acesso externo (somente usuários na lista de permitidos podem logar via ServiceNow)' +
+                    'Exigir liberação prévia para login' +
                 '</label>' +
                 '<button id="pm-save-ac" class="btn btn-sm btn-primary mt-2">Salvar</button>' +
             '</div>' +
         '</div>' +
-        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário (Local ou Rede/SSO)</button>' +
+        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário</button>' +
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
-        'servicenow', 'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
-        'orcamento_spare', 'orcamento_manutencao'];
+        'servicenow', 'atendimento', 'separacao', 'projetos', 'reversa', 'inventario', 'regularizacao', 'preparacao',
+        'destinacao', 'externo', 'torre', 'trilha',
+        'rastreio', 'reparos', 'status', 'parametros', 'orcamento',
+        'orcamento_spare', 'orcamento_manutencao', 'obsolescencia',
+        'automacoes', 'ebs_forms', 'consulta_times'];
     var MODULE_LABELS = {
         bemvindo: 'Bem-vindo', consulta: 'Consulta', recebimento: 'Recebimento',
         // A chave segue 'servicenow' (as telas escrevem no ServiceNow e a
         // permissão já existe nos usuários); só o nome no menu mudou.
-        identificacao: 'Identificação', servicenow: 'Gestão de Ativos', rastreio: 'Correios',
-        reparos: 'Central de Reparos', status: 'Status', parametros: 'Parâmetros',
+        identificacao: 'Identificação', servicenow: 'Gestão de Ativos',
+        atendimento: 'Atendimento', separacao: 'Separação',
+        projetos: 'Projetos de Loja', reversa: 'Logística Reversa',
+        inventario: 'Inventário', regularizacao: 'Regularização',
+        obsolescencia: 'Obsolescência do parque', automacoes: 'Automações',
+        ebs_forms: 'EBS Forms',
+        preparacao: 'Preparação (configuração e estoque)',
+        destinacao: 'Destinação (baixa, venda, descarte, doação)',
+        externo: 'Assistência externa e devolução',
+        // "Administrar" aqui abre o painel individual dos outros.
+        torre: 'Torre de Controle',
+        // Sem tela própria ainda: dá acesso à trilha de um ativo e ao
+        // painel de filas, que outros módulos consultam.
+        trilha: 'Trilha do Ativo', rastreio: 'Correios',
+        reparos: 'Central de Reparos (bancadas)', status: 'Status', parametros: 'Configuração',
+        consulta_times: 'Consulta Times (acesso específico)',
         // Telas fora da sidebar, liberadas usuário a usuário
         orcamento: 'Controle de Orçamento',        // /controle-orcamento
         orcamento_spare: 'Orçamento SPARE',        // CAPEX da área
@@ -1818,9 +1884,20 @@ async function renderPermissions(c, S) {
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];
+    // O servidor diz quais ações existem em cada módulo (config.MODULE_ACTIONS);
+    // a grade só oferece essas. O que não existe aparece como "—".
+    var modulosServidor = null;
+    var acoesPorModulo = {};
+
+    function acoesDe(m) {
+        var lista = acoesPorModulo[m];
+        return lista ? lista.map(function (a) { return 'can_' + a; }) : ACTIONS;
+    }
 
     async function load() {
         var d = await S.api('/parametros/permissoes');
+        if (d.modules && d.modules.length) modulosServidor = d.modules;
+        acoesPorModulo = d.module_actions || {};
         document.getElementById('pm-block-external').checked = !!d.block_external;
         var cols = [
             { key: 'username',      label: 'Login' },
@@ -1847,7 +1924,7 @@ async function renderPermissions(c, S) {
                     var b = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
                     b.onclick = function () { editUser(u); };
                     wrap.appendChild(b);
-                    var del = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                    var del = S.el('button', { className: 'btn btn-sm btn-outline-danger', textContent: 'Excluir' });
                     del.onclick = function () { deleteUser(u); };
                     wrap.appendChild(del);
                     return wrap;
@@ -1909,11 +1986,15 @@ async function renderPermissions(c, S) {
         var tbody = box.querySelector('#perm-body');
         var permMap = u.permission_map || {};
 
-        MODULES.forEach(function (m) {
+        (modulosServidor || MODULES).forEach(function (m) {
             var perms = permMap[m] || {};
+            var existentes = acoesDe(m);
             var tr = S.el('tr');
             tr.innerHTML = '<td><strong>' + S.esc(MODULE_LABELS[m] || m) + '</strong></td>' +
                 ACTIONS.map(function (k) {
+                    if (existentes.indexOf(k) === -1) {
+                        return '<td class="text-muted" title="Esta ação não existe neste módulo">—</td>';
+                    }
                     return '<td><input class="perm-check" data-module="' + S.esc(m) +
                         '" data-key="' + k + '" type="checkbox" ' +
                         (perms[k] ? 'checked' : '') + '></td>';
@@ -1948,15 +2029,6 @@ async function renderPermissions(c, S) {
     document.getElementById('pm-user-add').onclick = function () {
         var f = S.el('div');
 
-        var tipoWrap = S.el('div', { style: 'margin-bottom:10px' });
-        tipoWrap.innerHTML =
-            '<label style="display:block;font-size:.85rem;margin-bottom:4px">Tipo de acesso</label>' +
-            '<select id="pm-utype" class="form-control">' +
-                '<option value="LOCAL">Local (senha gerada no portal)</option>' +
-                '<option value="SSO">Rede / AD (senha do AD)</option>' +
-            '</select>';
-        f.appendChild(tipoWrap);
-
         [
             ['Login (usuário de rede)', 'pm-ul', ''],
             ['Nome',  'pm-un', '']
@@ -1969,15 +2041,13 @@ async function renderPermissions(c, S) {
         saveBtn.onclick = async function () {
             var login = document.getElementById('pm-ul').value.trim();
             if (!login) { S.toast('Informe o login.', 'warning'); return; }
-            var tipo = document.getElementById('pm-utype').value;
-            var r;
             try {
-                r = await S.api('/parametros/usuarios', {
+                await S.api('/parametros/usuarios', {
                     method: 'POST',
                     body: {
                         login:        login,
                         display_name: document.getElementById('pm-un').value,
-                        auth_source:  tipo
+                        auth_source:  'SSO'
                     }
                 });
             } catch (e) {
@@ -1986,42 +2056,11 @@ async function renderPermissions(c, S) {
             }
             S.closeModal();
             load();
-
-            if (tipo !== 'LOCAL') {
-                S.toast('Usuário de rede "' + login + '" liberado para acesso via SSO.', 'success');
-                return;
-            }
-
-            // LOCAL: mostra a senha temporária gerada para o admin repassar.
-            var box = S.el('div');
-            box.innerHTML =
-                '<p>Usuário <strong>' + S.esc(r.login) + '</strong> criado.</p>' +
-                '<p style="margin:8px 0 4px">Senha temporária (copie e repasse ao usuário — ' +
-                'ele terá que trocá-la no primeiro acesso):</p>' +
-                '<div style="display:flex;gap:8px;align-items:center">' +
-                '<code id="pm-temp-pass" style="font-size:1.1rem;padding:8px 12px;' +
-                'background:var(--bg-secondary);border-radius:6px;user-select:all">' +
-                S.esc(r.senha_temporaria || '') + '</code></div>';
-            var copyBtn = S.el('button', { className: 'btn btn-outline', textContent: 'Copiar senha' });
-            copyBtn.onclick = function () {
-                try {
-                    navigator.clipboard.writeText(r.senha_temporaria || '');
-                    S.toast('Senha copiada.', 'success');
-                } catch (_) { S.toast('Copie manualmente.', 'info'); }
-            };
-            S.openModal('Usuário criado', box, [copyBtn]);
+            S.toast('Usuário de rede "' + login + '" liberado para acesso via SSO.', 'success');
         };
 
+        aviso.textContent = 'Login validado pelo SSO corporativo (loginsso). Sem senha no portal — a senha é a do AD. O usuário já entra liberado.';
         S.openModal('Novo usuário', f, [saveBtn]);
-
-        function refreshAviso() {
-            var t = document.getElementById('pm-utype').value;
-            aviso.textContent = (t === 'LOCAL')
-                ? 'Uma senha temporária será gerada automaticamente. O usuário troca no primeiro acesso.'
-                : 'Login validado pelo SSO corporativo (loginsso). Sem senha no portal — a senha é a do AD. O usuário já entra liberado.';
-        }
-        refreshAviso();
-        document.getElementById('pm-utype').addEventListener('change', refreshAviso);
     };
 
     load();
@@ -2080,9 +2119,7 @@ async function renderDashboards(c, S) {
 
     var html =
         '<h1 class="page-title">Dashboards</h1>' +
-        '<p class="text-muted">Telas de TV do portal. Cada uma tem o seu endereço e ' +
-            'atualiza sozinha no intervalo abaixo. Desativada, a tela sai do ar sem ' +
-            'precisar mexer no servidor.</p>';
+        '';
 
     _DASHBOARDS.forEach(function (d) {
         var chave = d[0], nomePadrao = d[1], subPadrao = d[2];
@@ -2161,8 +2198,6 @@ function renderAccount(c, S) {
                         S.esc(u.display_name || '') + '"></div>' +
                 '</div>' +
                 '<button id="pm-nome-save" class="btn btn-primary mt-2">Salvar nome</button>' +
-                '<span class="text-muted" style="margin-left:10px">' +
-                'A senha é a da rede — alterada só no AD.</span>' +
             '</div>' +
         '</div>';
 
@@ -2181,4 +2216,345 @@ function renderAccount(c, S) {
             S.toast(e.message, 'error');
         }
     };
+}
+
+/* ── Separação (admin) ──────────────────────────────────────────────
+   Duas coisas moram aqui: como ler o estoque no ServiceNow e o
+   calendário de expediente. O calendário é do núcleo e vale para todos
+   os módulos — está nesta aba porque hoje é a Separação que o usa. */
+async function renderSeparacaoConfig(c, S) {
+    var d = await S.api('/separacao/config');
+    var cal = await S.api('/trilha/config');
+    var cfg = d.config;
+    // Projetos de loja carrega isolado: se o módulo não subiu, a aba da
+    // Separação continua inteira e só o cartão dele não aparece.
+    var prj = null;
+    try { prj = (await S.api('/projetos/config')).config; } catch (_) { prj = null; }
+    var rev = null;
+    try { rev = (await S.api('/reversa/config')).config; } catch (_) { rev = null; }
+    var inv = null, reg = null;
+    try { inv = (await S.api('/inventario/config')).config; } catch (_) { inv = null; }
+    try { reg = (await S.api('/regularizacao/config')).config; } catch (_) { reg = null; }
+    var mods = {};
+    for (var nomeMod of ['bancada', 'preparacao', 'destinacao', 'externo', 'atendimento']) {
+        try { var rc = await S.api('/' + nomeMod + '/config'); mods[nomeMod] = rc.config || rc; } catch (_) { mods[nomeMod] = null; }
+    }
+    var obs = null;
+    try { obs = await S.api('/obsolescencia/config'); } catch (_) { obs = null; }
+
+    c.innerHTML = '';
+    var topo = S.el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px' });
+    topo.appendChild(S.el('h1', { className: 'page-title', style: 'margin:0', textContent: 'Ciclo do ativo' }));
+    topo.appendChild(S.el('button', { id: 'sep-cfg-salvar', className: 'btn btn-primary', textContent: 'Salvar' }));
+    c.appendChild(topo);
+
+    var largura = 'max-width:900px';
+
+    /* Estoque ------------------------------------------------------ */
+    var estoque = S.el('div', { className: 'card-body' });
+    estoque.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Campo do espaço e corredor', 'sc-campo', cfg.campo_local) +
+          _sepSelect('Comparação', 'sc-comp', cfg.comparacao,
+                     [['STARTSWITH', 'Começa com'], ['=', 'É igual a'],
+                      ['LIKE', 'Contém']]) +
+          _sepCampo('Prefixo da reposição', 'sc-pref-rep', cfg.prefixo_reposicao) +
+          _sepCampo('Prefixo da inauguração', 'sc-pref-in', cfg.prefixo_inauguracao) +
+          _sepCampo('Situação em estoque (install_status)', 'sc-status', cfg.status_estoque) +
+        '</div>' +
+        '<div class="table-wrapper mt-3"><table class="data-table"><thead><tr>' +
+        '<th>Atendimento</th><th>Estoque</th><th>Consulta enviada ao ServiceNow</th>' +
+        '</tr></thead><tbody>' +
+        _sepLinhaTipo('Frente e Retaguarda', 'sc-est-fr',
+                      cfg.estoque_FRENTE_RETAGUARDA, d.filtros.FRENTE_RETAGUARDA) +
+        _sepLinhaTipo('Mobilidade', 'sc-est-mob',
+                      cfg.estoque_MOBILIDADE, d.filtros.MOBILIDADE) +
+        _sepLinhaTipo('Inauguração e Reforma', 'sc-est-inau',
+                      cfg.estoque_INAUGURACAO_REFORMA, d.filtros.INAUGURACAO_REFORMA) +
+        '</tbody></table></div>' +
+        '<div class="form-group mt-3">' +
+          '<label for="sc-manual">Sobrescrever a consulta (opcional)</label>' +
+          '<input id="sc-manual" class="form-control" value="' +
+            S.esc(cfg.filtro_manual) + '" ' +
+            'placeholder="em branco, vale a consulta montada acima">' +
+          '<span class="text-muted" style="font-size:11.5px">Aceita encoded query ' +
+            'inteira. Use $campo, $comparacao e $prefixo.</span>' +
+        '</div>';
+    c.appendChild(_sepCartao('Estoque', estoque, largura));
+
+    /* Reserva e envio ---------------------------------------------- */
+    var reserva = S.el('div', { className: 'card-body' });
+    reserva.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Campo da reserva', 'sc-res-campo', cfg.reserva_campo) +
+          _sepCampo('Valor quando reservado', 'sc-res-valor', cfg.reserva_valor) +
+          _sepCampo('Valor quando livre', 'sc-res-livre', cfg.reserva_valor_livre) +
+          _sepCampo('Situação no envio (install_status)', 'sc-envio-status', cfg.envio_status) +
+          _sepCampo('Campo do local no envio', 'sc-envio-local', cfg.envio_campo_local) +
+        '</div>';
+    c.appendChild(_sepCartao('Reserva e envio', reserva, largura));
+
+    /* Chamado e prazos --------------------------------------------- */
+    var chamado = S.el('div', { className: 'card-body' });
+    chamado.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Prefixos aceitos', 'sc-ch-pref', cfg.chamado_prefixos) +
+          _sepCampo('Situações que bloqueiam', 'sc-ch-bloq',
+                    cfg.chamado_estados_bloqueados) +
+          _sepCampo('Prazo normal (dias úteis)', 'sc-prazo-n', cfg.prazo_normal) +
+          _sepCampo('Prazo loja parada (dias úteis)', 'sc-prazo-lp', cfg.prazo_loja_parada) +
+          _sepCampo('Prazo inauguração (dias úteis)', 'sc-prazo-in', cfg.prazo_inauguracao) +
+        '</div>';
+    c.appendChild(_sepCartao('Chamado de origem e prazos', chamado, largura));
+
+    /* Projetos de loja (A16) --------------------------------------- */
+    if (prj) {
+        var projetos = S.el('div', { className: 'card-body' });
+        projetos.innerHTML =
+            '<div class="form-grid cols-2">' +
+              _sepCampo('Definição (dias úteis)', 'sc-prj-def', prj.prazo_definicao) +
+              _sepCampo('Separação (dias úteis)', 'sc-prj-sep', prj.prazo_separacao) +
+              _sepCampo('Configuração (dias úteis)', 'sc-prj-cfg', prj.prazo_configuracao) +
+              _sepCampo('Folga antes da abertura (dias úteis)', 'sc-prj-folga',
+                        prj.folga_antes_abertura) +
+              _sepCampo('Prefixos de chamado aceitos', 'sc-prj-ch', prj.chamado_prefixos) +
+              _sepCampo('Estado da unidade reprovada', 'sc-prj-rep', prj.estado_reparo) +
+            '</div>';
+        c.appendChild(_sepCartao('Projetos de loja', projetos, largura));
+    }
+
+    /* Logística reversa (A17) -------------------------------------- */
+    if (rev) {
+        var reversa = S.el('div', { className: 'card-body' });
+        reversa.innerHTML =
+            '<div class="form-grid cols-2">' +
+              _sepCampo('Loja posta em (dias corridos)', 'sc-rev-post', rev.prazo_postagem_dias) +
+              _sepCampo('Conferir em (dias úteis)', 'sc-rev-conf', rev.prazo_conferencia_dias) +
+              _sepCampo('Prefixos de chamado aceitos', 'sc-rev-ch', rev.chamado_prefixos) +
+              _sepSelect('Divergência abre regularização', 'sc-rev-reg', rev.abrir_regularizacao,
+                         [['1', 'Sim'], ['0', 'Não']]) +
+            '</div>';
+        c.appendChild(_sepCartao('Logística reversa', reversa, largura));
+    }
+
+    /* Inventário (A18) e Regularização (A19) ------------------------ */
+    if (inv || reg) {
+        var ctrl = S.el('div', { className: 'card-body' });
+        ctrl.innerHTML =
+            '<div class="form-grid cols-2">' +
+            (inv ? _sepCampo('Inventário: situação em estoque', 'sc-inv-status', inv.status_estoque) +
+                   _sepCampo('Inventário: campo do corredor', 'sc-inv-campo', inv.campo_local) +
+                   _sepCampo('Inventário: prazo da contagem (dias úteis)', 'sc-inv-prazo', inv.prazo_contagem_dias) +
+                   _sepSelect('Inventário: divergência abre regularização', 'sc-inv-reg', inv.abrir_regularizacao,
+                              [['1', 'Sim'], ['0', 'Não']]) : '') +
+            (reg ? _sepCampo('Regularização: prazo padrão ao assumir (dias úteis)', 'sc-reg-prazo', reg.prazo_padrao_dias) +
+                   _sepCampo('Regularização: alerta sem dono após (dias úteis)', 'sc-reg-alerta', reg.alerta_sem_dono_dias) : '') +
+            '</div>';
+        c.appendChild(_sepCartao('Inventário e regularização', ctrl, largura));
+    }
+
+    /* Bancada, preparação, destinação, assistência, atendimento ------ */
+    var b = mods.bancada, pr = mods.preparacao, ds = mods.destinacao, ex = mods.externo, at = mods.atendimento;
+    if (b || pr || ds || ex || at) {
+        var ofi = S.el('div', { className: 'card-body' });
+        ofi.innerHTML = '<div class="form-grid cols-2">' +
+            (b ? _sepCampo('Bancada: janela de reincidência (dias)', 'sc-bnc-reinc', b.janela_reincidencia) +
+                 _sepCampo('Bancada: alerta de peça parada (dias)', 'sc-bnc-pecas', b.alerta_pecas_dias) : '') +
+            (pr ? _sepSelect('Internalização grava corredor no ServiceNow', 'sc-prp-sn', pr.escrever_no_servicenow,
+                             [['sim', 'Sim'], ['nao', 'Não']]) +
+                  _sepCampo('Internalização: situação em estoque (install_status)', 'sc-prp-status', pr.status_disponivel) : '') +
+            (ds ? _sepCampo('Destinação: extensões de anexo', 'sc-dst-ext', ds.anexo_extensoes) +
+                  _sepCampo('Destinação: tamanho máximo do anexo (MB)', 'sc-dst-mb', ds.anexo_tamanho_mb) +
+                  _sepCampo('Destinação: alerta sem destino (dias úteis)', 'sc-dst-alerta', ds.alerta_sem_destino_dias) : '') +
+            (ex ? _sepCampo('Assistência: alerta de atraso (dias)', 'sc-ext-alerta', ex.alerta_atraso_dias) : '') +
+            (at ? _sepCampo('Atendimento: categorias de Mobilidade', 'sc-atd-frota', at.categorias_frota) +
+                  _sepCampo('Atendimento: prazo Frente e Retaguarda (dias úteis)', 'sc-atd-loja', at.prazo_loja) +
+                  _sepCampo('Atendimento: prazo Mobilidade (dias úteis)', 'sc-atd-frt', at.prazo_frota) : '') +
+            '</div>';
+        c.appendChild(_sepCartao('Bancada, preparação, destinação, assistência e atendimento', ofi, largura));
+    }
+
+    /* Obsolescência do parque ---------------------------------------- */
+    if (obs) {
+        var ob = S.el('div', { className: 'card-body' });
+        ob.innerHTML = '<div class="form-grid cols-2">' +
+            _sepSelect('Regra', 'sc-obs-modo', obs.modo_regra, [['todos', 'Todos os critérios (E)'], ['qualquer', 'Qualquer critério (OU)']]) +
+            _sepCampo('Idade limite (anos)', 'sc-obs-anos', obs.limite_anos) +
+            _sepCampo('Sem comunicar há (dias)', 'sc-obs-semver', obs.limite_sem_ver) +
+            _sepCampo('Modelos em fim de vida', 'sc-obs-eol', obs.modelos_eol) +
+            _sepCampo('Android mínimo suportado', 'sc-obs-android', obs.versao_os_minima) +
+            _sepCampo('Modelos sem atualização', 'sc-obs-semupd', obs.modelos_sem_update) +
+            '</div>';
+        c.appendChild(_sepCartao('Obsolescência do parque', ob, largura));
+    }
+
+    /* Metas por etapa (Torre) ---------------------------------------- */
+    try {
+        var mt = await S.api('/torre/metas');
+        var metas = S.el('div', { className: 'card-body' });
+        var grade = S.el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 18px' });
+        (mt.metas || []).forEach(function (m) {
+            var linha = S.el('label', { style: 'display:flex;align-items:center;gap:8px;font-size:13px' });
+            linha.innerHTML = '<span style="flex:1">' + S.esc(m.rotulo) + ' <span class="text-muted">· ' + S.esc(m.frente) + '</span></span>' +
+                '<input class="form-control form-control-inline sc-meta" data-estado="' + S.esc(m.estado) + '" type="number" min="0" step="0.5" style="width:84px" value="' + (m.horas_uteis == null ? '' : m.horas_uteis) + '" placeholder="h">';
+            grade.appendChild(linha);
+        });
+        metas.appendChild(grade);
+        metas.appendChild(S.el('p', { className: 'text-muted', style: 'font-size:12px;margin:10px 0 0', textContent: 'Horas úteis por etapa. Em branco, vale o alerta geral do calendário.' }));
+        c.appendChild(_sepCartao('Metas por etapa (Torre)', metas, largura));
+    } catch (_) { /* Torre fora do ar: cartão não aparece */ }
+
+    /* Calendário (núcleo) ------------------------------------------ */
+    var expediente = S.el('div', { className: 'card-body' });
+    expediente.innerHTML =
+        '<div class="form-grid cols-2">' +
+          _sepCampo('Dias de expediente (0=seg … 6=dom)', 'sc-cal-dias', cal.expediente_dias) +
+          _sepCampo('Fuso em relação ao UTC', 'sc-cal-fuso', cal.fuso_horas) +
+          _sepCampo('Abre às', 'sc-cal-ini', cal.expediente_inicio) +
+          _sepCampo('Fecha às', 'sc-cal-fim', cal.expediente_fim) +
+          _sepCampo('Foto diária da Torre às', 'sc-cal-snap', cal.snapshot_hora) +
+        '</div>' +
+        '<div class="form-group mt-3">' +
+          '<label for="sc-cal-fer">Feriados</label>' +
+          '<textarea id="sc-cal-fer" class="form-control" rows="2" ' +
+            'placeholder="2026-12-25, 2027-01-01">' + S.esc(cal.feriados) + '</textarea>' +
+        '</div>';
+    c.appendChild(_sepCartao('Calendário de expediente', expediente, largura));
+
+    /* Salvar -------------------------------------------------------- */
+    document.getElementById('sep-cfg-salvar').onclick = async function () {
+        var v = function (id) { return document.getElementById(id).value.trim(); };
+        try {
+            S.loading(true);
+            await S.api('/separacao/config', {
+                method: 'PUT',
+                body: {
+                    campo_local: v('sc-campo'), comparacao: v('sc-comp'),
+                    prefixo_reposicao: v('sc-pref-rep'),
+                    prefixo_inauguracao: v('sc-pref-in'),
+                    status_estoque: v('sc-status'),
+                    estoque_FRENTE_RETAGUARDA: v('sc-est-fr'),
+                    estoque_MOBILIDADE: v('sc-est-mob'),
+                    estoque_INAUGURACAO_REFORMA: v('sc-est-inau'),
+                    filtro_manual: v('sc-manual'),
+                    reserva_campo: v('sc-res-campo'),
+                    reserva_valor: v('sc-res-valor'),
+                    reserva_valor_livre: v('sc-res-livre'),
+                    envio_status: v('sc-envio-status'),
+                    envio_campo_local: v('sc-envio-local'),
+                    chamado_prefixos: v('sc-ch-pref'),
+                    chamado_estados_bloqueados: v('sc-ch-bloq'),
+                    prazo_normal: v('sc-prazo-n'),
+                    prazo_loja_parada: v('sc-prazo-lp'),
+                    prazo_inauguracao: v('sc-prazo-in')
+                }
+            });
+            if (prj) {
+                await S.api('/projetos/config', {
+                    method: 'PUT',
+                    body: {
+                        prazo_definicao: v('sc-prj-def'),
+                        prazo_separacao: v('sc-prj-sep'),
+                        prazo_configuracao: v('sc-prj-cfg'),
+                        folga_antes_abertura: v('sc-prj-folga'),
+                        chamado_prefixos: v('sc-prj-ch'),
+                        estado_reparo: v('sc-prj-rep')
+                    }
+                });
+            }
+            if (rev) {
+                await S.api('/reversa/config', {
+                    method: 'PUT',
+                    body: {
+                        prazo_postagem_dias: v('sc-rev-post'),
+                        prazo_conferencia_dias: v('sc-rev-conf'),
+                        chamado_prefixos: v('sc-rev-ch'),
+                        abrir_regularizacao: v('sc-rev-reg')
+                    }
+                });
+            }
+            if (inv) {
+                await S.api('/inventario/config', { method: 'PUT', body: {
+                    status_estoque: v('sc-inv-status'), campo_local: v('sc-inv-campo'),
+                    prazo_contagem_dias: v('sc-inv-prazo'), abrir_regularizacao: v('sc-inv-reg') } });
+            }
+            if (reg) {
+                await S.api('/regularizacao/config', { method: 'PUT', body: {
+                    prazo_padrao_dias: v('sc-reg-prazo'), alerta_sem_dono_dias: v('sc-reg-alerta') } });
+            }
+            if (mods.bancada) await S.api('/bancada/config', { method: 'PUT', body: {
+                janela_reincidencia: v('sc-bnc-reinc'), alerta_pecas_dias: v('sc-bnc-pecas') } });
+            if (mods.preparacao) await S.api('/preparacao/config', { method: 'PUT', body: {
+                escrever_no_servicenow: v('sc-prp-sn'), status_disponivel: v('sc-prp-status') } });
+            if (mods.destinacao) await S.api('/destinacao/config', { method: 'PUT', body: {
+                anexo_extensoes: v('sc-dst-ext'), anexo_tamanho_mb: v('sc-dst-mb'), alerta_sem_destino_dias: v('sc-dst-alerta') } });
+            if (mods.externo) await S.api('/externo/config', { method: 'PUT', body: { alerta_atraso_dias: v('sc-ext-alerta') } });
+            if (mods.atendimento) await S.api('/atendimento/config', { method: 'PUT', body: {
+                categorias_frota: v('sc-atd-frota'), prazo_loja: v('sc-atd-loja'), prazo_frota: v('sc-atd-frt') } });
+            if (obs) await S.api('/obsolescencia/config', { method: 'PUT', body: {
+                modo_regra: v('sc-obs-modo'), limite_anos: v('sc-obs-anos'), limite_sem_ver: v('sc-obs-semver'),
+                modelos_eol: v('sc-obs-eol'), versao_os_minima: v('sc-obs-android'), modelos_sem_update: v('sc-obs-semupd') } });
+            var metasBody = Array.from(document.querySelectorAll('.sc-meta')).map(function (i) {
+                return { estado: i.dataset.estado, horas_uteis: i.value === '' ? null : parseFloat(i.value), ativa: true };
+            });
+            if (metasBody.length) await S.api('/torre/metas', { method: 'PUT', body: metasBody });
+            await S.api('/trilha/config', {
+                method: 'PUT',
+                body: {
+                    expediente_dias: v('sc-cal-dias'),
+                    expediente_inicio: v('sc-cal-ini'),
+                    expediente_fim: v('sc-cal-fim'),
+                    feriados: v('sc-cal-fer'),
+                    fuso_horas: v('sc-cal-fuso'),
+                    snapshot_hora: v('sc-cal-snap')
+                }
+            });
+            S.toast('Configuração salva.', 'success');
+            renderSeparacaoConfig(c, S);
+        } catch (e) {
+            S.toast(e.message, 'danger');
+        } finally {
+            S.loading(false);
+        }
+    };
+}
+
+function _sepCartao(titulo, corpo, estilo) {
+    var S = window.SPARE;
+    var card = S.el('div', { className: 'card mb-3', style: estilo || '' });
+    card.appendChild(S.el('div', { className: 'card-header', textContent: titulo }));
+    card.appendChild(corpo);
+    return card;
+}
+
+function _sepCampo(rotulo, id, valor, ajuda) {
+    var S = window.SPARE;
+    return '<div class="form-group"><label for="' + id + '">' + S.esc(rotulo) +
+        '</label><input id="' + id + '" class="form-control" value="' +
+        S.esc(valor == null ? '' : valor) + '">' +
+        (ajuda ? '<span class="text-muted" style="font-size:11.5px">' +
+                 S.esc(ajuda) + '</span>' : '') + '</div>';
+}
+
+function _sepSelect(rotulo, id, valor, opcoes) {
+    var S = window.SPARE;
+    return '<div class="form-group"><label for="' + id + '">' + S.esc(rotulo) +
+        '</label><select id="' + id + '" class="form-control">' +
+        opcoes.map(function (o) {
+            return '<option value="' + S.esc(o[0]) + '"' +
+                (o[0] === valor ? ' selected' : '') + '>' + S.esc(o[1]) + '</option>';
+        }).join('') + '</select></div>';
+}
+
+function _sepLinhaTipo(rotulo, id, valor, consulta) {
+    var S = window.SPARE;
+    return '<tr><td>' + S.esc(rotulo) + '</td>' +
+        '<td><select id="' + id + '" class="form-control form-control-inline">' +
+          '<option value="reposicao"' + (valor === 'reposicao' ? ' selected' : '') +
+            '>Reposição</option>' +
+          '<option value="inauguracao"' + (valor === 'inauguracao' ? ' selected' : '') +
+            '>Inauguração</option>' +
+        '</select></td>' +
+        '<td class="text-muted" style="font-size:11.5px;word-break:break-all">' +
+        S.esc(consulta) + '</td></tr>';
 }

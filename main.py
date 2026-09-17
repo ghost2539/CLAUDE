@@ -278,6 +278,124 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Torre
+    try:
+        from routers.torre import router as torre_router
+        app.include_router(torre_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("torre").error(
+            "Módulo torre NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Atendimento
+    try:
+        import db.atendimento as _db_atendimento
+        _db_atendimento.init_db()
+        from routers.atendimento import router as atendimento_router
+        app.include_router(atendimento_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("atendimento").error(
+            "Módulo atendimento NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Preparacao
+    try:
+        import db.preparacao as _db_preparacao
+        _db_preparacao.init_db()
+        from routers.preparacao import router as preparacao_router
+        app.include_router(preparacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("preparacao").error(
+            "Módulo preparacao NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Separacao
+    try:
+        import db.separacao as _db_separacao
+        _db_separacao.init_db()
+        from routers.separacao import router as separacao_router
+        app.include_router(separacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("separacao").error(
+            "Módulo separacao NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Projetos
+    try:
+        import db.projetos as _db_projetos
+        _db_projetos.init_db()
+        from routers.projetos import router as projetos_router
+        app.include_router(projetos_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("projetos").error(
+            "Módulo projetos NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Reversa
+    try:
+        import db.reversa as _db_reversa
+        _db_reversa.init_db()
+        from routers.reversa import router as reversa_router
+        app.include_router(reversa_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("reversa").error(
+            "Módulo reversa NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Inventario
+    try:
+        import db.inventario as _db_inventario
+        _db_inventario.init_db()
+        from routers.inventario import router as inventario_router
+        app.include_router(inventario_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("inventario").error(
+            "Módulo inventario NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Regularizacao
+    try:
+        import db.regularizacao as _db_regularizacao
+        _db_regularizacao.init_db()
+        from routers.regularizacao import router as regularizacao_router
+        app.include_router(regularizacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("regularizacao").error(
+            "Módulo regularizacao NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Externo
+    try:
+        import db.externo as _db_externo
+        _db_externo.init_db()
+        from routers.externo import router as externo_router
+        app.include_router(externo_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("externo").error(
+            "Módulo externo NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Venda
+    try:
+        import db.venda as _db_venda
+        _db_venda.init_db()
+        from routers.venda import router as venda_router
+        app.include_router(venda_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("venda").error(
+            "Módulo venda NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Destinacao
+    try:
+        import db.destinacao as _db_destinacao
+        _db_destinacao.init_db()
+        from routers.destinacao import router as destinacao_router
+        app.include_router(destinacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("destinacao").error(
+            "Módulo destinacao NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
+    # ── Trilha
+    try:
+        import db.trilha as _db_trilha
+        _db_trilha.init_db()
+        from routers.trilha import router as trilha_router
+        app.include_router(trilha_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("trilha").error(
+            "Módulo trilha NÃO carregado (portal segue sem ele): %s", exc, exc_info=True)
+
     return app
 
 
