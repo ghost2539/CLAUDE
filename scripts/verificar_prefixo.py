@@ -154,6 +154,17 @@ pf._cfg.API_BARRA_FINAL = False
 checar('api-barra-final' not in pf.com_prefixo(HTML, "/portal-spare"),
        "desligada, a marca não aparece — é este o padrão")
 
+print("\n[extra] O ícone da aba também leva o prefixo")
+# /favicon.ico tem rota própria, fora de /static: sem o rewrite o navegador
+# o busca na raiz do domínio e a aba fica sem ícone.
+from core.prefixo import com_prefixo as _cp
+_html = '<head><link rel="icon" href="/favicon.ico"></head>'
+checar('href="/portal-spare/favicon.ico"' in _cp(_html, "/portal-spare"),
+       "com prefixo, o href do ícone é reescrito")
+checar('href="/favicon.ico"' in _cp(_html, ""),
+       "sem prefixo, o href fica como estava")
+
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))

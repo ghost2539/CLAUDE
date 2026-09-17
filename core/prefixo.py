@@ -102,6 +102,9 @@ def com_prefixo(html: str, base: str) -> str:
     marcas = ""
     if base:
         html = html.replace('="/static/', f'="{base}/static/')
+        # O ícone da aba tem rota própria, fora de /static. Sem esta linha
+        # o navegador o buscava na raiz do domínio e recebia 404.
+        html = html.replace('="/favicon.ico', f'="{base}/favicon.ico')
         if 'name="app-base"' not in html:
             marcas += f'\n    <meta name="app-base" content="{base}">'
     # O contorno da barra vale mesmo sem prefixo: quem decide é a chave.
