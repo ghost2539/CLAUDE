@@ -135,11 +135,22 @@
                 }).join(' ') || 'Erro na requisição.';
             }
             if (r.status === 401 && !url.match(/\/auth\/login/)) {
-                try {
-                    var chk = await fetch(API + '/auth/me', { credentials: 'include' });
-                    if (!chk.ok) showLogin();
-                } catch (_) {
+                // Perguntar ao /auth/me se o /auth/me falhou mesmo é circular:
+                // dobrava toda abertura de página deslogada e enchia o console
+                // de vermelho — dois 401 onde um já tinha respondido tudo.
+                if (url.match(/\/auth\/me\/?($|\?)/)) {
                     showLogin();
+                } else {
+                    try {
+                        // Pelo apiUrl, e não por API + caminho: é ele que põe a
+                        // barra do fim quando a marca está ligada. Sem isso,
+                        // justamente a chamada que existe para sobreviver ao
+                        // proxy era a única que ia sem o contorno dele.
+                        var chk = await fetch(apiUrl('/auth/me'), { credentials: 'include' });
+                        if (!chk.ok) showLogin();
+                    } catch (_) {
+                        showLogin();
+                    }
                 }
             }
             // O status vai junto no erro: há tela que precisa separar "o
