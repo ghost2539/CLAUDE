@@ -493,6 +493,7 @@ class ReparoIn(BaseModel):
     empresa: str = ""
     orcamento: Any = None
     garantia: Optional[bool] = None
+    valor_alterado: Optional[bool] = None
     valor_compra: Any = None
     status: str = ""
     tipo_manutencao: str = ""
@@ -515,6 +516,7 @@ class ReparoPatch(BaseModel):
     empresa: Optional[str] = None
     orcamento: Any = None
     garantia: Optional[bool] = None
+    valor_alterado: Optional[bool] = None
     valor_compra: Any = None
     status: Optional[str] = None
     tipo_manutencao: Optional[str] = None
@@ -947,6 +949,7 @@ def criar(body: ReparoIn, req: Request):
         rma=rma, serie=serie, categoria=categoria, modelo=modelo, familia=familia,
         loja=_inteiro(body.loja), empresa=normalizar_empresa(body.empresa),
         orcamento=orcamento, garantia=bool(garantia or body.garantia),
+        valor_alterado=bool(body.valor_alterado),
         status=status, status_original=status_original,
         tipo_manutencao=normalizar_tipo(body.tipo_manutencao)[0],
         tipo_original=_texto(body.tipo_manutencao, 60),
@@ -1028,6 +1031,8 @@ def atualizar(reparo_id: int, body: ReparoPatch, req: Request):
                 r.garantia = True
         if "garantia" in dados and dados["garantia"] is not None:
             r.garantia = bool(dados["garantia"])
+        if "valor_alterado" in dados and dados["valor_alterado"] is not None:
+            r.valor_alterado = bool(dados["valor_alterado"])
         if "status" in dados and dados["status"] is not None:
             r.status, r.status_original = _status_entrada(dados["status"])
         if "tipo_manutencao" in dados and dados["tipo_manutencao"] is not None:
