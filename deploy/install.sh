@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
  
-INSTALL_DIR="/opt/portal-spare-v2"
+INSTALL_DIR="/var/www/vcreports/portal-spare"
 CONFIG_DIR="/etc/portal_operacoes_spare"
 SERVICE_USER="portalspare"
 PORT=8901
@@ -30,17 +30,14 @@ cp -r . "$INSTALL_DIR/"
  
 if [ ! -f "$CONFIG_DIR/environment" ]; then
     SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(64))")
+    INITPASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
     cat > "$CONFIG_DIR/environment" <<ENVEOF
 DATABASE_URL=postgresql+psycopg://portal_spare_app:ALTERAR@127.0.0.1:5432/portal_operacoes_spare_db
 PORTAL_SESSION_SECRET=${SESSION_SECRET}
 SESSION_TTL_MINUTES=480
-SESSION_MAX_HOURS=24
 EBS_LOGIN_URL=https://suporte.lojasrenner.com.br/ebs/api/auth/login
 EBS_SEARCH_URL=https://suporte.lojasrenner.com.br/ebs/api/estoque/busca-imobilizado
-VERIFY_SSL=true
-# Proxy que intercepta o TLS: PORTAL_CA_BUNDLE=/etc/pki/tls/certs/ca-corporativa.pem
-TRUSTED_PROXIES=127.0.0.1,::1
-SESSION_COOKIE_SECURE=auto
+VERIFY_SSL=false
 TIMEOUT_SECONDS=15
 MAX_WORKERS=10
 CREDENTIALS_DIRECTORY=/run/credentials/portal_spare.service
@@ -49,6 +46,7 @@ PORT=${PORT}
 WORKERS=1
 DEFAULT_VALOR_HORA=150.00
 INITIAL_ADMIN_LOGIN=ALTERAR_LOGIN_ADMIN
+INITIAL_ADMIN_PASSWORD=${INITPASS}
 UPLOAD_MAX_MB=50
 RATE_LIMIT_LOGIN=5/minute
 RATE_LIMIT_API=120/minute
@@ -56,7 +54,8 @@ ENVEOF
     chmod 600 "$CONFIG_DIR/environment"
     echo ""
     echo "Arquivo de ambiente criado em $CONFIG_DIR/environment"
-    echo "ALTERE DATABASE_URL e INITIAL_ADMIN_LOGIN (login de rede do administrador) antes de iniciar."
+    echo "Senha temporária do admin: $INITPASS"
+    echo "ALTERE DATABASE_URL e INITIAL_ADMIN_LOGIN antes de iniciar."
 fi
  
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
@@ -78,4 +77,4 @@ echo "Próximos passos:"
 echo "  1. Edite $CONFIG_DIR/environment (DATABASE_URL, INITIAL_ADMIN_LOGIN)"
 echo "  2. Configure credenciais EBS em $CONFIG_DIR/credentials/"
 echo "  3. systemctl start portal_spare.service"
-echo "  4. Entre com o login de rede do INITIAL_ADMIN_LOGIN (a senha é a do AD)."
+echo "  4. Troque a senha do admin no primeiro acesso."

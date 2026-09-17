@@ -493,7 +493,6 @@ class ReparoIn(BaseModel):
     empresa: str = ""
     orcamento: Any = None
     garantia: Optional[bool] = None
-    valor_alterado: Optional[bool] = None
     valor_compra: Any = None
     status: str = ""
     tipo_manutencao: str = ""
@@ -516,7 +515,6 @@ class ReparoPatch(BaseModel):
     empresa: Optional[str] = None
     orcamento: Any = None
     garantia: Optional[bool] = None
-    valor_alterado: Optional[bool] = None
     valor_compra: Any = None
     status: Optional[str] = None
     tipo_manutencao: Optional[str] = None
@@ -835,61 +833,32 @@ def resumo(req: Request, ano: Optional[int] = None, mes: Optional[str] = None):
         # A cota mensal acompanha o contrato: o avulso é medido à parte.
         totais["percentual_cota_mes"] = round(consumo_contrato / cota, 4) if cota else None
 
-        # Cards: retrato de agora, sem filtro de ano. Cada categoria abre nos
-        # seus modelos (a série manda no modelo — ver resolver_modelo).
-        aprovacao: dict[tuple, dict] = {}
-        for cat, fam, mod, q, v in s.execute(
-            select(R.categoria, R.familia, R.modelo, func.count(R.id),
-                   func.coalesce(func.sum(R.orcamento), 0))
-            .where(R.status == "AGUARDANDO_APROVACAO")
-            .group_by(R.categoria, R.familia, R.modelo).order_by(R.categoria)
-        ).all():
-            g = aprovacao.setdefault((cat, fam), {
-                "categoria": cat, "familia": fam, "qtde": 0, "valor": 0.0,
-                "modelos": [],
-            })
-            g["qtde"] += int(q)
-            g["valor"] += float(v or 0)
-            g["modelos"].append({
-                "modelo": mod or "(sem modelo)", "qtde": int(q), "valor": _dinheiro(v),
-            })
-        ag_aprovacao = []
-        for g in aprovacao.values():
-            g["valor"] = _dinheiro(g["valor"])
-            g["modelos"].sort(key=lambda m: (-m["qtde"], m["modelo"]))
-            ag_aprovacao.append(g)
-
-        _MAPA_RETORNO = {
-            "APROVADO": "ag_manutencao", "AGUARDANDO_ORCAMENTO": "ag_orcamento",
-            "VALIDANDO_ORCAMENTO": "ag_orcamento",
-            "AGUARDANDO_APROVACAO": "ag_aprovacao", "REPROVADO": "reprovado",
-        }
+        # Cards: retrato de agora, sem filtro de ano.
+        ag_aprovacao = [
+            {"categoria": cat, "familia": fam, "qtde": int(q), "valor": _dinheiro(v)}
+            for cat, fam, q, v in s.execute(
+                select(R.categoria, R.familia, func.count(R.id),
+                       func.coalesce(func.sum(R.orcamento), 0))
+                .where(R.status == "AGUARDANDO_APROVACAO")
+                .group_by(R.categoria, R.familia).order_by(R.categoria)
+            ).all()
+        ]
         devolucao: dict[tuple, dict] = {}
-        for cat, fam, mod, status, q in s.execute(
-            select(R.categoria, R.familia, R.modelo, R.status, func.count(R.id))
+        for cat, fam, status, q in s.execute(
+            select(R.categoria, R.familia, R.status, func.count(R.id))
             .where(R.status_retorno == "EM_MANUTENCAO")
-            .group_by(R.categoria, R.familia, R.modelo, R.status).order_by(R.categoria)
+            .group_by(R.categoria, R.familia, R.status).order_by(R.categoria)
         ).all():
             d = devolucao.setdefault((cat, fam), {
                 "categoria": cat, "familia": fam, "total": 0,
                 "ag_manutencao": 0, "ag_orcamento": 0, "ag_aprovacao": 0, "reprovado": 0,
-                "modelos": {},
             })
-            chave = _MAPA_RETORNO.get(status)
             d["total"] += int(q)
+            chave = {"APROVADO": "ag_manutencao", "AGUARDANDO_ORCAMENTO": "ag_orcamento",
+                     "VALIDANDO_ORCAMENTO": "ag_orcamento",
+                     "AGUARDANDO_APROVACAO": "ag_aprovacao", "REPROVADO": "reprovado"}.get(status)
             if chave:
                 d[chave] += int(q)
-            mr = d["modelos"].setdefault(mod or "(sem modelo)", {
-                "modelo": mod or "(sem modelo)", "total": 0,
-                "ag_manutencao": 0, "ag_orcamento": 0, "ag_aprovacao": 0, "reprovado": 0,
-            })
-            mr["total"] += int(q)
-            if chave:
-                mr[chave] += int(q)
-        # dict de modelos → lista ordenada (maior total primeiro)
-        for d in devolucao.values():
-            d["modelos"] = sorted(
-                d["modelos"].values(), key=lambda m: (-m["total"], m["modelo"]))
 
     return {
         "ano": ano,
@@ -978,7 +947,6 @@ def criar(body: ReparoIn, req: Request):
         rma=rma, serie=serie, categoria=categoria, modelo=modelo, familia=familia,
         loja=_inteiro(body.loja), empresa=normalizar_empresa(body.empresa),
         orcamento=orcamento, garantia=bool(garantia or body.garantia),
-        valor_alterado=bool(body.valor_alterado),
         status=status, status_original=status_original,
         tipo_manutencao=normalizar_tipo(body.tipo_manutencao)[0],
         tipo_original=_texto(body.tipo_manutencao, 60),
@@ -1060,8 +1028,6 @@ def atualizar(reparo_id: int, body: ReparoPatch, req: Request):
                 r.garantia = True
         if "garantia" in dados and dados["garantia"] is not None:
             r.garantia = bool(dados["garantia"])
-        if "valor_alterado" in dados and dados["valor_alterado"] is not None:
-            r.valor_alterado = bool(dados["valor_alterado"])
         if "status" in dados and dados["status"] is not None:
             r.status, r.status_original = _status_entrada(dados["status"])
         if "tipo_manutencao" in dados and dados["tipo_manutencao"] is not None:

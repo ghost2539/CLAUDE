@@ -1,16 +1,17 @@
 from __future__ import annotations
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
     create_engine, String, Text, Boolean, DateTime, Date,
     Integer, BigInteger, Numeric, ForeignKey, UniqueConstraint,
-    Index, JSON, select,
+    Index, JSON, func, select, text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
+import bcrypt
 
 from config import get_settings
 
@@ -35,6 +36,19 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(plain: str, hashed: str | None) -> bool:
+    if not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
 # ── ORM Models ──────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
@@ -46,11 +60,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(_PK, primary_key=True)
     login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(180), default="")
-    # Sem senha no portal: a autenticação é sempre pelo SSO corporativo.
-    # `password_hash` e `must_change_password` ficam mapeadas só porque a
-    # tabela em produção as tem (NOT NULL); nada mais as lê.
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    auth_source: Mapped[str] = mapped_column(String(12), default="SSO")
+    auth_source: Mapped[str] = mapped_column(String(12), default="LOCAL")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     allowed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
@@ -169,14 +180,6 @@ class ReceiptCycle(Base):
         ForeignKey("storage_locations.id"), nullable=True
     )
     lot_number: Mapped[str] = mapped_column(String(120), default="", index=True)
-    # De onde o ativo entrou no Spare. REVERSA é o que volta da loja e já
-    # existe no EBS; FORNECEDOR é compra nova, que chega com PO e nota e
-    # ainda não existe em lugar nenhum — por isso os dois campos ao lado.
-    origem_entrada: Mapped[str] = mapped_column(
-        String(20), default="REVERSA", server_default="REVERSA", index=True
-    )
-    po: Mapped[str] = mapped_column(String(60), default="", server_default="", index=True)
-    nf: Mapped[str] = mapped_column(String(60), default="", server_default="", index=True)
     open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(80))
@@ -274,24 +277,6 @@ class LocalAsset(Base):
     )
 
 
-class PublicEbsQueryAudit(Base):
-    """Cada consulta ao EBS pela API de conversão (`/api/public-assets`):
-    quem, de onde, quantos identificadores e o resultado."""
-    __tablename__ = "public_ebs_query_audit"
-    id: Mapped[int] = mapped_column(_PK, primary_key=True)
-    ip_address: Mapped[str] = mapped_column(String(80), default="")
-    usuario: Mapped[str] = mapped_column(String(80), default="")
-    identifiers_count: Mapped[int] = mapped_column(Integer, default=0)
-    found_count: Mapped[int] = mapped_column(Integer, default=0)
-    missing_count: Mapped[int] = mapped_column(Integer, default=0)
-    exported: Mapped[bool] = mapped_column(Boolean, default=False)
-    outcome: Mapped[str] = mapped_column(String(30), default="SUCCESS")
-    error_message: Mapped[str] = mapped_column(String(500), default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True
-    )
-
-
 class LoadHistory(Base):
     __tablename__ = "load_history"
     id: Mapped[int] = mapped_column(_PK, primary_key=True)
@@ -314,32 +299,8 @@ class LoadHistory(Base):
 
 # ── Database init ───────────────────────────────────────────────
 
-def migrar_permissoes(renomes: dict[str, str]) -> int:
-    """Copia a permissão de um módulo aposentado para o que o substituiu.
-
-    Idempotente: só cria a linha nova quando ela ainda não existe. A
-    linha antiga fica — não custa e evita surpresa num rollback.
-    """
-    feitos = 0
-    with SessionLocal.begin() as s:
-        for velho, novo in renomes.items():
-            for p in s.scalars(select(Permission).where(Permission.module == velho)).all():
-                ja = s.scalar(select(Permission).where(Permission.user_id == p.user_id,
-                                                       Permission.module == novo))
-                if ja is None:
-                    s.add(Permission(user_id=p.user_id, module=novo, can_view=p.can_view,
-                                     can_create=p.can_create, can_edit=p.can_edit,
-                                     can_export=p.can_export, can_admin=p.can_admin))
-                    feitos += 1
-    return feitos
-
-
 def init_db() -> None:
     Base.metadata.create_all(engine)
-
-    # Coluna nova em tabela que já existe: o create_all não a acrescenta.
-    from db._esquema import migrar_colunas
-    migrar_colunas(Base, engine, "portal")
 
     from sqlalchemy import inspect as sa_inspect, text as sa_text
     insp = sa_inspect(engine)
@@ -355,7 +316,15 @@ def init_db() -> None:
         defaults = {
             "visual": {
                 "nome_app": "Portal de Operações - SPARE",
+                "subtitulo": "Operações de ativos",
+                "login_title": "Portal de Operações - SPARE",
                 "footer": "SPARE - Portal de Operações",
+                "fonte": "Inter",
+                "cor_primaria": "#AB4807",
+                "cor_fundo": "#090B0D",
+                "cor_painel": "#111419",
+                "cor_texto": "#E8E8E8",
+                "cor_destaque": "#C79105",
             },
             "tv": {
                 "title": "Painel de Operações",
@@ -381,13 +350,14 @@ def init_db() -> None:
             return
         u = s.scalar(select(User).where(User.login == admin_login))
         if not u:
+            password = _cfg.INITIAL_ADMIN_PASSWORD.strip()
             u = User(
                 login=admin_login,
                 display_name="Administrador Principal",
-                auth_source="SSO",
+                auth_source="LOCAL" if password else "AD",
                 is_admin=True,
                 active=True,
-                allowed=True,
+                password_hash=hash_password(password) if password else None,
                 must_change_password=False,
             )
             s.add(u)

@@ -30,9 +30,28 @@ router = APIRouter(prefix="/api/cofre", tags=["Cofre"])
 # resolvem, o caminho até o cofre está de pé.
 GRUPOS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Correios", ("CORREIOS_USUARIO", "CORREIOS_CHAVE", "CORREIOS_CARTOES")),
+    ("Base EBS (Oracle)", ("ORACLE_EBS_USER", "ORACLE_EBS_PASS",
+                           "ORACLE_EBS_DSN", "ORACLE_CLIENT_LIB_DIR")),
     ("ServiceNow", ("SN_API_USER", "SN_API_PASS")),
     ("MDM", ("MDM_USUARIO", "MDM_SENHA")),
 )
+
+# Quando a chave "certa" não devolve valor, a pergunta seguinte é sempre a
+# mesma: o cofre não responde, ou o nome é outro? Estes são os apelidos
+# plausíveis da credencial do EBS — sondar todos de uma vez responde isso
+# em um clique, em vez de um chute por vez.
+ALTERNATIVAS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Usuário do EBS", ("ORACLE_EBS_USER", "ORACLE_EBS_USUARIO",
+                        "ORACLE_USER", "ORACLE_USERNAME", "EBS_ORACLE_USER",
+                        "EBS_USER", "BASE_REMOVIDA_USER", "DB_ORACLE_USER")),
+    ("Senha do EBS", ("ORACLE_EBS_PASS", "ORACLE_EBS_PASSWORD",
+                      "ORACLE_EBS_SENHA", "ORACLE_PASS", "ORACLE_PASSWORD",
+                      "EBS_ORACLE_PASS", "EBS_PASS", "BASE_REMOVIDA_PASS",
+                      "DB_ORACLE_PASS")),
+    ("Endereço do EBS", ("ORACLE_EBS_DSN", "ORACLE_DSN", "EBS_ORACLE_DSN",
+                         "ORACLE_EBS_TNS", "ORACLE_TNS", "EBS_DSN")),
+)
+
 
 # Nomes cujo valor nunca aparece, nem parcialmente. A lista é deliberadamente
 # larga: aqui o erro de sobrar um nome custa uma coluna com "—", e o erro de
@@ -55,15 +74,9 @@ def _exigir(req: Request) -> dict:
 
 def _sondar(nome: str) -> dict:
     """Uma chave: onde está, se resolveu, e o tamanho. Sem o valor."""
-    import os
-
     from core import cofre
-
-    # `_somente_cofre` é o que está DE FATO no arquivo do cofre. O `s()`
-    # oficial cai para os.environ quando a chave não existe; contar isso
-    # como "veio do cofre" esconderia exatamente o que se quer enxergar.
     try:
-        corp = cofre._somente_cofre(nome)
+        corp = cofre._corporativo(nome)
     except Exception as exc:  # noqa: BLE001
         corp = ""
         _log.debug("cofre corporativo falhou em %s: %s", nome, exc)
@@ -71,29 +84,35 @@ def _sondar(nome: str) -> dict:
         local = cofre._local(nome)
     except Exception:  # noqa: BLE001
         local = ""
+    import os
     ambiente = os.environ.get(nome, "")
     valor = corp or local or ambiente
-
-    # Com o arquivo do cofre legível, a lista de nomes é a verdade e não há
-    # dúvida. Sem ela, só resta o `s()` — que mistura cofre e ambiente: se
-    # os dois valores batem, não dá para dizer de qual vieram, e a tela
-    # precisa admitir isso em vez de escolher.
+    # O loader do time resolve cofre -> os.environ -> default. Ou seja: com a
+    # variável definida no arquivo de ambiente, s() devolve valor mesmo com o
+    # cofre inacessível — e contabilizar isso como "veio do cofre" esconde
+    # exatamente o que se quer enxergar. Quando os dois valores são iguais,
+    # não há como distinguir, e a tela precisa dizer isso em vez de escolher.
+    # Se o loader diz que carregou a chave, ela É do cofre — mesmo que o
+    # valor também esteja no os.environ, porque foi o próprio loader que o
+    # exportou para lá. A heurística de comparar valores só vale quando o
+    # loader não sabe se listar.
+    from core import cofre as _cofre
     try:
-        nomes_do_cofre = cofre.chaves_corporativas()
+        _nomes_loader, _ = _chaves_do_loader(_cofre._resolver_modulo())
     except Exception:  # noqa: BLE001
-        nomes_do_cofre = []
-    if nomes_do_cofre:
-        do_cofre = nome in nomes_do_cofre and bool(corp)
+        _nomes_loader = []
+    if _nomes_loader:
+        do_cofre = nome in _nomes_loader and bool(corp)
         indistinguivel = False
     else:
         indistinguivel = bool(corp and ambiente and corp == ambiente)
         do_cofre = bool(corp) and not indistinguivel
-
     item = {
         "chave": nome,
         "resolvida": bool(valor),
-        "fonte": ("cofre corporativo" if do_cofre else
-                  "ambiente (pelo cofre)" if indistinguivel else
+        "fonte": ("cofre corporativo (loader)" if do_cofre and _nomes_loader else
+                  "cofre corporativo" if do_cofre else
+                  "ambiente (pelo loader)" if indistinguivel else
                   "cofre local" if local else
                   "ambiente" if ambiente else "não definido"),
         "no_corporativo": do_cofre,
@@ -106,59 +125,81 @@ def _sondar(nome: str) -> dict:
     # que faltava enxergar quando o cofre local sombreou a credencial certa.
     # A ordem é corporativo → local → ambiente: o local ganha do ambiente,
     # então um valor velho esquecido ali derruba a variável nova em silêncio.
+    # Quando foi o próprio loader que exportou a chave para o os.environ, o
+    # "ambiente" não é uma segunda fonte — é a mesma, vista de outro lugar.
+    eco_do_loader = bool(_nomes_loader) and nome in _nomes_loader and ambiente == corp
     tem = [(rotulo, v) for rotulo, v in
            (("cofre corporativo", corp if do_cofre else ""),
             ("cofre local", local),
-            ("ambiente", ambiente))
+            ("ambiente", "" if eco_do_loader else ambiente))
            if v]
     item["fontes_com_valor"] = [rotulo for rotulo, _ in tem]
     item["divergente"] = len({v for _, v in tem}) > 1
-    # Sombreamento: mais de uma fonte tem a chave. Vale avisar mesmo quando
-    # os valores batem — no dia em que uma mudar, a outra continua mandando.
+    # Sombreamento: mais de uma fonte tem a chave e a que vence não é a
+    # última a ser configurada. Vale avisar mesmo quando os valores batem —
+    # no dia em que uma mudar, a outra continua mandando.
     item["sombreado"] = len(tem) > 1
-    # Só o que não é segredo aparece — usuário e host ajudam a conferir se o
+    # Só o que não é segredo aparece — usuário e DSN ajudam a conferir se o
     # valor é o esperado; senha e chave, nunca.
     if valor and not _e_segredo(nome):
         item["valor"] = valor
     return item
 
 
-def _inventario_corporativo() -> dict:
-    """Como o portal chega ao cofre corporativo, e que nomes existem lá.
+def _chaves_do_loader(mod) -> tuple[list[str], str]:
+    """Os NOMES que o loader carregou, perguntando a ele.
 
-    Responde de uma vez às duas perguntas que travam o diagnóstico: "o
-    serviço alcança o cofre?" e "a chave existe com outro nome?". Nomes,
-    nunca valores — e o dono/permissão do arquivo, que é o que se pede ao
-    time quando a resposta é "não alcança".
+    O loader do time expõe `_load()`; é por ele que o core decide o que é
+    "do cofre". Para um loader de outro formato, sobra olhar um dicionário
+    no módulo — só para a tela listar; o core não se apoia nisso.
     """
     from core import cofre
+    cache = cofre._cache_do_loader(mod)
+    if cache is not None:
+        return sorted(cache), "função _load()"
+    if mod is not None:
+        for atributo, valor in vars(mod).items():
+            if (not atributo.startswith("__") and isinstance(valor, dict) and valor
+                    and all(isinstance(k, str) for k in valor)):
+                return sorted(valor), f"atributo {atributo}"
+    return [], ""
 
+
+def _inventario_corporativo() -> dict:
+    """O que o loader do time carregou do cofre — perguntado a ele.
+
+    Não se abre arquivo nenhum aqui. O loader (`vcreports_secrets.py`) é
+    importado e consultado: se ele leu o cofre, tem um cache, e o cache tem
+    os nomes. Lista cheia = o serviço lê o cofre pelo loader, e estes são os
+    nomes que existem lá. Lista vazia com loader carregado = o `_load()`
+    dele não conseguiu ler (é o "cofre nao legivel" do log do loader).
+    """
+    import os
+    from core import cofre
     mod = None
     try:
         mod = cofre._resolver_modulo()
     except Exception as exc:  # noqa: BLE001
-        _log.debug("módulo do cofre não resolveu: %s", exc)
+        _log.debug("loader do cofre não resolveu: %s", exc)
     funcao = ""
     if mod is not None:
         fn = cofre._funcao_do_modulo(mod)
         funcao = getattr(fn, "__name__", "") if fn else ""
-
-    try:
-        nomes = cofre.chaves_corporativas()
-    except Exception:  # noqa: BLE001
-        nomes = []
-
+    nomes, origem = _chaves_do_loader(mod)
+    tem_cache = cofre._cache_do_loader(mod) is not None
     return {
-        "ligado": cofre.USAR_CORPORATIVO,
-        "comando_externo": cofre.COMANDO,
+        "comando_externo": getattr(cofre, "COMANDO", ""),
         "modulo_carregado": mod is not None,
         "modulo_via": getattr(cofre, "_modulo_via", ""),
         "funcao": funcao,
-        "arquivo_do_cofre": cofre.CAMINHO_ARQUIVO,
-        # Dono, grupo, modo e se ESTE processo lê. É o pedido exato a fazer
-        # ao time quando o arquivo existe e o serviço não alcança.
-        "acesso": cofre.acesso_ao_arquivo(),
+        # O arquivo que o loader lê e por que esse: é o ponto de ajuste que
+        # o próprio time deixou (VCREPORTS_SECRETS_FILE) para um cofre próprio.
+        "arquivo_do_loader": cofre.caminho_do_loader(),
+        "arquivo_por": ("VCREPORTS_SECRETS_FILE" if "VCREPORTS_SECRETS_FILE" in os.environ
+                        else "padrão do loader"),
+        "loader_tem_cache": tem_cache,
         "sabe_listar": bool(nomes),
+        "listagem_por": origem,
         "nomes": nomes,
     }
 
@@ -292,10 +333,11 @@ def diagnostico(req: Request):
     except Exception:  # noqa: BLE001
         quem = str(os.getuid())
 
-    # O core sabe dizer por que o cofre responde ou não — módulo importado,
-    # arquivo lido direto, arquivo sem permissão, desligado por configuração.
+    # Prova o cofre com uma chave dos Correios: é a que o time de segurança
+    # já usa, então serve de referência quando as outras falham.
     ok, detalhe = parte("prova do cofre corporativo",
-                        cofre.diagnostico_corporativo, (False, ""))
+                        lambda: cofre.diagnostico_corporativo("CORREIOS_USUARIO"),
+                        (False, ""))
     if not detalhe and "prova do cofre corporativo" in erros:
         detalhe = erros["prova do cofre corporativo"]
 
@@ -304,14 +346,15 @@ def diagnostico(req: Request):
         "usuario_do_servico": quem,
         "corporativo_ok": ok,
         "corporativo_detalhe": detalhe,
+        "onde_procura": parte("caminhos de busca", cofre.onde_procura, []),
         "cofre_local": str(cofre.ARQ_COFRE),
         "cofre_local_existe": parte("cofre local", cofre.ARQ_COFRE.exists, False),
         "algoritmo": parte("algoritmo do cofre local", cofre.algoritmo, ""),
         "grupos": parte("chaves por assunto",
                         lambda: [{"nome": nome, "chaves": [_sondar(k) for k in chaves]}
                                  for nome, chaves in GRUPOS], []),
-        # Os nomes que o cofre expõe. Responde "a chave existe com outro
-        # nome?" sem chutar um por vez — só nomes, nunca valores.
+        # Nomes que o cofre expõe e apelidos plausíveis da credencial do
+        # EBS: responde "a chave tem outro nome?" sem chutar um por vez.
         "inventario": parte("inventário do cofre", _inventario_corporativo, {}),
         # De onde vêm as variáveis que o processo tem sem estar no cofre.
         "ambiente_do_servico": parte("arquivo de ambiente do serviço",
@@ -319,6 +362,10 @@ def diagnostico(req: Request):
         # Sem prefixo, o navegador busca CSS e JS no lugar errado e a tela
         # aparece crua. Como ele vem do ambiente, entra no mesmo diagnóstico.
         "prefixo": parte("prefixo em uso", lambda: _prefixo_em_uso(req), {}),
+        "alternativas": parte("apelidos do EBS",
+                              lambda: [{"nome": rotulo,
+                                        "chaves": [_sondar(k) for k in chaves]}
+                                       for rotulo, chaves in ALTERNATIVAS], []),
     }
     # Nada some em silêncio: o que falhou vai nomeado para a tela.
     resposta["erros"] = erros
@@ -381,7 +428,7 @@ def tudo(req: Request):
     inv, erro = _seguro("inventário do cofre", _inventario_corporativo, {})
     if erro:
         erros["inventário do cofre"] = erro
-    nomes.update(inv.get("nomes", []))  # vazio: o arquivo do cofre não é legível
+    nomes.update(inv.get("nomes", []))  # vazio: o loader não sabe listar
     locais, erro = _seguro("cofre local", cofre.listar, [])
     if erro:
         erros["cofre local"] = erro
@@ -412,9 +459,8 @@ def tudo(req: Request):
 def sondar_varios(body: dict, req: Request):
     """Sonda uma lista de nomes de uma vez.
 
-    Quando o arquivo do cofre não é legível por este processo, ele só
-    responde por nome — e esta é a única forma de "procurar": dizer os
-    nomes candidatos e ver quais respondem.
+    Como o loader só responde por nome, esta é a única forma de "procurar"
+    no cofre corporativo: dizer os nomes candidatos e ver quais respondem.
     Aceita o texto colado de qualquer jeito — vírgula, espaço ou uma por
     linha —, porque quem tem a lista costuma tê-la em algum desses formatos.
     """
@@ -435,3 +481,104 @@ def sondar_varios(body: dict, req: Request):
     return {"total": len(itens),
             "resolvidas": sum(1 for i in itens if i["resolvida"]),
             "itens": itens}
+
+
+# Onde um loader de cofre pode morar. O caminho vem da tela, e vira `require`
+# dentro do PHP — ou seja, vira código executado. Sem esta cerca, um admin
+# distraído (ou um navegador comprometido) mandaria o serviço executar
+# qualquer arquivo do disco. Admin já pode muito; não precisa poder isso.
+PASTAS_DE_LOADER = ("/usr/local/lib/vcreports/", "/etc/vcreports/")
+LOADER_PADRAO = "/usr/local/lib/vcreports/secrets.php"
+
+
+@router.post("/testar-php")
+def testar_php(body: dict, req: Request):
+    """Roda a ponte PHP DE DENTRO do serviço e diz se o cofre respondeu.
+
+    Só o serviço alcança o cofre — rodar `php` no terminal responde sobre o
+    terminal. Então quem executa é o processo do portal, e o que volta é
+    "respondeu / não respondeu / o que o PHP reclamou", nunca o valor.
+    """
+    _exigir(req)
+    check_rate_limit(req, "api")
+    import os
+    import re as _re
+    import shutil
+    import subprocess
+    from pathlib import Path as _P
+
+    chave = str((body or {}).get("chave", "") or "CORREIOS_USUARIO").strip().upper()
+    if not _re.fullmatch(r"[A-Z0-9_.-]{1,64}", chave):
+        raise HTTPException(422, "Nome de chave inválido.")
+
+    loader = str((body or {}).get("loader", "") or LOADER_PADRAO).strip()
+    if not loader.endswith(".php") or not any(
+            loader.startswith(pasta) for pasta in PASTAS_DE_LOADER):
+        raise HTTPException(
+            422, "O loader precisa ser um .php dentro de "
+                 + " ou ".join(PASTAS_DE_LOADER) + ".")
+
+    php = shutil.which("php")
+    if not php:
+        return {"ok": False, "etapa": "php",
+                "detalhe": "O PHP não está instalado neste servidor, "
+                           "então a ponte não tem como rodar."}
+
+    ponte = _P(__file__).resolve().parent.parent / "scripts" / "cofre_php.php"
+    if not ponte.is_file():
+        return {"ok": False, "etapa": "ponte",
+                "detalhe": f"A ponte não está no lugar esperado: {ponte}"}
+
+    # O subprocesso herda o ambiente do portal, de propósito: é assim que a
+    # ponte se comporta em uso real, e tirar a chave daqui fazia o teste
+    # responder "não achou" para credencial que funciona. O preço é que uma
+    # chave presente no ambiente não prova acesso ao cofre — por isso o
+    # resultado diz de qual dos dois casos se trata, em vez de esconder.
+    ambiente = dict(os.environ, VCREPORTS_SECRETS_PHP=loader)
+    tinha_no_ambiente = chave in ambiente
+    try:
+        r = subprocess.run([php, str(ponte), chave, "--tamanho"],
+                           capture_output=True, text=True, timeout=15,
+                           env=ambiente)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "etapa": "execucao", "detalhe": str(exc)}
+
+    saida = (r.stdout or "").strip()
+    erro = (r.returncode and (r.stderr or "").strip()) or ""
+    # A linha pronta para a unit: se funcionou, é só isto que falta.
+    comando = f'{php} {ponte} {{chave}}'
+    return {
+        "ok": r.returncode == 0,
+        "etapa": "cofre",
+        "chave": chave,
+        # A chave existia no ambiente do portal e foi retirada só para este
+        # teste: quem informa isso é a tela, para ninguém achar que o valor
+        # sumiu do serviço.
+        "retirada_do_ambiente": tinha_no_ambiente,
+        "loader": loader,
+        "codigo": r.returncode,
+        # --tamanho garante que só o comprimento sai daqui, nunca o valor.
+        "detalhe": saida if r.returncode == 0 else (erro or "sem detalhe"),
+        "comando_para_a_unit": comando if r.returncode == 0 else "",
+        "variavel_do_loader": (f"VCREPORTS_SECRETS_PHP={loader}"
+                               if r.returncode == 0 and loader != LOADER_PADRAO else ""),
+    }
+
+
+@router.post("/reler")
+def reler(req: Request):
+    """Manda o loader ler o cofre de novo, sem reiniciar o serviço.
+
+    O cache do loader é fixo por processo, inclusive quando a primeira
+    leitura falha. Liberou a permissão depois que o portal subiu? É isto
+    ou reiniciar.
+    """
+    _exigir(req)
+    check_rate_limit(req, "api")
+    from core import cofre
+    quantas = cofre.reler_loader()
+    arquivo = cofre.caminho_do_loader()
+    return {"ok": quantas > 0, "chaves": quantas, "arquivo": arquivo,
+            "detalhe": (f"O loader releu {arquivo} e trouxe {quantas} chave(s)." if quantas else
+                        f"O loader releu {arquivo} e continua sem conseguir ler — "
+                        f"permissão, ou o arquivo não existe.")}

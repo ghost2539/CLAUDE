@@ -28,7 +28,8 @@ from core.prefixo import com_prefixo, destino, prefixo
 from core.security import check_rate_limit, get_session, require_permission
 
 _log = logging.getLogger("ebs_forms")
-_DIR = get_settings().STATIC / "ebs-forms"
+_cfg = get_settings()
+_DIR = _cfg.STATIC / "ebs-forms"
 
 router = APIRouter(prefix="/api/ebs-forms", tags=["EBS Forms"], include_in_schema=False)
 
@@ -215,8 +216,9 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page(req: Request) -> HTMLResponse:
-    html = (_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", _asset_version())
+def _page(req: Request | None = None) -> HTMLResponse:
+    html = (_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{v}}", _asset_version())
     return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
@@ -230,7 +232,7 @@ p{margin:0 0 8px;line-height:1.5}a{color:#2563eb}</style>
 <div class="c"><h1>Acesso não liberado</h1>
 <p>Seu usuário está autenticado, mas não tem permissão para o módulo
 EBS Forms (RPA).</p><p>Solicite a liberação a um administrador do portal.</p>
-<p><a href="/">Voltar ao portal</a></p></div>"""
+<p><a href="__BASE__/">Voltar ao portal</a></p></div>"""
 
 
 def _acesso_pagina(req: Request):
@@ -239,13 +241,13 @@ def _acesso_pagina(req: Request):
     sd = get_session(req, required=False)
     if not sd:
         # o destino vai junto: depois do login o portal volta para esta tela
-        base = prefixo(req)
         return RedirectResponse(
-            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
+            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}",
+            status_code=302)
     try:
         require_permission(req, MODULO, "view")
     except HTTPException:
-        return HTMLResponse(_SEM_PERMISSAO, status_code=403)
+        return HTMLResponse(_SEM_PERMISSAO.replace("__BASE__", prefixo(req)), status_code=403)
     return _page(req)
 
 

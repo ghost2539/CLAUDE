@@ -3,7 +3,6 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line, Tooltip, LabelList, ResponsiveContainer,
 } from "recharts";
-import PlanejamentoView from "./Planejamento.jsx";
 
 /* ════════════════════════════════════════════════════════════════
    Domínio: opções, cores e dados iniciais
@@ -19,10 +18,14 @@ const corSugerida = (categorias) => {
   const usadas = new Set(categorias.map((c) => (c.cor || "").toLowerCase()));
   return PALETA_CATEGORIAS.find((c) => !usadas.has(c)) || PALETA_CATEGORIAS[categorias.length % PALETA_CATEGORIAS.length];
 };
-const API_BASE = "/api/controle-orcamento-exec";
-/* Instância servida: "csc" (Infra CSC) ou "spare" (Orçamento Spare). O
-   literal abaixo é trocado ao servir o bundle da instância Spare. */
-const INSTANCIA = "instancia:csc".split(":")[1];
+// Prefixo do proxy: atrás de suporte.lojasrenner.com.br/portal-spare, a API
+// mora em /portal-spare/api/... — não na raiz. O <meta name="app-base"> é
+// injetado pelo servidor (com_prefixo); sem proxy fica vazio e nada muda.
+const APP_BASE = (() => {
+  const m = document.querySelector('meta[name="app-base"]');
+  return (m && m.content ? m.content : "").replace(/\/+$/, "");
+})();
+const API_BASE = APP_BASE + "/api/controle-orcamento-exec";
 const API_CATEGORIAS = API_BASE + "/categorias";
 
 const ESTAGIOS = ["Planejamento", "Aprovação", "Em Execução", "Concluído"];
@@ -52,8 +55,24 @@ const STATUS_ESTILO = {
    pelo servidor quando a tabela está vazia (database_orcamento.SEED). */
 const API = API_BASE + "/projetos";
 
+// O Apache do host tem uma regra global que força barra no fim de toda URL
+// sem barra, com 301. Num 301 o navegador reenvia o POST como GET → 405. Se a
+// chamada JÁ vier com barra no fim (antes do "?"), a regra não dispara e o
+// método é preservado; o BarraFinalMiddleware do backend remove a barra antes
+// de rotear, então a rota casa igual. Contorno sem tocar no proxy.
+function _comBarraFinal(url) {
+  const h = url.indexOf("#");
+  const frag = h >= 0 ? url.slice(h) : "";
+  const semFrag = h >= 0 ? url.slice(0, h) : url;
+  const q = semFrag.indexOf("?");
+  let caminho = q >= 0 ? semFrag.slice(0, q) : semFrag;
+  const query = q >= 0 ? semFrag.slice(q) : "";
+  if (caminho && !caminho.endsWith("/")) caminho += "/";
+  return caminho + query + frag;
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(_comBarraFinal(path), {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
@@ -283,11 +302,6 @@ const Icon = {
   download: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
       <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
-    </svg>
-  ),
-  plan: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="M3 17l6-6 4 4 8-8" /><path d="M14 7h7v7" />
     </svg>
   ),
 };
@@ -535,7 +549,6 @@ const NAV = [
   { view: "geral", label: "Visão Geral", icon: Icon.home },
   { view: "portfolio", label: "CAPEX", icon: Icon.grid },
   { view: "opex", label: "OPEX", icon: Icon.list },
-  ...(INSTANCIA === "spare" ? [{ view: "planejamento", label: "Planejamento", icon: Icon.plan }] : []),
   { view: "relatorios", label: "Relatórios", icon: Icon.report },
   { view: "config", label: "Configurações", icon: Icon.gear },
 ];
@@ -825,7 +838,7 @@ function Sidebar({ view, onView, colapsado, onToggle }) {
         })}
       </nav>
       <div className="p-3 border-t border-white/10 space-y-1">
-        <a href="/" title="Voltar ao Portal"
+        <a href={(APP_BASE || "") + "/"} title="Voltar ao Portal"
            className="w-full flex items-center gap-3 px-1 py-2 text-xs text-gray-400 hover:text-white">
           <span className="shrink-0">{Icon.back}</span>{!colapsado && <span>Portal</span>}
         </a>
@@ -1078,7 +1091,9 @@ export default function App() {
     setSincBusy(true); setErro("");
     try {
       await Promise.all(Object.keys(filaRef.current).map((id) => enviar(Number(id))));
-      const r = await api(API_BASE + "/sincronizar", { method: "POST" });
+      // corpo mínimo de propósito: POST sem corpo é rebaixado por alguns
+      // proxies em subcaminho (vira GET → 405). O endpoint ignora o corpo.
+      const r = await api(API_BASE + "/sincronizar", { method: "POST", body: "{}" });
       await carregar();
       setIncMsg(
         `Sincronizado com o EBS: ${r.atualizados} projeto(s) atualizado(s).` +
@@ -1359,18 +1374,18 @@ export default function App() {
         <table className="min-w-[1200px] w-full text-[12px] border-collapse">
           <thead className="bg-gray-50 text-gray-600">
             <tr className="text-[11px]">
-              <th rowSpan={2} className="th">ID</th>
-              <th rowSpan={2} className="th text-left">Projeto / Demanda</th>
-              <th rowSpan={2} className="th">Tipo</th>
-              <th rowSpan={2} className="th">Categoria</th>
-              <th rowSpan={2} className="th text-left">Área Responsável</th>
-              <th rowSpan={2} className="th">Estágio</th>
-              <th rowSpan={2} className="th">Prioridade</th>
+              <th rowSpan={2} className="th align-bottom">ID</th>
+              <th rowSpan={2} className="th align-bottom text-left">Projeto / Demanda</th>
+              <th rowSpan={2} className="th align-bottom">Tipo</th>
+              <th rowSpan={2} className="th align-bottom">Categoria</th>
+              <th rowSpan={2} className="th align-bottom text-left">Área Responsável</th>
+              <th rowSpan={2} className="th align-bottom">Estágio</th>
+              <th rowSpan={2} className="th align-bottom">Prioridade</th>
               <th colSpan={5} className="th text-center text-blue-700 border-b border-gray-200">Valores (R$)</th>
-              <th rowSpan={2} className="th text-right">% Realizado</th>
-              <th rowSpan={2} className="th">Vencimento Previsto</th>
-              <th rowSpan={2} className="th">Status</th>
-              <th rowSpan={2} className="th">Ações</th>
+              <th rowSpan={2} className="th align-bottom text-right">% Realizado</th>
+              <th rowSpan={2} className="th align-bottom">Vencimento Previsto</th>
+              <th rowSpan={2} className="th align-bottom">Status</th>
+              <th rowSpan={2} className="th align-bottom">Ações</th>
             </tr>
             <tr className="text-[11px]">
               <th className="th text-right">Orçamento Aprovado</th>
@@ -1597,10 +1612,6 @@ export default function App() {
         )}
 
         {/* ── OPEX ────────────────────────────────────────────────── */}
-        {view === "planejamento" && INSTANCIA === "spare" && (
-          <PlanejamentoView podeEditar={podeEditar} />
-        )}
-
         {view === "opex" && (
           <OpexView podeEditar={podeEditar} onResumo={setOpexResumo} />
         )}
@@ -1663,7 +1674,7 @@ export default function App() {
                   <label className="block">
                     <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Login (rede)</span>
                     <input value={novoAc.login} onChange={(e) => setNovoAc({ ...novoAc, login: e.target.value })}
-                           placeholder="ex.: 000123456"
+                           placeholder="ex.: 001200660"
                            className="w-[150px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
                   </label>
                   <label className="block">

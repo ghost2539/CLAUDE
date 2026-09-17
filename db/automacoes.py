@@ -159,32 +159,6 @@ _MSG_ENCAMINHAR_AP = (
 def init_db() -> None:
     Base.metadata.create_all(get_engine())
     _seed_regras()
-    limpar_config_legada()
-
-
-# Chaves que versões anteriores gravavam e que não existem mais: cookies SSO
-# de usuários, credencial de serviço cifrada, chaves de cofre e agendador.
-_CHAVES_LEGADAS = ("sn_cookies", "usuario", "cred_user", "cred_blob", "cred_algo",
-                   "cofre_user_key", "cofre_pass_key", "enabled", "horarios")
-
-
-def limpar_config_legada() -> int:
-    """Remove do payload o que a automação não usa mais. Idempotente."""
-    with SessionLocal.begin() as s:
-        row = s.get(Config, _CFG_KEY)
-        if row is None:
-            return 0
-        try:
-            atual = json.loads(row.payload) or {}
-        except Exception:  # noqa: BLE001
-            return 0
-        removidas = [k for k in _CHAVES_LEGADAS if k in atual]
-        for k in removidas:
-            del atual[k]
-        if removidas:
-            row.payload = json.dumps(atual, ensure_ascii=False)
-            row.atualizado_em = localnow()
-        return len(removidas)
 
 
 def _seed_regras() -> None:
@@ -222,6 +196,10 @@ def listar_regras() -> list[dict]:
         rows = s.scalars(select(Regra).order_by(Regra.ordem, Regra.id)).all()
         return [r.to_dict() for r in rows]
 
+
+def obter_regra(rid: int) -> Regra | None:
+    with SessionLocal() as s:
+        return s.get(Regra, rid)
 
 
 def salvar_regra(dados: dict, rid: int | None = None) -> int:

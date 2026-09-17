@@ -64,54 +64,6 @@ def _c(nome: str, padrao: str = "") -> str:
     return getattr(_cfg, nome, padrao) or padrao
 
 
-# Socket do compositor e display: um por ambiente (produção e testes rodam
-# no mesmo servidor com o mesmo usuário; sem isto uma instância derruba a
-# tela virtual da outra).
-_AMBIENTE = getattr(_cfg, "AMBIENTE", "producao") or "producao"
-SOCKET_COMPOSITOR = f"portal-ebs-forms-{_AMBIENTE}"
-_DISPLAY_PADRAO = ":98" if getattr(_cfg, "TESTES", False) else ":99"
-
-# Só o que o compositor e a JVM precisam. Nada de segredo do portal
-# (DATABASE_URL, PORTAL_SESSION_SECRET, senhas) chega a processo filho.
-_ENV_HERDADO = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL",
-                "LC_CTYPE", "TZ", "TMPDIR", "JAVA_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME",
-                "XDG_CONFIG_HOME", "XAUTHORITY")
-
-
-def _ambiente_minimo() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k in _ENV_HERDADO}
-
-
-# O EBS corporativo é publicado em http://. Antes de mandar a senha do robô
-# em claro, tentamos o mesmo endereço em https://; se o servidor responder,
-# é ele que fica. Decidido uma vez por host, por processo.
-_ESQUEMA_EBS: dict[str, str] = {}
-
-
-def url_ebs_preferindo_https(url: str, http: requests.Session, timeout: int = 8) -> str:
-    if not (url or "").lower().startswith("http://"):
-        return url
-    host = urlparse(url).netloc
-    if host not in _ESQUEMA_EBS:
-        candidata = "https://" + url[len("http://"):]
-        try:
-            r = http.get(candidata, allow_redirects=True, timeout=timeout, stream=True)
-            r.close()
-            _ESQUEMA_EBS[host] = "https"
-            _log.info("EBS %s responde em https; a sessão do robô vai por TLS", host)
-        except requests.exceptions.SSLError as exc:
-            _ESQUEMA_EBS[host] = "http"
-            _log.warning("EBS %s respondeu em https mas o certificado não foi aceito (%s); "
-                         "mantendo http:// — configure PORTAL_CA_BUNDLE para usar TLS", host, exc)
-        except requests.RequestException as exc:
-            _ESQUEMA_EBS[host] = "http"
-            _log.warning("EBS %s não atende em https (%s); mantendo http:// — "
-                         "a senha do robô trafega sem TLS nesta rede", host, type(exc).__name__)
-    if _ESQUEMA_EBS[host] == "https":
-        return "https://" + url[len("http://"):]
-    return url
-
-
 class ErroForms(RuntimeError):
     """Falha esperável do RPA (login, jnlp, JVM, roteiro) — vai para o log da execução."""
 
@@ -175,9 +127,8 @@ class Sessao:
     def __init__(self, usuario: str, senha: str, registrar: Callable[[str], None] | None = None):
         self.usuario = usuario
         self._senha = senha
-        from integracoes.http import verificacao_tls
         self.http = requests.Session()
-        self.http.verify = verificacao_tls("ebs-forms", _c("EBS_FORMS_VERIFY", ""))
+        self.http.verify = _c("EBS_FORMS_VERIFY", "false").lower() == "true"
         self.http.headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Edg/124.0"
@@ -187,11 +138,9 @@ class Sessao:
             self.http.proxies = {"http": proxy, "https": proxy}
         else:
             self.http.trust_env = False
+        self.home = _c("EBS_FORMS_HOME_URL",
+                       "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE")
         self.timeout = int(_c("EBS_FORMS_TIMEOUT", "40"))
-        self.home = url_ebs_preferindo_https(
-            _c("EBS_FORMS_HOME_URL",
-               "http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE"),
-            self.http)
         self._registrar = registrar or (lambda m: _log.info("%s", m))
         self.jnlp_pronto: str = ""
         self.url_jnlp: str = ""
@@ -226,9 +175,7 @@ class Sessao:
         return "oa_html" in caminho or "/forms/" in caminho
 
     def entrar(self) -> None:
-        inicio = url_ebs_preferindo_https(
-            _c("EBS_FORMS_LOGIN_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/AppsLogin"),
-            self.http)
+        inicio = _c("EBS_FORMS_LOGIN_URL", "http://ebscorporativo.lojasrenner.com.br/OA_HTML/AppsLogin")
         self._registrar(f"SSO: abrindo {inicio}")
         r = self.http.get(inicio, allow_redirects=True, timeout=self.timeout)
         enviou_senha = False
@@ -418,7 +365,7 @@ class Xvfb:
 
     @classmethod
     def garantir(cls) -> str:
-        display = _c("EBS_FORMS_DISPLAY", _DISPLAY_PADRAO)
+        display = _c("EBS_FORMS_DISPLAY", ":99")
         if cls._proc and cls._proc.poll() is None:
             return cls._display
         if not _display_livre(display):
@@ -474,14 +421,14 @@ class Xvfb:
         # Sobras de uma rodada anterior (Weston órfão, lock e socket) impedem
         # o novo de subir: "unable to lock lockfile". Só mexemos no nosso
         # socket nomeado, nunca em outro compositor da máquina.
-        subprocess.run(["pkill", "-f", f"weston .*--socket={SOCKET_COMPOSITOR}( |$)"], capture_output=True)
+        subprocess.run(["pkill", "-f", "weston .*--socket=portal-ebs-forms"], capture_output=True)
         time.sleep(0.3)
-        for sobra in (SOCKET_COMPOSITOR, f"{SOCKET_COMPOSITOR}.lock"):
+        for sobra in ("portal-ebs-forms", "portal-ebs-forms.lock"):
             try:
                 (runtime / sobra).unlink()
             except FileNotFoundError:
                 pass
-        env = _ambiente_minimo()
+        env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = str(runtime)
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
@@ -491,7 +438,7 @@ class Xvfb:
         # da máquina; o acesso é o do túnel SSH.
         porta_vnc = _c("EBS_FORMS_VNC_PORTA", "5900")
         comum = ["--xwayland", f"--width={tam[0]}", f"--height={tam[1]}",
-                 f"--socket={SOCKET_COMPOSITOR}", "--idle-time=0", f"--log={log_path}"]
+                 "--socket=portal-ebs-forms", "--idle-time=0", f"--log={log_path}"]
         tentativas: list[list[str]] = []
         if _c("EBS_FORMS_VNC", "nao").lower() in ("sim", "true", "1"):
             # O backend VNC varia entre versões (TLS obrigatório, opções com
@@ -592,7 +539,7 @@ class Cliente:
             compilar()
         display = Xvfb.garantir()
         java = _c("EBS_FORMS_JAVA") or shutil.which("java") or "java"
-        env = _ambiente_minimo()
+        env = dict(os.environ)
         env["DISPLAY"] = display
         if Xvfb._xdg_runtime:
             env["XDG_RUNTIME_DIR"] = Xvfb._xdg_runtime
@@ -1013,6 +960,18 @@ def montar_ativo(principal: dict, atribuicoes: dict, origem: dict, criterio: str
     }
 
 
+def resumo_do_ativo(lido: dict) -> dict:  # noqa: D401
+    """A primeira linha da grade de ativos, achatada em nome → valor.
+
+    É o formato que o portal consome; `tela` continua no resultado para quem
+    precisar do detalhe completo (todos os quadros, campos e o rodapé).
+    """
+    for grade in _grades(lido):
+        for linha in grade.get("linhas", []):
+            if any(str(v).strip() for v in linha.values()):
+                return {k: v for k, v in linha.items() if str(v).strip()}
+    return {}
+
 
 def variaveis_da_tela() -> dict[str, str]:
     """Nomes de componentes da tela, ajustáveis sem tocar no roteiro.
@@ -1163,7 +1122,7 @@ def diagnostico() -> dict[str, Any]:
         cred = f"ok ({usuario})"
     except ErroForms as exc:
         cred = str(exc)
-    display = _c("EBS_FORMS_DISPLAY", _DISPLAY_PADRAO)
+    display = _c("EBS_FORMS_DISPLAY", ":99")
     return {
         "java": java or "", "java_versao": versao, "javac": javac or "",
         "lancador_compilado": compilado(),
@@ -1380,3 +1339,9 @@ def consultar_ativo(criterio: str, registrar: Callable[[str], None], roteiros: d
             fechar_sessao()
         _trava.release()
 
+
+def ler_json(caminho: Path, padrao: Any) -> Any:
+    try:
+        return json.loads(caminho.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return padrao

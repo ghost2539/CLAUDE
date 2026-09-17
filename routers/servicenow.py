@@ -1,24 +1,19 @@
 """ServiceNow router — upload de ativos do recebimento para alm_hardware via SSO + JSONv2."""
 from __future__ import annotations
 
-import logging
 import os
 import re
 import threading
 import time
-import unicodedata
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
 from db.portal import SessionLocal, Asset, ReceiptCycle, Setting
-from core.security import require_permission, get_session, check_rate_limit
-from integracoes.http import sessao as _sessao_http
-
-_log = logging.getLogger("servicenow")
+from core.security import require_permission, get_session
 
 router = APIRouter(prefix="/api/servicenow", tags=["ServiceNow"])
 
@@ -49,6 +44,9 @@ SUBSTATUS_MAP = {
     "pre-allocated": "pre_allocated", "pre-alocado": "pre_allocated",
 }
 
+REFERENCE_FIELDS = [
+    "model", "model_category", "company", "stockroom", "depreciation",
+]
 
 REFERENCE_TABLE_MAP = {
     "model": "cmdb_model",
@@ -129,6 +127,8 @@ class UploadIn(BaseModel):
     status: str = ""                 # para origem=status
     identificadores: list[str] = []  # para origem=lista (consulta EBS)
     itens: list[dict] = []           # para origem=itens (linhas já consultadas)
+    usuario: str = ""
+    senha: str = ""
     stockroom: str = "SPARE - CD324"
     aisle_space: str = ""
     calc_depreciation: bool = True   # sempre calcula; mantido por compatibilidade
@@ -139,42 +139,14 @@ class TestLoginIn(BaseModel):
     senha: str
 
 
-# sys_id do ServiceNow: 32 hexadecimais, sempre. Qualquer outra coisa numa
-# encoded query de escrita (`sys_id=X^OR...`) viraria atualização em massa.
-_SYS_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
-
-
-def sys_id_valido(valor: str) -> str:
-    v = (valor or "").strip()
-    if not _SYS_ID_RE.match(v):
-        raise ValueError("sys_id inválido: esperado identificador de 32 caracteres hexadecimais.")
-    return v.lower()
-
-
-class _ComSysId(BaseModel):
-    sys_id: str
-
-    @field_validator("sys_id")
-    @classmethod
-    def _validar_sys_id(cls, v: str) -> str:
-        return sys_id_valido(v)
-
-
-# ── Sessões HTTP com o ServiceNow ────────────────────────────────
-
-def _sn_sessao(proxy: str | None = SN_PROXY, json: bool = False):
-    """Sessão com o ServiceNow: TLS verificado (integracoes.http) e proxy.
-    `json=True` para as chamadas JSONv2; o login SSO navega HTML e fica sem."""
-    s = _sessao_http("servicenow", proxy)
-    if json:
-        s.headers["Accept"] = "application/json"
-    return s
-
+# ── SSO functions (adapted from servicenow_insert.py) ────────────
 
 def _get_http():
     """Lazy import requests + bs4 with clear error."""
     try:
         import requests as _req
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     except ImportError:
         raise HTTPException(501, "Pacote 'requests' não instalado no servidor.")
     try:
@@ -213,19 +185,11 @@ def _follow_form_redirects(session, response, BS, hop=0):
     return _follow_form_redirects(session, r, BS, hop + 1)
 
 
-def _host(url: str) -> str:
-    """Só o host de uma URL: o resto (request_id, encquery do OAM) não vai ao log."""
-    try:
-        from urllib.parse import urlparse
-        return urlparse(url or "").netloc or "?"
-    except Exception:  # noqa: BLE001
-        return "?"
-
-
 def _login_sso(session, usuario, senha, _req, BS):
     sn_url = f"{SERVICENOW_BASE}/now/nav/ui/classic/params/target/home.do"
+    print(f"[SSO] Step 1: GET {sn_url}")
     r1 = session.get(sn_url, allow_redirects=True, timeout=30)
-    _log.debug("SSO passo 1: %s -> %s (%s)", _host(sn_url), _host(r1.url), r1.status_code)
+    print(f"[SSO] Step 1 result: status={r1.status_code} url={r1.url}")
     soup = BS(r1.text, "html.parser")
     form = soup.find("form")
     if form:
@@ -239,11 +203,11 @@ def _login_sso(session, usuario, senha, _req, BS):
             name = inp.get("name")
             if name:
                 form_fields[name] = inp.get("value", "")
-        _log.debug("SSO formulário em %s com %d campos", _host(login_action), len(form_fields))
+        print(f"[SSO] Form found: action={login_action} fields={list(form_fields.keys())}")
     else:
         login_action = "https://loginsso.lojasrenner.com.br/oam/server/auth_cred_submit"
         form_fields = {}
-        _log.debug("SSO sem formulário na página; usando a ação padrão em %s", _host(login_action))
+        print(f"[SSO] No form found, using default action: {login_action}")
 
     for uf in ["username", "userid", "user", "login", "j_username"]:
         if uf in form_fields:
@@ -259,11 +223,13 @@ def _login_sso(session, usuario, senha, _req, BS):
     else:
         form_fields["password"] = senha
 
+    print(f"[SSO] Step 2: POST {login_action}")
     r2 = session.post(login_action, data=form_fields, allow_redirects=True, timeout=30)
-    _log.debug("SSO passo 2: POST %s -> %s (%s)", _host(login_action), _host(r2.url), r2.status_code)
+    print(f"[SSO] Step 2 result: status={r2.status_code} url={r2.url}")
     r3 = _follow_form_redirects(session, r2, BS)
+    print(f"[SSO] Step 3 (redirects): final url={r3.url}")
     ok = "service-now.com" in r3.url
-    _log.info("SSO %s para %s (fim em %s)", "OK" if ok else "FALHOU", usuario, _host(r3.url))
+    print(f"[SSO] Result: {'OK' if ok else 'FAILED'}")
     return ok
 
 
@@ -277,13 +243,14 @@ def _lookup_reference(session, field, display_value, cache, BS):
     name_field = REFERENCE_NAME_FIELD.get(field, "name")
     if not table:
         return display_value
-    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
+    url = (
+        f"{SERVICENOW_BASE}/{table}.do?JSONv2"
+        f"&sysparm_action=getRecords"
+        f"&sysparm_record_count=1"
+        f"&sysparm_query={name_field}={display_value}"
+    )
     try:
-        r = session.get(url, params={
-            "sysparm_action": "getRecords",
-            "sysparm_record_count": "1",
-            "sysparm_query": f"{name_field}={display_value}",
-        }, headers={
+        r = session.get(url, headers={
             "Accept": "application/json",
             "X-Requested-With": "XMLHttpRequest",
         }, timeout=15)
@@ -352,39 +319,23 @@ def _resolve_ref(session, field, value):
     return "", False
 
 
-_TERMO_SN_RE = re.compile(r"^[A-Za-z0-9._/ -]{1,80}$")
-
-
-def termo_sn(valor: str, rotulo: str = "valor") -> str:
-    """Um valor vindo do usuário que vai entrar numa encoded query.
-
-    A query do ServiceNow é montada por concatenação; `^`, `=`, `,` e
-    `!` mudam o significado dela. Uma série bipada como
-    `X^ORinstall_status=6` faria a busca casar outro registro — e a
-    reserva e o envio cairiam no sys_id errado.
-    """
-    valor = (valor or "").strip()
-    if not _TERMO_SN_RE.match(valor):
-        raise HTTPException(400, f"{rotulo.capitalize()} com caracteres inválidos.")
-    return valor
-
-
 def _sn_query(session, table, query="", fields="", limit=50, offset=0, display_value=True):
     """Query ServiceNow via JSONv2 API (works with SSO cookies).
     Returns list of records."""
-    # Parâmetros codificados pelo requests: um "&" ou "#" num valor não
-    # injeta nem trunca a query string.
-    params = {"sysparm_action": "getRecords", "sysparm_record_count": str(limit)}
+    params = [
+        f"sysparm_action=getRecords",
+        f"sysparm_record_count={limit}",
+    ]
     if query:
-        params["sysparm_query"] = query
+        params.append(f"sysparm_query={query}")
     if fields:
-        params["sysparm_fields"] = fields
+        params.append(f"sysparm_fields={fields}")
     if offset:
-        params["sysparm_first_row"] = str(offset)
+        params.append(f"sysparm_first_row={offset}")
     if display_value:
-        params["displayvalue"] = "true"
-    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
-    r = session.get(url, params=params, headers={
+        params.append("displayvalue=true")
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&{'&'.join(params)}"
+    r = session.get(url, headers={
         "Accept": "application/json",
         "X-Requested-With": "XMLHttpRequest",
     }, timeout=30)
@@ -419,20 +370,9 @@ def _sn_query_all(session, table, query="", fields="", page_size=500, max_record
 
 
 def _sn_update(session, table, sys_id, updates):
-    """Atualiza UM registro via JSONv2 (com os cookies do SSO).
-
-    O sys_id é validado aqui também, não só nos modelos de entrada: esta é a
-    única função que escreve por query, e um `^OR` no sys_id atualizaria
-    tudo o que casasse.
-    """
-    try:
-        sys_id = sys_id_valido(sys_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2"
-    r = session.post(url, params={
-        "sysparm_action": "update", "sysparm_query": f"sys_id={sys_id}",
-    }, json=updates, headers={
+    """Update a record via JSONv2 API (works with SSO cookies)."""
+    url = f"{SERVICENOW_BASE}/{table}.do?JSONv2&sysparm_action=update&sysparm_query=sys_id={sys_id}"
+    r = session.post(url, json=updates, headers={
         "Content-Type": "application/json",
         "Accept": "application/json",
         "X-Requested-With": "XMLHttpRequest",
@@ -470,109 +410,23 @@ def _insert_record(session, record):
     return False, "", r.text[:200]
 
 
-# Nome interno da ação e o texto do botão, em qualquer idioma. O nome
-# interno ("...calculate_depreciation...") não é traduzido; o texto é.
-_RE_ANCORA = re.compile(r"<a\b[^>]*>", re.I)
-_RE_ACAO_NOME = re.compile(r'gsft_action_name\s*=\s*["\']([^"\']+)["\']', re.I)
-_RE_DEPRECIA = re.compile(r"deprecia", re.I)      # depreciation / depreciação / depreciación
-
-
-def achar_acao_depreciacao(html: str) -> str:
-    """Nome da ação de calcular depreciação na página, ou "".
-
-    Procura em duas frentes: o nome interno da ação (que o ServiceNow não
-    traduz) e o texto visível do link (que ele traduz). Trabalha sobre o
-    HTML cru de propósito — assim dá para verificar com uma página de
-    exemplo em cada idioma, sem depender do parser.
-    """
-    texto = html or ""
-    candidatos: list[tuple[int, str]] = []
-    for m in _RE_ANCORA.finditer(texto):
-        tag = m.group(0)
-        acao = _RE_ACAO_NOME.search(tag)
-        if not acao:
-            continue
-        nome = acao.group(1)
-        # Texto do link: até o </a> correspondente (basta o suficiente).
-        fim = texto.find("</a>", m.end())
-        rotulo = re.sub(r"<[^>]*>", " ", texto[m.end():fim] if fim > 0 else "")
-        casa_nome = bool(_RE_DEPRECIA.search(nome))
-        casa_rotulo = bool(_RE_DEPRECIA.search(rotulo))
-        if not (casa_nome or casa_rotulo):
-            continue
-        # Prefere quem também fala em calcular: "Calculate Depreciation",
-        # "Calcular depreciação" — e não "Depreciation schedule".
-        peso = 2 if re.search(r"calc", nome + " " + rotulo, re.I) else 1
-        candidatos.append((peso, nome))
-    if not candidatos:
-        return ""
-    candidatos.sort(key=lambda x: -x[0])
-    return candidatos[0][1]
-
-
 def _calculate_depreciation(session, sys_id, BS):
-    """Roda o "Calculate Depreciation" do formulário. True se rodou."""
-    return _depreciacao_passos(session, sys_id, BS)["ok"]
-
-
-def _depreciacao_passos(session, sys_id, BS, executar: bool = True) -> dict:
-    """O cálculo da depreciação, passo a passo e com o motivo da parada.
-
-    O caminho é o formulário da interface, não a API: são cinco pontos
-    onde ele pode parar (página não abre, link ausente, formulário
-    ausente, sessão caiu no login, ação desconhecida). Devolver só
-    "não deu" transforma um diagnóstico de dois minutos em três rodadas
-    de tentativa e erro — foi exatamente o que aconteceu.
-    """
-    passos: list[dict] = []
-    resultado = {"sys_id": sys_id, "ok": False, "passos": passos, "motivo": ""}
-
-    def parar(motivo: str) -> dict:
-        resultado["motivo"] = motivo
-        return resultado
-
     form_url = f"{SERVICENOW_BASE}/alm_hardware.do?sys_id={sys_id}"
-    try:
-        r = session.get(form_url, timeout=30)
-    except Exception as exc:  # noqa: BLE001 — rede/certificado com a causa
-        passos.append({"passo": "abrir formulário", "ok": False, "detalhe": str(exc)[:200]})
-        return parar(f"não foi possível abrir o formulário do ativo: {exc}")
-    caiu_no_login = "login" in (getattr(r, "url", "") or "").lower() or \
-                    "oam" in (getattr(r, "url", "") or "").lower()
-    passos.append({"passo": "abrir formulário", "ok": r.status_code == 200 and not caiu_no_login,
-                   "http": r.status_code, "url": getattr(r, "url", ""),
-                   "tamanho": len(getattr(r, "text", "") or "")})
+    r = session.get(form_url, timeout=30)
     if r.status_code != 200:
-        return parar(f"o formulário do ativo respondeu HTTP {r.status_code}")
-    if caiu_no_login:
-        return parar("a sessão do portal não abre o formulário do ServiceNow "
-                     "(a resposta foi a tela de login). O cálculo da depreciação "
-                     "usa a interface, não a API.")
-
+        return False
     soup = BS(r.text, "html.parser")
-    # A ação é achada pelo NOME INTERNO e pelo texto em qualquer idioma: o
-    # ServiceNow de cada usuário pode estar em português, e procurar só por
-    # "Calculate Depreciation" fazia a depreciação não rodar para quem usa
-    # a interface traduzida.
-    action_id = achar_acao_depreciacao(r.text)
-    passos.append({"passo": "achar a ação de calcular depreciação",
-                   "ok": bool(action_id), "acao": action_id})
+    calc_link = soup.find("a", string=re.compile(r"Calculate\s+Depreciation", re.IGNORECASE))
+    if not calc_link:
+        return False
+    action_id = calc_link.get("gsft_action_name", "")
     if not action_id:
-        return parar("o formulário abriu, mas não tem a ação de calcular "
-                     "depreciação (nem em inglês nem em português) — "
-                     "verifique se o usuário do portal tem esse botão no "
-                     "ServiceNow.")
+        return False
     form_tag = soup.find("form", {"name": "alm_hardware.do"})
     if not form_tag:
         form_tag = soup.find("form", {"id": "alm_hardware.do"})
-    passos.append({"passo": "achar o formulário do ativo", "ok": bool(form_tag)})
     if not form_tag:
-        return parar("a página não trouxe o formulário do ativo.")
-    if not executar:
-        resultado["ok"] = True
-        resultado["motivo"] = ("o caminho está inteiro; o cálculo rodaria "
-                               "(diagnóstico não executa a ação)")
-        return resultado
+        return False
     payload = {}
     for inp in form_tag.find_all("input"):
         name = inp.get("name")
@@ -593,27 +447,12 @@ def _depreciacao_passos(session, sys_id, BS, executar: bool = True) -> dict:
     form_action = form_tag.get("action", "alm_hardware.do")
     if not form_action.startswith("http"):
         form_action = f"{SERVICENOW_BASE}/{form_action.lstrip('/')}"
-    try:
-        r_dep = session.post(form_action, data=payload, allow_redirects=True, timeout=60)
-    except Exception as exc:  # noqa: BLE001
-        passos.append({"passo": "executar a ação", "ok": False, "detalhe": str(exc)[:200]})
-        return parar(f"falha de rede ao executar a ação: {exc}")
-    url_dep = (getattr(r_dep, "url", "") or "").lower()
-    desconhecida = "Unknown action" in (getattr(r_dep, "text", "") or "")
-    ok = (r_dep.status_code == 200 and "login" not in url_dep
-          and "oam" not in url_dep and not desconhecida)
-    passos.append({"passo": "executar a ação", "ok": ok, "http": r_dep.status_code,
-                   "url": getattr(r_dep, "url", ""),
-                   "acao_desconhecida": desconhecida})
-    if ok:
-        resultado["ok"] = True
-        resultado["motivo"] = "depreciação calculada"
-        return resultado
-    if desconhecida:
-        return parar('o ServiceNow respondeu "Unknown action" à ação de calcular.')
-    if "login" in url_dep or "oam" in url_dep:
-        return parar("a sessão caiu no login ao executar a ação.")
-    return parar(f"a ação respondeu HTTP {r_dep.status_code}")
+    r_dep = session.post(form_action, data=payload, allow_redirects=True, timeout=60)
+    if r_dep.status_code == 200 and "login" not in r_dep.url.lower() and "oam" not in r_dep.url.lower():
+        if "Unknown action" in r_dep.text:
+            return False
+        return True
+    return False
 
 
 def _parse_date(value):
@@ -643,15 +482,32 @@ def _parse_date_with_time(value):
 def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
     job = _jobs[job_id]
     _req, BS = _get_http()
-    session = _sn_sessao()
 
-    # Autenticação só pela sessão SSO do portal (cookies validados no login).
+    # Create HTTP session
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    })
+
+    # Autenticação: preferir a sessão SSO do portal (cookies já validados no
+    # login). Só cai para usuário/senha se, por algum motivo, não houver cookies.
     job["phase"] = "login"
-    if not params.get("sn_cookies"):
-        job["status"] = "error"
-        job["error"] = "Sessão ServiceNow não ativa. Saia e entre novamente no portal."
-        return
-    session.cookies.update(params["sn_cookies"])
+    if params.get("sn_cookies"):
+        session.cookies.update(params["sn_cookies"])
+    else:
+        try:
+            ok = _login_sso(session, params["usuario"], params["senha"], _req, BS)
+        except Exception as e:
+            job["status"] = "error"
+            job["error"] = f"Falha no login SSO: {e}"
+            return
+        if not ok:
+            job["status"] = "error"
+            job["error"] = "Login SSO falhou — verifique usuário e senha."
+            return
 
     job["phase"] = "lookup"
     cache = {}
@@ -912,13 +768,19 @@ def test_login(body: TestLoginIn, req: Request):
     erros = []
 
     for proxy in tentativas:
-        session = _sn_sessao(proxy)
+        session = _req.Session()
+        session.verify = False
+        if proxy:
+            session.proxies = {"https": proxy, "http": proxy}
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
         origem = f"proxy {proxy}" if proxy else "conexão direta"
         try:
             ok = _login_sso(session, body.usuario, body.senha, _req, BS)
         except Exception as e:
             msg = f"{origem}: {type(e).__name__}: {e}"
-            _log.warning("SSO falhou via %s", msg)
+            print(f"[SSO] Falha via {msg}")
             erros.append(msg)
             continue
         if not ok:
@@ -944,7 +806,10 @@ def proxy_check(req: Request):
     for nome, proxy in (("com_proxy", SN_PROXY), ("direto", None)):
         if nome == "com_proxy" and not SN_PROXY:
             continue
-        sess = _sn_sessao(proxy)
+        sess = _req.Session()
+        sess.verify = False
+        if proxy:
+            sess.proxies = {"https": proxy, "http": proxy}
         try:
             r = sess.get(f"{SERVICENOW_BASE}/login.do", timeout=15, allow_redirects=True)
             resultado[nome] = {"ok": True, "status": r.status_code, "url_final": r.url}
@@ -964,8 +829,11 @@ def sn_session_status(req: Request):
     if not sn_cookies:
         return {"active": False, "reason": "no_session"}
     try:
-        _get_http()
-        sess = _sn_sessao()
+        _req, _ = _get_http()
+        sess = _req.Session()
+        sess.verify = False
+        if SN_PROXY:
+            sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
         sess.cookies.update(sn_cookies)
         url = f"{SERVICENOW_BASE}/sys_user.do?JSONv2&sysparm_action=getRecords&sysparm_record_count=1"
         r = sess.get(url, headers={
@@ -1007,9 +875,9 @@ def start_upload(body: UploadIn, req: Request):
         raise HTTPException(400, "Informe o Aisle and Space (obrigatório).")
 
     # A autenticação usa a sessão do ServiceNow do próprio login do portal
-    # (SSO). Usuário/senha não entram mais neste corpo.
+    # (SSO). Não são mais solicitados usuário/senha nesta tela.
     sn_cookies = sd.get("sn_cookies")
-    if not sn_cookies:
+    if not sn_cookies and not (body.usuario and body.senha):
         raise HTTPException(
             409,
             "Sessão ServiceNow não ativa. Saia e entre novamente no portal "
@@ -1138,6 +1006,8 @@ def start_upload(body: UploadIn, req: Request):
     }
 
     params = {
+        "usuario": body.usuario,
+        "senha": body.senha,
         "sn_cookies": sn_cookies,
         "stockroom": body.stockroom,
         "aisle_space": body.aisle_space,
@@ -1190,10 +1060,34 @@ def _sn_session_from_portal(req):
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Saia e entre novamente no portal (Logon AD).")
     _req, _ = _get_http()
-    session = _sn_sessao(json=True)
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
     session.cookies.update(sn_cookies)
     return session
 
+
+def _sn_session_from_cookies(sn_cookies: dict):
+    """Monta uma requests.Session a partir de cookies SN salvos (usada pela
+    rotina automática, fora de um request). Retorna None se sem cookies."""
+    if not sn_cookies:
+        return None
+    _req, _ = _get_http()
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
+    session.cookies.update(sn_cookies)
+    return session
 
 
 def _sn_session_valida(session) -> bool:
@@ -1228,7 +1122,14 @@ def list_incidents(
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
-    session = _sn_sessao(json=True)
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
     session.cookies.update(sn_cookies)
 
     query_parts = [f"assignment_group.name={queue}"]
@@ -1275,7 +1176,14 @@ def count_incidents(
     if not sn_cookies:
         raise HTTPException(409, "Sessão ServiceNow não ativa. Faça login na aba Entrada de Estoque.")
 
-    session = _sn_sessao(json=True)
+    session = _req.Session()
+    session.verify = False
+    if SN_PROXY:
+        session.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    })
     session.cookies.update(sn_cookies)
 
     sn_query = f"assignment_group.name={queue}"
@@ -1341,12 +1249,7 @@ def _hardware_existentes(session, itens: list) -> tuple[set, set]:
 
 def _hardware_records(session, itens: list) -> list[dict]:
     """Busca no alm_hardware os registros que casam por asset_tag/serial de uma
-    lista de itens. Retorna dicts com sys_id, asset_tag, serial_number.
-
-    Aceita item como dict OU objeto, e nos dois casos pelos nomes que cada
-    tela usa. Ler o campo errado aqui devolve lista vazia, e lista vazia
-    faz o chamador tratar ativo existente como novo — ou seja, duplicar.
-    """
+    lista de itens. Retorna dicts com sys_id, asset_tag, serial_number."""
     def _chunks(lst, n):
         for i in range(0, len(lst), n):
             yield lst[i:i + n]
@@ -1356,8 +1259,8 @@ def _hardware_records(session, itens: list) -> list[dict]:
 
     out = []
     for grupo in _chunks(itens, 50):
-        tags = [_campo_item(i, "asset_tag", "etiqueta", "tag_number") for i in grupo]
-        sers = [_campo_item(i, "serial_number", "serial", "numero_serie") for i in grupo]
+        tags = [str(getattr(i, "asset_tag", "") or "").strip() for i in grupo]
+        sers = [str(getattr(i, "serial_number", "") or "").strip() for i in grupo]
         tags = [t for t in tags if t]
         sers = [s for s in sers if s]
         partes = []
@@ -1377,349 +1280,6 @@ def _hardware_records(session, itens: list) -> list[dict]:
                 "serial_number": str(_plain(r.get("serial_number"))).strip(),
             })
     return out
-
-
-# Padrões da marcação automática no recebimento. Ficam aqui porque é
-# aqui que mora o contrato com o ServiceNow; o valor efetivo vem da
-# configuração (Parâmetros → Configuração Módulos).
-RECEBIMENTO_STOCKROOM_PADRAO = "SPARE - CD324"
-RECEBIMENTO_STATUS_PADRAO = "6"          # In stock
-RECEBIMENTO_DEPRECIACAO_PADRAO = "SL 5 Years"
-
-
-def _campo_item(item, *nomes: str) -> str:
-    """Lê um campo do item, aceitando dict ou objeto (compatibilidade)."""
-    for n in nomes:
-        v = item.get(n) if isinstance(item, dict) else getattr(item, n, None)
-        if v:
-            return str(v).strip()
-    return ""
-
-
-def _registro_individual(session, tag: str, serie: str) -> dict | None:
-    """Procura UM ativo por etiqueta ou série. Rede contra duplicidade."""
-    partes = []
-    if tag:
-        partes.append(f"asset_tag={termo_sn(tag, 'etiqueta')}")
-    if serie:
-        partes.append(f"serial_number={termo_sn(serie, 'série')}")
-    if not partes:
-        return None
-    consulta = "^OR".join(partes)
-    try:
-        achados = _sn_query(session, HARDWARE_TABLE, consulta,
-                            "sys_id,asset_tag,serial_number", limit=1,
-                            display_value=False)
-    except Exception:  # noqa: BLE001 — sem resposta, quem chama decide
-        return None
-    if not achados:
-        return None
-
-    def _plain(v):
-        return v.get("value", "") if isinstance(v, dict) else (v or "")
-
-    r = achados[0]
-    return {"sys_id": _plain(r.get("sys_id")),
-            "asset_tag": str(_plain(r.get("asset_tag"))).strip(),
-            "serial_number": str(_plain(r.get("serial_number"))).strip()}
-
-
-def _depreciar(session, sys_id: str, BS, rotulo: str, resumo: dict,
-               tag: str = "", serie: str = "", linha: dict | None = None) -> None:
-    """Roda o cálculo de depreciação do ativo recém-escrito.
-
-    Nunca silencia: sem sys_id o registro é reprocurado pelos
-    identificadores, e o que não depreciar entra em `falhas`. Depreciação
-    que falha sem ninguém saber é exatamente o que a área reclamou.
-    """
-    if not sys_id or sys_id == "N/A":
-        achado = _registro_individual(session, tag, serie)
-        sys_id = (achado or {}).get("sys_id", "")
-        if not sys_id:
-            resumo["falhas"].append(
-                f"{rotulo}: subiu, mas o ServiceNow não devolveu o sys_id — "
-                "depreciação não calculada")
-            resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
-            if linha is not None:
-                linha["depreciacao"] = "não calculada (sem sys_id)"
-            return
-        if linha is not None:
-            linha["sys_id"] = sys_id
-    try:
-        if _calculate_depreciation(session, sys_id, BS):
-            resumo["depreciados"] = resumo.get("depreciados", 0) + 1
-            if linha is not None:
-                linha["depreciacao"] = "calculada"
-            return
-    except Exception as exc:  # noqa: BLE001 — o ativo já subiu; isto é aviso
-        _log.error("servicenow: depreciação de %s falhou: %s", rotulo, exc)
-        resumo["falhas"].append(f"{rotulo}: cálculo da depreciação falhou — {exc}")
-        resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
-        if linha is not None:
-            linha["depreciacao"] = f"falhou: {str(exc)[:120]}"
-        return
-    _log.error("servicenow: o ServiceNow não calculou a depreciação de %s "
-               "(sys_id %s)", rotulo, sys_id)
-    resumo["falhas"].append(
-        f"{rotulo}: o ServiceNow não calculou a depreciação (sys_id {sys_id}). "
-        "Verifique se a sessão do portal ainda abre o formulário do ativo.")
-    resumo["sem_depreciacao"] = resumo.get("sem_depreciacao", 0) + 1
-    if linha is not None:
-        linha["depreciacao"] = "não calculada"
-
-
-def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
-                                install_status: str = "", aisle_space: str = "",
-                                criar: bool = True, depreciacao: str = "") -> dict:
-    """Reflete no ServiceNow o que chegou fisicamente ao CD.
-
-    Quem já existe é ATUALIZADO com os dados do recebimento (modelo,
-    categoria, identificadores) e passa a estar em estoque, no CD, no
-    espaço e corredor informados. Quem não existe é CRIADO ali mesmo:
-    equipamento no CD que o ServiceNow não conhece é ativo invisível, e
-    esperar a Entrada de Estoque deixava a diferença aberta.
-
-    Nunca se cria ativo pela metade: **custo, data de aquisição e
-    depreciação são obrigatórios**, e o cálculo da depreciação roda logo
-    depois da escrita. Item sem esses dados não sobe — entra em `falhas`
-    dizendo o que falta, e o ativo continua fora do ServiceNow em vez de
-    entrar como registro incompleto.
-
-    Antes de criar, o ativo é procurado uma segunda vez, um a um: um
-    índice vazio (consulta em lote que falhou, campo lido errado) faria o
-    ativo existente virar duplicata, e duplicata em cadastro de
-    patrimônio dá trabalho para o resto da vida.
-
-    `aisle_space` é obrigatório: gravar "em estoque" sem dizer onde é o
-    que faz o inventário não fechar depois. A escrita usa a sessão de
-    quem está logado — no ServiceNow o registro sai no nome de quem
-    recebeu.
-    """
-    # `por_item` é o que a tela mostra: uma linha por série, dizendo o que
-    # o ServiceNow fez com ela. Contador agregado não responde "e o MEU
-    # coletor?", que é a pergunta que sempre aparece.
-    resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
-              "nao_encontrados": 0, "incompletos": 0, "depreciados": 0,
-              "sem_depreciacao": 0, "falhas": [], "por_item": []}
-    if not itens:
-        return resumo
-
-    stockroom = (stockroom or RECEBIMENTO_STOCKROOM_PADRAO).strip()
-    status = (install_status or RECEBIMENTO_STATUS_PADRAO).strip()
-    status = INSTALL_STATUS_MAP.get(status.lower(), status)
-    aisle = (aisle_space or "").strip()
-    if not aisle:
-        raise HTTPException(400, "Informe o Espaço e Corredor antes de subir ao ServiceNow.")
-
-    registros = _hardware_records(session, itens)
-    resumo["encontrados"] = len(registros)
-
-    _req, BS = _get_http()
-    cache: dict = {}
-    stockroom_id = _lookup_reference(session, "stockroom", stockroom, cache, BS)
-    if not stockroom_id:
-        # Sem o estoque resolvido não se escreve nada: gravar só o status
-        # deixaria o ativo "em estoque" sem dizer em qual, que é pior do
-        # que não mexer.
-        resumo["falhas"].append(
-            f"estoque '{stockroom}' não encontrado no ServiceNow")
-        return resumo
-
-    # Depreciação é obrigatória, então ela é resolvida antes: sem o plano
-    # no ServiceNow não há como subir ativo completo, e subir incompleto
-    # não é opção.
-    plano = (depreciacao or RECEBIMENTO_DEPRECIACAO_PADRAO).strip()
-    depreciation_id = _lookup_reference(session, "depreciation", plano, cache, BS)
-    if not depreciation_id:
-        resumo["falhas"].append(
-            f"plano de depreciação '{plano}' não encontrado no ServiceNow")
-        return resumo
-
-    # Índice do que já existe, por etiqueta e por série.
-    por_tag = {r["asset_tag"].upper(): r for r in registros if r.get("asset_tag")}
-    por_serie = {r["serial_number"].upper(): r for r in registros if r.get("serial_number")}
-
-    base = {"install_status": status, "stockroom": stockroom_id,
-            "aisle_space_location": aisle, "depreciation": depreciation_id,
-            "cost.currency_type": CURRENCY_MAP.get("BRL", "BRL")}
-
-    for item in itens:
-        tag = _campo_item(item, "etiqueta", "asset_tag", "tag_number")
-        serie = _campo_item(item, "serial", "serial_number", "numero_serie")
-        modelo = _campo_item(item, "modelo", "model")
-        categoria = _campo_item(item, "categoria", "category")
-        rotulo = tag or serie or "(sem identificador)"
-        linha = {"serial": serie, "etiqueta": tag, "acao": "", "motivo": "",
-                 "sys_id": "", "depreciacao": ""}
-        resumo["por_item"].append(linha)
-
-        custo = _campo_item(item, "custo", "custo_asset", "cost")
-        aquisicao = _campo_item(item, "dpis", "data_aquisicao", "acquisition_date",
-                                "purchase_date")
-
-        existente = por_tag.get(tag.upper()) if tag else None
-        if existente is None and serie:
-            existente = por_serie.get(serie.upper())
-        # Segunda busca, individual: o índice do lote pode ter vindo vazio.
-        if existente is None and (tag or serie):
-            existente = _registro_individual(session, tag, serie)
-            if existente is not None:
-                resumo["encontrados"] += 1
-
-        # Ativo incompleto não sobe. Vale para criar E para atualizar: o
-        # recebimento é o momento em que esses dados existem.
-        faltando = []
-        if not custo:
-            faltando.append("custo")
-        if not _parse_date(aquisicao):
-            faltando.append("data de aquisição (DPIS)")
-        if faltando:
-            resumo["incompletos"] += 1
-            linha["acao"] = "não subiu"
-            linha["motivo"] = f"falta {' e '.join(faltando)}"
-            resumo["falhas"].append(
-                f"{rotulo}: não subiu porque falta {' e '.join(faltando)}. "
-                "Custo e depreciação são obrigatórios.")
-            continue
-
-        # Modelo e categoria só entram quando o ServiceNow os reconhece:
-        # mandar texto livre num campo de referência apaga o valor atual.
-        dados = dict(base)
-        dados["cost"] = str(custo).replace(",", ".")
-        dados["purchase_date"] = _parse_date(aquisicao)
-        dados["depreciation_date"] = _parse_date_with_time(aquisicao)
-        if modelo:
-            mid = _lookup_reference(session, "model", modelo, cache, BS)
-            if mid:
-                dados["model"] = mid
-        if categoria:
-            cid = _lookup_reference(session, "model_category", categoria, cache, BS)
-            if cid:
-                dados["model_category"] = cid
-
-        try:
-            if existente is not None:
-                alteracao = dict(dados)
-                # Completa identificador que faltava no registro do SN.
-                if tag and not existente.get("asset_tag"):
-                    alteracao["asset_tag"] = tag
-                if serie and not existente.get("serial_number"):
-                    alteracao["serial_number"] = serie
-                if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
-                    resumo["atualizados"] += 1
-                    linha["acao"] = "atualizado"
-                    linha["sys_id"] = existente["sys_id"]
-                    _depreciar(session, existente["sys_id"], BS, rotulo, resumo,
-                               tag, serie, linha)
-                else:
-                    linha["acao"] = "falhou"
-                    linha["motivo"] = "o ServiceNow não confirmou a atualização"
-                    resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
-            elif criar:
-                if not (tag or serie):
-                    resumo["falhas"].append("item sem etiqueta e sem série não pode ser criado")
-                    continue
-                registro = dict(dados)
-                if tag:
-                    registro["asset_tag"] = tag
-                if serie:
-                    registro["serial_number"] = serie
-                ok, novo_sys_id, detalhe = _insert_record(session, registro)
-                if ok:
-                    resumo["criados"] += 1
-                    linha["acao"] = "criado"
-                    linha["sys_id"] = novo_sys_id
-                    _depreciar(session, novo_sys_id, BS, rotulo, resumo,
-                               tag, serie, linha)
-                else:
-                    linha["acao"] = "falhou"
-                    linha["motivo"] = detalhe
-                    resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
-            else:
-                resumo["nao_encontrados"] += 1
-                linha["acao"] = "não encontrado"
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001 — um item ruim não derruba o lote
-            linha["acao"] = "falhou"
-            linha["motivo"] = str(exc)[:200]
-            resumo["falhas"].append(f"{rotulo}: {exc}")
-
-    return resumo
-
-
-@router.get("/diagnostico/depreciacao/{serie_no_caminho}")
-def diagnostico_depreciacao_caminho(serie_no_caminho: str, req: Request,
-                                    etiqueta: str = ""):
-    """Mesma coisa, com a série no caminho.
-
-    Existe porque query string se perde: proxy que a corta, endereço
-    colado pela metade, série com "#". No caminho ela chega inteira.
-    """
-    return diagnostico_depreciacao(req, serie=serie_no_caminho, etiqueta=etiqueta)
-
-
-@router.get("/diagnostico/depreciacao")
-def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
-    """Por que a depreciação não foi calculada — sem executar nada.
-
-    Percorre o mesmo caminho do cálculo e para onde ele pararia, dizendo
-    em qual passo e por quê.
-    """
-    require_permission(req, "servicenow", "view")
-    serie = (serie or "").strip()
-    etiqueta = (etiqueta or "").strip()
-    # O que o servidor REALMENTE recebeu. Sem este eco, "informei a série"
-    # e "a série não chegou" viram discussão em vez de diagnóstico.
-    recebido = {"serie": serie, "etiqueta": etiqueta,
-                "url": str(getattr(req, "url", ""))}
-    if not serie and not etiqueta:
-        return {"encontrado": False, "informado": False, "recebido": recebido,
-                "motivo": "o servidor recebeu a consulta SEM série e SEM "
-                          "etiqueta. Se você informou, o dado se perdeu no "
-                          "caminho — use a tela em Status → Diagnóstico de "
-                          "ativo, que envia direto."}
-    session = _sn_session_from_portal(req)
-    _req, BS = _get_http()
-    achado = _registro_individual(session, etiqueta, serie)
-    if not achado or not achado.get("sys_id"):
-        return {"encontrado": False, "informado": True, "recebido": recebido,
-                "motivo": f"o ativo não foi encontrado no ServiceNow por "
-                          f"série \"{serie or '—'}\" / etiqueta \"{etiqueta or '—'}\" "
-                          "— sem ativo no cadastro não há o que depreciar."}
-    saida = _depreciacao_passos(session, achado["sys_id"], BS, executar=False)
-    saida["encontrado"] = True
-    saida["recebido"] = recebido
-    saida["asset_tag"] = achado.get("asset_tag", "")
-    saida["serial_number"] = achado.get("serial_number", "")
-    return saida
-
-
-class RecalcularIn(BaseModel):
-    serie: str = ""
-    etiqueta: str = ""
-
-
-@router.post("/depreciacao/recalcular")
-def recalcular_depreciacao(body: RecalcularIn, req: Request):
-    """Calcula a depreciação de um ativo já cadastrado, sob demanda.
-
-    Serve para o que subiu antes desta correção e ficou sem o cálculo:
-    não é preciso receber o equipamento de novo.
-    """
-    sd = require_permission(req, "servicenow", "edit")
-    check_rate_limit(req)
-    session = _sn_session_from_portal(req)
-    _req, BS = _get_http()
-    achado = _registro_individual(session, (body.etiqueta or "").strip(),
-                                  (body.serie or "").strip())
-    if not achado or not achado.get("sys_id"):
-        raise HTTPException(404, "Ativo não encontrado no ServiceNow por essa série/etiqueta.")
-    resultado = _depreciacao_passos(session, achado["sys_id"], BS, executar=True)
-    _log.info("servicenow: %s recalculou depreciação de %s → %s",
-              sd.get("username", ""), achado.get("serial_number") or achado.get("asset_tag"),
-              "ok" if resultado["ok"] else resultado["motivo"])
-    return resultado
 
 
 class EntradaPreviewIn(BaseModel):
@@ -1800,165 +1360,20 @@ def entrada_preview(body: EntradaPreviewIn, req: Request):
     else:
         raise HTTPException(400, "Origem inválida.")
 
-    _marcar_existe_sn(session, rows)
-    return {"rows": rows, "total": len(rows)}
-
-
-def _marcar_existe_sn(session, rows: list[dict]) -> None:
-    """Marca quais linhas já existem no ServiceNow (por asset_tag/serial)."""
+    # Marca quais já existem no ServiceNow (por asset_tag/serial).
     from types import SimpleNamespace
     itens = [SimpleNamespace(asset_tag=r.get("tag_number", ""), serial_number=r.get("serial_number", ""))
              for r in rows if r.get("encontrado")]
     tags_ok, ser_ok = set(), set()
     try:
         tags_ok, ser_ok = _hardware_existentes(session, itens)
-    except Exception:  # noqa: BLE001 — sem o ServiceNow a conferência some, a tela não
+    except Exception:  # noqa: BLE001
         pass
     for r in rows:
         t = str(r.get("tag_number") or "").strip().upper()
         s2 = str(r.get("serial_number") or "").strip().upper()
         r["existe_sn"] = bool((t and t in tags_ok) or (s2 and s2 in ser_ok))
 
-
-# ── Origem por planilha ───────────────────────────────────────────
-# As colunas são as que sobem para o ServiceNow. O modelo para baixar e o
-# arquivo enviado falam a mesma língua: quem preenche vê exatamente o que
-# vai gravar.
-COLUNAS_PLANILHA_ENTRADA: list[tuple[str, str, bool]] = [
-    ("tag_number", "Asset Tag", True),
-    ("serial_number", "Número de Série", True),
-    ("asset_number", "Imobilizado", False),
-    ("model", "Modelo", True),
-    ("category", "Categoria", False),
-    ("company", "Empresa", False),
-    ("description", "Descrição", False),
-    ("cost", "Custo", False),
-    ("dpis", "DPIS (AAAA-MM-DD)", False),
-    ("acquisition_date", "Data de aquisição (AAAA-MM-DD)", False),
-]
-
-
-@router.get("/entrada/planilha-modelo")
-def entrada_planilha_modelo(req: Request):
-    """Planilha modelo com as colunas que sobem para o ServiceNow."""
-    require_permission(req, "servicenow", "view")
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
-    from fastapi.responses import StreamingResponse
-    import io as _io
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Ativos"
-    cabecalho = Font(bold=True, color="FFFFFF")
-    fundo = PatternFill("solid", fgColor="C06010")
-    for col, (_chave, rotulo, obrig) in enumerate(COLUNAS_PLANILHA_ENTRADA, start=1):
-        cel = ws.cell(row=1, column=col, value=rotulo + (" *" if obrig else ""))
-        cel.font = cabecalho
-        cel.fill = fundo
-        ws.column_dimensions[cel.column_letter].width = max(16, len(cel.value) + 4)
-    ws.cell(row=2, column=1, value="RN000123")
-    ws.cell(row=2, column=2, value="SN123456789")
-    ws.cell(row=2, column=4, value="PDV Dell 3050")
-    ws.freeze_panes = "A2"
-    aba = wb.create_sheet("Instruções")
-    for i, linha in enumerate([
-        "Uma linha por ativo. A primeira linha é o cabeçalho e não deve ser apagada.",
-        "Colunas com * são obrigatórias: Asset Tag, Número de Série e Modelo.",
-        "Datas em AAAA-MM-DD. Custo apenas com números.",
-        "A linha 2 é um exemplo: apague-a antes de enviar.",
-        "Depois de enviar, confira a pré-visualização e selecione o que vai subir.",
-    ], start=1):
-        aba.cell(row=i, column=1, value=linha)
-    aba.column_dimensions["A"].width = 90
-
-    buf = _io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return StreamingResponse(
-        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="modelo_entrada_ativos.xlsx"'})
-
-
-def ler_planilha_entrada(nome: str, conteudo: bytes) -> list[dict]:
-    """Lê a planilha enviada e devolve as linhas no formato da pré-visualização.
-
-    Aceita XLSX e CSV. O cabeçalho é casado pelo rótulo do modelo ou pelo
-    nome técnico da coluna, sem diferenciar acento nem caixa.
-    """
-    import pandas as pd
-    import io as _io
-
-    nome = (nome or "").lower()
-    if nome.endswith((".xlsx", ".xlsm", ".xls")):
-        df = pd.read_excel(_io.BytesIO(conteudo), dtype=str)
-    else:
-        texto = conteudo.decode("utf-8-sig", errors="replace")
-        sep = ";" if texto.count(";") > texto.count(",") else ","
-        df = pd.read_csv(_io.StringIO(texto), sep=sep, dtype=str)
-
-    def limpar(t: str) -> str:
-        t = unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode()
-        return t.strip().lower().rstrip("*").strip()
-
-    colunas = {limpar(c): c for c in df.columns}
-    mapa: dict[str, str] = {}
-    for chave, rotulo, _obrig in COLUNAS_PLANILHA_ENTRADA:
-        for candidato in (rotulo, chave):
-            if limpar(candidato) in colunas:
-                mapa[chave] = colunas[limpar(candidato)]
-                break
-    faltando = [r for c, r, obrig in COLUNAS_PLANILHA_ENTRADA if obrig and c not in mapa]
-    if faltando:
-        raise HTTPException(400, "Planilha sem a(s) coluna(s): " + ", ".join(faltando) +
-                                 ". Baixe o modelo e use o cabeçalho dele.")
-
-    linhas: list[dict] = []
-    for _, r in df.iterrows():
-        def pega(chave: str) -> str:
-            if chave not in mapa:
-                return ""
-            v = r[mapa[chave]]
-            if v is None or (isinstance(v, float) and v != v):   # NaN
-                return ""
-            return str(v).strip()
-
-        tag, serie, modelo = pega("tag_number"), pega("serial_number"), pega("model")
-        if not (tag or serie or modelo):
-            continue                      # linha em branco no meio da planilha
-        falta = [rot for chave, rot in (("tag_number", "Asset Tag"), ("serial_number", "Número de Série"),
-                                        ("model", "Modelo")) if not pega(chave)]
-        linhas.append({
-            "encontrado": not falta,
-            "origem_planilha": True,
-            "tag_number": tag, "serial_number": serie, "model": modelo,
-            "asset_number": pega("asset_number"),
-            "category": pega("category"),
-            "company": _normaliza_company(pega("company")),
-            "description": pega("description"),
-            "cost": pega("cost"),
-            "dpis": pega("dpis"),
-            "acquisition_date": pega("acquisition_date"),
-            "erro": ("Faltando: " + ", ".join(falta)) if falta else "",
-        })
-    if not linhas:
-        raise HTTPException(400, "A planilha não tem nenhuma linha preenchida.")
-    return linhas
-
-
-@router.post("/entrada/planilha")
-async def entrada_planilha(req: Request, arquivo: UploadFile = File(...)):
-    """Recebe a planilha preenchida e devolve as linhas para conferência."""
-    require_permission(req, "servicenow", "view")
-    check_rate_limit(req)
-    conteudo = await arquivo.read()
-    if not conteudo:
-        raise HTTPException(400, "Arquivo vazio.")
-    if len(conteudo) > 10 * 1024 * 1024:
-        raise HTTPException(400, "Arquivo acima de 10 MB.")
-    rows = ler_planilha_entrada(arquivo.filename or "", conteudo)
-    session = _sn_session_from_portal(req)
-    _marcar_existe_sn(session, rows)
     return {"rows": rows, "total": len(rows)}
 
 
@@ -2008,32 +1423,14 @@ def hardware_exists(body: ExisteIn, req: Request):
 # SAÍDA DE ESTOQUE — busca e movimentação de ativos no alm_hardware
 # ═══════════════════════════════════════════════════════════════════
 
+VALID_STOCKROOMS = ["SPARE-ADM15", "SPARE-CD324", "SPARE-CD504"]
 
-# Listas que as telas de Entrada, Saída e Movimentação interna oferecem.
-# Vêm de Configuração → Configuração Módulos (chave gestao_ativos) e
-# valem na hora, sem reiniciar. Os padrões são os de sempre.
-GESTAO_ATIVOS_PADRAO = {
-    "estoques": ["SPARE - CD324", "SPARE-ADM15", "SPARE-CD504"],
-    "corredores": [],
-    "anotacoes": [],
+BU_MAP = {
+    "renner": "Renner Brasil",
+    "youcom": "Youcom",
+    "camicado": "Camicado",
+    "ashua": "Ashua",
 }
-
-
-def config_gestao_ativos() -> dict:
-    from db.portal import SessionLocal as _Portal, Setting
-    with _Portal() as s:
-        row = s.get(Setting, "gestao_ativos")
-    cfg = dict(GESTAO_ATIVOS_PADRAO)
-    for k, v in ((row.value or {}) if row else {}).items():
-        if k in cfg and isinstance(v, list):
-            cfg[k] = [str(x).strip() for x in v if str(x).strip()]
-    return cfg
-
-
-@router.get("/gestao-ativos/config")
-def gestao_ativos_config(req: Request):
-    require_permission(req, "servicenow", "view")
-    return config_gestao_ativos()
 
 
 class SaidaSearchIn(BaseModel):
@@ -2042,7 +1439,8 @@ class SaidaSearchIn(BaseModel):
     stockroom: str = ""
 
 
-class SaidaMovIn(_ComSysId):
+class SaidaMovIn(BaseModel):
+    sys_id: str
     install_status: str = "In transit"
     location: str = ""
     aisle_space: str = ""
@@ -2127,7 +1525,8 @@ def saida_move(body: SaidaMovIn, req: Request):
     return {"ok": True, "message": "Ativo atualizado com sucesso."}
 
 
-class MovInternaIn(_ComSysId):
+class MovInternaIn(BaseModel):
+    sys_id: str
     stockroom: str = ""
     install_status: str = ""
     aisle_space: str = ""

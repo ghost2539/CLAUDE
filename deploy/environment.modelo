@@ -1,0 +1,222 @@
+# ============================================================================
+#  Portal de Operações SPARE — arquivo de ambiente
+#
+#  Lugar: ~/.config/portal-spare/environment      (permissão 600)
+#  Carregado com `. arquivo` pelos scripts — por isso NÃO use ${...} aqui.
+#
+#  REGRA: nenhuma senha em texto claro neste arquivo.
+#  Onde for segredo, deixe o marcador @cofre:NOME@ e guarde o valor:
+#      python3 scripts/cofre.py definir NOME
+#      python3 scripts/cofre.py conferir     # mostra o que ainda falta
+#
+#  Marcações:
+#    [PREENCHER]  só você tem o valor (vem do servidor antigo)
+#    [COFRE]      o valor vai para o cofre, não para cá
+#    sem marca    já está no valor correto, mexa só se precisar
+# ============================================================================
+
+# ── 0. Cofre ────────────────────────────────────────────────────────────
+# Cofre corporativo LIGADO ou DESLIGADO. Desligado, o portal usa só o cofre
+# local — nenhuma tentativa de import, de leitura de arquivo ou de comando.
+COFRE_CORPORATIVO=nao
+
+# Todo @cofre:NOME@ é procurado nesta ordem:
+#   1. cofre CORPORATIVO (vcreports_secrets) — só leitura, mantido por outro time
+#   2. cofre LOCAL cifrado (scripts/cofre.py definir NOME)
+#   3. variável de ambiente de mesmo nome
+#
+# Hoje o corporativo tem os Correios. O ServiceNow também está lá, mas com
+# nome ainda desconhecido — enquanto isso, fica no cofre local. Para achar
+# o nome (só leitura, não mostra valor):
+#     python3 scripts/cofre.py sondar
+# Quando descobrir, é só apontar o marcador para o nome certo; o corporativo
+# tem prioridade e passa a responder sozinho.
+#
+# O cofre corporativo é resolvido sozinho, nesta ordem: comando de leitura
+# (abaixo), import do módulo, módulo carregado por caminho absoluto, e o
+# arquivo lido direto. Ajuste só se o caminho no servidor for outro:
+# VCREPORTS_SECRETS_MODULE=/usr/local/lib/vcreports/vcreports_secrets.py
+# VCREPORTS_SECRETS_FILE=/etc/vcreports/.secrets.env
+#
+# O arquivo do cofre fica numa partição restrita: os serviços alcançam, o
+# usuário comum não. Se o time do cofre expuser um comando de leitura, é ele
+# que resolve — {chave} é substituído pelo nome do segredo:
+# VCREPORTS_SECRETS_CMD=sudo -n /usr/local/bin/vcreports-secret {chave}
+#
+# Diagnóstico de por que o cofre não responde:
+#     python3 scripts/cofre.py acesso
+#
+# Onde ficam a chave e o cofre local. Vazio = ~/.config/portal-spare.
+# Só preencha se o portal rodar com um usuário sem diretório pessoal.
+# PORTAL_COFRE_DIR=/var/www/vcreports/.cofre-portal-spare
+
+# ── 1. Servidor ─────────────────────────────────────────────────────────
+HOST=0.0.0.0
+PORT=8901
+# A tela Consulta de Ativos — Times também atende na porta do aplicativo
+# antigo (:8502), no MESMO processo. 0 desliga esse espelho.
+CONSULTA_TIMES_PORTA=8502
+WORKERS=1
+SESSION_TTL_MINUTES=480
+UPLOAD_MAX_MB=50
+TIMEOUT_SECONDS=15
+MAX_WORKERS=40
+
+# HTTPS: preencher só quando houver certificado no servidor.
+SSL_CERTFILE=
+SSL_KEYFILE=
+
+# Verificação de certificado nas chamadas de saída. Em `false` enquanto os
+# sistemas internos usarem certificado próprio; ligar quando forem válidos.
+VERIFY_SSL=false
+
+# Proxy de saída. O servidor novo tem acesso direto à rede — deixe VAZIO.
+# Só preencha se a saída passar a exigir proxy.
+HTTPS_PROXY=
+
+# ── 2. Banco principal ──────────────────────────────────────────────────
+# Produção (Postgres) — a senha fica no cofre:
+#   DATABASE_URL=postgresql+psycopg2://portal:@cofre:DB_SENHA@@HOST:5432/portal_spare
+# MySQL, se for o caso (exige `pip install pymysql`):
+#   DATABASE_URL=mysql+pymysql://portal:@cofre:DB_SENHA@@HOST:3306/portal_spare
+# Teste sem servidor de banco (o instalador deixa assim):
+#   DATABASE_URL=sqlite:///CAMINHO/data/db/portal.db
+DATABASE_URL=                                    # [PREENCHER]
+
+# Bancos dos módulos isolados: sem declarar = SQLite em data/db/, que é o
+# certo na maioria dos casos. Descomente só para apontar a outro servidor.
+# INDICADORES_DATABASE_URL=
+# AUTOMACOES_DATABASE_URL=
+# MONITORAMENTO_DATABASE_URL=
+# ORCAMENTO_EXEC_DATABASE_URL=
+# ORCAMENTO_SPARE_DATABASE_URL=
+
+# ── 3. Sessão e primeiro administrador ──────────────────────────────────
+PORTAL_SESSION_SECRET=@cofre:PORTAL_SESSION_SECRET@          # [COFRE]
+
+# Seu login de rede. Sem isso, ninguém consegue liberar o acesso de ninguém.
+INITIAL_ADMIN_LOGIN=@cofre:INITIAL_ADMIN_LOGIN@              # [COFRE]
+INITIAL_ADMIN_PASSWORD=@cofre:INITIAL_ADMIN_PASSWORD@        # [COFRE]
+
+RATE_LIMIT_LOGIN=5/minute
+RATE_LIMIT_API=120/minute
+
+# ── 4. ServiceNow ───────────────────────────────────────────────────────
+SN_API_BASE=https://renner.service-now.com
+# Sem proxy neste servidor: a saída é direta.
+SN_PROXY=
+SN_API_PROXY=
+
+# Conta de serviço do ServiceNow (a conta do Zabbix) — usada SÓ para leitura.
+# Escrita vai sempre como o usuário logado, com os cookies da sessão dele.
+#
+# NÃO existe linha para ela aqui, de propósito: o portal lê SN_API_USER e
+# SN_API_PASS direto do cofre (corporativo primeiro, depois o local cifrado).
+# Grave uma vez, no servidor, com o usuário do serviço:
+#     python3 scripts/cofre.py definir SN_API_USER
+#     python3 scripts/cofre.py definir SN_API_PASS
+# Confira sem revelar o valor:  python3 scripts/cofre.py conferir
+
+# Estados numéricos do incident:
+#   1 Novo · 2 Em andamento · 3 Em espera · 6 Resolvido · 7 Encerrado · 8 Cancelado
+SN_STATUS_FIELD=state
+SN_STATE_ABERTO=1,2,3
+SN_STATE_ATENDIMENTO=1,2
+SN_STATE_RESOLVIDO=6,7
+SN_STATE_CANCELADO=8
+
+# Indicadores
+SN_INDIC_QUEUE=TI_N2_FLD_RNR_LOJAS_SPARE
+SN_INDIC_REFRESH_MIN=2
+SN_BACKLOG_DATE_FIELD=u_data_bouncing
+SN_TMA_START_FIELD=u_data_bouncing
+SN_RESOLVED_DATE_FIELD=closed_at
+SN_PRIORITIZED_QUERY=u_prioritized=true
+SN_BU_FIELD=company
+SN_SUB_COLETOR_LIKE=coletor
+SN_SUB_SLED_LIKE=sled
+
+# SLA
+SN_SLA_NAME_LIKE=SPARE
+SN_SLA_STAGE=completed
+SN_SLA_DATE_FIELD=task.closed_at
+SN_SLA_EXTRA=
+
+# Conversão de empresa do EBS para o nome no ServiceNow.
+# Formato: DO_EBS=NO_SN, separado por vírgula.
+SN_COMPANY_MAP=CAMIC_FIS=Camicado
+
+# ── 5. EBS — API REST ───────────────────────────────────────────────────
+EBS_LOGIN_URL=                                   # [PREENCHER]
+EBS_SEARCH_URL=                                  # [PREENCHER]
+
+# ── 6. EBS — base Oracle (leitura direta) ───────────────────────────────
+ORACLE_EBS_DSN=                                  # [PREENCHER]
+ORACLE_EBS_USER=@cofre:ORACLE_EBS_USER@          # [COFRE]
+ORACLE_EBS_PASS=@cofre:ORACLE_EBS_PASS@          # [COFRE]
+# Instant Client; vazio usa o modo thin (sem biblioteca nativa).
+ORACLE_CLIENT_LIB_DIR=
+
+# ── 7. EBS — API de CAPEX (/controle-orcamento) ─────────────────────────
+EBS_CAPEX_URL=https://suporte.lojasrenner.com.br/ebs/api/capex/
+EBS_CAPEX_TIMEOUT=30
+EBS_CAPEX_VERIFY=false
+EBS_CAPEX_PROXY=
+# Autenticação: usuário/senha OU token. Use um dos dois.
+EBS_CAPEX_USER=
+EBS_CAPEX_PASS=@cofre:EBS_CAPEX_PASS@            # [COFRE]
+EBS_CAPEX_TOKEN=@cofre:EBS_CAPEX_TOKEN@          # [COFRE]
+EBS_CAPEX_TOKEN_SCHEME=Bearer
+EBS_CAPEX_AUTH_HEADER=Authorization
+# Câmbio para projetos fora do Brasil. 0 = busca na API abaixo.
+EBS_CAPEX_ARS_BRL=0
+EBS_CAPEX_UYU_BRL=0
+EBS_CAPEX_FX_URL=https://economia.awesomeapi.com.br/last/ARS-BRL,UYU-BRL
+EBS_CAPEX_FX_PROXY=
+
+# ── 8. Correios (rastreio) ──────────────────────────────────────────────
+# JÁ RESOLVIDO: vêm do cofre corporativo, que hoje é o único lugar onde
+# estas chaves existem. Nada a cadastrar. Chaves exatas:
+#     s('CORREIOS_USUARIO')
+#     s('CORREIOS_CHAVE')
+#     s('CORREIOS_CARTOES').split(',')
+# Não precisa declarar nada aqui: o portal consulta o cofre direto. As linhas
+# abaixo ficam só como documentação do que ele procura.
+# CORREIOS_USUARIO   -> cofre
+# CORREIOS_CHAVE     -> cofre
+# CORREIOS_CARTOES   -> cofre (lista separada por vírgula)
+CORREIOS_DR=64
+CORREIOS_CONTRATO=
+
+# ── 9. Automações (encerramento/encaminhamento) ─────────────────────────
+# Horas locais em que a rotina roda sozinha.
+AUTOMACOES_HORARIOS=7,12,16
+# Credencial que a rotina usa para encerrar como usuário de verdade.
+# Liga/desliga e regras ficam em Parâmetros → Automações.
+SN_AUTOMACAO_USUARIO=@cofre:SN_AUTOMACAO_USUARIO@   # [COFRE]
+SN_AUTOMACAO_SENHA=@cofre:SN_AUTOMACAO_SENHA@    # [COFRE]
+
+# ── 10. Alertas por e-mail ──────────────────────────────────────────────
+# Só os padrões: a configuração efetiva fica em Parâmetros → Acessos & Alertas.
+SMTP_HOST=                                       # [PREENCHER] relay da Renner
+SMTP_PORT=25
+SMTP_SEGURANCA=none
+SMTP_USUARIO=
+SMTP_SENHA=@cofre:SMTP_SENHA@                    # [COFRE]
+SMTP_REMETENTE=portal-spare@lojasrenner.com.br
+ALERTA_EMAIL_TO=raphael.steilein@lojasrenner.com.br
+
+# ── 11. Aplicação ───────────────────────────────────────────────────────
+DEFAULT_VALOR_HORA=150.00
+BACKUP_RETENTION_DAYS=30
+
+# ── EBS Forms (RPA) ─────────────────────────────────────────────────────
+# Usuário e senha do robô: SÓ no cofre → python3 scripts/cofre.py definir EBS_FORMS_USER / EBS_FORMS_PASS
+EBS_FORMS_HOME_URL=http://ebscorporativo.lojasrenner.com.br/OA_HTML/OA.jsp?OAFunc=OAHOMEPAGE
+EBS_FORMS_FUNCAO_URL=                            # link RF.jsp da função "Informações Financeiras" (recomendado)
+EBS_FORMS_FUNCAO=Informações Financeiras
+EBS_FORMS_RESPONSABILIDADE=RENNER_FA_CONSULTA
+EBS_FORMS_LIVROS=FA_RENNER,FA_RENNER_FIS
+EBS_FORMS_DISPLAY=:99
+EBS_FORMS_TELA=1280x900x24
+EBS_FORMS_DATABASE_URL=                          # vazio = data/db/ebs_forms.db

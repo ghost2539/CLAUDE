@@ -27,6 +27,7 @@ var _loteAssets = [];
 function _renderLote(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Gerar Lote</h1>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">Operação integrada ao Recebimento.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Gerar Lote</div>' +
@@ -85,10 +86,10 @@ function _renderLote(c, S) {
                     '<button class="btn" id="lt-save-ip">Salvar IP</button>' +
                     '<button class="btn" id="lt-test">Testar conexão</button>' +
                     '<button class="btn btn-dark" id="lt-preview">Baixar prévia ZPL</button>' +
-                    '<button class="btn btn-primary" id="lt-generate">Gerar Caixa e imprimir</button>' +
+                    '<button class="btn btn-primary" id="lt-generate" style="background:#c06010;border-color:#c06010">Gerar Caixa e imprimir</button>' +
                 '</div>' +
                 '<pre id="lt-zpl-out" style="margin-top:1rem;display:none;max-height:250px;overflow:auto;' +
-                    'background:var(--bg-input);padding:1rem;font-size:.85rem"></pre>' +
+                    'background:var(--bg-input);padding:1rem;border-radius:8px;font-size:.85rem"></pre>' +
             '</div>' +
         '</div>';
 
@@ -244,6 +245,7 @@ function _loteGenerate(S) {
 function _renderA4(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Identificação A4</h1>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">Operação integrada ao Recebimento.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Identificação A4</div>' +
@@ -273,7 +275,7 @@ function _renderA4(c, S) {
                 '<div style="margin-top:1.5rem;display:flex;gap:.8rem;flex-wrap:wrap">' +
                     '<button class="btn" id="a4-save-ip">Salvar IP</button>' +
                     '<button class="btn btn-dark" id="a4-pdf">Visualizar PDF</button>' +
-                    '<button class="btn btn-primary" id="a4-print">Imprimir na Lexmark</button>' +
+                    '<button class="btn btn-primary" id="a4-print" style="background:#c06010;border-color:#c06010">Imprimir na Lexmark</button>' +
                 '</div>' +
             '</div>' +
         '</div>';
@@ -288,7 +290,7 @@ function _renderA4(c, S) {
 
     document.getElementById('a4-pdf').addEventListener('click', function () {
         var body = _a4Body();
-        fetch('/api/identificacao/a4.pdf', {
+        fetch((window.SPARE.base || '') + '/api/identificacao/a4.pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -330,6 +332,9 @@ function _a4Body() {
 function _renderLivre(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Impressão Zebra Livre</h1>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1.5rem">' +
+            'Operação integrada ao Recebimento. ' +
+            'Não consome sequência e não altera recebimentos.</p>' +
 
         '<div class="card mb-3">' +
             '<div class="card-header">Etiqueta Zebra livre</div>' +
@@ -362,10 +367,10 @@ function _renderLivre(c, S) {
                     '<button class="btn" id="zl-save-ip">Salvar IP</button>' +
                     '<button class="btn" id="zl-test">Testar conexão</button>' +
                     '<button class="btn btn-dark" id="zl-download">Baixar ZPL</button>' +
-                    '<button class="btn btn-primary" id="zl-print">Imprimir na Zebra</button>' +
+                    '<button class="btn btn-primary" id="zl-print" style="background:#c06010;border-color:#c06010">Imprimir na Zebra</button>' +
                 '</div>' +
                 '<pre id="zl-zpl-out" style="margin-top:1rem;display:none;max-height:250px;overflow:auto;' +
-                    'background:var(--bg-input);padding:1rem;font-size:.85rem"></pre>' +
+                    'background:var(--bg-input);padding:1rem;border-radius:8px;font-size:.85rem"></pre>' +
             '</div>' +
         '</div>';
 

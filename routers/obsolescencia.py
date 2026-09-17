@@ -183,82 +183,44 @@ LIMITE_SEM_VER = 30      # dias sem comunicar
 # sem acento e sem caixa: "EF500" casa com "Bluebird EF500" e "EF500R".
 # ATENÇÃO: NÃO casa com "EF501R", que é o que aparece nas amostras do parque
 # — são strings diferentes. Se o EF501R também for EOL, precisa entrar aqui.
+MODELOS_EOL = ("EF500", "EF500R")
 
 MODO_TODOS = "todos"
 MODO_QUALQUER = "qualquer"
 MODO_PADRAO = MODO_TODOS
 
 
-_FORMATOS_DATA = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
-                  "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p", "%m/%d/%Y")
-
-
-def interpretar_data(valor) -> datetime | None:
-    """Data em ISO ou no formato do tooltip do MDM (dd/mm/aaaa HH:MM).
-
-    O parser da grade entrega a data absoluta como texto do tooltip, não
-    ISO. Tratar só ISO fazia `dias_sem_ver` devolver None para o parque
-    inteiro — e o painel mostrava zero "sem comunicar" sem ninguém
-    perceber o motivo.
-    """
-    if not valor:
-        return None
-    if isinstance(valor, datetime):
-        dt = valor
-    else:
-        texto = str(valor).strip()
-        dt = None
-        try:
-            dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-        except ValueError:
-            for fmt in _FORMATOS_DATA:
-                try:
-                    dt = datetime.strptime(texto[:19], fmt)
-                    break
-                except ValueError:
-                    continue
-        if dt is None:
-            return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
 def dias_sem_ver(last_seen, agora=None) -> int | None:
     """Dias desde a última comunicação. None quando a data não veio."""
-    dt = interpretar_data(last_seen)
-    if dt is None:
+    if not last_seen:
         return None
     agora = agora or datetime.now(timezone.utc)
-    return max(0, (agora - dt).days)
-
-
-def _versao_major(texto: str) -> int | None:
-    m = re.search(r"(\d+)", str(texto or ""))
-    return int(m.group(1)) if m else None
-
-
-def android_travado(versao_os: str, modelo: str, versao_minima: str,
-                    modelos_sem_update=()) -> bool:
-    """Sem atualização possível: versão abaixo da mínima ou modelo sem update."""
-    modelo_n = _sem_acento(modelo)
-    if any(_sem_acento(m) and _sem_acento(m) in modelo_n for m in modelos_sem_update):
-        return True
-    atual, minima = _versao_major(versao_os), _versao_major(versao_minima)
-    return bool(atual is not None and minima is not None and atual < minima)
+    if isinstance(last_seen, str):
+        try:
+            last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    return max(0, (agora - last_seen).days)
 
 
 def idade_anos(data_aquisicao, agora=None) -> float | None:
     if not data_aquisicao:
         return None
     agora = agora or datetime.now(timezone.utc)
-    dt = interpretar_data(data_aquisicao)
-    if dt is None:
-        return None
-    return (agora - dt).days / 365.25
+    if isinstance(data_aquisicao, str):
+        try:
+            data_aquisicao = datetime.fromisoformat(data_aquisicao.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if data_aquisicao.tzinfo is None:
+        data_aquisicao = data_aquisicao.replace(tzinfo=timezone.utc)
+    return (agora - data_aquisicao).days / 365.25
 
 
 def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None,
-                          modo: str = MODO_PADRAO,
-                          limite_anos: float = LIMITE_ANOS) -> dict:
+                          modo: str = MODO_PADRAO) -> dict:
     """Aplica a regra: 5 anos de uso, Android travado sem update possível e
     EOL do modelo atingido.
 
@@ -271,7 +233,7 @@ def avaliar_obsolescencia(coletor: dict, modelos_eol=(), agora=None,
     eol = any(_sem_acento(m) and _sem_acento(m) in modelo for m in modelos_eol)
 
     criterios = {
-        "idade_5_anos": bool(idade is not None and idade >= limite_anos),
+        "idade_5_anos": bool(idade is not None and idade >= LIMITE_ANOS),
         "android_travado": bool(coletor.get("android_travado")),
         "modelo_eol": eol,
     }
@@ -305,8 +267,15 @@ def _asset_version() -> str:
     return h.hexdigest()[:10]
 
 
-def _page(req: Request) -> HTMLResponse:
-    html = (_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", _asset_version())
+def _page(req: Request | None = None) -> HTMLResponse:
+    """A página inteira, com o prefixo do proxy quando houver.
+
+    A tela é servida daqui, e não pelo index do portal, então o prefixo
+    precisa ser aplicado aqui também — senão, atrás do proxy num
+    subcaminho, ela busca CSS e JS na raiz do domínio e toma 404.
+    """
+    html = (_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{v}}", _asset_version())
     return HTMLResponse(com_prefixo(html, prefixo(req)))
 
 
@@ -315,9 +284,8 @@ def _acesso_pagina(req: Request):
     módulo à parte. Sem sessão, manda para o login levando o destino."""
     sd = get_session(req, required=False)
     if not sd:
-        base = prefixo(req)
         return RedirectResponse(
-            f"{base}/?next={quote(destino(req), safe='/')}", status_code=302)
+            f"{prefixo(req)}/?next={quote(destino(req), safe='/')}", status_code=302)
     return _page(req)
 
 
@@ -379,23 +347,6 @@ def config_ler(req: Request):
     return _db.ler_config()
 
 
-@router.put("/api/obsolescencia/config")
-def config_gravar(req: Request, corpo: dict):
-    """Regra de obsolescência. A próxima coleta reavalia o parque com ela."""
-    sd = _exigir_admin(req)
-    import db.obsolescencia as _db
-    _db.init_db()
-    validos = set(_db.PADROES)
-    pares = {k: str(v).strip() for k, v in (corpo or {}).items() if k in validos}
-    if not pares:
-        raise HTTPException(400, "Nada para gravar.")
-    if pares.get("modo_regra") not in (None, MODO_TODOS, MODO_QUALQUER):
-        raise HTTPException(400, "modo_regra deve ser 'todos' ou 'qualquer'.")
-    _db.gravar_config(pares)
-    _log.info("obsolescencia: regra alterada por %s: %s", sd.get("username", "?"), ", ".join(pares))
-    return _db.ler_config()
-
-
 # ── Sessão no MDM ─────────────────────────────────────────────────
 # A credencial é de SERVIÇO e vive no cofre: o portal não guarda a senha do
 # usuário logado (só os cookies do ServiceNow), então não há como reaproveitá-la.
@@ -412,39 +363,13 @@ def credencial_mdm() -> tuple[str, str]:
     return cofre.obter(CHAVE_USUARIO), cofre.obter(CHAVE_SENHA)
 
 
-def _verificacao_tls():
-    """O que vai em `verify`: a CA própria do MDM (MDM_CA_BUNDLE), senão a
-    política geral do portal (integracoes.http: PORTAL_CA_BUNDLE / VERIFY_SSL)."""
-    ca = (getattr(_cfg, "MDM_CA_BUNDLE", "") or "").strip()
-    if ca:
-        return ca
-    from integracoes.http import verificacao_tls
-    return verificacao_tls("mdm")
-
-
 def _nova_sessao():
-    from integracoes.http import sessao
-    from routers.servicenow import SN_PROXY
-    # Sem trust_env: https_proxy do ambiente entraria na frente do SN_PROXY.
-    # Aqui a política é a configurada, e só ela.
-    return sessao("mdm", SN_PROXY, verify=_verificacao_tls(), trust_env=False, user_agent="")
-
-
-def _erro_de_rede(exc: Exception, base: str) -> HTTPException:
-    """Rede e certificado viram 502 com a causa, nunca 500 mudo."""
     import requests
-    if isinstance(exc, requests.exceptions.SSLError):
-        return HTTPException(
-            502, f"Falha de certificado ao conectar no MDM ({base}): {str(exc)[:200]}. "
-                 "Com proxy que intercepta o TLS, use VERIFY_SSL=false; para validar com a "
-                 "cadeia corporativa, aponte MDM_CA_BUNDLE para o arquivo .pem.")
-    if isinstance(exc, requests.exceptions.ProxyError):
-        return HTTPException(502, f"Proxy recusou a conexão com o MDM ({base}): {str(exc)[:200]}")
-    if isinstance(exc, requests.exceptions.Timeout):
-        return HTTPException(504, f"O MDM ({base}) não respondeu a tempo.")
-    if isinstance(exc, requests.exceptions.RequestException):
-        return HTTPException(502, f"MDM inacessível ({base}): {str(exc)[:200]}")
-    return HTTPException(502, f"Falha ao falar com o MDM ({base}): {str(exc)[:200]}")
+    from routers.servicenow import SN_PROXY
+    s = requests.Session()
+    if SN_PROXY:
+        s.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+    return s
 
 
 def sessao_mdm(forcar: bool = False):
@@ -466,13 +391,7 @@ def sessao_mdm(forcar: bool = False):
                 503, "Credencial de serviço do MDM não configurada no cofre "
                      f"({CHAVE_USUARIO} / {CHAVE_SENHA}).")
         nova = _nova_sessao()
-        try:
-            ok = mdm.login(nova, usuario, senha, base)
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001 — rede/certificado, com a causa na tela
-            raise _erro_de_rede(exc, base) from exc
-        if not ok:
+        if not mdm.login(nova, usuario, senha, base):
             raise HTTPException(502, "Login no MDM recusado. Confira a credencial "
                                      "de serviço no cofre.")
         _sessao_mdm = nova
@@ -567,172 +486,6 @@ def credencial_gravar(req: Request, corpo: CredencialMDM):
     return {"ok": True, "configurada": True, "usuario": usuario}
 
 
-# ── Progresso da coleta ───────────────────────────────────────────
-# A varredura do MDM leva minutos. Sem isto o botão parece não fazer
-# nada: a tela pergunta o andamento enquanto a requisição não volta.
-_progresso: dict = {"rodando": False, "pagina": 0, "lidos": 0, "total": 0,
-                    "fase": "", "usuario": "", "iniciada_em": None,
-                    "terminada_em": None, "erro": "", "resultado": None}
-_trava_progresso = threading.Lock()
-
-
-def _prog(**campos) -> None:
-    with _trava_progresso:
-        _progresso.update(campos)
-
-
-@router.get("/api/obsolescencia/coleta/progresso")
-def coleta_progresso(req: Request):
-    """Andamento da varredura em curso (ou da última). Qualquer login lê."""
-    get_session(req)
-    with _trava_progresso:
-        p = dict(_progresso)
-    if p["total"] and p["lidos"]:
-        p["percentual"] = min(99, int(100 * p["lidos"] / p["total"]))
-    else:
-        p["percentual"] = 0
-    if not p["rodando"] and p["terminada_em"] and not p["erro"]:
-        p["percentual"] = 100
-    return p
-
-
-@router.get("/api/obsolescencia/mdm/diagnostico/{serie_no_caminho}")
-def mdm_diagnostico_caminho(serie_no_caminho: str, req: Request, etiqueta: str = ""):
-    """Mesma coisa, com a série no caminho — query string se perde."""
-    return mdm_diagnostico(req, serie=serie_no_caminho, etiqueta=etiqueta)
-
-
-@router.get("/api/obsolescencia/mdm/diagnostico")
-def mdm_diagnostico(req: Request, serie: str = "", etiqueta: str = ""):
-    """Por que a remoção do coletor no MDM não aconteceu — sem apagar nada.
-
-    Responde, em ordem, o que a remoção olha: se a remoção está ligada, se
-    o endpoint está configurado, se a sessão do console abre, se o
-    aparelho está no parque guardado e o que a busca do console devolve.
-    Só leitura: existe para o diagnóstico não depender de tentar apagar.
-    """
-    _exigir_admin(req)
-    import db.obsolescencia as _db
-    from sqlalchemy import select as _select
-    from integracoes import mdm_airwatch as mdm
-
-    cfg = _db.ler_config()
-    base = getattr(_cfg, "MDM_BASE_URL", "")
-    ligado = str(cfg.get("remover_do_mdm_no_recebimento", "1")).strip().lower() in ("1", "sim", "true")
-    endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
-    saida = {
-        # O que o servidor recebeu, para não discutir se o dado chegou.
-        "recebido": {"serie": (serie or "").strip(),
-                     "etiqueta": (etiqueta or "").strip(),
-                     "url": str(getattr(req, "url", ""))},
-        "remocao_ligada": ligado,
-        "endpoint": endpoint,
-        "metodo": cfg.get("mdm_remocao_metodo", "POST"),
-        "campo": cfg.get("mdm_remocao_campo") or "SelectedDeviceIds",
-        "base": base,
-        "sessao_ok": False,
-        "no_parque": None,
-        "busca": [],
-        "conclusao": "",
-    }
-    if not ligado:
-        saida["conclusao"] = "A remoção está desligada na configuração."
-    elif not endpoint:
-        saida["conclusao"] = "Não há endpoint de remoção configurado."
-
-    serie = (serie or "").strip()
-    etiqueta = (etiqueta or "").strip()
-    chaves = [k.upper() for k in (serie, etiqueta) if k]
-
-    if chaves:
-        with _db.SessionLocal() as s:
-            for linha in s.execute(_select(_db.Coletor)).scalars():
-                candidatos = {(linha.serie or "").strip().upper(),
-                              (linha.nome or "").strip().upper()}
-                candidatos.discard("")
-                if candidatos & set(chaves):
-                    saida["no_parque"] = {"mdm_id": linha.mdm_id, "nome": linha.nome,
-                                          "serie": linha.serie, "usuario": linha.usuario}
-                    break
-
-    sessao = None
-    try:
-        sessao = sessao_mdm()
-        saida["sessao_ok"] = True
-    except HTTPException as exc:
-        saida["sessao_erro"] = str(exc.detail)
-
-    if sessao is not None:
-        for termo in (serie, etiqueta):
-            if not termo:
-                continue
-            try:
-                detalhe = mdm.procurar_detalhado(sessao, termo, base)
-            except Exception as exc:  # noqa: BLE001 — o diagnóstico mostra a falha
-                saida["busca"].append({"termo": termo, "erro": str(exc)[:200]})
-                continue
-            achados = detalhe.get("coletores") or []
-            linha = {
-                "termo": termo, "quantidade": len(achados),
-                "http": detalhe.get("http"), "erro": detalhe.get("erro", ""),
-                # O rodapé denuncia filtro ignorado pelo console.
-                "rodape": detalhe.get("rodape"),
-                "aparelhos": [{"id": a.get("id"), "nome": a.get("nome"),
-                               "usuario": a.get("usuario"), "modelo": a.get("modelo")}
-                              for a in achados[:5]],
-            }
-            rod = detalhe.get("rodape") or {}
-            if rod.get("total") and rod["total"] > 50 and len(achados) > 5:
-                linha["alerta"] = (f"a busca devolveu {rod['total']} aparelhos: o console "
-                                   "ignorou o filtro (o parâmetro de busca desta versão "
-                                   "não é SearchText).")
-            saida["busca"].append(linha)
-
-    if not saida["conclusao"]:
-        achou_parque = saida["no_parque"] is not None
-        achou_busca = any(b.get("quantidade") == 1 for b in saida["busca"])
-        ambiguo = any((b.get("quantidade") or 0) > 1 for b in saida["busca"])
-        filtro_ignorado = any(b.get("alerta") for b in saida["busca"])
-        if filtro_ignorado:
-            saida["conclusao"] = next(b["alerta"] for b in saida["busca"] if b.get("alerta"))
-            return saida
-        if achou_parque or achou_busca:
-            saida["conclusao"] = ("O aparelho é encontrado; a remoção deve funcionar. "
-                                  "Se não funcionou, o console recusou a escrita — "
-                                  "veja a trilha de escrita (ação deletar).")
-        elif ambiguo:
-            saida["conclusao"] = ("A busca devolve mais de um aparelho e por isso "
-                                  "nada é apagado. Informe uma série exata.")
-        elif not chaves:
-            saida["conclusao"] = ("o servidor recebeu a consulta SEM série e SEM "
-                                  "etiqueta. Se você informou, o dado se perdeu no "
-                                  "caminho — use a tela em Status → Diagnóstico de "
-                                  "ativo, que envia direto.")
-        else:
-            saida["conclusao"] = ("Nem o parque nem a busca do console acham este "
-                                  "aparelho. Confira se a série do recebimento é a "
-                                  "mesma que o console conhece.")
-    return saida
-
-
-@router.get("/api/obsolescencia/mdm/escritas")
-def mdm_escritas(req: Request, limite: int = 20):
-    """Últimas escritas tentadas no MDM, com a resposta do console."""
-    _exigir_admin(req)
-    import db.obsolescencia as _db
-    from sqlalchemy import select as _select
-    with _db.SessionLocal() as s:
-        linhas = s.execute(
-            _select(_db.Escrita).order_by(_db.Escrita.id.desc()).limit(max(1, min(limite, 200)))
-        ).scalars().all()
-    return {"escritas": [{
-        "quando": e.quando.isoformat() if e.quando else "",
-        "usuario": e.usuario, "acao": e.acao, "origem": e.origem,
-        "mdm_id": e.mdm_id, "serie": e.serie, "sucesso": e.sucesso,
-        "resposta": (e.resposta or "")[:400], "detalhe": e.detalhe,
-    } for e in linhas]}
-
-
 @router.post("/api/obsolescencia/coletar")
 def coletar(req: Request):
     """Varre o parque de coletores e grava. Sob demanda, por botão.
@@ -746,49 +499,18 @@ def coletar(req: Request):
     _db.init_db()
 
     base = getattr(_cfg, "MDM_BASE_URL", "")
-    agora = lambda: _db.localnow().isoformat()   # noqa: E731
-    with _trava_progresso:
-        if _progresso["rodando"]:
-            raise HTTPException(409, "Já existe uma coleta em andamento.")
-        _progresso.update({"rodando": True, "pagina": 0, "lidos": 0, "total": 0,
-                           "fase": "Conectando no MDM", "usuario": sd.get("username", ""),
-                           "iniciada_em": agora(), "terminada_em": None,
-                           "erro": "", "resultado": None})
-
-    def _andamento(pagina, faixa, lidos):
-        _prog(pagina=pagina + 1, lidos=lidos,
-              total=int((faixa or {}).get("total") or 0),
-              fase=f"Lendo a grade — página {pagina + 1}")
-
+    sessao = sessao_mdm()
     try:
-        sessao = sessao_mdm()
-        _prog(fase="Lendo a grade — página 1")
-        try:
-            varredura = mdm.varrer(sessao, base, progresso=_andamento)
-        except mdm.SessaoExpirada:
-            # Uma segunda tentativa com login novo; se cair de novo, é problema real.
-            _prog(fase="A sessão expirou; entrando de novo")
-            varredura = mdm.varrer(sessao_mdm(forcar=True), base, progresso=_andamento)
+        varredura = mdm.varrer(sessao, base)
+    except mdm.SessaoExpirada:
+        # Uma segunda tentativa com login novo; se cair de novo, é problema real.
+        varredura = mdm.varrer(sessao_mdm(forcar=True), base)
 
-        for c in varredura["coletores"]:
-            c["tipo"] = _db.COLETOR
-        _prog(fase=f"Gravando {len(varredura['coletores'])} coletores",
-              lidos=len(varredura["coletores"]))
-        resultado = aplicar_coleta(
-            varredura["coletores"], usuario=sd.get("username", ""),
-            total_mdm=varredura["total"], paginas=varredura["paginas"])
-    except HTTPException as exc:
-        _prog(rodando=False, erro=str(exc.detail), fase="Falhou", terminada_em=agora())
-        raise
-    except mdm.SessaoExpirada as exc:
-        _prog(rodando=False, erro=str(exc), fase="Falhou", terminada_em=agora())
-        raise HTTPException(502, f"O MDM não devolveu a grade: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001
-        falha = _erro_de_rede(exc, base)
-        _prog(rodando=False, erro=str(falha.detail), fase="Falhou", terminada_em=agora())
-        raise falha from exc
-
-    _prog(rodando=False, fase="Concluída", terminada_em=agora(), resultado=resultado)
+    for c in varredura["coletores"]:
+        c["tipo"] = _db.COLETOR
+    resultado = aplicar_coleta(
+        varredura["coletores"], usuario=sd.get("username", ""),
+        total_mdm=varredura["total"], paginas=varredura["paginas"])
     _log.info("Coleta do MDM por %s: %s", sd.get("username", ""), resultado)
     return {"ok": True, **resultado}
 
@@ -796,42 +518,6 @@ def coletar(req: Request):
 # ── Persistência da coleta ────────────────────────────────────────
 def _limpar(v) -> str:
     return str(v or "").strip()
-
-
-def _dpis_da_base() -> dict[str, datetime]:
-    """Série / imobilizado / etiqueta → DPIS, da base de ativos do portal.
-
-    Um dicionário só, carregado uma vez por coleta: o parque tem
-    milhares de linhas e consultar um a um levaria minutos.
-    """
-    try:
-        from sqlalchemy import select as _select
-        from db.portal import SessionLocal as _Portal, Asset
-        mapa: dict[str, datetime] = {}
-        with _Portal() as s:
-            for serial, tag, asset_id, asset_number, d in s.execute(
-                    _select(Asset.serial_number, Asset.tag_number, Asset.asset_id,
-                            Asset.asset_number, Asset.dpis).where(Asset.dpis.isnot(None))):
-                dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-                for chave in (serial, tag, asset_id, asset_number):
-                    chave = (chave or "").strip().upper()
-                    if chave:
-                        mapa.setdefault(chave, dt)
-        return mapa
-    except Exception as exc:  # noqa: BLE001 — sem base, sem idade; não derruba a coleta
-        _log.warning("obsolescencia: base de ativos indisponível para a DPIS: %s", exc)
-        return {}
-
-
-def _achar_dpis(mapa: dict, bruto: dict) -> datetime | None:
-    """Tenta série, nome e usuário do coletor contra o mapa da base."""
-    if not mapa:
-        return None
-    for campo in ("serie", "nome", "usuario"):
-        chave = _limpar(bruto.get(campo)).upper()
-        if chave and chave in mapa:
-            return mapa[chave]
-    return None
 
 
 def aplicar_coleta(coletores: list[dict], usuario: str = "",
@@ -849,17 +535,9 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
     cfg = _db.ler_config()
     modo = cfg.get("modo_regra", MODO_PADRAO)
     eol = [m.strip() for m in (cfg.get("modelos_eol") or "").split(",") if m.strip()]
-    sem_update = [m.strip() for m in (cfg.get("modelos_sem_update") or "").split(",") if m.strip()]
-    versao_minima = cfg.get("versao_os_minima") or ""
-    try:
-        limite_anos = float(cfg.get("limite_anos") or LIMITE_ANOS)
-    except ValueError:
-        limite_anos = LIMITE_ANOS
     agora = datetime.now(timezone.utc)
-    dpis = _dpis_da_base()
-    so_coletores = str(cfg.get("somente_coletores", "1")).strip().lower() in ("1", "sim", "true")
 
-    novos = atualizados = descartados = 0
+    novos = atualizados = 0
     with _db.SessionLocal.begin() as s:
         coleta = _db.Coleta(usuario=usuario, total_mdm=total_mdm, paginas=paginas,
                             lidos=len(coletores), situacao="aberta")
@@ -867,35 +545,18 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
         s.flush()
 
         existentes = {c.mdm_id: c for c in s.execute(_select(_db.Coletor)).scalars()}
-        fora_do_padrao: set[str] = set()
 
         for bruto in coletores:
             mdm_id = _limpar(bruto.get("id"))
             if not mdm_id:
                 continue
             loja = identificar_loja(bruto.get("usuario"))
-            # Só entra o que é coletor de loja: o usuário tem de bater com
-            # <sigla><número>_coletor e a sigla tem de ser uma BU conhecida.
-            # Celular e tablet ficam de fora do parque, não viram "sumiu".
-            if so_coletores and not loja["reconhecido"]:
-                descartados += 1
-                fora_do_padrao.add(mdm_id)
-                continue
             tags = tags_relevantes(bruto.get("tags"))
-            # Idade real: a DPIS (ativação) da base local do portal, casada
-            # por série, imobilizado ou etiqueta. O MDM só tem a data de
-            # inscrição, que rejuvenesce a cada reinscrição.
-            if not bruto.get("data_aquisicao"):
-                bruto["data_aquisicao"] = _achar_dpis(dpis, bruto)
-            travado = bruto.get("android_travado")
-            if travado is None:
-                travado = android_travado(bruto.get("versao_os"), bruto.get("modelo"),
-                                          versao_minima, sem_update)
             aval = avaliar_obsolescencia(
                 {"modelo": bruto.get("modelo"),
                  "data_aquisicao": bruto.get("data_aquisicao"),
-                 "android_travado": travado},
-                eol, agora, modo, limite_anos)
+                 "android_travado": bruto.get("android_travado")},
+                eol, agora, modo)
 
             linha = existentes.get(mdm_id)
             if linha is None:
@@ -920,7 +581,6 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
             linha.gerenciamento = _limpar(bruto.get("gerenciamento"))
             linha.conformidade = _limpar(bruto.get("conformidade"))
             linha.visto_relativo = _limpar(bruto.get("visto_relativo"))
-            linha.visto_em = interpretar_data(bruto.get("visto_em"))
             linha.dias_sem_ver = dias_sem_ver(bruto.get("visto_em"), agora)
             linha.tags = "|".join(tags)
             linha.idade_anos = aval["idade_anos"]
@@ -930,17 +590,6 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
             linha.situacao = _db.ATIVO
             linha.visto_na_coleta = coleta.id
             linha.atualizado_em = _db.localnow()
-
-        # Sai de vez o que não é coletor de loja: o descartado nesta rodada
-        # e o que ficou de coletas antigas, antes do filtro existir. Não é
-        # "sumiu" — nunca deveria ter entrado no parque.
-        removidos = 0
-        if so_coletores:
-            for mdm_id, linha in list(existentes.items()):
-                if mdm_id in fora_do_padrao or not identificar_loja(linha.usuario)["reconhecido"]:
-                    existentes.pop(mdm_id, None)
-                    s.delete(linha)
-                    removidos += 1
 
         # O que não apareceu nesta rodada vira tratativa.
         sumiram = 0
@@ -953,14 +602,11 @@ def aplicar_coleta(coletores: list[dict], usuario: str = "",
         coleta.novos = novos
         coleta.atualizados = atualizados
         coleta.sumiram = sumiram
-        coleta.descartados = descartados
         coleta.fim = _db.localnow()
         coleta.situacao = "concluida"
         resultado = {"coleta_id": coleta.id, "lidos": len(coletores),
                      "novos": novos, "atualizados": atualizados,
-                     "sumiram": sumiram, "descartados": descartados,
-                     "removidos": removidos, "total_mdm": total_mdm,
-                     "coletores": len(coletores) - descartados}
+                     "sumiram": sumiram, "total_mdm": total_mdm}
     return resultado
 
 
@@ -999,6 +645,18 @@ def traduzir_pdv(reg: dict) -> dict:
         "tags": [],
     }
 
+
+def coletar_pdvs(sessao_sn) -> list[dict]:
+    """Todos os PDVs instalados, por local. Somente leitura."""
+    from routers.servicenow import _sn_query_all
+    import db.obsolescencia as _db
+
+    cfg = _db.ler_config()
+    registros = _sn_query_all(
+        sessao_sn, cfg.get("pdv_tabela", "cmdb_ci_computer"),
+        query=cfg.get("pdv_query", ""), fields=CAMPOS_PDV,
+        page_size=500, max_records=100000)
+    return [traduzir_pdv(r) for r in registros]
 
 
 # ── Agregações do painel ──────────────────────────────────────────
@@ -1050,54 +708,8 @@ def resumo_parque() -> dict:
 
     tags = contar_tags([{"tags": c.tags.split("|") if c.tags else []} for c in ativos])
 
-    # Por modelo e por versão de Android: é onde a obsolescência aparece
-    # antes de virar número — e é o que o widget do MDM esconde.
-    import json as _json
-    por_modelo: dict[str, dict] = {}
-    por_versao: dict[str, int] = {}
-    criterios_qtd = {"idade_5_anos": 0, "android_travado": 0, "modelo_eol": 0}
-    em_risco = 0
-    for c in ativos:
-        m = por_modelo.setdefault(c.modelo or "?", {"modelo": c.modelo or "?", "coletores": 0,
-                                                    "obsoletos": 0, "idades": []})
-        m["coletores"] += 1
-        m["obsoletos"] += 1 if c.obsoleto else 0
-        if c.idade_anos is not None:
-            m["idades"].append(c.idade_anos)
-        v = (c.versao_os or "?").split(".")[0]
-        por_versao[v] = por_versao.get(v, 0) + 1
-        try:
-            crit = _json.loads(c.criterios or "{}")
-        except ValueError:
-            crit = {}
-        atendidos = 0
-        for k in criterios_qtd:
-            if crit.get(k):
-                criterios_qtd[k] += 1
-                atendidos += 1
-        if atendidos >= 2 and not c.obsoleto:
-            em_risco += 1
-
     return {
-        "em_risco": em_risco,
-        "criterios": criterios_qtd,
-        "por_modelo": sorted(
-            ({"modelo": m["modelo"], "coletores": m["coletores"], "obsoletos": m["obsoletos"],
-              "idade_media": round(sum(m["idades"]) / len(m["idades"]), 1) if m["idades"] else None}
-             for m in por_modelo.values()), key=lambda x: -x["coletores"]),
-        "por_versao_os": sorted(({"versao": k, "coletores": v} for k, v in por_versao.items()),
-                                key=lambda x: -x["coletores"]),
-        "limites": {"anos": cfg.get("limite_anos"), "versao_os_minima": cfg.get("versao_os_minima"),
-                    "modelos_eol": cfg.get("modelos_eol")},
         "coletado_em": ultima.fim.isoformat() if ultima and ultima.fim else None,
-        "coleta": {
-            "total_mdm": ultima.total_mdm if ultima else 0,
-            "lidos": ultima.lidos if ultima else 0,
-            "paginas": ultima.paginas if ultima else 0,
-            "descartados": getattr(ultima, "descartados", 0) if ultima else 0,
-            "novos": ultima.novos if ultima else 0,
-            "atualizados": ultima.atualizados if ultima else 0,
-        },
         "total": len(ativos),
         "em_lojas": len(de_loja),
         "fora_de_loja": len(ativos) - len(de_loja),
@@ -1118,155 +730,3 @@ def resumo_parque() -> dict:
             for c in mais_antigos],
         "modo_regra": cfg.get("modo_regra"),
     }
-
-
-# ── Coletor recebido sai do MDM ───────────────────────────────────
-def _achar_no_mdm(sessao, base: str, alvo: dict) -> tuple[str, int | None]:
-    """id do aparelho no console, e o id da linha do parque se houver.
-
-    Procura no parque guardado (série ou nome) e, não achando, na busca do
-    próprio console — que é o único lugar onde a série sempre está.
-    """
-    import db.obsolescencia as _db
-    from sqlalchemy import select as _select
-    from integracoes import mdm_airwatch as mdm
-
-    serie = (alvo.get("serie") or "").strip()
-    etiqueta = (alvo.get("etiqueta") or "").strip()
-    chaves = [k.upper() for k in (serie, etiqueta) if k]
-    if not chaves:
-        return "", None
-
-    with _db.SessionLocal() as s:
-        for linha in s.execute(_select(_db.Coletor)).scalars():
-            candidatos = {(linha.serie or "").strip().upper(),
-                          (linha.nome or "").strip().upper()}
-            candidatos.discard("")
-            if candidatos & set(chaves):
-                return linha.mdm_id, linha.id
-
-    if sessao is None:
-        return "", None
-    for termo in (serie, etiqueta):
-        if not termo:
-            continue
-        try:
-            achados = mdm.procurar(sessao, termo, base)
-        except Exception as exc:  # noqa: BLE001 — busca falha não derruba o lote
-            _log.warning("MDM: busca por %s falhou: %s", termo, exc)
-            continue
-        # Só age quando a busca é inequívoca: apagar do MDM não tem volta,
-        # e escolher entre dois resultados é chute.
-        if len(achados) == 1 and achados[0].get("id"):
-            return achados[0]["id"], None
-        if len(achados) > 1:
-            _log.warning("MDM: busca por %s devolveu %d aparelhos; nada removido",
-                         termo, len(achados))
-    return "", None
-
-
-
-def remover_recebidos_do_mdm(itens: list[dict], usuario: str = "") -> dict:
-    """Remove do MDM os coletores que acabaram de ser recebidos no CD.
-
-    Vale SÓ para o que passou pelo Recebimento: a base inteira não é
-    tocada. Cada tentativa fica na trilha de escrita, com sucesso ou
-    motivo da falha — apagar do MDM não tem volta.
-
-    O aparelho é achado em dois passos: primeiro no parque guardado
-    (quando a série já é conhecida) e, se não estiver lá, **procurando no
-    próprio console** pela série e pela etiqueta. A grade não publica a
-    série nas colunas, então depender só do parque fazia a remoção não
-    achar ninguém e o coletor recebido continuar inscrito.
-
-    Sem endpoint configurado nada é enviado: a remoção fica pendente e o
-    resumo diz por quê.
-    """
-    resumo = {"tentados": 0, "removidos": 0, "pendentes": 0, "nao_encontrados": 0,
-              "falhas": [], "motivo": "", "por_serie": {}}
-    if not itens:
-        return resumo
-    import db.obsolescencia as _db
-    from integracoes import mdm_airwatch as mdm
-
-    cfg = _db.ler_config()
-    if str(cfg.get("remover_do_mdm_no_recebimento", "1")).strip().lower() not in ("1", "sim", "true"):
-        resumo["motivo"] = "desligado na configuração"
-        return resumo
-
-    # Chaves de busca de cada recebido: série primeiro, etiqueta como
-    # reserva — coletor costuma ter as duas gravadas no console.
-    procurados = []
-    for it in itens:
-        serie = str(it.get("serial") or "").strip()
-        etiqueta = str(it.get("etiqueta") or "").strip()
-        if serie or etiqueta:
-            procurados.append({"serie": serie, "etiqueta": etiqueta})
-    if not procurados:
-        return resumo
-
-    endpoint = (cfg.get("mdm_remocao_endpoint") or "").strip()
-    base = getattr(_cfg, "MDM_BASE_URL", "")
-    sessao = None
-    if endpoint:
-        try:
-            sessao = sessao_mdm()
-        except HTTPException as exc:
-            resumo["motivo"] = str(exc.detail)
-    else:
-        resumo["motivo"] = ("endpoint de remoção do MDM não configurado "
-                            "(Configuração → Obsolescência)")
-
-    for alvo in procurados:
-        serie = alvo["serie"]
-        chave = serie.upper()
-        mdm_id, linha_id = _achar_no_mdm(sessao, base, alvo)
-        if not mdm_id:
-            resumo["nao_encontrados"] += 1
-            resumo["por_serie"][chave] = {
-                "ok": False, "mdm_id": "",
-                "detalhe": "não encontrado no MDM (nem no parque, nem na busca do console)"}
-            continue
-
-        resumo["tentados"] += 1
-        ok, detalhe = False, resumo["motivo"] or "não enviado"
-        if sessao is not None and endpoint:
-            # Primeiro o caminho configurado; se ele responder sem apagar,
-            # os outros caminhos conhecidos, cada um CONFERIDO. O que
-            # funcionar vira o configurado — a próxima remoção vai direto.
-            caminhos = [(endpoint, cfg.get("mdm_remocao_metodo", "POST"),
-                         cfg.get("mdm_remocao_campo") or "SelectedDeviceIds")]
-            caminhos += [c for c in mdm.CAMINHOS_REMOCAO if c[0] != endpoint]
-            try:
-                ok, detalhe, trilha, venceu = mdm.remover_tentando(
-                    sessao, mdm_id, base, caminhos)
-                resumo.setdefault("trilha", []).extend(trilha)
-                if ok and venceu and venceu != endpoint:
-                    _db.gravar_config({"mdm_remocao_endpoint": venceu})
-                    _log.info("MDM: caminho de remoção que funciona é %s", venceu)
-            except mdm.RemocaoNaoConfigurada as exc:
-                ok, detalhe = False, str(exc)
-            except Exception as exc:  # noqa: BLE001 — um aparelho não derruba o lote
-                ok, detalhe = False, str(exc)[:200]
-        with _db.SessionLocal.begin() as s:
-            s.add(_db.Escrita(usuario=usuario, acao="deletar", mdm_id=mdm_id,
-                              serie=serie, origem="recebimento",
-                              sucesso=ok, resposta=detalhe[:400],
-                              detalhe="coletor recebido no CD"))
-            if ok and linha_id:
-                registro = s.get(_db.Coletor, linha_id)
-                if registro is not None:
-                    s.delete(registro)
-        # Por série para quem chamou poder registrar no próprio processo
-        # (o Recebimento guarda o desfecho no ciclo do ativo).
-        resumo["por_serie"][chave] = {"ok": ok, "detalhe": detalhe, "mdm_id": mdm_id}
-        if ok:
-            resumo["removidos"] += 1
-        else:
-            resumo["pendentes"] += 1
-            if detalhe not in resumo["falhas"]:
-                resumo["falhas"].append(detalhe)
-    _log.info("MDM: %d coletor(es) recebido(s), %d removido(s), %d pendente(s)",
-              resumo["tentados"], resumo["removidos"], resumo["pendentes"])
-    return resumo
-

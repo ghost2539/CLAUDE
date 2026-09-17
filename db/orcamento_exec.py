@@ -439,10 +439,18 @@ def _ensure_coluna_a_realizar() -> None:
                 conn.execute(sa_text("ALTER TABLE opex_itens ADD COLUMN realizado_meses TEXT DEFAULT '{}'"))
 
 
+def criar_tabelas() -> None:
+    Base.metadata.create_all(get_engine())
+    _ensure_coluna_a_realizar()
+
 
 def ensure_db() -> None:
     if not _ready:
         init_db()
 
 
-
+def try_init_db() -> None:
+    try:
+        init_db()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Banco do Controle de Orçamento (Execução) indisponível no startup: %s", exc)

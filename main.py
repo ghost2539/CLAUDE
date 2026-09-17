@@ -1,5 +1,7 @@
 from __future__ import annotations
 import logging
+import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -7,8 +9,8 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
-from core.prefixo import BarraFinalMiddleware, com_prefixo, prefixo
 from db.portal import init_db
+from core.prefixo import BarraFinalMiddleware, com_prefixo, prefixo
 from core.security import (
     SecurityHeadersMiddleware,
     BotProtectionMiddleware,
@@ -21,16 +23,20 @@ _cfg = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # A tela Consulta de Ativos — Times também responde na porta antiga
+    # (:8502). É o mesmo processo: um listener a mais, serviço nenhum.
     try:
-        from db.portal import migrar_permissoes
-        n = migrar_permissoes({"bancada": "reparos"})
-        if n:
-            logging.getLogger("portal").info("permissões migradas bancada→reparos: %d", n)
-    except Exception as exc:  # noqa: BLE001
-        logging.getLogger("portal").warning("migração de permissões: %s", exc)
-    # A Consulta Times deixou de ter porta própria (:8502): agora exige o
-    # login do portal e vive em /consulta-times, na mesma porta.
+        from routers.consulta_times import iniciar_espelho
+        logging.getLogger("consulta_times").info("espelho: %s", await iniciar_espelho())
+    except Exception as exc:  # noqa: BLE001 — espelho é acessório
+        logging.getLogger("consulta_times").error(
+            "espelho na porta antiga NÃO subiu (portal segue normal): %s", exc)
     yield
+    try:
+        from routers.consulta_times import parar_espelho
+        await parar_espelho()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def create_app() -> FastAPI:
@@ -64,34 +70,29 @@ def create_app() -> FastAPI:
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        # O ícone enviado pelo admin geral (data/branding) vence o padrão.
-        # no-cache: o navegador revalida e troca sem reiniciar nada.
-        tipos = {".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon"}
-        from routers.parametros import favicon_atual
-        path = favicon_atual() or (_cfg.STATIC / "favicon.svg")
-        if not path.exists():
-            path = _cfg.STATIC / "favicon.ico"
-        return FileResponse(path, media_type=tipos.get(path.suffix, "image/x-icon"),
-                            headers={"Cache-Control": "no-cache"})
+        path = _cfg.STATIC / "favicon.svg"
+        if path.exists():
+            return FileResponse(path, media_type="image/svg+xml")
+        return FileResponse(_cfg.STATIC / "favicon.ico")
 
     # ── Register routers ────────────────────────────────────────────────
     from routers.auth import router as auth_router
     from routers.consulta import router as consulta_router
     from routers.recebimento import router as recebimento_router
+    from routers.reparos import router as reparos_router
     from routers.parametros import router as parametros_router
     from routers.status import router as status_router
     from routers.public_assets import router as public_assets_router
     from routers.identificacao import router as identificacao_router
     from routers.servicenow import router as servicenow_router
     from routers.correios import router as correios_router
-    import db.consulta_times as _db_ct
-    _db_ct.init_db()
     from routers.consulta_times import router as consulta_times_router
     from routers.encerramento import router as encerramento_router
 
     app.include_router(auth_router)
     app.include_router(consulta_router)
     app.include_router(recebimento_router)
+    app.include_router(reparos_router)
     app.include_router(parametros_router)
     app.include_router(status_router)
     app.include_router(public_assets_router)
@@ -140,100 +141,16 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── Orçamento Spare — a tela do Infra CSC com banco e permissão próprios
-    # (permissão "orcamento_spare", liberação por login na própria tela).
+    # ── Orçamento do SPARE (CAPEX da área) — banco próprio ──────────────
+    # Acesso pelo módulo de permissão "orcamento_spare".
     try:
-        from routers.orcamento_spare_exec import router as orcamento_spare_router, init_db as _init_osp
-        _init_osp()
+        import db.orcamento_spare as _db_orc_spare
+        _db_orc_spare.init_db()
+        from routers.orcamento_spare import router as orcamento_spare_router
         app.include_router(orcamento_spare_router)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("orcamento_spare_exec").error(
-            "Módulo Orçamento Spare NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── CAPEX Spare — projetos e itens de investimento, banco e permissão
-    # próprios ("capex_spare"). Outro produto que a tela acima: aqui são
-    # projetos com linhas de item, catálogo, acordo de compra e NCM/TIPI.
-    try:
-        import db.capex_spare as _db_capex
-        _db_capex.init_db()
-        from routers.capex_spare import router as capex_spare_router
-        app.include_router(capex_spare_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("capex_spare").error(
-            "Módulo CAPEX Spare NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # Gestão de Compras: PO e projetos do EBS por HTTP. O portal é cliente;
-    # o cofre fica do lado de lá, com quem pode lê-lo.
-    try:
-        from routers.gestao_compras import router as gestao_compras_router
-        app.include_router(gestao_compras_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("gestao_compras").error(
-            "Módulo Gestão de Compras NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # Agendamento de entrega do fornecedor: o que vem, quando e em quantos
-    # volumes. Banco próprio.
-    try:
-        import db.agendamentos_forn as _db_agf
-        _db_agf.init_db()
-        from routers.agendamentos_forn import router as agendamentos_forn_router
-        app.include_router(agendamentos_forn_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("agendamentos_forn").error(
-            "Módulo Agendamentos Fornecedor NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # Internalização: a conferência do que chegou contra o agendamento.
-    try:
-        import db.internalizacao as _db_int
-        _db_int.init_db()
-        from routers.internalizacao import router as internalizacao_router
-        app.include_router(internalizacao_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("internalizacao").error(
-            "Módulo Internalização NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Base do EBS: leitura direta, credencial pelo cofre. Caminho
-    # alternativo ao /gestao-compras — as consultas são as mesmas, pelos
-    # mesmos nomes; muda só por onde o dado vem.
-    try:
-        from routers.ebs_oracle import router as ebs_oracle_router
-        app.include_router(ebs_oracle_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("ebs_oracle").error(
-            "Base EBS NÃO carregada (portal segue sem ela): %s", exc, exc_info=True,
-        )
-
-    # ── Cofre: o serviço enxerga os segredos? — só diagnóstico, nenhum
-    # valor sai daqui. Rodar o CLI no terminal responde sobre o usuário do
-    # shell, não sobre o processo do portal.
-    try:
-        from routers.cofre import router as cofre_router
-        app.include_router(cofre_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("cofre_diag").error(
-            "Diagnóstico do cofre NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # Planejamento de compras: aba do Orçamento Spare, banco próprio.
-    try:
-        import db.planejamento as _db_pln
-        _db_pln.init_db()
-        from routers.planejamento import router as planejamento_router
-        app.include_router(planejamento_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("planejamento").error(
-            "Módulo Planejamento NÃO carregado (portal segue sem ele): %s",
+        logging.getLogger("orcamento_spare").error(
+            "Módulo Orçamento SPARE NÃO carregado (portal segue sem ele): %s",
             exc, exc_info=True,
         )
 
@@ -247,6 +164,64 @@ def create_app() -> FastAPI:
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("orcamento_manutencao").error(
             "Módulo Orçamento Manutenção NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Agendamentos de Fornecedores (menu Entrada) — banco próprio ─────
+    try:
+        import db.agendamentos_forn as _db_agf
+        _db_agf.init_db()
+        from routers.agendamentos_forn import router as agendamentos_forn_router
+        app.include_router(agendamentos_forn_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("agendamentos_forn").error(
+            "Módulo Agendamentos Forn. NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Internalização (menu Entrada) — banco próprio ───────────────────
+    try:
+        import db.internalizacao as _db_int
+        _db_int.init_db()
+        from routers.internalizacao import router as internalizacao_router
+        app.include_router(internalizacao_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("internalizacao").error(
+            "Módulo Internalização NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Cofre: o serviço enxerga os segredos? — só diagnóstico ──────────
+    try:
+        from routers.cofre import router as cofre_router
+        app.include_router(cofre_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("cofre_diag").error(
+            "Diagnóstico do cofre NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── EBS Oracle (leitura do BASE_REMOVIDA) — sem banco próprio ──────────────
+    # Aditivo e isolado: sem o driver Oracle ou sem credencial no cofre, o
+    # módulo simplesmente não carrega e o portal segue igual.
+    try:
+        from routers.ebs_oracle import router as ebs_oracle_router
+        app.include_router(ebs_oracle_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("ebs_oracle").error(
+            "Módulo EBS Oracle NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
+    # ── Gestão de Compras — PO e projetos do EBS pela API do módulo PHP ──
+    # O serviço não lê o cofre; o módulo /gestao_compras (Apache) lê e já
+    # expõe as consultas. Cliente HTTP, sem banco próprio, isolado.
+    try:
+        from routers.gestao_compras import router as gestao_compras_router
+        app.include_router(gestao_compras_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("gestao_compras").error(
+            "Módulo Gestão de Compras NÃO carregado (portal segue sem ele): %s",
             exc, exc_info=True,
         )
 
@@ -266,13 +241,14 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
-    # ── Automações (encerramento/encaminhamento pelo botão) — banco próprio
+    # ── Automações (encerramento/encaminhamento) — banco próprio ────────
     # Carregamento isolado (nunca derruba o portal).
     try:
         import db.automacoes as _db_autom
         _db_autom.init_db()
-        from routers.automacoes import router as automacoes_router
+        from routers.automacoes import router as automacoes_router, start_scheduler as _autom_sched
         app.include_router(automacoes_router)
+        _autom_sched()  # rotina agendada (07/12/16 por padrão)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("automacoes").error(
             "Módulo Automações NÃO carregado (portal segue sem ele): %s",
@@ -280,201 +256,16 @@ def create_app() -> FastAPI:
         )
 
     # ── EBS Forms (RPA sobre o cliente Oracle Forms) — banco próprio ────
-    # Roda em segundo plano numa tela virtual; só a API e a tela entram aqui.
-    # Aditivo: falha nele nunca derruba o portal.
+    # Roda em segundo plano numa tela virtual; só a API entra aqui.
     try:
         import db.ebs_forms as _db_forms
         _db_forms.init_db()
         from routers.ebs_forms import router as ebs_forms_router, pagina_router as ebs_forms_pagina
         app.include_router(ebs_forms_router)
-        app.include_router(ebs_forms_pagina)
+        app.include_router(ebs_forms_pagina)  # tela /ebs-forms (exige login e permissão)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("ebs_forms").error(
             "Módulo EBS Forms NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Trilha do Ativo — núcleo de rastreabilidade e relógios ──────────
-    # Espinha dos processos da área: o token do ativo, a movimentação
-    # imutável e os intervalos de que saem todos os indicadores de tempo.
-    # Carregamento isolado como os demais — mas note que, diferente deles,
-    # os módulos de processo dependem deste para registrar trilha.
-    try:
-        import db.trilha as _db_trilha
-        _db_trilha.init_db()
-        from routers.trilha import router as trilha_router
-        app.include_router(trilha_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("trilha").error(
-            "Núcleo da Trilha do Ativo NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Separação e Expedição (A15) — banco próprio ─────────────────────
-    # Depende do núcleo da Trilha para registrar o tempo, mas carrega
-    # isolado: se a trilha não subir, a separação ainda funciona sem
-    # medir — operação não para por causa de indicador.
-    try:
-        import db.separacao as _db_sep
-        _db_sep.init_db()
-        from routers.separacao import router as separacao_router
-        app.include_router(separacao_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("separacao").error(
-            "Módulo Separação NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Projetos de loja (A16) — banco próprio ──────────────────────────
-    # Inauguração e reforma, item por item. Usa o estoque e o chamado
-    # pelas funções da Separação, e o relógio pelo núcleo; carrega
-    # isolado porque a Separação funciona sem ele.
-    try:
-        import db.projetos as _db_prj
-        _db_prj.init_db()
-        from routers.projetos import router as projetos_router
-        app.include_router(projetos_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("projetos").error(
-            "Módulo Projetos NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Logística reversa (A17) — banco próprio ─────────────────────────
-    # A coleta é o token; esperado × recebido é o indicador. Usa o
-    # rastreio do módulo Correios e o chamado pela Separação; carrega
-    # isolado, e o Recebimento só o chama se ele estiver no ar.
-    try:
-        import db.reversa as _db_rev
-        _db_rev.init_db()
-        from routers.reversa import router as reversa_router
-        app.include_router(reversa_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("reversa").error(
-            "Módulo Logística Reversa NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Regularização de ativo (A19) — banco próprio ────────────────────
-    # A divergência com dono e prazo. Carrega antes do inventário porque
-    # é quem recebe as divergências dele (e da reversa), por import tardio.
-    try:
-        import db.regularizacao as _db_reg
-        _db_reg.init_db()
-        from routers.regularizacao import router as regularizacao_router
-        app.include_router(regularizacao_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("regularizacao").error(
-            "Módulo Regularização NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Inventário e contagem (A18) — banco próprio ─────────────────────
-    # O ciclo é o token; o retrato do ServiceNow é congelado na abertura.
-    try:
-        import db.inventario as _db_inv
-        _db_inv.init_db()
-        from routers.inventario import router as inventario_router
-        app.include_router(inventario_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("inventario").error(
-            "Módulo Inventário NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Venda de ativos (A11) — banco próprio ───────────────────────────
-    # A fila de venda mora na Trilha; aqui ficam os ciclos trimestrais.
-    try:
-        import db.venda as _db_vnd
-        _db_vnd.init_db()
-        from routers.venda import router as venda_router
-        app.include_router(venda_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("venda").error(
-            "Módulo Venda de Ativos NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Atendimento a chamados (A20) — banco próprio ────────────────────
-    # Espelha o chamado do ServiceNow para medir o tempo de quem atende e
-    # ligar o atendimento à separação. Carregamento isolado: a separação
-    # funciona sem ele (só não devolve o chamado à fila sozinha).
-    try:
-        import db.atendimento as _db_atd
-        _db_atd.init_db()
-        from routers.atendimento import router as atendimento_router
-        app.include_router(atendimento_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("atendimento").error(
-            "Módulo Atendimento NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Bancadas de triagem e reparo (A02, A03, A04) ────────────────────
-    # Primeiro módulo que usa a Trilha como fonte de estado: a fila é
-    # lida dos intervalos abertos do núcleo. Sem a trilha no ar, a fila
-    # aparece vazia — por isso carrega isolado e depois dela.
-    try:
-        import db.bancada as _db_bnc
-        _db_bnc.init_db()
-        from routers.bancada import router as bancada_router
-        app.include_router(bancada_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("bancada").error(
-            "Módulo Bancada NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Preparação (A06, A07, A08.2) — banco próprio ────────────────────
-    # Fecha os caminhos que a bancada abre: coletor apto vai configurar,
-    # sled é montado, e tudo termina internalizado no estoque.
-    try:
-        import db.preparacao as _db_prp
-        _db_prp.init_db()
-        from routers.preparacao import router as preparacao_router
-        app.include_router(preparacao_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("preparacao").error(
-            "Módulo Preparação NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Destinação (A09 a A13) — banco próprio ──────────────────────────
-    # Fecha o caminho do reparo inviável. Guarda anexos comprobatórios em
-    # data/uploads/destinacao — é o único módulo que grava arquivo.
-    try:
-        import db.destinacao as _db_dst
-        _db_dst.init_db()
-        from routers.destinacao import router as destinacao_router
-        app.include_router(destinacao_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("destinacao").error(
-            "Módulo Destinação NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Assistência externa e devolução (A05, A14) — banco próprio ──────
-    try:
-        import db.externo as _db_ext
-        _db_ext.init_db()
-        from routers.externo import router as externo_router
-        app.include_router(externo_router)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("externo").error(
-            "Módulo Assistência/Devolução NÃO carregado (portal segue sem ele): %s",
-            exc, exc_info=True,
-        )
-
-    # ── Torre de Controle (T2) — sem banco próprio ──────────────────────
-    # Não grava nada: tudo é derivado dos intervalos do núcleo. Por isso
-    # o painel muda sozinho quando o calendário muda.
-    try:
-        from routers.torre import router as torre_router, start_scheduler as _torre_snapshot
-        app.include_router(torre_router)
-        _torre_snapshot()  # foto diária da Torre, na hora configurada
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
-        logging.getLogger("torre").error(
-            "Torre de Controle NÃO carregada (portal segue sem ela): %s",
             exc, exc_info=True,
         )
 

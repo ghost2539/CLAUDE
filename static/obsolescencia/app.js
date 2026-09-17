@@ -7,12 +7,26 @@
 (function () {
     'use strict';
 
-    // Tema escolhido no portal (cache local do mesmo usuário); a página
-    // não tem alternador próprio.
-    try {
-        document.documentElement.dataset.tema =
-            localStorage.getItem('spare-tema') === 'escuro' ? 'escuro' : 'claro';
-    } catch (_) { /* sem storage: fica no claro */ }
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Vazio na raiz do domínio.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+
+    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
+    // vira GET). Com a marca ligada, a URL já sai com a barra.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+    function comBarra(url) {
+        if (!API_BARRA) return url;
+        var corte = url.indexOf('?');
+        var base = corte === -1 ? url : url.slice(0, corte);
+        var query = corte === -1 ? '' : url.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
+
 
     var alvo = document.getElementById('obs-conteudo');
     var ehAdmin = false;
@@ -82,7 +96,7 @@
             return barra(x[campoNome], x[campoValor] || 0, x[campoCritico] || 0, maximo);
         }).join('');
         return '<div class="obs-card"><h2>' + esc(titulo) + '</h2>' +
-            (sub ? '<p class="obs-sub-card">' + esc(sub) + '</p>' : '') +
+            '<p class="obs-sub-card">' + esc(sub) + '</p>' +
             '<div class="obs-barras">' + linhas + '</div>' +
             '<div class="obs-legenda">' +
                 '<span><i style="background:var(--barra-fundo)"></i>No parque</span>' +
@@ -100,14 +114,16 @@
             return barra(t.tag + ' · ' + t.grupo, t.quantidade, 0, maximo);
         }).join('');
         return '<div class="obs-card"><h2>Coletores por tag</h2>' +
-
+            '<p class="obs-sub-card">Só aparecem as tags que têm coletor atribuído.</p>' +
             '<div class="obs-barras">' + linhas + '</div></div>';
     }
 
     function cardAntigos(lista, idadeDesconhecida) {
         if (!lista || !lista.length) {
             return '<div class="obs-card"><h2>Coletores mais antigos</h2>' +
-                '<p class="obs-sub-card">Nenhum coletor com idade conhecida.</p></div>';
+                '<p class="obs-sub-card">Nenhum coletor com idade conhecida. A data de ' +
+                'aquisição vem do EBS; sem ela a idade não é estimada, para não ' +
+                'inventar número.</p></div>';
         }
         var linhas = lista.slice(0, 20).map(function (c) {
             return '<tr><td>' + esc(c.nome || c.mdm_id) + '</td>' +
@@ -124,63 +140,6 @@
             '<th>Coletor</th><th>BU</th><th>Loja</th><th>Modelo</th><th>Android</th>' +
             '<th class="obs-num">Anos</th></tr></thead><tbody>' + linhas +
             '</tbody></table></div></div>';
-    }
-
-    var NOME_CRITERIO = { idade_5_anos: 'Idade acima do limite', android_travado: 'Android sem atualização', modelo_eol: 'Modelo em fim de vida' };
-
-    /* Por critério: responde "por quê" — quantos atendem cada regra. */
-    function cardCriterios(crit, total, limites) {
-        if (!crit) return '';
-        var chaves = Object.keys(crit);
-        var maximo = Math.max.apply(null, chaves.map(function (k) { return crit[k] || 0; }).concat([1]));
-        var linhas = chaves.map(function (k) {
-            return barra(NOME_CRITERIO[k] || k, crit[k] || 0, crit[k] || 0, Math.max(maximo, total || 1));
-        }).join('');
-        var lim = limites || {};
-        return '<div class="obs-card"><h2>Por critério</h2>' +
-            '<p class="obs-sub-card">' + esc((lim.anos || '?') + ' anos · Android < ' + (lim.versao_os_minima || '?') +
-                ' · EOL: ' + (lim.modelos_eol || '—')) + '</p>' +
-            '<div class="obs-barras">' + linhas + '</div></div>';
-    }
-
-    /* Por modelo: responde "quais trocar primeiro". */
-    function cardModelos(modelos) {
-        if (!modelos || !modelos.length) return '';
-        var linhas = modelos.slice(0, 20).map(function (m) {
-            return '<tr><td>' + esc(m.modelo) + '</td>' +
-                '<td class="obs-num">' + num(m.coletores) + '</td>' +
-                '<td class="obs-num">' + (m.obsoletos ? '<span class="obs-etq obs-etq--critico">' + num(m.obsoletos) + '</span>' : '—') + '</td>' +
-                '<td class="obs-num">' + (m.idade_media != null ? m.idade_media.toFixed(1) : '—') + '</td></tr>';
-        }).join('');
-        return '<div class="obs-card"><h2>Por modelo</h2>' +
-            '<div class="obs-tabela-wrap"><table class="obs-tabela"><thead><tr>' +
-            '<th>Modelo</th><th class="obs-num">Coletores</th><th class="obs-num">Obsoletos</th>' +
-            '<th class="obs-num">Idade média</th></tr></thead><tbody>' + linhas + '</tbody></table></div></div>';
-    }
-
-    function cardVersoes(versoes) {
-        if (!versoes || !versoes.length) return '';
-        var maximo = Math.max.apply(null, versoes.map(function (v) { return v.coletores; }));
-        var linhas = versoes.map(function (v) {
-            return barra('Android ' + v.versao, v.coletores, 0, maximo);
-        }).join('');
-        return '<div class="obs-card"><h2>Por versão de Android</h2>' +
-            '<div class="obs-barras">' + linhas + '</div></div>';
-    }
-
-    /* Sumiram do MDM: lista carregada ao clicar no KPI. */
-    function carregarTratativa(alvoLista) {
-        alvoLista.innerHTML = '<p class="obs-sub-card">Carregando…</p>';
-        fetch('/api/obsolescencia/tratativa', { credentials: 'include' }).then(resposta).then(function (d) {
-            if (!d.coletores || !d.coletores.length) { alvoLista.innerHTML = '<p class="obs-sub-card">Nenhum.</p>'; return; }
-            alvoLista.innerHTML = '<div class="obs-tabela-wrap"><table class="obs-tabela"><thead><tr>' +
-                '<th>Coletor</th><th>BU</th><th>Loja</th><th>Modelo</th><th>Desde</th></tr></thead><tbody>' +
-                d.coletores.map(function (c) {
-                    return '<tr><td>' + esc(c.nome || c.mdm_id) + '</td><td>' + esc(c.bu || '—') + '</td>' +
-                        '<td>' + esc(c.loja || '—') + '</td><td>' + esc(c.modelo || '—') + '</td>' +
-                        '<td>' + esc(quando(c.desde)) + '</td></tr>';
-                }).join('') + '</tbody></table></div>';
-        }).catch(function (e) { alvoLista.innerHTML = '<p class="obs-sub-card">' + esc(e.message) + '</p>'; });
     }
 
     function cardLojas(lojas) {
@@ -205,11 +164,7 @@
         return '<div class="obs-acoes">' +
             '<button id="obs-coletar" class="obs-btn">Atualizar do MDM</button>' +
             '<button id="obs-cred" class="obs-btn obs-btn--secundario">Credencial do MDM</button>' +
-            '<span id="obs-msg" class="obs-msg">' + esc(msg || '') + '</span>' +
-            '<div id="obs-prog" class="obs-prog" hidden>' +
-                '<div class="obs-prog-barra"><div id="obs-prog-cheio"></div></div>' +
-                '<span id="obs-prog-txt" class="obs-msg"></span>' +
-            '</div></div>';
+            '<span id="obs-msg" class="obs-msg">' + esc(msg || '') + '</span></div>';
     }
 
     /* Formulário da credencial de serviço. Fica aqui, e não só no CLI do
@@ -258,7 +213,7 @@
     }
 
     function abrirCredencial() {
-        fetch('/api/obsolescencia/credencial', { credentials: 'include' })
+        fetch(comBarra(BASE + '/api/obsolescencia/credencial'), { credentials: 'include' })
             .then(resposta)
             .catch(function () { return {}; })
             .then(function (estado) {
@@ -284,7 +239,7 @@
         if (!u || !p) { m.textContent = 'Informe usuário e senha.'; return; }
         b.disabled = true;
         m.textContent = 'Guardando no cofre…';
-        fetch('/api/obsolescencia/credencial', {
+        fetch(comBarra(BASE + '/api/obsolescencia/credencial'), {
             method: 'POST', credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: u, senha: p })
@@ -307,39 +262,21 @@
                 kpi(num(d.total), 'Coletores no parque',
                     d.fora_de_loja ? num(d.fora_de_loja) + ' fora de loja (CD)' : '') +
                 kpi(num(d.obsoletos), 'Obsoletos',
-                    d.modo_regra === 'qualquer' ? 'Qualquer critério' : 'Todos os critérios', 'critico') +
-                kpi(num(d.em_risco || 0), 'Em risco', '2 de 3 critérios', 'alerta') +
+                    'Regra: ' + (d.modo_regra === 'qualquer' ? 'qualquer critério' : 'os três critérios'),
+                    'critico') +
                 kpi(num(semVer.quantidade), 'Sem comunicar',
                     'Há mais de ' + (semVer.limite_dias || 30) + ' dias', 'alerta') +
-                '<button type="button" class="obs-kpi obs-kpi--botao" id="obs-kpi-tratativa">' +
-                    '<div class="obs-kpi-valor">' + num(d.em_tratativa) + '</div>' +
-                    '<div class="obs-kpi-rotulo">Sumiram do MDM</div>' +
-                    '<div class="obs-kpi-nota">Ver lista</div></button>' +
-            '</div>' +
-            '<div id="obs-tratativa"></div>' +
-            '<div class="obs-grid2">' +
-                cardCriterios(d.criterios, d.total, d.limites) +
-                cardModelos(d.por_modelo) +
+                kpi(num(d.em_tratativa), 'Em tratativa', 'Sumiram do MDM') +
             '</div>' +
             '<div class="obs-grid2">' +
-                cardBarras('Parque por BU', '', d.por_bu, 'bu_nome', 'coletores', 'obsoletos') +
-                cardVersoes(d.por_versao_os) +
+                cardBarras('Parque por BU', 'Coletores em loja, com a parcela obsoleta destacada.',
+                           d.por_bu, 'bu_nome', 'coletores', 'obsoletos') +
+                cardTags(d.tags) +
             '</div>' +
             '<div class="obs-grid2">' +
                 cardLojas(d.por_loja) +
                 cardAntigos(d.mais_antigos, d.idade_desconhecida) +
-            '</div>' +
-            '<div class="obs-grid2">' + cardTags(d.tags) + '</div>';
-        var kt = document.getElementById('obs-kpi-tratativa');
-        if (kt) kt.addEventListener('click', function () {
-            var alvoLista = document.getElementById('obs-tratativa');
-            if (alvoLista.innerHTML) { alvoLista.innerHTML = ''; return; }
-            alvoLista.innerHTML = '';
-            var card = document.createElement('div'); card.className = 'obs-card';
-            card.innerHTML = '<h2>Sumiram do MDM</h2><div class="obs-lista"></div>';
-            alvoLista.appendChild(card);
-            carregarTratativa(card.querySelector('.obs-lista'));
-        });
+            '</div>';
         ligarBotao();
     }
 
@@ -360,41 +297,6 @@
         ligarBotao();
     }
 
-    /* A varredura leva minutos e a requisição só volta no fim. Enquanto
-       isso a tela pergunta o andamento ao servidor: páginas lidas de
-       quantas, e o que está acontecendo agora. */
-    function acompanharProgresso() {
-        var caixa = document.getElementById('obs-prog');
-        var cheio = document.getElementById('obs-prog-cheio');
-        var txt = document.getElementById('obs-prog-txt');
-        if (caixa) caixa.hidden = false;
-        if (cheio) cheio.style.width = '0%';
-        if (txt) txt.textContent = 'Conectando no MDM…';
-
-        function pintar(pct, fase, lidos, total) {
-            if (cheio) cheio.style.width = Math.max(2, pct) + '%';
-            if (!txt) return;
-            var detalhe = total ? num(lidos) + ' de ' + num(total) + ' coletores' :
-                (lidos ? num(lidos) + ' coletores' : '');
-            txt.textContent = [fase, detalhe].filter(Boolean).join(' · ');
-        }
-        var timer = setInterval(function () {
-            fetch('/api/obsolescencia/coleta/progresso', { credentials: 'include' })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (p) {
-                    if (!p || !p.rodando) return;
-                    pintar(p.percentual || 0, p.fase || '', p.lidos || 0, p.total || 0);
-                })
-                .catch(function () {});
-        }, 2000);
-
-        return function encerrar(pct, fase) {
-            clearInterval(timer);
-            if (pct) { pintar(pct, fase, 0, 0); setTimeout(function () { if (caixa) caixa.hidden = true; }, 1500); }
-            else if (caixa) caixa.hidden = true;
-        };
-    }
-
     function ligarBotao() {
         var c = document.getElementById('obs-cred');
         if (c) c.addEventListener('click', abrirCredencial);
@@ -403,18 +305,15 @@
         b.addEventListener('click', function () {
             var m = document.getElementById('obs-msg');
             b.disabled = true;
-            if (m) m.textContent = 'Lendo o parque no MDM…';
-            var parar = acompanharProgresso();
-            fetch('/api/obsolescencia/coletar', { method: 'POST', credentials: 'include' })
+            if (m) m.textContent = 'Lendo o parque no MDM… isso leva alguns minutos.';
+            fetch(comBarra(BASE + '/api/obsolescencia/coletar'), { method: 'POST', credentials: 'include' })
                 .then(resposta)
                 .then(function (j) {
-                    parar(100, 'Concluída');
                     if (m) m.textContent = 'Coleta concluída: ' + num(j.lidos) + ' lidos, ' +
                         num(j.novos) + ' novos, ' + num(j.sumiram) + ' sumiram.';
                     carregar();
                 })
                 .catch(function (e) {
-                    parar(0, '');
                     b.disabled = false;
                     if (m) m.textContent = e.message;
                     // Falta credencial? Abre o formulário em vez de só reclamar.
@@ -424,7 +323,7 @@
     }
 
     function carregar() {
-        fetch('/api/obsolescencia/resumo', { credentials: 'include' })
+        fetch(comBarra(BASE + '/api/obsolescencia/resumo'), { credentials: 'include' })
             .then(function (r) {
                 if (r.status === 401) { location.href = '/?next=/obsolescencia'; return null; }
                 return resposta(r);
@@ -443,7 +342,7 @@
     }
 
     // Só admin vê o botão de coletar; o painel em si é de quem tem login.
-    fetch('/api/auth/me', { credentials: 'include' })
+    fetch(comBarra(BASE + '/api/auth/me'), { credentials: 'include' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (u) { ehAdmin = !!(u && u.is_admin); })
         .catch(function () {})

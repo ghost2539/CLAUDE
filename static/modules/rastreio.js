@@ -16,8 +16,8 @@
             '<div style="display:flex;justify-content:space-between;font-size:.85rem;' +
             'color:var(--text-secondary);margin-bottom:4px">' +
             '<span class="pg-label">Processando...</span><span class="pg-pct">0%</span></div>' +
-            '<div style="height:10px;background:var(--sp-border-soft);overflow:hidden">' +
-            '<div class="pg-fill" style="height:100%;width:0%;background:var(--sp-accent);transition:width .2s"></div></div>';
+            '<div style="height:10px;background:var(--bg-secondary,#eee);border-radius:6px;overflow:hidden">' +
+            '<div class="pg-fill" style="height:100%;width:0%;background:#3b82f6;transition:width .2s"></div></div>';
         return {
             el: wrap,
             iniciar: function (label) {
@@ -75,13 +75,13 @@
         content.appendChild(card);
 
         function statusDoObjeto(d) {
-            if (!d.encontrado) return { txt: 'Não encontrado', cor: 'var(--sp-faint)' };
-            if (d.entrega && d.entrega.entregue) return { txt: 'Entregue', cor: 'var(--sp-ok)' };
-            return { txt: 'Em trânsito', cor: 'var(--sp-teal-text)' };
+            if (!d.encontrado) return { txt: 'Não encontrado', cor: '#6b7280' };
+            if (d.entrega && d.entrega.entregue) return { txt: 'Entregue', cor: '#16a34a' };
+            return { txt: 'Em trânsito', cor: '#2563eb' };
         }
 
         function cardResultado(cod, d, erro) {
-            var st = erro ? { txt: 'Erro', cor: 'var(--sp-alerta)' } : statusDoObjeto(d);
+            var st = erro ? { txt: 'Erro', cor: '#dc2626' } : statusDoObjeto(d);
             var ultimo = '';
             if (!erro && d.eventos && d.eventos.length) {
                 var ev = d.eventos[0];
@@ -94,7 +94,7 @@
             }
             var det = erro ? erro : (ultimo || rec || '—');
             return '<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 10px;' +
-                'border:1px solid var(--sp-border);margin-bottom:6px">' +
+                'border:1px solid var(--border,#eee);border-radius:8px;margin-bottom:6px">' +
                 '<span style="font-family:monospace;min-width:130px;font-weight:600">' + S.esc(cod) + '</span>' +
                 '<span style="min-width:110px;font-weight:600;color:' + st.cor + '">' + S.esc(st.txt) + '</span>' +
                 '<span style="color:var(--text-secondary);font-size:.88rem;flex:1">' + S.esc(det) +
@@ -141,11 +141,11 @@
             S.api('/servicenow/correios/test', { method: 'POST' })
                 .then(function (d) {
                     result.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-word;' +
-                        'font-size:.8rem;background:var(--bg-secondary);padding:12px;' +
+                        'font-size:.8rem;background:var(--bg-secondary);padding:12px;border-radius:8px;' +
                         'max-height:480px;overflow:auto">' + S.esc(JSON.stringify(d, null, 2)) + '</pre>';
                 })
                 .catch(function (err) {
-                    result.innerHTML = '<div style="color:var(--sp-alerta)">' + S.esc(err.message) + '</div>';
+                    result.innerHTML = '<div style="color:#dc2626">' + S.esc(err.message) + '</div>';
                 })
                 .finally(function () { testBtn.disabled = false; testBtn.textContent = 'Testar conexão'; });
         };

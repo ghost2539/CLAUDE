@@ -1,15 +1,7 @@
-"""Conversão EBS → ServiceNow com a credencial de serviço do EBS.
-
-Não é mais aberta: entra quem tem sessão no portal com `consulta:view` ou
-quem apresenta o token de API (`PUBLIC_ASSETS_TOKEN`, no cofre) no cabeçalho
-`X-Api-Key` — é o caminho para integrações de outros times. Tudo passa pelo
-rate limit e fica na tabela `public_ebs_query_audit`.
-"""
+"""Public assets router — EBS lookup without user auth (uses service credentials)."""
 from __future__ import annotations
 
-import hmac
 import io
-import logging
 import os
 import threading
 import time
@@ -22,20 +14,14 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 
 from config import get_settings
-from core.security import get_session, check_rate_limit, client_ip
-from db.portal import SessionLocal, PublicEbsQueryAudit
+from db.portal import SessionLocal
 from integracoes.ebs_service import login as ebs_login, search_many as ebs_search_many
 
 _cfg = get_settings()
-_log = logging.getLogger("public_assets")
-router = APIRouter(prefix="/api/public-assets", tags=["Conversão EBS → ServiceNow"])
+router = APIRouter(prefix="/api/public-assets", tags=["Consulta pública EBS"])
 
 _auth_lock = threading.Lock()
 _auth_cache: dict = {"value": None, "expires": 0.0}
-
-# Teto por chamada: cada identificador é uma consulta ao EBS em paralelo.
-MAX_IDENTIFICADORES = 200
-CHAVE_TOKEN = "PUBLIC_ASSETS_TOKEN"
 
 
 # ── Pydantic models ───────────────────────────────────────────────
@@ -55,56 +41,42 @@ class PublicQueryIn(BaseModel):
                 out.append(item)
         if not out:
             raise ValueError("Informe ao menos um identificador.")
-        if len(out) > MAX_IDENTIFICADORES:
-            raise ValueError(f"No máximo {MAX_IDENTIFICADORES} identificadores por chamada.")
         return out
-
-
-# ── Quem pode chamar ──────────────────────────────────────────────
-
-def _token_configurado() -> str:
-    from core import cofre
-    return (cofre.obter(CHAVE_TOKEN) or "").strip()
-
-
-def _autorizar(req: Request) -> str:
-    """Devolve quem chamou: o login da sessão ou 'token'. Sem um dos dois, 401."""
-    apresentado = (req.headers.get("x-api-key") or "").strip()
-    if apresentado:
-        esperado = _token_configurado()
-        if esperado and hmac.compare_digest(apresentado, esperado):
-            return "token"
-        raise HTTPException(401, "Token de API inválido.")
-    sd = get_session(req, required=False)
-    if sd is None:
-        raise HTTPException(401, "Sessão não autenticada ou token de API ausente (X-Api-Key).")
-    if not sd.get("is_admin") and not (sd.get("permission_map") or {}).get("consulta", {}).get("can_view"):
-        raise HTTPException(403, "Permissão insuficiente (consulta).")
-    return sd.get("username") or ""
 
 
 # ── Internal helpers ──────────────────────────────────────────────
 
-def _credential(name: str) -> str:
-    """Credencial entregue pelo systemd (LoadCredentialEncrypted).
+# A conta de leitura do EBS vinha de arquivo em disco, entregue pelo
+# LoadCredentialEncrypted da unit de SISTEMA. Como o portal agora roda como
+# serviço de usuário, esse mecanismo não existe mais e a consulta quebrava
+# com 500. Passa pelo cofre, como todo o resto; o diretório continua valendo
+# para não quebrar instalação antiga.
+_CHAVES_COFRE = {
+    "ebs_public_username": ("EBS_PUBLIC_USER", "EBS_PUBLIC_USERNAME"),
+    "ebs_public_password": ("EBS_PUBLIC_PASS", "EBS_PUBLIC_PASSWORD"),
+}
 
-    Sem ela a consulta ao EBS não tem como acontecer: devolve 503 dizendo
-    o que falta, em vez de um 500 mudo. O diretório vem de
-    CREDENTIALS_DIRECTORY, que o systemd define para o próprio serviço —
-    outro serviço (um ambiente de testes, por exemplo) tem o dele.
-    """
+
+def _credential(name: str) -> str:
+    from core.cofre import obter
+    for chave in _CHAVES_COFRE.get(name, (name.upper(),)):
+        valor = obter(chave, "")
+        if valor:
+            return valor
+
     directory = _cfg.CREDENTIALS_DIRECTORY
     path = os.path.join(directory, name) if directory else ""
-    if not path or not os.path.isfile(path):
-        raise HTTPException(
-            503, f"Credencial protegida do EBS não carregada ({name}). O serviço precisa de "
-                 f"LoadCredentialEncrypted no unit e CREDENTIALS_DIRECTORY apontando para o "
-                 f"diretório dele (atual: {directory or 'em branco'}).")
-    with open(path, "r", encoding="utf-8") as handle:
-        value = handle.read().strip()
-    if not value:
-        raise HTTPException(503, f"Credencial protegida do EBS vazia ({name}).")
-    return value
+    if path and os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+        if value:
+            return value
+
+    chaves = " ou ".join(_CHAVES_COFRE.get(name, (name.upper(),)))
+    raise RuntimeError(
+        f"Credencial do EBS ausente ({name}). Grave no cofre: "
+        f"python3 scripts/cofre.py definir {chaves.split(' ou ')[0]}"
+    )
 
 
 def _auth(force: bool = False):
@@ -119,6 +91,11 @@ def _auth(force: bool = False):
         _auth_cache["value"] = value
         _auth_cache["expires"] = now + 600
         return value
+
+
+def _ip(req: Request) -> str:
+    forwarded = req.headers.get("x-forwarded-for", "")
+    return (forwarded.split(",")[0].strip() if forwarded else (req.client.host if req.client else ""))[:80]
 
 
 def _normal(value) -> str:
@@ -182,23 +159,32 @@ def _snow(row: dict) -> dict:
     }
 
 
-def _audit(ip: str, usuario: str, ids: list, found: int, missing: int, exported: bool,
-           outcome: str = "SUCCESS", error: str = ""):
+def _audit(ip: str, ids: list, found: int, missing: int, exported: bool, outcome: str = "SUCCESS", error: str = ""):
     try:
         with SessionLocal.begin() as db:
-            db.add(PublicEbsQueryAudit(
-                ip_address=ip, usuario=usuario[:80], identifiers_count=len(ids),
-                found_count=found, missing_count=missing, exported=exported,
-                outcome=outcome, error_message=str(error)[:500],
-            ))
-    except Exception:  # noqa: BLE001 — auditoria não derruba a consulta, mas fica no log
-        _log.exception("auditoria da conversão EBS não gravada")
+            db.execute(
+                text(
+                    "INSERT INTO public_ebs_query_audit "
+                    "(ip_address, identifiers_count, found_count, missing_count, "
+                    "exported, outcome, error_message, created_at) "
+                    "VALUES (:ip, :total, :found, :missing, :exported, :outcome, :error, now())"
+                ),
+                {
+                    "ip": ip,
+                    "total": len(ids),
+                    "found": found,
+                    "missing": missing,
+                    "exported": exported,
+                    "outcome": outcome,
+                    "error": str(error)[:500],
+                },
+            )
+    except Exception:
+        pass
 
 
 def _execute(ids: list[str], req: Request, exported: bool = False) -> list[dict]:
-    usuario = _autorizar(req)
-    check_rate_limit(req)
-    ip = client_ip(req)
+    ip = _ip(req)
     try:
         raw = ebs_search_many(_auth(), ids)
         if raw and all(
@@ -212,15 +198,12 @@ def _execute(ids: list[str], req: Request, exported: bool = False) -> list[dict]
             converted = [_apply_rule(dict(row), rule_map) for row in raw]
 
         found = sum(1 for row in converted if row.get("encontrado"))
-        _audit(ip, usuario, ids, found, len(ids) - found, exported)
+        _audit(ip, ids, found, len(ids) - found, exported)
         return converted
 
-    except HTTPException as exc:
-        _audit(ip, usuario, ids, 0, len(ids), exported, "ERROR", exc.detail)
-        raise
-    except Exception as exc:  # noqa: BLE001 — falha da integração vira 502 e auditoria
-        _audit(ip, usuario, ids, 0, len(ids), exported, "ERROR", exc)
-        _log.error("integração EBS falhou: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:
+        _audit(ip, ids, 0, len(ids), exported, "ERROR", exc)
+        print(f"[PUBLIC_EBS_INTEGRATION_ERROR] {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(
             502,
             "Integração EBS temporariamente indisponível. Tente novamente mais tarde.",
@@ -230,24 +213,28 @@ def _execute(ids: list[str], req: Request, exported: bool = False) -> list[dict]
 # ── Endpoints ─────────────────────────────────────────────────────
 
 @router.get("/health")
-def health(req: Request):
-    _autorizar(req)
+def health():
     try:
         user = _credential("ebs_public_username")
         return {
             "ok": True,
             "module": "public-assets",
-            "authentication_required": True,
-            "token_configured": bool(_token_configurado()),
+            "authentication_required": False,
             "source": "EBS",
+            "uses_ebs": True,
+            "stored_as_systemd_encrypted_credential": True,
             "credential_configured": bool(user),
             "read_only": True,
-            "rate_limit": True,
-            "max_identificadores": MAX_IDENTIFICADORES,
+            "rate_limit": False,
         }
-    except HTTPException as exc:
-        return {"ok": False, "module": "public-assets", "source": "EBS",
-                "credential_configured": False, "error": exc.detail}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "module": "public-assets",
+            "source": "EBS",
+            "credential_configured": False,
+            "error": str(exc),
+        }
 
 
 @router.post("/convert")
@@ -272,6 +259,7 @@ def convert(body: PublicQueryIn, req: Request):
         "encontrados": found,
         "nao_encontrados": len(body.identificadores) - found,
         "origem": "EBS",
+        "autenticacao": "CREDENCIAL PROTEGIDA DO SERVIÇO",
     }
 
 

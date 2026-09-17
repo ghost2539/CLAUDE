@@ -1,0 +1,596 @@
+<title>Portal SPARE — Documentação</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F6F2EC; --surface:#FFFFFF; --surface-2:#FBF8F3;
+  --ink:#1C1714; --ink-2:#40372F; --muted:#726860; --faint:#9A8F85;
+  --accent:#AB4807; --accent-soft:#F0E0D2; --accent-ink:#8A3A06;
+  --gold:#9A6C08; --gold-soft:#F3E8CE;
+  --good:#2F7D4F; --warn:#9A6C08; --crit:#B4442F;
+  --border:#E7DFD3; --border-strong:#D8CDBD;
+  --shadow:0 1px 2px rgba(28,23,20,.04),0 8px 24px -12px rgba(28,23,20,.12);
+  --radius:10px;
+}
+:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
+  --ground:#0C0F12; --surface:#14181D; --surface-2:#171C22;
+  --ink:#ECE7E0; --ink-2:#CFC7BD; --muted:#9A9089; --faint:#6F6760;
+  --accent:#E0722C; --accent-soft:#2A1B10; --accent-ink:#F0925A;
+  --gold:#E0A82E; --gold-soft:#2A2210;
+  --good:#5FB783; --warn:#E0A82E; --crit:#E27358;
+  --border:#242A31; --border-strong:#333B44;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+}}
+:root[data-theme="dark"]{
+  --ground:#0C0F12; --surface:#14181D; --surface-2:#171C22;
+  --ink:#ECE7E0; --ink-2:#CFC7BD; --muted:#9A9089; --faint:#6F6760;
+  --accent:#E0722C; --accent-soft:#2A1B10; --accent-ink:#F0925A;
+  --gold:#E0A82E; --gold-soft:#2A2210;
+  --good:#5FB783; --warn:#E0A82E; --crit:#E27358;
+  --border:#242A31; --border-strong:#333B44;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font-size:16px; line-height:1.65; scroll-padding-top:90px;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent-ink); text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+
+/* ── Layout shell ─────────────────────────────── */
+.wrap{max-width:1180px; margin:0 auto; padding:0 24px}
+.layout{display:grid; grid-template-columns:250px minmax(0,1fr); gap:56px; align-items:start}
+@media (max-width:900px){ .layout{grid-template-columns:1fr; gap:0} }
+
+/* ── Top bar ──────────────────────────────────── */
+.topbar{
+  position:sticky; top:0; z-index:50; background:color-mix(in srgb,var(--ground) 88%,transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--border);
+}
+.topbar-inner{display:flex; align-items:center; gap:14px; height:60px}
+.brand{display:flex; align-items:center; gap:11px; font-family:"Archivo",sans-serif; font-weight:800; letter-spacing:-.01em}
+.brand .mark{
+  width:30px; height:30px; border-radius:7px; display:grid; place-items:center;
+  background:var(--accent); color:#fff; font-size:12px; font-weight:800; letter-spacing:.02em;
+  box-shadow:0 2px 8px -2px var(--accent);
+}
+.brand .mark[data-theme-dark]{}
+.brand small{font-family:"IBM Plex Mono",monospace; font-weight:500; font-size:11px; color:var(--muted); letter-spacing:.02em}
+.topbar-spacer{flex:1}
+.tb-btn{
+  font:inherit; font-size:13px; cursor:pointer; color:var(--ink-2);
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  padding:7px 12px; display:inline-flex; align-items:center; gap:7px;
+}
+.tb-btn:hover{border-color:var(--border-strong); color:var(--ink)}
+#menu-toggle{display:none}
+@media (max-width:900px){ #menu-toggle{display:inline-flex} }
+
+/* ── Sidebar TOC ──────────────────────────────── */
+.toc{position:sticky; top:76px; max-height:calc(100vh - 96px); overflow-y:auto; padding:28px 0 40px}
+.toc h2{font-family:"IBM Plex Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--faint); margin:0 0 12px; font-weight:600}
+.toc ol{list-style:none; margin:0; padding:0; counter-reset:sec}
+.toc li{counter-increment:sec}
+.toc a{
+  display:flex; gap:10px; align-items:baseline; padding:6px 10px; margin:1px 0;
+  border-radius:7px; color:var(--muted); font-size:13.5px; line-height:1.35;
+  border-left:2px solid transparent;
+}
+.toc a::before{content:counter(sec,decimal-leading-zero); font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--faint); font-weight:500}
+.toc a:hover{background:var(--surface-2); color:var(--ink); text-decoration:none}
+.toc a.active{color:var(--accent-ink); background:var(--accent-soft); border-left-color:var(--accent); font-weight:600}
+.toc a.active::before{color:var(--accent)}
+@media (max-width:900px){
+  .toc{position:static; max-height:none; overflow:visible; padding:16px 0; border-bottom:1px solid var(--border); display:none}
+  .toc.open{display:block}
+}
+
+/* ── Main content ─────────────────────────────── */
+main{padding:0 0 100px; min-width:0}
+.hero{padding:52px 0 30px; border-bottom:1px solid var(--border); margin-bottom:44px}
+.eyebrow{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent-ink); font-weight:600; margin:0 0 14px}
+.hero h1{
+  font-family:"Archivo",sans-serif; font-weight:800; letter-spacing:-.02em; line-height:1.04;
+  font-size:clamp(2.1rem,5vw,3.15rem); margin:0 0 16px; text-wrap:balance;
+}
+.hero p{font-size:1.08rem; color:var(--ink-2); max-width:64ch; margin:0}
+
+.facts{display:flex; flex-wrap:wrap; gap:10px; margin-top:28px}
+.fact{
+  background:var(--surface); border:1px solid var(--border); border-radius:9px;
+  padding:11px 15px; min-width:120px;
+}
+.fact dt{font-family:"IBM Plex Mono",monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:0}
+.fact dd{margin:3px 0 0; font-family:"Archivo",sans-serif; font-weight:700; font-size:15px; color:var(--ink)}
+
+section{margin:0 0 56px; scroll-margin-top:84px}
+h2.sec{
+  font-family:"Archivo",sans-serif; font-weight:800; letter-spacing:-.015em;
+  font-size:1.62rem; margin:0 0 6px; display:flex; align-items:baseline; gap:12px; text-wrap:balance;
+}
+h2.sec .num{font-family:"IBM Plex Mono",monospace; font-size:.95rem; color:var(--accent); font-weight:600}
+.sec-lead{color:var(--muted); margin:0 0 24px; max-width:66ch}
+h3.sub{font-family:"Archivo",sans-serif; font-weight:700; font-size:1.16rem; letter-spacing:-.01em; margin:34px 0 10px}
+h4{font-family:"Archivo",sans-serif; font-weight:600; font-size:1rem; margin:22px 0 8px}
+p{max-width:70ch}
+strong{color:var(--ink); font-weight:600}
+
+/* code + route chips */
+code{font-family:"IBM Plex Mono",monospace; font-size:.86em; background:var(--surface-2); border:1px solid var(--border); border-radius:5px; padding:.1em .4em; color:var(--accent-ink)}
+.route{
+  display:inline-flex; align-items:center; gap:7px; font-family:"IBM Plex Mono",monospace;
+  font-size:12.5px; font-weight:500; background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:7px; padding:5px 11px; color:var(--ink-2); margin:2px 0;
+}
+.route b{color:var(--accent-ink); font-weight:600}
+.method{font-size:10px; font-weight:700; letter-spacing:.03em; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent-ink)}
+
+/* tables */
+.tbl-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); margin:14px 0; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:14.5px}
+th,td{text-align:left; padding:11px 15px; border-bottom:1px solid var(--border); vertical-align:top}
+thead th{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--muted); font-weight:600; background:var(--surface-2); white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--surface-2)}
+td:first-child{font-weight:600; color:var(--ink); white-space:nowrap}
+td code{white-space:nowrap}
+.tag{display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; padding:2px 7px; border-radius:5px; letter-spacing:.02em}
+.tag.yes{background:var(--accent-soft); color:var(--accent-ink)}
+.tag.no{background:var(--surface-2); color:var(--faint); border:1px solid var(--border)}
+
+/* module cards */
+.mod{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:22px 24px; margin:16px 0; box-shadow:var(--shadow);
+}
+.mod-head{display:flex; align-items:center; gap:13px; flex-wrap:wrap; margin-bottom:6px}
+.mod-head h3{font-family:"Archivo",sans-serif; font-weight:700; font-size:1.24rem; letter-spacing:-.01em; margin:0}
+.mod-num{
+  font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:13px; color:var(--accent);
+  border:1.5px solid var(--accent-soft); background:var(--accent-soft); border-radius:7px; padding:3px 9px;
+}
+.mod p{margin:.4em 0; color:var(--ink-2)}
+.mod ul{margin:.5em 0; padding-left:1.15em}
+.mod li{margin:.25em 0; color:var(--ink-2)}
+.mod li::marker{color:var(--accent)}
+
+/* architecture diagram */
+.arch{border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); padding:22px; margin:20px 0; box-shadow:var(--shadow)}
+.arch-row{display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; margin:8px 0}
+.node{
+  flex:1 1 150px; background:var(--surface); border:1px solid var(--border-strong); border-radius:8px;
+  padding:11px 13px; min-width:0;
+}
+.node .n-t{font-family:"Archivo",sans-serif; font-weight:700; font-size:13.5px; color:var(--ink)}
+.node .n-d{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-top:2px}
+.node.accent{border-color:var(--accent); background:var(--accent-soft)}
+.node.accent .n-t{color:var(--accent-ink)}
+.arch-label{font-family:"IBM Plex Mono",monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; color:var(--faint); margin:16px 0 4px; font-weight:600}
+.arch-flow{text-align:center; color:var(--faint); font-size:18px; line-height:1; margin:2px 0}
+
+/* callout */
+.note{
+  border-left:3px solid var(--accent); background:var(--accent-soft); color:var(--ink-2);
+  padding:13px 17px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14.5px;
+}
+.note strong{color:var(--accent-ink)}
+.note.gold{border-left-color:var(--gold); background:var(--gold-soft)}
+.note.gold strong{color:var(--gold)}
+
+pre{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius);
+  padding:15px 17px; overflow-x:auto; font-family:"IBM Plex Mono",monospace; font-size:13px;
+  line-height:1.6; color:var(--ink-2); margin:14px 0;
+}
+.footer{border-top:1px solid var(--border); padding:26px 0; color:var(--muted); font-size:13px; font-family:"IBM Plex Mono",monospace}
+.footer .wrap{display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px}
+</style>
+
+<div class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand"><span class="mark">SP</span> Portal SPARE <small>docs</small></div>
+    <div class="topbar-spacer"></div>
+    <button class="tb-btn" id="menu-toggle" aria-label="Índice">☰ Índice</button>
+    <button class="tb-btn" id="theme-toggle" aria-label="Alternar tema"><span id="theme-ico">◐</span> Tema</button>
+  </div>
+</div>
+
+<div class="wrap layout">
+  <!-- ── TOC ── -->
+  <nav class="toc" id="toc" aria-label="Sumário">
+    <h2>Conteúdo</h2>
+    <ol>
+      <li><a href="#visao">Visão geral</a></li>
+      <li><a href="#auth">Acesso e autenticação</a></li>
+      <li><a href="#modulos">Módulos do portal</a></li>
+      <li><a href="#paginas">Páginas autônomas</a></li>
+      <li><a href="#integracoes">Integrações externas</a></li>
+      <li><a href="#dados">Modelo de dados</a></li>
+      <li><a href="#config">Configuração e operação</a></li>
+      <li><a href="#rotas">Mapa de rotas</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Documentação do sistema</p>
+      <h1>Portal de Operações SPARE</h1>
+      <p>Plataforma web da operação SPARE para o ciclo de vida de ativos de TI de loja — recebimento, triagem, reparo, identificação, saída de estoque e chamados — integrando EBS, ServiceNow e Correios em um só serviço.</p>
+      <dl class="facts">
+        <div class="fact"><dt>Backend</dt><dd>FastAPI · Python 3.11+</dd></div>
+        <div class="fact"><dt>Frontend</dt><dd>SPA JS + React</dd></div>
+        <div class="fact"><dt>Banco</dt><dd>PostgreSQL / MySQL</dd></div>
+        <div class="fact"><dt>Porta</dt><dd>8901</dd></div>
+        <div class="fact"><dt>Serviço</dt><dd>portal_spare.service</dd></div>
+      </dl>
+    </header>
+
+    <!-- 1 ── VISÃO GERAL ── -->
+    <section id="visao">
+      <h2 class="sec"><span class="num">01</span> Visão geral</h2>
+      <p class="sec-lead">Um único serviço FastAPI serve a SPA do portal, três páginas autônomas fora do menu e toda a API REST. Dois módulos rodam no mesmo processo, mas com banco de dados próprio e isolado.</p>
+
+      <div class="arch">
+        <div class="arch-label">Navegador → Serviço (porta 8901)</div>
+        <div class="arch-row">
+          <div class="node accent"><div class="n-t">/ · Portal SPA</div><div class="n-d">login + menu → banco PORTAL</div></div>
+          <div class="node"><div class="n-t">/tv · Painel TV</div><div class="n-d">banco PORTAL</div></div>
+        </div>
+        <div class="arch-row">
+          <div class="node"><div class="n-t">/tv2 · Controle de Orçamento</div><div class="n-d">banco ORÇAMENTO (isolado)</div></div>
+          <div class="node"><div class="n-t">/indicadores · RMR</div><div class="n-d">banco INDICADORES (isolado)</div></div>
+        </div>
+        <div class="arch-flow">↓ /api/…</div>
+        <div class="arch-label">Integrações de saída</div>
+        <div class="arch-row">
+          <div class="node"><div class="n-t">EBS</div><div class="n-d">Oracle E-Business Suite — ativos + login AD</div></div>
+          <div class="node"><div class="n-t">ServiceNow</div><div class="n-d">entrada · saída · encerramento · relatórios</div></div>
+          <div class="node"><div class="n-t">Correios</div><div class="n-d">rastreio + comprovante</div></div>
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Valor</th></tr></thead>
+          <tbody>
+            <tr><td>Backend</td><td>Python 3.11+ · <strong>FastAPI</strong> + Uvicorn</td></tr>
+            <tr><td>Frontend principal</td><td>SPA em <strong>JavaScript puro</strong> (sem framework), CSS próprio</td></tr>
+            <tr><td>Controle de Orçamento</td><td><strong>React</strong> (build gerado e versionado no repositório)</td></tr>
+            <tr><td>ORM / Banco</td><td><strong>SQLAlchemy 2</strong> — PostgreSQL (atual) / <strong>MySQL–MariaDB</strong> (servidor novo)</td></tr>
+            <tr><td>Caminho (servidor novo)</td><td><code>/var/www/vcreports/portal-spare</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 2 ── AUTH ── -->
+    <section id="auth">
+      <h2 class="sec"><span class="num">02</span> Acesso e autenticação</h2>
+      <p class="sec-lead">A tela de login oferece três tipos de acesso. As ações de escrita no ServiceNow ocorrem sempre como o usuário logado — nunca com conta de serviço.</p>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Botão</th><th>Tipo</th><th>O que faz</th></tr></thead>
+          <tbody>
+            <tr><td>Logon AD</td><td><code>AD</code></td><td>Valida no EBS/AD corporativo. Cria o usuário no primeiro acesso.</td></tr>
+            <tr><td>Logon Rede</td><td><code>SSO</code></td><td>Valida no <strong>loginsso</strong> (Oracle Access Manager). Só entra quem um administrador liberou (allow-list por usuário de rede).</td></tr>
+            <tr><td>Logon Local</td><td><code>LOCAL</code></td><td>Usuário/senha no próprio portal (hash <strong>bcrypt</strong>); permite troca de senha.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sub">Regras de segurança</h3>
+      <ul>
+        <li><strong>Sessão</strong> por cookie assinado (<code>itsdangerous</code>), <code>HttpOnly</code>, expira em 480 min (configurável).</li>
+        <li><strong>Bloqueio por tentativas</strong> (Local): 5 senhas erradas ⇒ 15 min bloqueado.</li>
+        <li><strong>Rate limit</strong>: login 5/min, API 120/min por IP.</li>
+        <li><strong>Liberação SSO</strong>: usuários de rede nascem sem liberação (<code>allowed=false</code>) e só entram após um admin liberar em <em>Parâmetros → Usuários e Permissões</em>.</li>
+        <li><strong>Sessão ServiceNow</strong>: o portal guarda os cookies SSO do usuário; há endpoints para checar (<code>/api/auth/sn-session</code>) e refazer (<code>/api/auth/sn-relogin</code>) sem deslogar.</li>
+      </ul>
+
+      <div class="note"><strong>Permissões por módulo:</strong> cada usuário tem <code>can_view</code>, <code>can_create</code>, <code>can_edit</code>, <code>can_export</code>, <code>can_admin</code>. Administradores têm acesso total; o menu só mostra o que o usuário pode ver.</div>
+    </section>
+
+    <!-- 3 ── MÓDULOS ── -->
+    <section id="modulos">
+      <h2 class="sec"><span class="num">03</span> Módulos do portal</h2>
+      <p class="sec-lead">Nove entradas no menu lateral. Módulos com várias telas usam sub-abas.</p>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.1</span><h3>Bem-vindo</h3></div>
+        <p>Página inicial com boas-vindas e atalhos. Sem escrita.</p>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.2</span><h3>Consulta</h3></div>
+        <p>Busca de ativos por qualquer identificador (imobilizado, ativo, etiqueta, série).</p>
+        <ul>
+          <li>Busca <strong>em lote</strong> (cola vários identificadores; deduplica; até 1000) e busca individual.</li>
+          <li>Cruza base local + EBS e aplica as regras de classificação (categoria/modelo).</li>
+          <li><strong>Exporta</strong> o resultado em Excel (.xlsx).</li>
+        </ul>
+        <p><span class="route"><span class="method">POST</span> <b>/api/consulta</b></span> <span class="route"><span class="method">GET</span> <b>/api/consulta/single</b></span> <span class="route"><span class="method">POST</span> <b>/api/consulta/export</b></span></p>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.3</span><h3>Recebimento</h3></div>
+        <p>O coração do fluxo de entrada de equipamentos. Cada mudança de status/local gera um registro em <strong>Movimentos</strong> (auditoria).</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Novo Recebimento</td><td>Escaneia/insere identificadores, faz preview (EBS/base), classifica e grava o ciclo. Detecta duplicidade (prefixos CM/YC).</td></tr>
+            <tr><td>Base de Recebimentos</td><td>Lista, filtra, edita o ativo, atualiza status/local e exclui recebimentos.</td></tr>
+            <tr><td>Dashboard</td><td>Indicadores por período, status e categoria.</td></tr>
+            <tr><td>Lotes</td><td>Geração e gestão de lotes (numeração automática por prefixo).</td></tr>
+            <tr><td>Cadastro de modelos</td><td>Regras de classificação (descrição → categoria/modelo).</td></tr>
+            <tr><td>Importar base histórica</td><td>Importa histórico de recebimentos por planilha.</td></tr>
+            <tr><td>Base local EBS</td><td>Sobe/atualiza a base local de ativos (fallback do EBS).</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.4</span><h3>Identificação</h3></div>
+        <p>Impressão de etiquetas e caixas.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Gerar Lote</td><td>Gera etiquetas em lote a partir de ativos/recebimentos, com sequência automática.</td></tr>
+            <tr><td>Identificação A4</td><td>Gera PDF A4 para impressão comum ou envio direto.</td></tr>
+            <tr><td>Impressão Zebra Livre</td><td>Impressão livre em impressora Zebra (ZPL), com preview.</td></tr>
+            <tr><td>Impressoras</td><td>Cadastro/gestão de impressoras de rede e teste de conexão.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.5</span><h3>ServiceNow</h3></div>
+        <p>Integração operacional com o ServiceNow.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Entrada de estoque</td><td>Envia os ativos recebidos para o <code>alm_hardware</code> (SSO + JSONv2), com status de instalação e depreciação. Processamento assíncrono com barra de progresso.</td></tr>
+            <tr><td>Saída de estoque</td><td><strong>Fluxo em lote</strong>: cola-se a lista de identificadores (sem limite), busca todos e edita cada linha na própria lista (destino/local, status, <strong>corredor/espaço</strong>, observações). Flag "aplicar a todos" pré-preenche todas as linhas.</td></tr>
+            <tr><td>Rastreio - Chamados</td><td>Lista chamados de Correios e correlaciona com o código de rastreio.</td></tr>
+            <tr><td>Relatórios</td><td>Tickets por período/prioridade, SLA, TMA e atualização do painel de TV.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note gold"><strong>Corredor/Espaço</strong> (<code>aisle_space_location</code>) foi adicionado à saída, no formulário e no upload automático. A automação de <strong>encerramento de chamados</strong> não é afetada por esse fluxo.</div>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.6</span><h3>Correios</h3></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Rastreios</td><td>Rastreia objetos (individual e em lote), mostra eventos e baixa comprovante de entrega.</td></tr>
+            <tr><td>Encerramento</td><td><strong>Encerramento automático</strong> de chamados entregues: lista candidatos (On Hold/In Progress com código de rastreio) e, confirmada a entrega, encerra no ServiceNow (On Hold → In Progress → Resolved) com código e nota-padrão.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><strong>Credenciais dos Correios</strong> vêm do cofre <code>vcreports_secret</code> (servidor novo); há fallback para variável de ambiente só na transição.</div>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.7</span><h3>Central de Reparos</h3></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Registro de Reparo</td><td>Registra tempos (triagem, reparo, pesquisa, higienização), técnico e resultado; calcula o <strong>saving</strong> (valor-hora × tempo) e atualiza o status do ciclo.</td></tr>
+            <tr><td>Tratativa de saldos</td><td>Tratamento de saldos/pendências.</td></tr>
+            <tr><td>Dashboard Reparos</td><td>Indicadores de reparo e saving.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.8</span><h3>Status</h3></div>
+        <p>Status das integrações: saúde das conexões (EBS, ServiceNow, Correios, banco) e um resumo geral.</p>
+        <p><span class="route"><span class="method">GET</span> <b>/api/status</b></span> <span class="route"><span class="method">GET</span> <b>/api/dashboard/summary</b></span></p>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">3.9</span><h3>Parâmetros</h3></div>
+        <p>Administração do sistema (algumas abas só para admin).</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Sub-aba</th><th>Admin?</th><th>Função</th></tr></thead>
+          <tbody>
+            <tr><td>Visual</td><td><span class="tag yes">admin</span></td><td>Nome do app, cores, fonte, logo, textos de login/rodapé.</td></tr>
+            <tr><td>Locais</td><td><span class="tag no">todos</span></td><td>Cadastro de locais de armazenagem.</td></tr>
+            <tr><td>Classificações</td><td><span class="tag no">todos</span></td><td>Regras descrição → categoria/modelo.</td></tr>
+            <tr><td>Valor-hora</td><td><span class="tag no">todos</span></td><td>Valor-hora usado no cálculo de saving.</td></tr>
+            <tr><td>Usuários e Permissões</td><td><span class="tag yes">admin</span></td><td>Cria usuários (Local/SSO), define permissões, libera acesso SSO, ativa/desativa, define admin.</td></tr>
+            <tr><td>Sequências</td><td><span class="tag yes">admin</span></td><td>Sequências de numeração de lotes.</td></tr>
+            <tr><td>TV</td><td><span class="tag no">todos</span></td><td>Configura o painel de TV (título, intervalo, widgets).</td></tr>
+            <tr><td>Minha conta</td><td><span class="tag no">—</span></td><td>Troca de senha (apenas Logon Local).</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 4 ── PÁGINAS AUTÔNOMAS ── -->
+    <section id="paginas">
+      <h2 class="sec"><span class="num">04</span> Páginas autônomas</h2>
+      <p class="sec-lead">Acessadas direto pela URL, sem passar pelo menu do portal.</p>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">/tv</span><h3>Painel de Operações (TV)</h3></div>
+        <p>Dashboard leve para exibir em TV: estatísticas, gráficos (categoria, status) e últimos recebimentos; atualiza sozinho em intervalo configurável. Fonte: banco do portal.</p>
+        <p><code>/tv?demo=1</code> preenche com dados aleatórios para validação visual.</p>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">/tv2</span><h3>Controle de Orçamento (CAPEX/OPEX)</h3></div>
+        <p>Dashboard <strong>React</strong> de acompanhamento de orçamento de portfólio. Também em <code>/controle-orcamento</code>.</p>
+        <ul>
+          <li><strong>Módulo oculto</strong>: não aparece no menu; acesso direto pela URL.</li>
+          <li><strong>Acesso livre</strong> (sem login); grava quem alterou (usuário logado ou IP). Escritas passam por rate limit.</li>
+          <li><strong>Banco exclusivo</strong> (<code>database_orcamento.py</code>; SQLite por padrão, MySQL no servidor novo). Tabelas <code>budget_projects</code> e <code>budget_categories</code>.</li>
+          <li>Assets são o <em>build</em> de <code>frontend/controle-orcamento</code>, versionado porque o servidor não tem Node.js.</li>
+        </ul>
+      </div>
+
+      <div class="mod">
+        <div class="mod-head"><span class="mod-num">/indicadores</span><h3>Indicadores RMR</h3></div>
+        <p>Painel dos indicadores mensais da apresentação RMR. <strong>Banco próprio</strong> (<code>indicador_snapshot</code>, JSON por mês). Leitura no ServiceNow pela API REST com a <strong>conta de serviço</strong> (<code>SIS.ZABBIXDCSN</code>), somente leitura, via Aggregate API. Carregamento isolado: erro aqui não derruba o portal.</p>
+        <ol>
+          <li><strong>Tickets resolvidos (12m) + SLA</strong> — grupo <code>TI_N2_FLD_RNR_LOJAS_SPARE</code>, fechados no ano, estado ≠ Cancelado; SLA por <code>task_sla</code> (<code>has_breached</code>).</li>
+          <li><strong>Top 20 lojas</strong> e <strong>Top 10 subcategorias</strong>.</li>
+          <li><strong>TMA</strong> (Coletor / SLED / PDV) — incidentes abertos e fechados no mesmo mês; TMA = dias entre "Data Bouncing" (<code>u_data_bouncing</code>) e a resolução, média por subcategoria.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- 5 ── INTEGRAÇÕES ── -->
+    <section id="integracoes">
+      <h2 class="sec"><span class="num">05</span> Integrações externas</h2>
+
+      <h3 class="sub">EBS — Oracle E-Business Suite</h3>
+      <p>Login AD e consulta de ativos no ERP corporativo (<code>ebs_service.py</code>). Toda configuração vem de <code>config.py</code>. Fallback: base local de ativos (<code>local_assets</code>) quando o EBS não responde.</p>
+
+      <h3 class="sub">ServiceNow — renner.service-now.com</h3>
+      <ul>
+        <li><strong>Escrita como usuário logado</strong>: login por SSO/OAM e reuso dos cookies da sessão. Usado em entrada, saída e encerramento.</li>
+        <li><strong>Leitura por conta de serviço</strong>: API REST (<code>/api/now/table/…</code> e Aggregate <code>/api/now/stats/…</code>) com <code>SIS.ZABBIXDCSN</code>, usada pelos Indicadores.</li>
+        <li><strong>Proxy de saída</strong> <code>SN_PROXY</code> (ex.: <code>http://10.115.30.135:8888</code>), com interceptação TLS (self-signed ⇒ <code>verify=False</code>).</li>
+        <li>Tabelas: <code>alm_hardware</code>, <code>incident</code>, <code>task_sla</code>.</li>
+      </ul>
+
+      <h3 class="sub">Correios — API oficial</h3>
+      <p>Autenticação com cartão/contrato, rastreio de objetos e comprovante. Credenciais no cofre <code>vcreports_secret</code> (<code>CORREIOS_USUARIO</code>, <code>CORREIOS_CHAVE</code>, <code>CORREIOS_CARTOES</code>, <code>CORREIOS_DR</code>, <code>CORREIOS_CONTRATO</code>), com fallback para env.</p>
+    </section>
+
+    <!-- 6 ── DADOS ── -->
+    <section id="dados">
+      <h2 class="sec"><span class="num">06</span> Modelo de dados</h2>
+      <p class="sec-lead">Três bancos independentes: o do portal e os dois módulos isolados.</p>
+
+      <h3 class="sub">Banco do portal <code>database.py</code></h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Tabela</th><th>Conteúdo</th></tr></thead>
+        <tbody>
+          <tr><td>users</td><td>Usuários (login, origem AD/SSO/LOCAL, admin, <code>allowed</code>, bloqueio, senha hash).</td></tr>
+          <tr><td>permissions</td><td>Permissões por usuário e módulo.</td></tr>
+          <tr><td>access_logs</td><td>Log de acessos (sucesso/falha, IP, origem).</td></tr>
+          <tr><td>settings</td><td>Configurações chave/valor (visual, TV, valor-hora, controle de acesso).</td></tr>
+          <tr><td>classifications</td><td>Regras de classificação (descrição → categoria/modelo).</td></tr>
+          <tr><td>storage_locations</td><td>Locais de armazenagem.</td></tr>
+          <tr><td>assets</td><td>Ativos (imobilizado, ativo, etiqueta, série, descrição, custo, DPIS…).</td></tr>
+          <tr><td>receipt_cycles</td><td>Ciclos de recebimento (status, local, lote, semana ISO, aberto).</td></tr>
+          <tr><td>movements</td><td>Auditoria de mudanças de status/local.</td></tr>
+          <tr><td>lot_sequences · lots</td><td>Numeração e registro de lotes.</td></tr>
+          <tr><td>repairs</td><td>Reparos (tempos, técnico, resultado, saving).</td></tr>
+          <tr><td>local_assets · load_history</td><td>Base local de ativos e histórico de cargas.</td></tr>
+          <tr><td>printers</td><td>Impressoras cadastradas (módulo Identificação).</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="arch-row" style="margin-top:20px">
+        <div class="node"><div class="n-t">Banco Controle de Orçamento</div><div class="n-d">database_orcamento.py — budget_projects, budget_categories</div></div>
+        <div class="node"><div class="n-t">Banco Indicadores</div><div class="n-d">database_indicadores.py — indicador_snapshot (YYYY-MM, JSON)</div></div>
+      </div>
+    </section>
+
+    <!-- 7 ── CONFIG ── -->
+    <section id="config">
+      <h2 class="sec"><span class="num">07</span> Configuração e operação</h2>
+
+      <h3 class="sub">Variáveis de ambiente principais <code>config.py</code></h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Variável</th><th>Uso</th></tr></thead>
+        <tbody>
+          <tr><td><code>DATABASE_URL</code></td><td>Banco do portal (PostgreSQL hoje / MySQL no servidor novo).</td></tr>
+          <tr><td><code>PORTAL_SESSION_SECRET</code></td><td>Segredo de assinatura de sessão.</td></tr>
+          <tr><td><code>INITIAL_ADMIN_LOGIN</code></td><td>Admin inicial (sempre liberado).</td></tr>
+          <tr><td><code>PORT</code> · <code>HOST</code> · <code>WORKERS</code></td><td>Servidor (porta padrão 8901).</td></tr>
+          <tr><td><code>SN_PROXY</code></td><td>Proxy de saída para ServiceNow/Correios.</td></tr>
+          <tr><td><code>SN_API_USER/PASS/PROXY</code></td><td>Conta de serviço para os Indicadores.</td></tr>
+          <tr><td><code>SN_INDIC_QUEUE</code> · <code>SN_TMA_START_FIELD</code></td><td>Parâmetros dos Indicadores.</td></tr>
+          <tr><td><code>INDICADORES_DATABASE_URL</code></td><td>Banco isolado dos Indicadores.</td></tr>
+          <tr><td><code>CONTROLE_ORCAMENTO_DATABASE_URL</code></td><td>Banco isolado do Controle de Orçamento.</td></tr>
+          <tr><td><code>SSL_CERTFILE</code> · <code>SSL_KEYFILE</code></td><td>HTTPS direto (opcional).</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note"><strong>Correios no servidor novo:</strong> não use variável de ambiente — as credenciais vêm do cofre <code>vcreports_secret</code>.</div>
+
+      <h3 class="sub">Subir o serviço</h3>
+      <pre>cd /var/www/vcreports/portal-spare
+python3 -m venv .venv &amp;&amp; . .venv/bin/activate
+pip install -r requirements.txt
+python3 main.py            # ou via systemd (portal_spare.service)</pre>
+      <p>Na subida, <code>init_db()</code> cria as tabelas e grava as configurações padrão. A migração para o servidor novo está em <code>docs/MIGRACAO_SERVIDOR_NOVO.md</code> (MySQL/MariaDB, cofre de segredos, cópia dos três bancos).</p>
+    </section>
+
+    <!-- 8 ── ROTAS ── -->
+    <section id="rotas">
+      <h2 class="sec"><span class="num">08</span> Mapa de rotas</h2>
+      <p class="sec-lead">Páginas: <code>/</code> · <code>/tv</code> · <code>/tv2</code> · <code>/controle-orcamento</code> · <code>/indicadores</code></p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Prefixo da API</th><th>Responsabilidade</th></tr></thead>
+        <tbody>
+          <tr><td><code>/api/auth/*</code></td><td>Login, logout, sessão, troca de senha, sessão ServiceNow.</td></tr>
+          <tr><td><code>/api/consulta*</code></td><td>Consulta de ativos.</td></tr>
+          <tr><td><code>/api/recebimento* · /recebimentos* · /lotes*</code></td><td>Recebimento e lotes.</td></tr>
+          <tr><td><code>/api/identificacao/*</code></td><td>Etiquetas e impressoras.</td></tr>
+          <tr><td><code>/api/servicenow/*</code></td><td>Entrada, saída, incidentes, relatórios, Correios, encerramento.</td></tr>
+          <tr><td><code>/api/reparos*</code></td><td>Reparos e dashboard.</td></tr>
+          <tr><td><code>/api/parametros/*</code></td><td>Administração.</td></tr>
+          <tr><td><code>/api/status · /dashboard/summary · /tv/dashboard</code></td><td>Status e TV.</td></tr>
+          <tr><td><code>/api/controle-orcamento/* · /api/indicadores/*</code></td><td>Módulos isolados.</td></tr>
+          <tr><td><code>/api/public-assets/*</code></td><td>Consulta pública de ativos EBS (sem login).</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>Portal de Operações SPARE — documentação técnica</span>
+    <span>docs/DOCUMENTACAO_SISTEMA.md</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // Theme toggle
+  var root=document.documentElement, tt=document.getElementById('theme-toggle');
+  tt.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    var next = cur==='dark' ? 'light' : (cur==='light' ? 'dark' :
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark'));
+    root.setAttribute('data-theme',next);
+    try{localStorage.setItem('spare-doc-theme',next);}catch(e){}
+  });
+  try{var saved=localStorage.getItem('spare-doc-theme'); if(saved)root.setAttribute('data-theme',saved);}catch(e){}
+
+  // Mobile TOC toggle
+  var mt=document.getElementById('menu-toggle'), toc=document.getElementById('toc');
+  mt.addEventListener('click',function(){toc.classList.toggle('open');});
+  toc.addEventListener('click',function(e){ if(e.target.tagName==='A'&&innerWidth<=900) toc.classList.remove('open'); });
+
+  // Scrollspy
+  var links=[].slice.call(toc.querySelectorAll('a'));
+  var map={}; links.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});
+  var secs=[].slice.call(document.querySelectorAll('main section[id]'));
+  var obs=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(a){a.classList.remove('active');});
+        var a=map[en.target.id]; if(a)a.classList.add('active');
+      }
+    });
+  },{rootMargin:'-20% 0px -70% 0px',threshold:0});
+  secs.forEach(function(s){obs.observe(s);});
+})();
+</script>

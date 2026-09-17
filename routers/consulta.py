@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
-from db.portal import SessionLocal, ReceiptCycle, Setting
+from db.portal import SessionLocal, ReceiptCycle
 from core.security import get_session, require_permission
 from routers.helpers import (
     apply_class, find_asset, local_search_one, xlsx_response,
@@ -97,52 +97,3 @@ def export_query(body: QueryIn, req: Request):
     require_permission(req, "consulta", "export")
     rows = _query_assets(body, req)["resultados"]
     return xlsx_response(rows, "consulta_ativos.xlsx")
-
-
-# ── Colunas visíveis na consulta ────────────────────────────────────
-# A visão padrão é da área (Configuração); cada pessoa pode reduzir ou
-# reordenar a sua. Guardado em Setting, chave por login.
-COLUNAS_CONSULTA = [
-    ("empresa", "Empresa"), ("imobilizado", "Imobilizado"), ("etiqueta", "Etiqueta"),
-    ("numero_serie", "Nº Série"), ("descricao", "Descrição"), ("categoria", "Categoria"),
-    ("modelo", "Modelo"), ("fonte", "Fonte"), ("erro", "Erro"),
-    ("local_atribuido", "Local Atribuído"),
-]
-_CHAVES = {c for c, _ in COLUNAS_CONSULTA}
-
-
-def _colunas_padrao(s) -> list[str]:
-    row = s.get(Setting, "consulta_colunas_padrao")
-    lista = (row.value or {}).get("colunas") if row else None
-    lista = [c for c in (lista or []) if c in _CHAVES]
-    return lista or [c for c, _ in COLUNAS_CONSULTA]
-
-
-@router.get("/consulta/colunas")
-def colunas_ler(req: Request):
-    sd = get_session(req)
-    with SessionLocal() as s:
-        padrao = _colunas_padrao(s)
-        row = s.get(Setting, f"consulta_colunas:{sd.get('username', '')}")
-        minhas = [c for c in ((row.value or {}).get("colunas") or []) if c in _CHAVES] if row else []
-    return {"disponiveis": [{"chave": c, "rotulo": r} for c, r in COLUNAS_CONSULTA],
-            "padrao": padrao, "minhas": minhas or padrao, "personalizada": bool(minhas)}
-
-
-@router.put("/consulta/colunas")
-def colunas_gravar(payload: dict, req: Request):
-    sd = get_session(req)
-    lista = [c for c in (payload or {}).get("colunas", []) if c in _CHAVES]
-    with SessionLocal.begin() as s:
-        chave = f"consulta_colunas:{sd.get('username', '')}"
-        row = s.get(Setting, chave)
-        if not lista:
-            if row is not None:
-                s.delete(row)
-        else:
-            if row is None:
-                row = Setting(key=chave)
-                s.add(row)
-            row.value = {"colunas": lista}
-            row.updated_by = sd.get("username", "")
-    return colunas_ler(req)

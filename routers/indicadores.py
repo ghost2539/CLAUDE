@@ -16,10 +16,11 @@ import time
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
+
+from core.prefixo import com_prefixo, prefixo
 from fastapi.responses import HTMLResponse
 
 import config as _config_mod
-from core.prefixo import com_prefixo, prefixo
 import db.indicadores as db
 
 _cfg = _config_mod.get_settings()
@@ -107,16 +108,12 @@ def _proxies():
     return None
 
 
-def _verify_tls():
-    from integracoes.http import verificacao_tls
-    return verificacao_tls("servicenow-api")
-
-
 def _checar_conta():
     if not _cfg.SN_API_USER or not _cfg.SN_API_PASS:
         raise RuntimeError(
-            "Conta de serviço do ServiceNow não configurada "
-            "(defina SN_API_USER e SN_API_PASS no ambiente do serviço)."
+            "Conta de serviço do ServiceNow não configurada. Grave no cofre: "
+            "python3 scripts/cofre.py definir SN_API_USER  e  "
+            "python3 scripts/cofre.py definir SN_API_PASS."
         )
 
 
@@ -128,6 +125,8 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
     Com group_by  → retorna lista de (valor, contagem).
     """
     import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     _checar_conta()
 
     params = {"sysparm_query": query, "sysparm_count": "true"}
@@ -138,7 +137,7 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
     r = requests.get(
         f"{_cfg.SN_API_BASE}/api/now/stats/{table}", params=params,
         auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS), headers={"Accept": "application/json"},
-        proxies=_proxies(), verify=_verify_tls(), timeout=45,
+        proxies=_proxies(), verify=_cfg.VERIFY_SSL, timeout=45,
     )
     if r.status_code == 401:
         raise RuntimeError("ServiceNow 401 — conta de serviço inválida ou sem papel de API.")
@@ -159,6 +158,8 @@ def _sn_stats(table: str, query: str, group_by: str | None = None,
 def _sn_rest_get(table: str, query: str, fields: str,
                  display_value: str = "false", limit: int = 8000) -> list[dict]:
     import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     _checar_conta()
 
     proxies = _proxies()
@@ -179,7 +180,7 @@ def _sn_rest_get(table: str, query: str, fields: str,
         r = requests.get(
             url, params=params, auth=(_cfg.SN_API_USER, _cfg.SN_API_PASS),
             headers={"Accept": "application/json"}, proxies=proxies,
-            verify=_verify_tls(), timeout=45,
+            verify=_cfg.VERIFY_SSL, timeout=45,
         )
         if r.status_code == 401:
             raise RuntimeError("ServiceNow 401 — usuário/senha da conta de serviço inválidos ou sem papel de API.")
@@ -199,11 +200,17 @@ def _mv(v):
     return v if v is not None else ""
 
 
+def _is_true(v) -> bool:
+    return str(_mv(v)).strip().lower() in ("true", "1", "sim", "yes")
+
 
 def _mes(dt_str: str) -> str:
     s = str(dt_str or "")
     return s[:7] if len(s) >= 7 else ""
 
+
+def _meses_do_ano(ano: int) -> list[str]:
+    return [f"{ano}-{m:02d}" for m in range(1, 13)]
 
 
 def _mes_janela(ano: int, mes: int) -> str:
@@ -425,9 +432,20 @@ def _recalcular_e_salvar() -> None:
 
 def _scheduler_loop() -> None:
     time.sleep(15)  # deixa o app terminar de subir
+    sem_conta = False
     while True:
         try:
+            # Sem a conta de serviço, cada um dos ~60 indicadores falharia
+            # sozinho e o terminal viraria uma parede de erros idênticos —
+            # foi o que aconteceu na primeira subida do servidor novo. Uma
+            # mensagem por rodada basta, e a primeira já diz o que fazer.
+            _checar_conta()
+            sem_conta = False
             _recalcular_e_salvar()
+        except RuntimeError as exc:
+            if not sem_conta:
+                _log.warning("Indicadores: recálculo adiado — %s", exc)
+                sem_conta = True
         except Exception as exc:  # noqa: BLE001
             _log.error("Agendador de indicadores falhou: %s", exc, exc_info=True)
         time.sleep(max(1, REFRESH_MIN) * 60)
@@ -454,18 +472,13 @@ def indicadores_page(req: Request):
 
 
 @router.get("/indicadores/", response_class=HTMLResponse)
-def indicadores_page_slash(req: Request):
-    return indicadores_page(req)
+def indicadores_page_slash():
+    return indicadores_page()
 
 
 @router.get("/api/indicadores/dados")
-def indicadores_dados(req: Request, referencia: str = ""):
-    """Retorna o snapshot mais recente (ou de um mês YYYY-MM), do banco próprio.
-
-    Leitura pública, como a tela — mas com limite de taxa: sem ele, a rota
-    era o único ponto do módulo sem qualquer contenção."""
-    from core.security import check_rate_limit
-    check_rate_limit(req, "api")
+def indicadores_dados(referencia: str = ""):
+    """Retorna o snapshot mais recente (ou de um mês YYYY-MM), do banco próprio."""
     snap = db.obter_snapshot(referencia) if referencia else db.ultimo_snapshot()
     return {
         "snapshot": snap,
@@ -549,15 +562,10 @@ def indicadores_diag_backlog(req: Request, field: str = ""):
 
 
 @router.get("/api/indicadores/diag-slas")
-def indicadores_diag_slas(req: Request, like: str = ""):
+def indicadores_diag_slas(like: str = ""):
     """Diagnóstico: lista os NOMES de ANS (task_sla) e a contagem de cada um,
     para confirmarmos o filtro correto (o que tem 'SPARE' no nome). Use
-    ?like=SPARE para restringir, ou vazio para ver todos ligados à fila.
-
-    Somente ADMIN, como o diag-backlog: expõe a estrutura da fila no
-    ServiceNow e consulta com a conta de serviço."""
-    from core.security import require_permission
-    require_permission(req, "parametros", "admin")
+    ?like=SPARE para restringir, ou vazio para ver todos ligados à fila."""
     termo = like or SLA_NAME_LIKE
     q = "sla.nameLIKE" + termo if termo else f"task.assignment_group.name={QUEUE}"
     try:
@@ -577,16 +585,7 @@ def indicadores_diag_slas(req: Request, like: str = ""):
 
 @router.post("/api/indicadores/atualizar")
 def indicadores_atualizar(req: Request, referencia: str = ""):
-    """Recalcula os indicadores no ServiceNow (conta de serviço) e grava snapshot.
-
-    A LEITURA desta tela é pública de propósito; esta rota não é. Ela consulta
-    o ServiceNow com a conta de serviço e grava snapshot — aberta, qualquer um
-    sem login consumiria a cota da conta de serviço e poluiria o histórico.
-    O agendador interno chama `_calcular_tudo()` direto, sem passar por aqui.
-    """
-    from core.security import get_session, check_rate_limit
-    check_rate_limit(req, "api")
-    get_session(req)
+    """Recalcula os indicadores no ServiceNow (conta de serviço) e grava snapshot."""
     ref = referencia or datetime.now().strftime("%Y-%m")
     dados = _calcular_tudo()
     if all(dados.get(k) is None for k in ("kpis", "tratado_por_mes", "sla")):

@@ -1,107 +1,53 @@
 #!/usr/bin/env python3
-"""EBS Oracle — acesso somente-leitura à base do E-Business Suite.
+"""EBS Oracle — base de ACESSO somente-leitura ao Oracle E-Business Suite.
 
-Entrega a CAMADA DE ACESSO (conexão + credencial pelo cofre) e um executor
-de consultas seguro. As consultas de negócio ficam em ``QUERIES``, nomeadas,
-e são as mesmas que o módulo /gestao_compras usa do lado dele — de
-propósito: o mesmo nome e os mesmos binds nos dois caminhos.
+Este módulo entrega apenas a CAMADA DE ACESSO (conexão + credenciais pelo cofre)
+e um executor de consultas seguro. As CONSULTAS em si são configuradas por quem
+usa (dicionário ``QUERIES`` abaixo, ou passando o SQL direto para ``query()``).
 
-Dois caminhos para o mesmo dado, e a escolha é operacional:
-
-  • DIRETO (este módulo), quando o serviço alcança a base;
-  • HTTP (``integracoes/gestao_compras.py``), quando não alcança — o módulo
-    do outro time consulta e devolve por JSON.
-
-Princípios de segurança:
-  • Só-leitura: cada consulta roda em ``SET TRANSACTION READ ONLY`` e a
-    conexão nunca comita (rollback + close no finally). Qualquer DML falha.
-  • Timeout por chamada (``call_timeout``), para não travar sessão no banco.
-  • Teto de linhas (``max_rows``), para não puxar volume gigante.
+Princípios de segurança (a base é PRODUÇÃO — BASE_REMOVIDA):
+  • Só-leitura: cada consulta roda em transação ``SET TRANSACTION READ ONLY`` e a
+    conexão nunca faz commit (rollback + close no finally). Qualquer DML falha.
+  • Timeout por chamada (``call_timeout``) para não travar sessão no banco.
+  • Trava de linhas (``max_rows``) para não puxar volume gigante ao explorar.
   • Bind variables sempre (``:param``) — nada de concatenar valor em SQL.
 
-CREDENCIAL: vem do cofre (``core.cofre.obter``), que procura no cofre
-corporativo, depois no cofre local cifrado, depois no ambiente. Nenhum
-endereço, instância ou usuário fica escrito aqui: sem as chaves gravadas, o
-módulo diz o que falta e não tenta conectar. É o mesmo caminho dos Correios
-e do ServiceNow.
-
-Chaves: ORACLE_EBS_DSN, ORACLE_EBS_USER, ORACLE_EBS_PASS
-(EBS_ORACLE_* aceitos como alternativa, por compatibilidade).
-
-    python3 scripts/cofre.py definir ORACLE_EBS_DSN
+Credenciais: lidas DIRETO do ambiente do processo (os.environ), no mesmo
+padrão dos Correios — ORACLE_EBS_DSN / ORACLE_EBS_USER / ORACLE_EBS_PASS
+(EBS_ORACLE_* aceitos como alternativa). Sem cofre.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
 import oracledb
 
 
-class EbsOracleErro(RuntimeError):
-    """Falha que a tela mostra ao usuário — sem valor de segredo dentro."""
+# ── Segredos (lidos DIRETO do ambiente, igual ao Correios) ────────
+def _secret_multi(nomes, default=None):
+    """Primeiro nome que tiver valor no ambiente (os.environ).
 
-
-# ── Credencial: cofre corporativo → cofre local → ambiente ────────
-# Nenhum padrão escrito aqui. Endereço e usuário do banco são dado de
-# acesso; no repositório fica só o NOME da chave.
-CHAVES_DSN = ("ORACLE_EBS_DSN", "EBS_ORACLE_DSN")
-CHAVES_USUARIO = ("ORACLE_EBS_USER", "EBS_ORACLE_USER")
-CHAVES_SENHA = ("ORACLE_EBS_PASS", "EBS_ORACLE_PASS")
-# O Instant Client é caminho de instalação da máquina, não segredo.
-CHAVES_LIB = ("ORACLE_CLIENT_LIB_DIR", "EBS_ORACLE_CLIENT_LIB_DIR")
-LIB_DIR_PADRAO = "/usr/lib/oracle/21/client64/lib"
-
-
-def _do_cofre(nomes: tuple[str, ...], padrao: str = "") -> tuple[str, str]:
-    """(valor, chave que respondeu). Vazio quando nenhuma responde."""
-    from core.cofre import obter
+    O serviço injeta as chaves no ambiente do processo (mesmo local dos
+    Correios). Os nomes reais são ORACLE_EBS_DSN/USER/PASS; mantemos
+    EBS_ORACLE_* como alternativa por compatibilidade. Sem cofre."""
     for nome in nomes:
-        valor = obter(nome, "")
-        if valor:
-            return valor, nome
-    return padrao, ""
-
-
-def credenciais() -> dict:
-    """O que está configurado, PARA A TELA — sem a senha.
-
-    Diz de qual chave veio cada valor: com duas grafias aceitas, saber qual
-    respondeu é o que evita gravar a chave certa no lugar errado.
-    """
-    dsn, chave_dsn = _do_cofre(CHAVES_DSN)
-    usuario, chave_usuario = _do_cofre(CHAVES_USUARIO)
-    senha, chave_senha = _do_cofre(CHAVES_SENHA)
-    from core.cofre import fonte
-    return {
-        # DSN carrega host e instância: é dado de acesso, não aparece.
-        "dsn_definido": bool(dsn),
-        "dsn_chave": chave_dsn,
-        "dsn_fonte": fonte(chave_dsn) if chave_dsn else "não definido",
-        "usuario_definido": bool(usuario),
-        "usuario_chave": chave_usuario,
-        "usuario_fonte": fonte(chave_usuario) if chave_usuario else "não definido",
-        "senha_definida": bool(senha),
-        "senha_chave": chave_senha,
-        "senha_fonte": fonte(chave_senha) if chave_senha else "não definido",
-        "completo": bool(dsn and usuario and senha),
-    }
+        v = os.environ.get(nome)
+        if v:
+            return v
+    return default
 
 
 def _config() -> dict:
-    dsn, _ = _do_cofre(CHAVES_DSN)
-    usuario, _ = _do_cofre(CHAVES_USUARIO)
-    senha, _ = _do_cofre(CHAVES_SENHA)
-    lib_dir, _ = _do_cofre(CHAVES_LIB, LIB_DIR_PADRAO)
-    faltando = [rotulo for rotulo, valor in
-                (("ORACLE_EBS_DSN", dsn), ("ORACLE_EBS_USER", usuario),
-                 ("ORACLE_EBS_PASS", senha)) if not valor]
-    if faltando:
-        raise EbsOracleErro(
-            "Credencial da base do EBS não está no cofre: " + ", ".join(faltando) +
-            ". Grave com: python3 scripts/cofre.py definir <CHAVE>")
-    return {"user": usuario, "password": senha, "dsn": dsn, "lib_dir": lib_dir}
+    return {
+        "user": _secret_multi(("ORACLE_EBS_USER", "EBS_ORACLE_USER"), "USUARIO_REMOVIDO"),
+        "password": _secret_multi(("ORACLE_EBS_PASS", "EBS_ORACLE_PASS")),
+        "dsn": _secret_multi(("ORACLE_EBS_DSN", "EBS_ORACLE_DSN"), "BANCO_REMOVIDO:1521/BASE_REMOVIDA"),
+        "lib_dir": _secret_multi(("ORACLE_CLIENT_LIB_DIR", "EBS_ORACLE_CLIENT_LIB_DIR"),
+                                 "/usr/lib/oracle/21/client64/lib"),
+    }
 
 
 # ── Cliente Oracle (modo thick com Instant Client) ────────────────
@@ -252,11 +198,14 @@ def find_objects(termo: str, limit: int = 500) -> list[dict]:
     )
 
 
-# `sql_livre` FICOU DE FORA de propósito. SELECT digitado na tela é o que
-# tirou esta camada do ar na revisão de segurança: o filtro "começa com
-# SELECT" não impede subconsulta cara, leitura de tabela que não é do
-# assunto, nem consulta que trava sessão no banco. O que a tela executa são
-# as consultas de QUERIES, pelo nome, com bind variables.
+def sql_livre(texto: str, max_rows: int = 200) -> list[dict]:
+    """Roda um SELECT ad-hoc, só-leitura, com trava contra DML.
+    Para exploração pelo CLI (`ebs_oracle.py sql "SELECT ..."`)."""
+    limpo = texto.strip().rstrip(";").strip()
+    inicio = limpo.lstrip("(").lstrip().split(None, 1)[0].lower() if limpo else ""
+    if inicio not in ("select", "with"):
+        raise ValueError("Só SELECT/WITH é permitido no comando sql.")
+    return query(limpo, {}, max_rows=max_rows, read_only=True)
 
 
 # ── Registro de consultas (VOCÊS configuram aqui) ─────────────────
@@ -433,7 +382,7 @@ def _parse_binds(args: list[str]) -> dict:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Uso: ebs_oracle.py <check|list|find|describe|NOME> [args...]"}))
+        print(json.dumps({"error": "Uso: ebs_oracle.py <check|list|find|describe|sql|NOME> [args...]"}))
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -453,6 +402,12 @@ def main() -> None:
                 print(json.dumps({"error": "find <TERMO>"}))
                 sys.exit(1)
             print(json.dumps({"data": find_objects(sys.argv[2])}, default=str))
+        elif cmd == "sql":
+            if len(sys.argv) < 3:
+                print(json.dumps({"error": 'sql "SELECT ..." [max_rows]'}))
+                sys.exit(1)
+            mx = int(sys.argv[3]) if len(sys.argv) > 3 else 200
+            print(json.dumps({"data": sql_livre(sys.argv[2], max_rows=mx)}, default=str))
         else:
             print(json.dumps({"data": run_named(cmd, _parse_binds(sys.argv[2:]))}, default=str))
     except Exception as e:  # noqa: BLE001

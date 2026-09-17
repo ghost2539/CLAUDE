@@ -7,6 +7,7 @@ config.get_settings() — nothing is read from os.environ here.
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from typing import Any
@@ -71,24 +72,6 @@ def parse_date(value: Any) -> str | None:
 # Authentication
 # ---------------------------------------------------------------------------
 
-# URLs da API do EBS: Configuração do portal primeiro (chave ebs_api),
-# ambiente como padrão. Lidas a cada chamada — mudar não exige reiniciar.
-def _urls() -> tuple[str, str]:
-    cfg = get_settings()
-    try:
-        import db.monitoramento as _mon
-        c = _mon.obter_config("ebs_api") or {}
-    except Exception:  # noqa: BLE001
-        c = {}
-    return ((c.get("login_url") or "").strip() or cfg.EBS_LOGIN_URL,
-            (c.get("search_url") or "").strip() or cfg.EBS_SEARCH_URL)
-
-
-def _verify_tls():
-    from integracoes.http import verificacao_tls
-    return verificacao_tls("ebs-api")
-
-
 def login(username: str, password: str) -> dict[str, Any]:
     """Authenticate against EBS and return cookies + bearer token.
 
@@ -106,19 +89,19 @@ def login(username: str, password: str) -> dict[str, Any]:
     payload = {"username": username, "password": password}
 
     response = session.post(
-        _urls()[0],
+        cfg.EBS_LOGIN_URL,
         json=payload,
         timeout=cfg.TIMEOUT,
-        verify=_verify_tls(),
+        verify=cfg.VERIFY_SSL,
     )
 
     if response.status_code >= 400:
         # Fallback: form-encoded
         response = session.post(
-            _urls()[0],
+            cfg.EBS_LOGIN_URL,
             data=payload,
             timeout=cfg.TIMEOUT,
-            verify=_verify_tls(),
+            verify=cfg.VERIFY_SSL,
         )
 
     if response.status_code >= 400:
@@ -339,10 +322,10 @@ def search_one(auth: dict[str, Any], query: str) -> dict[str, Any]:
 
     try:
         response = session.get(
-            _urls()[1],
+            cfg.EBS_SEARCH_URL,
             params={"numero": query},
             timeout=cfg.TIMEOUT,
-            verify=_verify_tls(),
+            verify=cfg.VERIFY_SSL,
             headers={"Accept": "application/json"},
         )
 

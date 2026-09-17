@@ -1,8 +1,6 @@
 """Recebimento (receiving) router — scan, list, update, dashboard, lots."""
 from __future__ import annotations
 
-import logging
-
 import csv
 import io
 import unicodedata
@@ -18,11 +16,11 @@ from sqlalchemy import select, func, or_
 
 from config import get_settings
 from db.portal import (
-    SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot, Setting,
+    SessionLocal, Asset, ReceiptCycle, Movement, LotSequence, Lot,
 )
-from core.security import require_permission, check_rate_limit
+from core.security import get_session, require_permission, check_rate_limit
 from routers.helpers import (
-    apply_class, upsert_asset, asset_dict, cycle_dict,
+    classify, apply_class, find_asset, upsert_asset, asset_dict, cycle_dict,
     local_search_one,
 )
 from routers.consulta import _query_single, _query_assets, QueryIn
@@ -31,21 +29,6 @@ _cfg = get_settings()
 CLOSED = _cfg.CLOSED_STATUSES
 DUPLICATE_PREFIXES = ["CM", "YC"]
 router = APIRouter(prefix="/api", tags=["Recebimento"])
-
-# ── Destino de entrada: o Recebimento é a porta do Spare ───────────
-# Só há dois caminhos a partir daqui. Venda direta sai do fluxo de
-# reparo e vai esperar o ciclo trimestral; triagem entra no backlog de
-# uma das bancadas, escolhida pela subcategoria do ativo.
-VENDA_DIRETA = "VENDA"
-TRIAGEM = "TRIAGEM"
-DESTINOS_ENTRADA = (VENDA_DIRETA, TRIAGEM)
-
-# De onde o ativo entrou. Reversa é o que volta da loja: já existe no EBS e
-# entra pela leitura. Fornecedor é compra nova, que não existe em lugar
-# nenhum e por isso é digitada, com PO e nota fiscal.
-ORIGEM_REVERSA = "REVERSA"
-ORIGEM_FORNECEDOR = "FORNECEDOR"
-ORIGENS_ENTRADA = (ORIGEM_REVERSA, ORIGEM_FORNECEDOR)
 
 
 # ── Pydantic models ───────────────────────────────────────────────
@@ -89,31 +72,10 @@ class BulkSubmitItem(BaseModel):
     custo_asset: float | None = None
     dpis: str | None = None
     fonte: str = "EBS"
-    # Compra do fornecedor: a ordem e a nota que trouxeram o equipamento.
-    # Ficam no ciclo, que é o evento de entrada, não no ativo.
-    po: str = ""
-    nf: str = ""
-    # O Recebimento é a porta de entrada e define o próximo destino:
-    # venda direta, ou triagem para uma das bancadas. Em triagem, a
-    # subcategoria é obrigatória — é ela que diz qual bancada recebe.
-    destino_entrada: str = TRIAGEM
-    subcategoria: str = ""
 
 
 class BulkSubmitIn(BaseModel):
     items: list[BulkSubmitItem]
-    origem: str = ORIGEM_REVERSA
-
-    @field_validator("origem")
-    @classmethod
-    def validar_origem(cls, v: str) -> str:
-        v = (v or ORIGEM_REVERSA).strip().upper()
-        if v not in ORIGENS_ENTRADA:
-            raise ValueError("Origem inválida: informe fornecedor ou reversa.")
-        return v
-    # Onde o lote foi guardado. Obrigatório quando o espelho no ServiceNow
-    # está ligado: "em estoque" sem dizer onde não fecha inventário depois.
-    espaco_corredor: str = ""
 
 
 class LotCreateIn(BaseModel):
@@ -240,20 +202,21 @@ def check_duplicate(body: ScanIn, req: Request):
 def receipt_preview(body: ScanIn, req: Request):
     """Query EBS for an asset WITHOUT saving. Returns all matches including
     duplicates across companies (CM/YC prefix variants)."""
-    require_permission(req, "recebimento", "create")
+    sd = require_permission(req, "recebimento", "create")
     check_rate_limit(req)
 
     ident = body.identificador.strip()
     search_terms = [ident]
     bare = ident
-    prefixos = config_familias()["prefixos_duplicidade"]
-    for pfx in prefixos:
+    detected_prefix = ""
+    for pfx in DUPLICATE_PREFIXES:
         if ident.upper().startswith(pfx) and len(ident) > len(pfx):
             bare = ident[len(pfx):]
+            detected_prefix = pfx
             break
     if bare != ident:
         search_terms.append(bare)
-    for pfx in prefixos:
+    for pfx in DUPLICATE_PREFIXES:
         variant = pfx + bare
         if variant.upper() != ident.upper() and variant not in search_terms:
             search_terms.append(variant)
@@ -310,64 +273,16 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     """Save validated assets from the temporary session to the database."""
     sd = require_permission(req, "recebimento", "create")
     check_rate_limit(req)
-    # O espelho no ServiceNow escreve estoque E local. Sem o local, gravaria
-    # "em estoque" sem dizer onde, e a conferência não fecharia depois.
-    # Recusa-se ANTES de gravar, para não deixar o recebimento pela metade.
-    if _config_servicenow().get("ativo", True) and not (body.espaco_corredor or "").strip():
-        raise HTTPException(400, "Informe o Espaço e Corredor onde os ativos "
-                                 "ficaram guardados antes de confirmar o recebimento.")
 
     if not body.items:
         raise HTTPException(400, "Nenhum ativo para enviar.")
 
-    # Compra de fornecedor não passa pelo EBS: o que identifica o
-    # equipamento é o que o operador digitou. Sem isso o ativo entraria sem
-    # série (impossível de achar depois) ou sem nota (impossível de
-    # conferir com o financeiro).
-    if body.origem == ORIGEM_FORNECEDOR:
-        for pos, item in enumerate(body.items, start=1):
-            faltando = [rotulo for rotulo, valor in (
-                ("descrição do item", item.descricao),
-                ("serial number", item.numero_serie),
-                ("PO", item.po),
-                ("NF", item.nf),
-            ) if not (valor or "").strip()]
-            if faltando:
-                ident = (item.numero_serie or item.descricao or f"item {pos}").strip()
-                raise HTTPException(
-                    400, f"{ident}: informe {', '.join(faltando)}.")
-
-    # Destino de entrada de cada ativo, decidido aqui e não adivinhado
-    # depois. Em triagem, a subcategoria tem de estar na lista: é ela que
-    # diz qual bancada recebe o equipamento.
-    rota: dict[int, tuple[str, str, str]] = {}   # índice → (destino, sub, família)
-    for pos, item in enumerate(body.items):
-        destino = (item.destino_entrada or TRIAGEM).strip().upper()
-        if destino not in DESTINOS_ENTRADA:
-            raise HTTPException(400, "Destino de entrada inválido: informe "
-                                     "venda direta ou triagem.")
-        ident = item.etiqueta or item.numero_serie or item.ativo or "ativo"
-        familia = ""
-        if destino == TRIAGEM:
-            if not (item.subcategoria or "").strip():
-                raise HTTPException(
-                    400, f"{ident}: informe a subcategoria para mandar à triagem.")
-            familia = familia_da_subcategoria(item.subcategoria)
-            if not familia:
-                raise HTTPException(
-                    400, f"{ident}: subcategoria \"{item.subcategoria}\" não está "
-                         "cadastrada. Ajuste em Configuração → Configuração "
-                         "Módulos → Recebimento.")
-        rota[pos] = (destino, (item.subcategoria or "").strip(), familia)
-
     created = 0
     skipped = 0
     errors: list[str] = []
-    entrando: list[dict] = []
 
     with SessionLocal.begin() as s:
-        for pos, item in enumerate(body.items):
-            destino_entrada, subcategoria, familia = rota[pos]
+        for item in body.items:
             payload: dict[str, Any] = {
                 "empresa": item.empresa,
                 "asset_id": item.asset_id,
@@ -379,8 +294,6 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                 "modelo": item.modelo,
                 "fonte": item.fonte or "EBS",
             }
-            if body.origem == ORIGEM_FORNECEDOR:
-                payload["fonte"] = ORIGEM_FORNECEDOR
             if item.custo_asset is not None:
                 payload["custo_asset"] = item.custo_asset
             if item.dpis:
@@ -388,28 +301,6 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
 
             try:
                 a = upsert_asset(s, payload)
-
-                def _linha() -> dict:
-                    """O que os ganchos (trilha, ServiceNow, MDM) recebem."""
-                    return {
-                        "serial": item.numero_serie or item.etiqueta or item.ativo,
-                        "etiqueta": item.etiqueta or "",
-                        "modelo": item.modelo,
-                        "categoria": item.categoria or "",
-                        "numero_ativo": item.ativo or "",
-                        "destino_entrada": destino_entrada,
-                        "subcategoria": subcategoria,
-                        "familia": familia,
-                        # Custo e DPIS vão junto: o ServiceNow recusa ativo pela
-                        # metade. Se não vieram na leitura, valem os da base —
-                        # é o mesmo dado do EBS, gravado numa passagem anterior.
-                        "custo": ("" if item.custo_asset in (None, "")
-                                  else str(item.custo_asset)) or (
-                                      str(a.cost) if a.cost is not None else ""),
-                        "dpis": (item.dpis or "") or (
-                            a.dpis.isoformat() if a.dpis else ""),
-                        "empresa": item.empresa or "",
-                    }
 
                 current = s.scalar(
                     select(ReceiptCycle)
@@ -420,13 +311,7 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     .order_by(ReceiptCycle.id.desc())
                 )
                 if current:
-                    # Ciclo já aberto: não se cria outro, MAS o equipamento
-                    # chegou de novo às mãos de alguém. Os ganchos precisam
-                    # rodar — sem isso o ativo não é atualizado no ServiceNow
-                    # e o coletor não sai do MDM só porque já havia um
-                    # recebimento em aberto.
                     skipped += 1
-                    entrando.append(_linha())
                     continue
 
                 n = (
@@ -444,9 +329,6 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     received_date=today,
                     iso_week=f"{iso.year}-S{iso.week:02d}",
                     status="RECEBIDO",
-                    origem_entrada=body.origem,
-                    po=(item.po or "").strip(),
-                    nf=(item.nf or "").strip(),
                     created_by=sd["username"],
                     updated_by=sd["username"],
                 )
@@ -461,391 +343,16 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
                     username=sd["username"],
                 ))
                 created += 1
-                entrando.append(_linha())
             except Exception as e:
                 ident = item.etiqueta or item.ativo or item.numero_serie
                 errors.append(f"{ident}: {e}")
-
-    # Entrada na Trilha do Ativo (A01). Aditivo e tolerante a falha: o
-    # recebimento já foi gravado, e não se desfaz um recebimento porque
-    # o núcleo de medição não respondeu.
-    na_trilha = _entrar_na_trilha(entrando, sd["username"])
-
-    # Espelho no ServiceNow: o que chegou fisicamente está no CD, e lá
-    # precisa aparecer em estoque. Também aditivo — recebimento gravado
-    # não se desfaz porque o ServiceNow recusou.
-    no_servicenow = _marcar_no_servicenow(entrando, req, body.espaco_corredor)
-
-    # Logística reversa (A17): série que bate com uma coleta em aberto
-    # entra como recebida nela — a caixa está no CD, quem confirmou foi
-    # quem recebeu. Aditivo e tolerante a falha, como os outros ganchos.
-    na_coleta = _casar_com_coleta(entrando, sd["username"])
-
-    # Coletor que chegou ao CD sai do MDM: ele voltou para o estoque e não
-    # está mais com a loja. Só o que passou por aqui — a base do MDM não é
-    # tocada. Aditivo: recebimento gravado não se desfaz por causa do MDM.
-    do_mdm = _remover_do_mdm(entrando, sd["username"])
-    # O ciclo guarda o desfecho: o recebimento foi o gatilho da remoção.
-    # Movimento de origem MDM — rastro, não item de tela.
-    _registrar_mdm_no_ciclo(entrando, do_mdm, sd["username"])
 
     return {
         "ok": True,
         "criados": created,
         "ignorados": skipped,
         "erros": errors,
-        "na_trilha": na_trilha,
-        "no_servicenow": no_servicenow,
-        "na_coleta": na_coleta,
-        "mdm": do_mdm,
     }
-
-
-# ── Ponte com a Trilha do Ativo (A01) ───────────────────────────────
-
-# Para onde cada família vai depois do recebimento. A bancada da frota
-# e a de loja compartilham o estado de fila; quem separa as duas é o
-# tipo do equipamento, lido na própria fila.
-_FILA_POR_FAMILIA = {
-    "frota": "AG_TRIAGEM",
-    "loja": "AG_TRIAGEM",
-    "conectividade": "AG_TRIAGEM_CONECT",
-}
-
-# ── Subcategorias: é a subcategoria que escolhe a bancada ──────────
-# Lista fechada de propósito. Se o operador pudesse digitar, "PDV",
-# "P.D.V." e "pdv" virariam três subcategorias e o backlog da bancada
-# passaria a depender de grafia. A área mantém a lista em Configuração
-# → Configuração Módulos → Recebimento.
-CONFIG_SUBCATEGORIAS = "recebimento_subcategorias"
-
-_SUBCATEGORIAS_PADRAO = [
-    {"nome": "Coletor", "familia": "frota"},
-    {"nome": "Sled", "familia": "frota"},
-    {"nome": "Impressora portátil", "familia": "frota"},
-    {"nome": "PDV", "familia": "loja"},
-    {"nome": "Impressora fiscal", "familia": "loja"},
-    {"nome": "Impressora de etiqueta", "familia": "loja"},
-    {"nome": "Desktop", "familia": "loja"},
-    {"nome": "Monitor", "familia": "loja"},
-    {"nome": "Leitor", "familia": "loja"},
-    {"nome": "Balança", "familia": "loja"},
-    {"nome": "Periférico", "familia": "loja"},
-    {"nome": "Access point", "familia": "conectividade"},
-    {"nome": "Switch", "familia": "conectividade"},
-    {"nome": "Roteador", "familia": "conectividade"},
-    {"nome": "Firewall", "familia": "conectividade"},
-]
-
-
-def config_subcategorias() -> list[dict]:
-    """Subcategorias válidas e a família (bancada) de cada uma."""
-    with SessionLocal() as s:
-        x = s.get(Setting, CONFIG_SUBCATEGORIAS)
-        valor = (x.value or {}) if x else {}
-    linhas = valor.get("subcategorias") if isinstance(valor, dict) else None
-    if not isinstance(linhas, list) or not linhas:
-        return [dict(l) for l in _SUBCATEGORIAS_PADRAO]
-    limpas = []
-    for l in linhas:
-        if not isinstance(l, dict):
-            continue
-        nome = str(l.get("nome") or "").strip()
-        familia = str(l.get("familia") or "").strip().lower()
-        if nome and familia in _FILA_POR_FAMILIA:
-            limpas.append({"nome": nome, "familia": familia})
-    return limpas or [dict(l) for l in _SUBCATEGORIAS_PADRAO]
-
-
-def _chave_sub(nome: str) -> str:
-    """Compara subcategoria sem depender de acento, caixa ou espaço."""
-    texto = unicodedata.normalize("NFKD", str(nome or "").strip().lower())
-    return "".join(c for c in texto if not unicodedata.combining(c))
-
-
-def familia_da_subcategoria(nome: str) -> str:
-    """Família (bancada) da subcategoria, ou "" se não estiver na lista."""
-    alvo = _chave_sub(nome)
-    if not alvo:
-        return ""
-    for l in config_subcategorias():
-        if _chave_sub(l["nome"]) == alvo:
-            return l["familia"]
-    return ""
-
-
-@router.get("/recebimento/subcategorias")
-def api_subcategorias(req: Request):
-    require_permission(req, "recebimento", "view")
-    return {"subcategorias": config_subcategorias(),
-            "destinos": [{"valor": VENDA_DIRETA, "rotulo": "Venda direta"},
-                         {"valor": TRIAGEM, "rotulo": "Triagem"}]}
-
-_PALAVRAS_FROTA = ("coletor", "sled", "mc33", "tc2", "ef50", "rfr")
-_PALAVRAS_CONECT = ("access point", "acess point", " ap ", "switch",
-                    "roteador", "router", "wifi", "wi-fi")
-
-# As palavras acima são só o padrão. O que vale é a configuração
-# (Configuração → Configuração Módulos → Recebimento), lida a cada
-# chamada: modelo novo entra sem release.
-CONFIG_FAMILIAS = "recebimento_familias"
-
-
-def config_familias() -> dict:
-    with SessionLocal() as s:
-        x = s.get(Setting, CONFIG_FAMILIAS)
-        cfg = dict(x.value or {}) if x else {}
-    def lista(chave, padrao):
-        v = cfg.get(chave)
-        return [str(p).strip().lower() for p in v if str(p).strip()] if isinstance(v, list) and v else list(padrao)
-    return {"frota": lista("frota", _PALAVRAS_FROTA),
-            "conectividade": lista("conectividade", _PALAVRAS_CONECT),
-            "prefixos_duplicidade": [p.upper() for p in lista("prefixos_duplicidade", DUPLICATE_PREFIXES)]}
-
-
-def _familia(modelo: str, categoria: str) -> str:
-    """Frota, loja ou conectividade, pelo modelo e pela categoria.
-
-    Heurística de texto porque nem o EBS nem o ServiceNow têm um campo
-    que separe as três famílias do jeito que a área trabalha. Na dúvida
-    cai em loja, que é a bancada com mais gente — errar para lá é mais
-    fácil de perceber e de corrigir.
-    """
-    texto = f" {modelo} {categoria} ".lower()
-    cfg = config_familias()
-    if any(p in texto for p in cfg["conectividade"]):
-        return "conectividade"
-    if any(p in texto for p in cfg["frota"]):
-        return "frota"
-    return "loja"
-
-
-def _detalhe_entrada(it: dict, reentrada: bool = False) -> str:
-    """O que o Recebimento decidiu, gravado junto da movimentação."""
-    import json as _json
-    dados = {"destino_entrada": (it.get("destino_entrada") or TRIAGEM).upper()}
-    if it.get("subcategoria"):
-        dados["subcategoria"] = it["subcategoria"]
-    if reentrada:
-        dados["reentrada"] = True
-    return _json.dumps(dados, ensure_ascii=False)
-
-
-def _estado_de_entrada(it: dict) -> tuple[str, str]:
-    """Onde o ativo entra na trilha, e com que família (bancada).
-
-    Venda direta pula o reparo e vai esperar o ciclo de venda. Triagem
-    cai no backlog da bancada que a subcategoria indicou; sem
-    subcategoria (recebimento antigo, importação), a família ainda é
-    adivinhada pelo modelo — melhor um palpite do que ativo sem fila.
-    """
-    if (it.get("destino_entrada") or "").upper() == VENDA_DIRETA:
-        return "AG_VENDA", ""
-    familia = (it.get("familia") or "").strip().lower()
-    if familia not in _FILA_POR_FAMILIA:
-        familia = _familia(it.get("modelo", ""), it.get("categoria", ""))
-    return _FILA_POR_FAMILIA[familia], familia
-
-
-def _entrar_na_trilha(itens: list[dict], usuario: str) -> dict:
-    """Cria o token de cada ativo recebido e o põe onde o destino mandou."""
-    if not itens:
-        return {"criados": 0, "ja_existiam": 0, "falhas": 0}
-    resumo = {"criados": 0, "reentradas": 0, "ja_existiam": 0, "falhas": 0}
-    try:
-        import db.trilha as dbt
-        from routers.trilha import abrir_ativo, mover, reabrir_ativo, TrilhaInvalida
-        from sqlalchemy import select as _select
-    except Exception as exc:  # noqa: BLE001 — trilha fora do ar
-        logging.getLogger("recebimento").error(
-            "Trilha indisponível; %d ativo(s) recebidos sem medição: %s",
-            len(itens), exc)
-        return {"criados": 0, "ja_existiam": 0, "falhas": len(itens)}
-
-    for it in itens:
-        serial = (it.get("serial") or "").strip()
-        if not serial:
-            resumo["falhas"] += 1
-            continue
-        estado_entrada, familia = _estado_de_entrada(it)
-        detalhe = _detalhe_entrada(it)
-        try:
-            with dbt.SessionLocal() as s:
-                ativo = abrir_ativo(
-                    s, serial=serial, usuario=usuario,
-                    modelo=it.get("modelo", ""),
-                    numero_ativo=it.get("numero_ativo", ""),
-                    tipo_equipamento=familia, origem="RECEBIMENTO")
-                mover(s, ativo, estado=estado_entrada,
-                      tipo=dbt.FILA, processo="A01", usuario=usuario,
-                      detalhe=detalhe)
-                s.commit()
-            resumo["criados"] += 1
-        except TrilhaInvalida:
-            # Serial repetido. Se o ciclo anterior já encerrou (saiu para a
-            # loja e voltou), é reentrada: reabre e mede o segundo ciclo.
-            # Se ainda está em curso, é leitura duplicada — não mexe.
-            try:
-                with dbt.SessionLocal() as s:
-                    ativo = s.execute(_select(dbt.Ativo).where(
-                        dbt.Ativo.serial == serial.upper())).scalar_one_or_none()
-                    if ativo is not None and ativo.encerrado:
-                        reabrir_ativo(s, ativo, usuario=usuario, origem="RECEBIMENTO")
-                        mover(s, ativo, estado=estado_entrada,
-                              tipo=dbt.FILA, processo="A01", usuario=usuario,
-                              detalhe=_detalhe_entrada(it, reentrada=True))
-                        s.commit()
-                        resumo["reentradas"] += 1
-                    else:
-                        resumo["ja_existiam"] += 1
-            except Exception as exc:  # noqa: BLE001
-                resumo["falhas"] += 1
-                logging.getLogger("recebimento").error(
-                    "Trilha: reentrada da série %s não registrada: %s", serial, exc)
-        except Exception as exc:  # noqa: BLE001
-            resumo["falhas"] += 1
-            logging.getLogger("recebimento").error(
-                "Trilha: série %s recebida mas não entrou na fila: %s",
-                serial, exc)
-    return resumo
-
-
-# ── Ponte com o ServiceNow (A01) ────────────────────────────────────
-
-# O recebimento não cria ativo no ServiceNow: quem cria é a Entrada de
-# Estoque, que tem os campos fiscais e de modelo. Aqui só se corrige a
-# situação de quem já está lá — em estoque, no CD.
-CONFIG_SN = "recebimento_servicenow"
-
-
-def _config_servicenow() -> dict:
-    with SessionLocal() as s:
-        x = s.get(Setting, CONFIG_SN)
-        cfg = dict(x.value or {}) if x else {}
-    cfg.setdefault("ativo", True)
-    cfg.setdefault("stockroom", "")
-    cfg.setdefault("install_status", "")
-    # Ativo recebido que o ServiceNow não conhece é criado no ato. Sem isto
-    # ele fica invisível até alguém lembrar da Entrada de Estoque.
-    cfg.setdefault("criar_ausentes", True)
-    return cfg
-
-
-def _marcar_no_servicenow(itens: list[dict], req: Request, espaco: str = "") -> dict:
-    """Espelha o recebimento no ServiceNow: cria o que falta, atualiza o resto."""
-    resumo = {"ativo": False, "encontrados": 0, "atualizados": 0, "criados": 0,
-              "nao_encontrados": 0, "falhas": []}
-    if not itens:
-        return resumo
-    cfg = _config_servicenow()
-    if not cfg.get("ativo", True):
-        return resumo
-    resumo["ativo"] = True
-    try:
-        from routers.servicenow import (
-            marcar_recebidos_em_estoque, _sn_session_from_portal,
-        )
-        # A escrita sai no nome de quem recebeu, como manda a norma.
-        session = _sn_session_from_portal(req)
-        r = marcar_recebidos_em_estoque(
-            session, itens,
-            stockroom=cfg.get("stockroom", ""),
-            install_status=cfg.get("install_status", ""),
-            aisle_space=espaco,
-            criar=bool(cfg.get("criar_ausentes", True)))
-        resumo.update(r)
-    except Exception as exc:  # noqa: BLE001 — ServiceNow fora do ar
-        resumo["falhas"] = [str(exc)]
-        logging.getLogger("recebimento").error(
-            "ServiceNow: %d ativo(s) recebidos sem marcação de estoque: %s",
-            len(itens), exc)
-    return resumo
-
-
-def _remover_do_mdm(itens: list[dict], usuario: str) -> dict:
-    """Tira do MDM os coletores recebidos. Módulo ausente não trava nada."""
-    if not itens:
-        return {"tentados": 0, "removidos": 0, "pendentes": 0}
-    try:
-        from routers.obsolescencia import remover_recebidos_do_mdm
-        return remover_recebidos_do_mdm(itens, usuario)
-    except Exception as exc:  # noqa: BLE001 — módulo fora do ar
-        logging.getLogger("recebimento").warning(
-            "MDM: %d recebido(s) sem remoção: %s", len(itens), exc)
-        return {"tentados": 0, "removidos": 0, "pendentes": 0, "falhas": [str(exc)]}
-
-
-def _registrar_mdm_no_ciclo(itens: list[dict], resultado: dict, usuario: str) -> int:
-    """Guarda o desfecho da remoção no MDM no ciclo do ativo recebido.
-
-    O livro das escritas no MDM continua na Obsolescência — quem fala com o
-    console é quem registra lá. Isto aqui é o rastro do lado de cá: o
-    recebimento foi o gatilho, então o ciclo guarda o que aconteceu. Fica
-    como movimento de origem MDM, fora do que a tela de recebimento lista.
-    """
-    por_serie = (resultado or {}).get("por_serie") or {}
-    if not por_serie:
-        return 0
-    gravados = 0
-    try:
-        with SessionLocal.begin() as s:
-            for item in itens:
-                chave = str(item.get("serial") or "").strip().upper()
-                desfecho = por_serie.get(chave)
-                if not desfecho:
-                    continue
-                a = s.scalar(
-                    select(Asset).where(
-                        or_(Asset.serial_number == item.get("serial"),
-                            Asset.tag_number == item.get("etiqueta"))
-                    ).order_by(Asset.id.desc())
-                )
-                if a is None:
-                    continue
-                ciclo = s.scalar(
-                    select(ReceiptCycle)
-                    .where(ReceiptCycle.asset_id == a.id)
-                    .order_by(ReceiptCycle.id.desc())
-                )
-                if ciclo is None:
-                    continue
-                nota = ("Removido do MDM" if desfecho.get("ok")
-                        else "Remoção do MDM pendente")
-                detalhe = str(desfecho.get("detalhe") or "").strip()
-                if detalhe and not desfecho.get("ok"):
-                    nota = f"{nota}: {detalhe}"
-                s.add(Movement(
-                    asset_id=a.id,
-                    cycle_id=ciclo.id,
-                    origin="MDM",
-                    note=nota[:400],
-                    username=usuario,
-                ))
-                gravados += 1
-    except Exception as exc:  # noqa: BLE001 — rastro não desfaz recebimento
-        logging.getLogger("recebimento").warning(
-            "MDM: desfecho não registrado no ciclo: %s", exc)
-        return 0
-    return gravados
-
-
-def _casar_com_coleta(itens: list[dict], usuario: str) -> dict:
-    """Avisa a Logística Reversa do que chegou. Sem ela no ar, segue."""
-    if not itens:
-        return {"casados": 0, "coletas": []}
-    try:
-        from routers.reversa import registrar_recebimento
-        return registrar_recebimento(itens, usuario)
-    except Exception as exc:  # noqa: BLE001 — módulo ausente ou fora do ar
-        logging.getLogger("recebimento").warning(
-            "Reversa: %d ativo(s) recebidos sem casar com coleta: %s", len(itens), exc)
-        return {"casados": 0, "coletas": [], "falha": str(exc)}
-
-
-@router.get("/recebimento/familias")
-def api_familias(req: Request):
-    require_permission(req, "recebimento", "view")
-    return config_familias()
 
 
 @router.delete("/recebimentos/{cycle_id}")
