@@ -128,7 +128,7 @@ Regras:
 | **Agendamentos Forn.** | Entrega de fornecedor agendada: BU, NF, PO, volumes, estoque de destino e a lista de equipamentos. Gera o recebimento quando a carga chega. |
 | **Internalização** | O que entrou por agendamento, pronto para conferência e exportação. |
 | **Status** | Saúde das integrações. |
-| **Configuração** | *Visual* (admin: nome e rodapé) · *Locais* · *Classificações* · *Usuários e Permissões* (admin: cria usuário SSO, libera, define admin, permissões por módulo/ação) · *Sequências* (admin) · *Configuração Módulos* (admin) · *Ciclo do ativo* (admin) · *Automações* · *Monitoramento* (admin) · *Cofre de segredos* (admin: de onde vem cada chave, sem mostrar valor) · *Gestão de Compras* (admin: ponte HTTP com o módulo /gestao_compras) · *Acessos & Alertas* (admin) · *Dashboards* (admin) · *Minha conta*. |
+| **Configuração** | *Visual* (admin: nome e rodapé) · *Locais* · *Classificações* · *Usuários e Permissões* (admin: cria usuário SSO, libera, define admin, permissões por módulo/ação) · *Sequências* (admin) · *Configuração Módulos* (admin) · *Ciclo do ativo* (admin) · *Automações* · *Monitoramento* (admin) · *Cofre de segredos* (admin: de onde vem cada chave, sem mostrar valor) · *Gestão de Compras* (admin: ponte HTTP com o módulo /gestao_compras) · *Base EBS* (admin: leitura direta da base, consultas nomeadas, só-leitura) · *Acessos & Alertas* (admin) · *Dashboards* (admin) · *Minha conta*. |
 
 O campo **Corredor/Espaço** (`aisle_space_location`) foi adicionado à saída
 (formulário e upload). **A automação de encerramento de chamados não é afetada.**

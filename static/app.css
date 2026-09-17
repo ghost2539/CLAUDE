@@ -28,6 +28,9 @@
     --sp-sans: Arial, Helvetica, sans-serif;
     --sp-num: var(--sp-sans);
     --sp-label: var(--sp-sans);
+    /* Monoespaçada: só onde alinhar caractere a caractere é o que importa
+       (SQL, chave de cofre, identificador). Fora disso, Arial. */
+    --sp-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
     --sp-sidebar-w: 236px;
     --sp-header-h: 62px;
@@ -526,6 +529,23 @@ h2.page-title { font-size: 18px; margin-bottom: 16px; }
     color: var(--sp-kicker);
 }
 .text-muted { color: var(--sp-faint); }
+
+.om-mono { font-family: var(--sp-mono); letter-spacing: .02em; }
+textarea.om-mono { resize: vertical; min-height: 150px; line-height: 1.5; }
+/* Bloco de texto que não pode ser reflowado (SQL). Rola no eixo X em vez
+   de empurrar a largura da página. */
+.om-pre {
+    font-family: var(--sp-mono);
+    font-size: .82rem;
+    line-height: 1.5;
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    background: var(--sp-th-bg);
+    border: 1px solid var(--sp-border-soft);
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre;
+}
 .text-success { color: var(--sp-ok); }
 .text-danger { color: var(--sp-alerta); }
 

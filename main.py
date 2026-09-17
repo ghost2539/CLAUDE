@@ -202,6 +202,17 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Base do EBS: leitura direta, credencial pelo cofre. Caminho
+    # alternativo ao /gestao-compras — as consultas são as mesmas, pelos
+    # mesmos nomes; muda só por onde o dado vem.
+    try:
+        from routers.ebs_oracle import router as ebs_oracle_router
+        app.include_router(ebs_oracle_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("ebs_oracle").error(
+            "Base EBS NÃO carregada (portal segue sem ela): %s", exc, exc_info=True,
+        )
+
     # ── Cofre: o serviço enxerga os segredos? — só diagnóstico, nenhum
     # valor sai daqui. Rodar o CLI no terminal responde sobre o usuário do
     # shell, não sobre o processo do portal.

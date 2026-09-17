@@ -10,6 +10,9 @@ PyMySQL>=1.1,<2
 cryptography>=42
 python-multipart>=0.0.9
 requests>=2.31
+# Driver da base do EBS (integracoes/ebs_oracle.py). Modo thin por padrão;
+# o Instant Client só é necessário onde o banco exigir modo thick.
+oracledb>=2.0
 pandas>=2.2
 openpyxl>=3.1
 itsdangerous>=2.2

@@ -83,6 +83,14 @@ normativo.
   pede `PORTAL_CA_BUNDLE`, não desligar.
 - Segredo nunca no código nem no git: cofre primeiro, senão store cifrado
   (`core/notificador.py` e `routers/automacoes.py` são os modelos).
+- **Dado de acesso a banco é segredo**: host, porta/instância, SID, esquema
+  e usuário, não só a senha. No repositório fica o NOME da chave; o valor
+  vem do cofre (`integracoes/ebs_oracle.py` é o modelo). E mensagem de erro
+  do driver costuma trazer o endereço dentro — limpe antes de mostrar na
+  tela (`routers/ebs_oracle.py::_limpo`).
+- **SQL não vem da tela.** Consulta ao banco é nomeada, mora no código e usa
+  bind variables. "Começa com SELECT" não é proteção: não impede subconsulta
+  cara, leitura fora do assunto nem consulta que trava sessão.
 - CSP é `script-src 'self'`: **`<script>` inline é bloqueado**. JS de página
   sempre em arquivo externo.
 

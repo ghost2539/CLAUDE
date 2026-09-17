@@ -41,13 +41,14 @@ routers/                 As APIs do portal — uma por área funcional
   controle_orcamento_exec · orcamento_spare · public_assets · helpers
   consulta_times · cockpit (telas de TV)
   capex_spare · agendamentos_forn · internalizacao
-  gestao_compras · cofre (abas de Parâmetros, só administrador)
+  gestao_compras · cofre · ebs_oracle (abas de Parâmetros, só administrador)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
   http.py                Fábrica de sessões de saída — TLS verificado por padrão
   ebs_service.py         API REST do EBS
   ebs_logged.py          Raspagem autenticada do EBS
   gestao_compras.py      Ponte HTTP com o módulo /gestao_compras (PO e projetos)
+  ebs_oracle.py          Leitura direta da base do EBS (só-leitura, credencial no cofre)
 
 static/                  Front-end servido ao navegador (público por definição)
   index.html · app.js · app.css (tokens + componentes do padrão de UI) · modules/*.js

@@ -21,6 +21,7 @@ window.SPARE_MODULES.parametros = {
             ['automacoes',      'Automações'],
             ['cofre',           'Cofre de segredos'],
             ['compras',         'Gestão de Compras'],
+            ['base-ebs',        'Base EBS'],
             ['monitoramento',   'Monitoramento'],
             ['acessos',         'Acessos & Alertas'],
             ['dashboards',      'Dashboards'],
@@ -31,8 +32,8 @@ window.SPARE_MODULES.parametros = {
         // não é admin vê a situação, os logs e o botão Exec Now — a
         // configuração (credencial, cofre, horários) segue só do admin.
         var adminOnly = ['visual', 'permissoes', 'sequencias', 'config-modulos',
-                         'separacao', 'monitoramento', 'cofre', 'compras', 'acessos',
-                         'dashboards'];
+                         'separacao', 'monitoramento', 'cofre', 'compras', 'base-ebs',
+                         'acessos', 'dashboards'];
         var visibleTabs = allTabs.filter(function (x) {
             return u.is_admin || adminOnly.indexOf(x[0]) === -1;
         });
@@ -54,6 +55,7 @@ window.SPARE_MODULES.parametros = {
             automacoes:     renderAutomacoes,
             cofre:          renderCofre,
             compras:        renderCompras,
+            'base-ebs':     renderBaseEbs,
             monitoramento:  renderMonitoramento,
             acessos:        renderAcessos,
             dashboards:     renderDashboards,
@@ -951,6 +953,250 @@ async function renderCompras(c, S) {
     };
 
     carregar();
+}
+
+
+/* ── Base EBS ───────────────────────────────────────────────────────
+   Leitura direta da base do EBS. Existe em paralelo com a aba Gestão
+   de Compras: as consultas são as mesmas, pelos mesmos nomes — muda o
+   caminho por onde o dado vem. Aqui, conexão direta; lá, HTTP pelo
+   módulo do outro time.
+
+   O que a tela executa são as consultas NOMEADAS. SQL digitado não
+   existe: o SQL fica no código, versionado e revisável.
+   ─────────────────────────────────────────────────────────────────── */
+async function renderBaseEbs(c, S) {
+    var e = S.esc;
+    c.innerHTML =
+        '<h1 class="page-title">Base EBS</h1>' +
+        '<p class="text-muted">Leitura direta da base do EBS, só-leitura, com teto de linhas e ' +
+            'de tempo. A credencial vem do cofre — endereço, usuário e senha não aparecem ' +
+            'nesta tela nem ficam no repositório.</p>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Situação</div>' +
+            '<div class="card-body" id="eo-situacao">' +
+                '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>' +
+            '</div>' +
+            '<div class="card-footer btn-row">' +
+                '<button id="eo-atualizar" class="btn btn-secondary btn-sm" type="button">Atualizar</button>' +
+                '<button id="eo-testar" class="btn btn-primary btn-sm" type="button">Testar conexão</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card mb-3" id="eo-teste-card" hidden>' +
+            '<div class="card-header">Resultado do teste</div>' +
+            '<div class="card-body" id="eo-teste"></div>' +
+        '</div>' +
+        '<div class="card mb-3">' +
+            '<div class="card-header">Consulta</div>' +
+            '<div class="card-body">' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="eo-nome">Consulta</label>' +
+                        '<select id="eo-nome" class="form-control"></select></div>' +
+                    '<div class="form-group"><label for="eo-limite">Máximo de linhas</label>' +
+                        '<input id="eo-limite" class="form-control" type="number" value="200" ' +
+                        'min="1" max="5000"></div>' +
+                '</div>' +
+                '<div id="eo-binds" class="filter-grid mt-2"></div>' +
+                '<details class="mt-3"><summary class="text-muted">Ver o SQL desta consulta</summary>' +
+                    '<pre class="om-mono om-pre" id="eo-sql"></pre></details>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="eo-rodar" class="btn btn-primary" type="button">Executar</button>' +
+                '</div>' +
+                '<div id="eo-resultado" class="mt-3"></div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="card">' +
+            '<div class="card-header">Procurar objeto</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted mt-0">Lista tabelas e views que a conta enxerga. ' +
+                    'Só catálogo — nenhum dado de negócio é lido aqui.</p>' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label for="eo-prefixo">Prefixo (mín. 3 letras)</label>' +
+                        '<input id="eo-prefixo" class="form-control" placeholder="ex.: PO_HEADERS"></div>' +
+                    '<div class="form-group"><label for="eo-owner">Owner</label>' +
+                        '<input id="eo-owner" class="form-control" value="APPS"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-3">' +
+                    '<button id="eo-buscar" class="btn btn-primary" type="button">Procurar</button>' +
+                '</div>' +
+                '<div id="eo-objetos" class="mt-3"></div>' +
+            '</div>' +
+        '</div>';
+
+    var consultas = {};
+
+    function selo(ok, sim, nao) {
+        return '<span class="badge badge-' + (ok ? 'success' : 'danger') + '">' +
+            e(ok ? sim : nao) + '</span>';
+    }
+
+    // Cada consulta tem os próprios parâmetros; o formulário se refaz a
+    // cada escolha, em vez de oferecer campo que a consulta ignora.
+    function montarBinds() {
+        var nome = document.getElementById('eo-nome').value;
+        var q = consultas[nome] || { binds: [], sql: '' };
+        var host = document.getElementById('eo-binds');
+        host.innerHTML = q.binds.map(function (b) {
+            return '<div class="form-group"><label for="eo-b-' + e(b) + '">' + e(b) + '</label>' +
+                '<input id="eo-b-' + e(b) + '" class="form-control" data-bind="' + e(b) + '"></div>';
+        }).join('') || '<p class="text-muted mb-0">Esta consulta não pede parâmetro.</p>';
+        document.getElementById('eo-sql').textContent = q.sql || '';
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('eo-situacao');
+        var d;
+        try { d = await S.api('/ebs-oracle/situacao'); }
+        catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return;
+        }
+        alvo.innerHTML = '';
+        var topo = S.el('div', { className: 'stats-grid mb-3' });
+        [['Credencial', d.completo ? 'completa' : 'incompleta', d.completo],
+         ['Driver Oracle', d.driver.instalado ? ('instalado ' + (d.driver.versao || '')) : 'ausente',
+          d.driver.instalado],
+         ['Cofre corporativo', d.cofre_corporativo ? 'alcança' : 'não alcança', d.cofre_corporativo]
+        ].forEach(function (x) {
+            var cart = S.el('div', { className: 'stat-card' + (x[2] ? '' : ' accent-orange') });
+            cart.appendChild(S.el('div', { className: 'stat-value', textContent: x[1] }));
+            cart.appendChild(S.el('div', { className: 'stat-label', textContent: x[0] }));
+            topo.appendChild(cart);
+        });
+        alvo.appendChild(topo);
+
+        alvo.appendChild(S.table([
+            { key: 'rotulo', label: 'O quê' },
+            { key: 'chave', label: 'Chave no cofre' },
+            { key: 'resolvida', label: 'Resolveu', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } },
+            { key: 'fonte', label: 'De onde veio' },
+            { key: 'valor', label: 'Valor',
+              render: function (v) { return v || '—'; } },
+            { key: 'no_local', label: '', html: true, render: function (v, linha) {
+                // Sombreamento: o cofre local vence o corporativo, então um
+                // valor velho ali derruba o certo sem ninguém ver.
+                return (v && !linha.no_corporativo)
+                    ? '<span class="badge badge-warning" title="Só o cofre local tem esta chave">só no local</span>'
+                    : '';
+            } }
+        ], d.chaves));
+
+        if (!d.driver.instalado) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-warning mt-3',
+                textContent: d.driver.detalhe || 'Driver Oracle ausente neste servidor.' }));
+        }
+        if (!d.completo) {
+            alvo.appendChild(S.el('div', { className: 'alert alert-info mt-3',
+                textContent: 'Grave o que falta com: python3 scripts/cofre.py definir <CHAVE>' }));
+        }
+        if (d.cofre_detalhe) {
+            alvo.appendChild(S.el('p', { className: 'text-muted mb-0 mt-3',
+                textContent: 'Cofre: ' + d.cofre_detalhe }));
+        }
+    }
+
+    async function carregarConsultas() {
+        var sel = document.getElementById('eo-nome');
+        try {
+            var d = await S.api('/ebs-oracle/consultas');
+            consultas = {};
+            (d.consultas || []).forEach(function (q) { consultas[q.nome] = q; });
+            sel.innerHTML = (d.consultas || []).map(function (q) {
+                return '<option value="' + e(q.nome) + '">' + e(q.nome) + '</option>';
+            }).join('');
+            sel.onchange = montarBinds;
+            montarBinds();
+        } catch (x) {
+            sel.innerHTML = '';
+            document.getElementById('eo-binds').innerHTML =
+                '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    document.getElementById('eo-atualizar').onclick = carregar;
+
+    document.getElementById('eo-testar').onclick = async function () {
+        var card = document.getElementById('eo-teste-card');
+        var saida = document.getElementById('eo-teste');
+        card.hidden = false;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Conectando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/testar', { method: 'POST' });
+            saida.innerHTML = '';
+            saida.appendChild(S.el('div', { className: 'alert alert-success',
+                textContent: 'Conectado.' }));
+            saida.appendChild(S.table([
+                { key: 'o', label: 'O quê' }, { key: 'q', label: 'Qual' }
+            ], Object.keys(d.acesso || {}).map(function (k) {
+                return { o: k, q: String(d.acesso[k]) };
+            })));
+            S.toast('A base respondeu.', 'success');
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('eo-rodar').onclick = async function () {
+        var saida = document.getElementById('eo-resultado');
+        var nome = document.getElementById('eo-nome').value;
+        if (!nome) { S.toast('Escolha uma consulta.', 'warning'); return; }
+        var binds = {};
+        Array.prototype.forEach.call(c.querySelectorAll('#eo-binds [data-bind]'), function (el) {
+            var v = el.value.trim();
+            if (v) binds[el.getAttribute('data-bind')] = v;
+        });
+        var limite = parseInt(document.getElementById('eo-limite').value, 10) || 200;
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/consultar', {
+                method: 'POST', body: { nome: nome, binds: binds, limite: limite }
+            });
+            saida.innerHTML = '';
+            if (!d.total) {
+                saida.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhuma linha (' + d.ms + ' ms).' }));
+                return;
+            }
+            saida.appendChild(S.el('p', { className: 'text-muted',
+                textContent: d.total + ' linha(s) em ' + d.ms + ' ms.' +
+                    (d.truncado ? ' Cortado no limite de ' + d.limite + ' — pode haver mais.' : '') }));
+            saida.appendChild(S.table(d.colunas.map(function (col) {
+                return { key: col, label: col, render: function (v) { return v == null ? '' : v; } };
+            }), d.linhas));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            S.toast(x.message, 'error');
+        }
+    };
+
+    document.getElementById('eo-buscar').onclick = async function () {
+        var saida = document.getElementById('eo-objetos');
+        var prefixo = document.getElementById('eo-prefixo').value.trim();
+        var owner = document.getElementById('eo-owner').value.trim() || 'APPS';
+        if (prefixo.length < 3) { S.toast('Informe ao menos 3 letras.', 'warning'); return; }
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Procurando…</div>';
+        try {
+            var d = await S.api('/ebs-oracle/objetos?prefixo=' + encodeURIComponent(prefixo) +
+                                '&owner=' + encodeURIComponent(owner));
+            saida.innerHTML = '';
+            if (!d.total) {
+                saida.appendChild(S.el('p', { className: 'text-muted', textContent: 'Nada encontrado.' }));
+                return;
+            }
+            saida.appendChild(S.table([
+                { key: 'owner', label: 'Owner' },
+                { key: 'object_name', label: 'Objeto' },
+                { key: 'object_type', label: 'Tipo' }
+            ], d.itens));
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
+    carregar();
+    carregarConsultas();
 }
 
 

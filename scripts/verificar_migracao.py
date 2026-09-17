@@ -63,10 +63,11 @@ print("\n[1] O que ficou para trás não voltou")
 # Cada caminho aqui foi removido por um motivo escrito ao lado. Se algum
 # reaparecer, é merge trazendo de volta — não decisão nova.
 BARRADOS = {
-    "integracoes/ebs_oracle.py": "acesso direto ao banco Oracle do EBS",
-    "routers/ebs_oracle.py": "endpoints de SQL livre e exploração de catálogo",
-    "docs/EBS_ORACLE_BASE.md": "documentação do acesso Oracle",
-    "scripts/verificar_ebs_consulta.py": "verificação do acesso Oracle",
+    # integracoes/ebs_oracle.py e routers/ebs_oracle.py NÃO estão aqui: a
+    # leitura da base do EBS é conexão de negócio e existe de propósito.
+    # O que se barra dela é o dado de acesso no código — seção [2].
+    "docs/EBS_ORACLE_BASE.md": "documento com o catálogo e o endereço da base",
+    "scripts/verificar_ebs_consulta.py": "verificação da versão que lia credencial do ambiente",
     "scripts/cofre_php.php": "carregador de cofre em PHP, executado pelo portal",
     "routers/reparos.py": "router duplicado — a Central de Reparos é routers/bancada.py",
     "docs/MIGRACAO.md": "roteiro de migração de outra branch",
@@ -79,41 +80,56 @@ for caminho, motivo in BARRADOS.items():
     checar(not (RAIZ / caminho).exists(), f"{caminho} continua fora — {motivo}")
 
 
-print("\n[2] Endereço e credencial de banco não voltaram para o código")
-# Duas coisas diferentes, e só a primeira é regra absoluta:
+print("\n[2] Endereço e credencial de banco fora do código")
+# O portal SE LIGA à base do EBS (integracoes/ebs_oracle.py) — isso é
+# funcionalidade, não regressão. O que não pode entrar no repositório é
+# DADO DE ACESSO: host, porta/instância, SID, esquema, usuário, senha.
+# Tudo isso vem do cofre; aqui fica só o NOME da chave.
 #
-#   1. DADO DE ACESSO nunca fica no repositório — host, instância, SID,
-#      esquema, usuário, senha. Não importa como o portal chega ao banco:
-#      isso vem do cofre ou do ambiente, nunca do git. É por isso que o
-#      histórico foi reescrito para tirar o que já tinha vazado.
-#
-#   2. A ligação DIRETA ao banco (driver, DSN montado no código, SQL
-#      solto) foi retirada nesta linha de trabalho: o portal fala com o
-#      EBS por HTTP, e quem consulta a base é o módulo /gestao_compras,
-#      do lado de lá. Isso é DECISÃO DE ARQUITETURA, não regra de
-#      segurança — se um dia a conexão direta voltar a ser necessária, é
-#      só tirar a linha do driver daqui; o item 1 continua valendo.
-#
-# A palavra "Oracle" sozinha não é problema: o SSO é o Oracle Access
-# Manager e o EBS é o Oracle E-Business Suite.
-LIGACAO_DIRETA = (
-    (r"\bimport\s+(cx_Oracle|oracledb)\b", "driver de banco Oracle"),
-    (r"\bORACLE_EBS_(USER|PASS|PASSWORD|SENHA|DSN|TNS)\b", "credencial de esquema do EBS"),
-    (r"\b(ORACLE|EBS)_\w*(DSN|TNS|SID|SCHEMA)\b", "endereço do banco"),
-    (r"\bmakedsn\(|\bconnect\(.*service_name", "abertura de conexão Oracle"),
-    (r"\bfrom\s+apps\.\w+", "SQL direto no esquema APPS"),
+# Esta checagem existe porque foi exatamente por aqui que vazou antes: o
+# módulo trazia DSN e usuário escritos como valor padrão.
+DADO_DE_ACESSO = (
+    # host:porta/instancia — a forma de um DSN Oracle escrito à mão.
+    (r"[\w.-]+:\d{4,5}/[A-Za-z]\w{2,}", "endereço de banco (host:porta/instância)"),
+    # Credencial de esquema com valor ao lado, em vez do nome da chave.
+    (r"ORACLE_EBS_(USER|PASS|PASSWORD|SENHA|DSN)\s*[:=]\s*[\"'][^\"'\s]+",
+     "credencial de banco com valor escrito"),
+    (r"\bmakedsn\(\s*[\"'][^\"']+[\"']", "DSN montado com valor literal"),
 )
+MARCAS_DE_EXEMPLO = ("@cofre:", "ALTERAR_", "127.0.0.1", "localhost",
+                     "EXEMPLO", "exemplo", "<", "usuario:senha", "SEU_")
 achados: list[str] = []
-for p in PRODUTO:
-    for n, linha in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-        for padrao, oque in LIGACAO_DIRETA:
+for p in PRODUTO + pys("scripts", "docs", ".env.example"):
+    if p.name in ("verificar_migracao.py", "verificar_ebs_oracle.py"):
+        continue   # são estes padrões, escritos para procurar
+    try:
+        conteudo = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        continue
+    for n, linha in enumerate(conteudo.splitlines(), 1):
+        # Exemplo de documentação não é vazamento. O que se procura é
+        # endereço REAL colado no repositório; a linha que se anuncia como
+        # modelo (marcador do cofre, ALTERAR_, localhost, <...>) sai da
+        # conta — senão o .env.example faria a checagem falhar para sempre,
+        # e uma checagem que sempre falha ninguém lê.
+        if any(marca in linha for marca in MARCAS_DE_EXEMPLO):
+            continue
+        for padrao, oque in DADO_DE_ACESSO:
             if re.search(padrao, linha):
                 achados.append(f"{p.relative_to(RAIZ)}:{n} {oque}")
-checar(not achados, f"nenhum endereço nem credencial de banco no código ({achados[:3]})")
-req = texto("requirements.txt")
-checar("cx_Oracle" not in req and "oracledb" not in req,
-       "e o driver Oracle segue fora das dependências (decisão de arquitetura)")
+checar(not achados, f"nenhum dado de acesso a banco escrito no repositório ({achados[:3]})")
 
+# A ligação existe e tem de continuar existindo: é conexão de negócio.
+checar((RAIZ / "integracoes" / "ebs_oracle.py").is_file()
+       and (RAIZ / "routers" / "ebs_oracle.py").is_file(),
+       "a camada de leitura da base do EBS está no lugar")
+checar("oracledb" in texto("requirements.txt"),
+       "e o driver consta nas dependências")
+ebs = texto("integracoes/ebs_oracle.py")
+checar("from core.cofre import obter" in ebs and not re.search(r"os\.(environ|getenv)", ebs),
+       "a credencial dela vem do cofre, nunca do ambiente direto")
+checar("SET TRANSACTION READ ONLY" in ebs and "def sql_livre" not in ebs,
+       "só-leitura, e sem SQL livre — a tela roda consulta nomeada")
 
 print("\n[3] TLS: verificação ligada, e uma porta só de saída")
 for p in PRODUTO:

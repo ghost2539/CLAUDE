@@ -1,0 +1,464 @@
+#!/usr/bin/env python3
+"""EBS Oracle — acesso somente-leitura à base do E-Business Suite.
+
+Entrega a CAMADA DE ACESSO (conexão + credencial pelo cofre) e um executor
+de consultas seguro. As consultas de negócio ficam em ``QUERIES``, nomeadas,
+e são as mesmas que o módulo /gestao_compras usa do lado dele — de
+propósito: o mesmo nome e os mesmos binds nos dois caminhos.
+
+Dois caminhos para o mesmo dado, e a escolha é operacional:
+
+  • DIRETO (este módulo), quando o serviço alcança a base;
+  • HTTP (``integracoes/gestao_compras.py``), quando não alcança — o módulo
+    do outro time consulta e devolve por JSON.
+
+Princípios de segurança:
+  • Só-leitura: cada consulta roda em ``SET TRANSACTION READ ONLY`` e a
+    conexão nunca comita (rollback + close no finally). Qualquer DML falha.
+  • Timeout por chamada (``call_timeout``), para não travar sessão no banco.
+  • Teto de linhas (``max_rows``), para não puxar volume gigante.
+  • Bind variables sempre (``:param``) — nada de concatenar valor em SQL.
+
+CREDENCIAL: vem do cofre (``core.cofre.obter``), que procura no cofre
+corporativo, depois no cofre local cifrado, depois no ambiente. Nenhum
+endereço, instância ou usuário fica escrito aqui: sem as chaves gravadas, o
+módulo diz o que falta e não tenta conectar. É o mesmo caminho dos Correios
+e do ServiceNow.
+
+Chaves: ORACLE_EBS_DSN, ORACLE_EBS_USER, ORACLE_EBS_PASS
+(EBS_ORACLE_* aceitos como alternativa, por compatibilidade).
+
+    python3 scripts/cofre.py definir ORACLE_EBS_DSN
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+
+import oracledb
+
+
+class EbsOracleErro(RuntimeError):
+    """Falha que a tela mostra ao usuário — sem valor de segredo dentro."""
+
+
+# ── Credencial: cofre corporativo → cofre local → ambiente ────────
+# Nenhum padrão escrito aqui. Endereço e usuário do banco são dado de
+# acesso; no repositório fica só o NOME da chave.
+CHAVES_DSN = ("ORACLE_EBS_DSN", "EBS_ORACLE_DSN")
+CHAVES_USUARIO = ("ORACLE_EBS_USER", "EBS_ORACLE_USER")
+CHAVES_SENHA = ("ORACLE_EBS_PASS", "EBS_ORACLE_PASS")
+# O Instant Client é caminho de instalação da máquina, não segredo.
+CHAVES_LIB = ("ORACLE_CLIENT_LIB_DIR", "EBS_ORACLE_CLIENT_LIB_DIR")
+LIB_DIR_PADRAO = "/usr/lib/oracle/21/client64/lib"
+
+
+def _do_cofre(nomes: tuple[str, ...], padrao: str = "") -> tuple[str, str]:
+    """(valor, chave que respondeu). Vazio quando nenhuma responde."""
+    from core.cofre import obter
+    for nome in nomes:
+        valor = obter(nome, "")
+        if valor:
+            return valor, nome
+    return padrao, ""
+
+
+def credenciais() -> dict:
+    """O que está configurado, PARA A TELA — sem a senha.
+
+    Diz de qual chave veio cada valor: com duas grafias aceitas, saber qual
+    respondeu é o que evita gravar a chave certa no lugar errado.
+    """
+    dsn, chave_dsn = _do_cofre(CHAVES_DSN)
+    usuario, chave_usuario = _do_cofre(CHAVES_USUARIO)
+    senha, chave_senha = _do_cofre(CHAVES_SENHA)
+    from core.cofre import fonte
+    return {
+        # DSN carrega host e instância: é dado de acesso, não aparece.
+        "dsn_definido": bool(dsn),
+        "dsn_chave": chave_dsn,
+        "dsn_fonte": fonte(chave_dsn) if chave_dsn else "não definido",
+        "usuario_definido": bool(usuario),
+        "usuario_chave": chave_usuario,
+        "usuario_fonte": fonte(chave_usuario) if chave_usuario else "não definido",
+        "senha_definida": bool(senha),
+        "senha_chave": chave_senha,
+        "senha_fonte": fonte(chave_senha) if chave_senha else "não definido",
+        "completo": bool(dsn and usuario and senha),
+    }
+
+
+def _config() -> dict:
+    dsn, _ = _do_cofre(CHAVES_DSN)
+    usuario, _ = _do_cofre(CHAVES_USUARIO)
+    senha, _ = _do_cofre(CHAVES_SENHA)
+    lib_dir, _ = _do_cofre(CHAVES_LIB, LIB_DIR_PADRAO)
+    faltando = [rotulo for rotulo, valor in
+                (("ORACLE_EBS_DSN", dsn), ("ORACLE_EBS_USER", usuario),
+                 ("ORACLE_EBS_PASS", senha)) if not valor]
+    if faltando:
+        raise EbsOracleErro(
+            "Credencial da base do EBS não está no cofre: " + ", ".join(faltando) +
+            ". Grave com: python3 scripts/cofre.py definir <CHAVE>")
+    return {"user": usuario, "password": senha, "dsn": dsn, "lib_dir": lib_dir}
+
+
+# ── Cliente Oracle (modo thick com Instant Client) ────────────────
+_client_ready = False
+
+
+def _ensure_client(lib_dir: str) -> None:
+    global _client_ready
+    if _client_ready:
+        return
+    try:
+        oracledb.init_oracle_client(lib_dir=lib_dir)
+    except Exception:
+        # Já iniciado nesta sessão, ou cai para modo thin — segue.
+        pass
+    _client_ready = True
+
+
+# ── Parâmetros de segurança (ajustáveis) ──────────────────────────
+DEFAULT_TIMEOUT_S = 60       # tempo máximo por chamada ao banco
+DEFAULT_MAX_ROWS = 5000      # teto de linhas por consulta (0 = sem teto)
+DEFAULT_ARRAYSIZE = 500      # linhas por fetch (throughput)
+
+
+# ── Conexão e execução ────────────────────────────────────────────
+def get_connection():
+    """Abre uma conexão nova (não comita nada; use com ``query``)."""
+    c = _config()
+    _ensure_client(c["lib_dir"])
+    conn = oracledb.connect(user=c["user"], password=c["password"], dsn=c["dsn"])
+    try:
+        conn.call_timeout = DEFAULT_TIMEOUT_S * 1000  # ms
+    except Exception:
+        pass
+    conn.autocommit = False
+    return conn
+
+
+def _rows_to_dicts(cur, rows) -> list[dict]:
+    cols = [d[0].lower() for d in cur.description]
+    out: list[dict] = []
+    for row in rows:
+        r: dict = {}
+        for i, val in enumerate(row):
+            if val is None:
+                r[cols[i]] = None
+            elif isinstance(val, oracledb.LOB):
+                r[cols[i]] = val.read()
+            elif hasattr(val, "isoformat"):
+                r[cols[i]] = val.isoformat()
+            else:
+                r[cols[i]] = val
+        out.append(r)
+    return out
+
+
+def query(
+    sql: str,
+    binds: dict | None = None,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    read_only: bool = True,
+) -> list[dict]:
+    """Executa um SELECT e devolve lista de dicts (colunas em minúsculo).
+
+    - ``binds``: dicionário de bind variables (``:param``).
+    - ``max_rows``: teto de linhas (0 = sem teto). Segurança ao explorar.
+    - ``read_only``: True → ``SET TRANSACTION READ ONLY`` (recomendado).
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.arraysize = DEFAULT_ARRAYSIZE
+            if read_only:
+                cur.execute("SET TRANSACTION READ ONLY")
+            cur.execute(sql, binds or {})
+            rows = cur.fetchmany(max_rows) if max_rows else cur.fetchall()
+            return _rows_to_dicts(cur, rows)
+    finally:
+        try:
+            conn.rollback()  # garante que nada é persistido
+        finally:
+            conn.close()
+
+
+# ── Exploração da base padrão (dicionário de dados) ───────────────
+def check_access() -> dict:
+    """Valida o acesso: quem sou, em qual banco/instância e a hora do servidor.
+    Use isto PRIMEIRO — confirma credenciais/DSN sem tocar em tabela de negócio."""
+    return query(
+        """
+        SELECT SYS_CONTEXT('USERENV','SESSION_USER')  AS session_user,
+               SYS_CONTEXT('USERENV','DB_NAME')       AS db_name,
+               SYS_CONTEXT('USERENV','INSTANCE_NAME') AS instance_name,
+               SYS_CONTEXT('USERENV','SERVER_HOST')   AS server_host,
+               TO_CHAR(SYSDATE,'YYYY-MM-DD HH24:MI:SS') AS db_time
+        FROM dual
+        """
+    )[0]
+
+
+def list_objects(prefix: str, owner: str = "APPS", limit: int = 1000) -> list[dict]:
+    """Lista tabelas/views/synonyms ACESSÍVEIS pela conta, por prefixo.
+    Ex.: list_objects('PA') → objetos de Projetos que a conta enxerga."""
+    return query(
+        """
+        SELECT owner, object_name, object_type
+        FROM all_objects
+        WHERE owner = :owner
+          AND object_type IN ('TABLE','VIEW','SYNONYM')
+          AND object_name LIKE :pat
+        ORDER BY object_name
+        """,
+        {"owner": owner.upper(), "pat": prefix.upper() + "%"},
+        max_rows=limit,
+    )
+
+
+def describe(object_name: str, owner: str = "APPS") -> list[dict]:
+    """Descreve as colunas de um objeto (nome, tipo, tamanho, aceita nulo)."""
+    return query(
+        """
+        SELECT column_name, data_type, data_length, nullable
+        FROM all_tab_columns
+        WHERE owner = :owner AND table_name = :name
+        ORDER BY column_id
+        """,
+        {"owner": owner.upper(), "name": object_name.upper()},
+        max_rows=0,
+    )
+
+
+def find_objects(termo: str, limit: int = 500) -> list[dict]:
+    """Procura objetos (tabela/view/synonym) cujo NOME contém `termo`, em
+    QUALQUER owner acessível pela conta. Útil para garimpar a tabela certa,
+    ex.: find_objects('FA_ADD') ou find_objects('ATIVO')."""
+    return query(
+        """
+        SELECT owner, object_name, object_type
+        FROM all_objects
+        WHERE object_type IN ('TABLE','VIEW','SYNONYM')
+          AND object_name LIKE :pat
+        ORDER BY
+          CASE object_type WHEN 'TABLE' THEN 0 WHEN 'VIEW' THEN 1 ELSE 2 END,
+          owner, object_name
+        """,
+        {"pat": "%" + termo.upper() + "%"},
+        max_rows=limit,
+    )
+
+
+# `sql_livre` FICOU DE FORA de propósito. SELECT digitado na tela é o que
+# tirou esta camada do ar na revisão de segurança: o filtro "começa com
+# SELECT" não impede subconsulta cara, leitura de tabela que não é do
+# assunto, nem consulta que trava sessão no banco. O que a tela executa são
+# as consultas de QUERIES, pelo nome, com bind variables.
+
+
+# ── Registro de consultas (VOCÊS configuram aqui) ─────────────────
+# Preencha com as consultas de negócio. Sempre use bind variables (:param).
+# As consultas do módulo Gestão de Compras (oracle_helper.py do time), tal e
+# qual. Aqui elas rodam pelo caminho direto — que só funciona quando o
+# serviço alcança o cofre. Enquanto não alcança, as mesmas consultas chegam
+# por HTTP via integracoes/gestao_compras.py; os nomes e os binds são os
+# mesmos nos dois caminhos, de propósito.
+QUERIES: dict[str, str] = {
+    "saldo": """
+WITH proj AS (
+    SELECT project_id, segment1 AS nro_projeto, name AS nome_projeto
+    FROM APPS.PA_PROJECTS_ALL WHERE segment1 = :p_project_number
+)
+SELECT DISTINCT p.nro_projeto, p.nome_projeto, NVL(bl.burdened_cost, 0) AS burdened_cost,
+    bl.creation_date AS dt_criacao_linha, bv.version_number
+FROM proj p
+JOIN APPS.PA_TASKS t ON t.project_id = p.project_id
+JOIN APPS.PA_RESOURCE_ASSIGNMENTS ra ON ra.task_id = t.task_id
+JOIN APPS.PA_BUDGET_LINES bl ON bl.resource_assignment_id = ra.resource_assignment_id
+JOIN APPS.PA_BUDGET_VERSIONS bv ON bv.budget_version_id = bl.budget_version_id
+WHERE (bv.current_flag = 'Y' OR bv.budget_status_code = 'B')
+  AND (NVL(bl.raw_cost,0)>0 OR NVL(bl.burdened_cost,0)>0 OR NVL(bl.project_raw_cost,0)>0 OR NVL(bl.project_burdened_cost,0)>0)
+""",
+    "po": """
+SELECT ph.authorization_status AS status, NVL(pll.amount_billed, 0) AS amount_billed_ship,
+    CASE WHEN NVL(pll.amount_billed, 0)=0 THEN 'Comprometida' ELSE 'Realizado' END AS status_faturado,
+    ph.segment1 || ' / ' || pll.shipment_num AS numero_po, ph.creation_date AS data_criacao,
+    ph.approved_date AS data_aprovacao, pl.line_num AS po_line_num, pll.shipment_num,
+    pl.item_description AS desc_po, pll.need_by_date AS necessario_em,
+    NVL(pll.quantity, 0) AS qty_pedida, NVL(pll.quantity_received, 0) AS qty_recebida,
+    NVL(pll.quantity_billed, 0) AS qty_faturada, NVL(pll.quantity_cancelled, 0) AS qty_cancelada,
+    NVL(pll.price_override, NVL(pl.unit_price, 0)) AS price_override,
+    NVL(pll.amount, NVL(pll.quantity, 0) * NVL(pll.price_override, NVL(pl.unit_price, 0))) AS amount_ship
+FROM APPS.PA_PROJECTS_ALL p
+JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.project_id = p.project_id
+JOIN APPS.PO_LINE_LOCATIONS_ALL pll ON pll.line_location_id = pd.line_location_id
+JOIN APPS.PO_LINES_ALL pl ON pl.po_line_id = pd.po_line_id
+JOIN APPS.PO_HEADERS_ALL ph ON ph.po_header_id = pl.po_header_id
+WHERE p.segment1 = :p_project_number ORDER BY ph.segment1, pll.shipment_num
+""",
+    "rc": """
+SELECT p.segment1 AS project_number, prh.segment1 AS rc_numero, prh.authorization_status AS rc_status,
+    prh.description AS rc_descricao, prh.creation_date AS rc_data_criacao, prl.line_num AS rc_line_num,
+    prl.item_description AS rc_item_desc, prl.quantity AS rc_qty, prl.unit_price AS rc_unit_price
+FROM apps.pa_projects_all p
+JOIN apps.po_req_distributions_all prd ON prd.project_id = p.project_id
+JOIN apps.po_requisition_lines_all prl ON prl.requisition_line_id = prd.requisition_line_id
+JOIN apps.po_requisition_headers_all prh ON prh.requisition_header_id = prl.requisition_header_id
+WHERE p.segment1 = :p_project_number ORDER BY rc_data_criacao DESC
+""",
+    "acordos": """
+SELECT pha.segment1 AS agreement_num, pv.vendor_name, pha.start_date, pha.end_date,
+    ROUND(pha.end_date - SYSDATE) AS days_to_expire, pha.authorization_status,
+    hou.name AS operating_unit
+FROM APPS.PO_HEADERS_ALL pha
+JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
+LEFT JOIN APPS.HR_OPERATING_UNITS hou ON hou.organization_id = pha.org_id
+WHERE pha.type_lookup_code = 'BLANKET' AND pha.authorization_status = 'APPROVED'
+  AND pha.end_date IS NOT NULL AND TRUNC(pha.end_date) BETWEEN TRUNC(SYSDATE) AND TRUNC(SYSDATE) + :p_days
+ORDER BY days_to_expire ASC
+""",
+    "vendor_lookup": """
+SELECT DISTINCT pv.vendor_name
+FROM APPS.PO_HEADERS_ALL pha
+JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
+WHERE pha.type_lookup_code IN ('BLANKET','CONTRACT') AND pha.authorization_status = 'APPROVED'
+  AND TRUNC(SYSDATE) >= TRUNC(NVL(pha.start_date, SYSDATE))
+  AND (pha.end_date IS NULL OR TRUNC(SYSDATE) <= TRUNC(pha.end_date))
+ORDER BY pv.vendor_name
+""",
+    "vendor_items": """
+SELECT hou.name AS operating_unit, NVL(msib.description, pl.item_description) AS item_description,
+    pl.unit_meas_lookup_code AS uom, pl.list_price_per_unit AS unit_price
+FROM APPS.PO_HEADERS_ALL pha
+JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
+LEFT JOIN APPS.HR_OPERATING_UNITS hou ON hou.organization_id = pha.org_id
+JOIN APPS.PO_LINES_ALL pl ON pl.po_header_id = pha.po_header_id
+LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = pl.item_id AND msib.organization_id = 0
+WHERE pha.type_lookup_code IN ('BLANKET','CONTRACT') AND pha.authorization_status = 'APPROVED'
+  AND UPPER(pv.vendor_name) = UPPER(:p_vendor_name)
+  AND TRUNC(SYSDATE) >= TRUNC(NVL(pha.start_date, SYSDATE))
+  AND (pha.end_date IS NULL OR TRUNC(SYSDATE) <= TRUNC(pha.end_date))
+ORDER BY hou.name, pha.segment1, pl.line_num
+""",
+    "busca_po": """
+SELECT h.segment1 AS po_numero, ppa.segment1 AS projeto_numero, ppa.name AS projeto_nome,
+    s.vendor_name AS fornecedor, h.authorization_status AS status_po, l.line_num AS linha,
+    NVL(l.item_description, msib.description) AS descricao_item,
+    NVL(l.unit_meas_lookup_code, msib.primary_uom_code) AS uom,
+    l.unit_price AS preco_unitario, l.closed_code AS status_linha,
+    ll.shipment_num AS entrega, ll.quantity AS quantidade_pedida,
+    ll.promised_date AS data_prometida, ll.need_by_date AS data_necessidade,
+    ll.closed_code AS status_entrega, pd.distribution_num AS distribuicao,
+    pat.task_number AS tarefa_numero, pat.task_name AS tarefa_nome,
+    pd.expenditure_type AS tipo_despesa, pd.destination_type_code AS destino,
+    COALESCE(pah_ll.note, pah_hdr.note) AS motivo_rejeicao,
+    COALESCE(pah_ll.action_date, pah_hdr.action_date) AS data_rejeicao,
+    COALESCE(fu_ll.user_name, fu_hdr.user_name) AS rejeitado_por
+FROM APPS.PO_HEADERS_ALL h
+JOIN APPS.PO_LINES_ALL l ON l.po_header_id = h.po_header_id
+JOIN APPS.PO_LINE_LOCATIONS_ALL ll ON ll.po_line_id = l.po_line_id
+JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = h.vendor_id
+LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = l.item_id AND msib.organization_id = ll.ship_to_organization_id
+JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.line_location_id = ll.line_location_id
+LEFT JOIN APPS.PA_PROJECTS_ALL ppa ON ppa.project_id = pd.project_id
+LEFT JOIN APPS.PA_TASKS pat ON pat.task_id = pd.task_id
+LEFT JOIN (SELECT pah1.* FROM APPS.PO_ACTION_HISTORY pah1 WHERE pah1.object_type_code='PO' AND pah1.action_code='REJECT'
+  AND pah1.sequence_num=(SELECT MAX(pah2.sequence_num) FROM APPS.PO_ACTION_HISTORY pah2
+  WHERE pah2.object_type_code=pah1.object_type_code AND pah2.object_id=pah1.object_id AND pah2.action_code='REJECT')
+) pah_hdr ON pah_hdr.object_id = h.po_header_id
+LEFT JOIN APPS.FND_USER fu_hdr ON fu_hdr.user_id = pah_hdr.last_updated_by
+LEFT JOIN (SELECT pah1.* FROM APPS.PO_ACTION_HISTORY pah1 WHERE pah1.object_type_code='PO_LINE_LOCATION' AND pah1.action_code='REJECT'
+  AND pah1.sequence_num=(SELECT MAX(pah2.sequence_num) FROM APPS.PO_ACTION_HISTORY pah2
+  WHERE pah2.object_type_code=pah1.object_type_code AND pah2.object_id=pah1.object_id AND pah2.action_code='REJECT')
+) pah_ll ON pah_ll.object_id = ll.line_location_id
+LEFT JOIN APPS.FND_USER fu_ll ON fu_ll.user_id = pah_ll.last_updated_by
+WHERE h.segment1 = :numero_po AND (:p_line_num IS NULL OR l.line_num = :p_line_num)
+ORDER BY l.line_num, ll.shipment_num, pd.distribution_num
+""",
+    "catalogo": """
+SELECT * FROM (
+    SELECT LTRIM(msib.segment1, '0') AS item_ebs, msib.description AS descricao,
+        CASE msib.item_type WHEN 'ATIVO FIXO' THEN 'HARDWARE' WHEN 'SERVICO' THEN 'SERVICOS'
+            WHEN 'SERVICO ATIVO FIXO' THEN 'SERVICOS' WHEN 'USO CONSUMO' THEN 'HARDWARE' ELSE 'OUTROS' END AS tipo_item,
+        s.vendor_name AS fornecedor, pl.unit_price AS valor_unitario, pd.expenditure_type,
+        pat.task_number AS tarefa, ph.creation_date AS po_date,
+        ROW_NUMBER() OVER (PARTITION BY msib.inventory_item_id ORDER BY ph.creation_date DESC) AS rn
+    FROM APPS.PO_HEADERS_ALL ph
+    JOIN APPS.PO_LINES_ALL pl ON pl.po_header_id = ph.po_header_id
+    JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.po_line_id = pl.po_line_id
+    JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = ph.vendor_id
+    LEFT JOIN APPS.PA_TASKS pat ON pat.task_id = pd.task_id
+    LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = pl.item_id AND msib.organization_id = 101
+    WHERE ph.authorization_status IN ('APPROVED','CLOSED')
+      AND pd.expenditure_type IN ('Computadores e Perifericos','Sistemas de Informatica')
+      AND msib.segment1 IS NOT NULL AND ph.creation_date >= ADD_MONTHS(SYSDATE, -36)
+) WHERE rn = 1 ORDER BY descricao
+""",
+}
+
+# Binds de cada consulta, para a tela montar o formulário e validar antes de
+# ir ao banco. Derivado do SQL: um bind fora daqui é erro de digitação.
+BINDS: dict[str, tuple[str, ...]] = {
+    nome: tuple(dict.fromkeys(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", sql)))
+    for nome, sql in QUERIES.items()
+}
+
+
+def run_named(name: str, binds: dict | None = None, max_rows: int = DEFAULT_MAX_ROWS):
+    if name not in QUERIES:
+        raise KeyError(f"Consulta desconhecida: {name}")
+    return query(QUERIES[name], binds, max_rows=max_rows)
+
+
+# ── CLI (compatível com o helper original + exploração) ───────────
+def _parse_binds(args: list[str]) -> dict:
+    binds: dict = {}
+    for arg in args:
+        if "=" not in arg:
+            continue
+        k, v = arg.split("=", 1)
+        if v == "NULL":
+            binds[k] = None
+        elif v.isdigit() and (v == "0" or not v.startswith("0")):
+            # int só quando é numérico E não tem zero à esquerda (preserva
+            # números de projeto/PO com zeros à frente).
+            binds[k] = int(v)
+        else:
+            binds[k] = v
+    return binds
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(json.dumps({"error": "Uso: ebs_oracle.py <check|list|find|describe|NOME> [args...]"}))
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+    try:
+        if cmd == "check":
+            print(json.dumps({"data": check_access()}, default=str))
+        elif cmd == "list":
+            prefix = sys.argv[2] if len(sys.argv) > 2 else ""
+            print(json.dumps({"data": list_objects(prefix)}, default=str))
+        elif cmd == "describe":
+            if len(sys.argv) < 3:
+                print(json.dumps({"error": "describe <OBJETO>"}))
+                sys.exit(1)
+            print(json.dumps({"data": describe(sys.argv[2])}, default=str))
+        elif cmd == "find":
+            if len(sys.argv) < 3:
+                print(json.dumps({"error": "find <TERMO>"}))
+                sys.exit(1)
+            print(json.dumps({"data": find_objects(sys.argv[2])}, default=str))
+        else:
+            print(json.dumps({"data": run_named(cmd, _parse_binds(sys.argv[2:]))}, default=str))
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

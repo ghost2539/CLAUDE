@@ -50,18 +50,34 @@ O que está nesta lista foi removido de propósito em algum momento. Um
 merge desatento traz tudo de volta sem ninguém perceber — por isso
 `scripts/verificar_migracao.py` falha se qualquer item reaparecer.
 
-### Acesso direto ao banco Oracle do EBS
-`integracoes/ebs_oracle.py`, `routers/ebs_oracle.py`, a aba "Base EBS
-(Oracle)", `docs/EBS_ORACLE_BASE.md` e a verificação correspondente.
+### SQL livre na tela e credencial de banco no ambiente
+**A conexão com a base do EBS existe** — `integracoes/ebs_oracle.py` e
+`routers/ebs_oracle.py`, na aba *Base EBS* de Parâmetros. O que foi
+removido dela são três coisas:
 
-Eram SQL livre a partir da tela, comandos de exploração de catálogo
-(`find`, `sql`) e credencial de esquema no ambiente. O portal fala com o
-EBS por **API REST** e, para PO e projetos, pelo **módulo Gestão de
-Compras por HTTP** — que é quem tem a credencial, do lado de lá.
+1. **SQL digitado na tela.** O endpoint aceitava um `SELECT` do
+   navegador. O filtro "começa com SELECT" não impede subconsulta cara,
+   leitura de tabela que não é do assunto, nem consulta que trava sessão
+   no banco. Ficaram as consultas **nomeadas** de `QUERIES`, com bind
+   variables: o SQL mora no código, versionado e revisável.
+2. **Credencial lida de `os.environ`.** O módulo dizia "sem cofre" em
+   letras maiúsculas. Agora resolve por `core.cofre.obter` — cofre
+   corporativo, cofre local cifrado, ambiente, nessa ordem.
+3. **Endereço e usuário escritos como padrão no código.** Host,
+   instância e usuário são dado de acesso: no repositório fica só o
+   NOME da chave (`ORACLE_EBS_DSN`, `_USER`, `_PASS`).
 
-A palavra "Oracle" continua no código onde é legítima: o SSO é o Oracle
-Access Manager e o EBS é o Oracle E-Business Suite. O que não existe mais
-é conexão a banco.
+Também some o que o driver devolve: vários erros do Oracle (ORA-12154,
+ORA-12541) trazem o endereço de conexão dentro da mensagem. O router
+apaga o DSN — e os pedaços dele — antes de a mensagem chegar à tela.
+
+`docs/EBS_ORACLE_BASE.md` continua fora: era catálogo de tabelas com o
+endereço da base no cabeçalho.
+
+Há dois caminhos para o mesmo dado, e a escolha é operacional: direto
+(este módulo, quando o serviço alcança a base) ou por HTTP (o módulo
+`/gestao_compras`, que consulta do lado de lá). **As consultas são as
+mesmas, com os mesmos nomes e os mesmos binds**, de propósito.
 
 ### Ponte `/api/cofre/testar-php` e `scripts/cofre_php.php`
 A tela mandava um caminho de arquivo `.php` e o portal o executava. Um
@@ -129,6 +145,7 @@ passou a fechar.
 
 ```bash
 python3 scripts/verificar_migracao.py        # o que não pode voltar
+python3 scripts/verificar_ebs_oracle.py      # a conexão com a base do EBS
 python3 scripts/verificar_seguranca.py       # as decisões de segurança
 python3 scripts/verificar_ui.py              # o padrão de design
 for f in scripts/verificar_*.py; do python3 "$f" || echo "FALHOU: $f"; done

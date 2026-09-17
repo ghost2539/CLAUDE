@@ -168,8 +168,6 @@
         '.om-tw tr.om-valor-alterado:hover td{background:rgba(199,145,5,.22)}' +
         '.om-hint{font-size:12px;color:var(--text-muted);margin:4px 0 0}' +
         /* retorno de reparo */
-        '.om-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.02em}' +
-        'textarea.om-mono{resize:vertical;min-height:150px;line-height:1.5}' +
         '.om-ret-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);gap:14px;align-items:start}' +
         '.om-ret-grid .form-group{margin-bottom:0}' +
         '.om-ret-side{display:flex;flex-direction:column;gap:8px;min-width:0}' +
