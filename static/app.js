@@ -126,6 +126,14 @@
             var d;
             try { d = await r.json(); } catch (_) { d = { detail: r.statusText }; }
             var msg = d.detail || 'Erro na requisição.';
+            // O 422 do FastAPI vem como LISTA de erros de campo. Jogar isso
+            // num textContent virava "[object Object]" na cara do operador:
+            // aqui vira frase, sem o prefixo técnico do pydantic.
+            if (Array.isArray(d.detail)) {
+                msg = d.detail.map(function (it) {
+                    return String((it && it.msg) || it).replace(/^Value error,\s*/, '');
+                }).join(' ') || 'Erro na requisição.';
+            }
             if (r.status === 401 && !url.match(/\/auth\/login/)) {
                 try {
                     var chk = await fetch(API + '/auth/me', { credentials: 'include' });
@@ -134,7 +142,12 @@
                     showLogin();
                 }
             }
-            throw new Error(msg);
+            // O status vai junto no erro: há tela que precisa separar "o
+            // servidor está sem credencial" (503) de "você digitou errado"
+            // (422). Quem só lê `.message` continua igual.
+            var err = new Error(msg);
+            err.status = r.status;
+            throw err;
         }
         var ct = r.headers.get('content-type') || '';
         if (ct.indexOf('json') !== -1) return r.json();

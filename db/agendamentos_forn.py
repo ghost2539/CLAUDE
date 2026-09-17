@@ -7,7 +7,9 @@ recebimento (grava a data e passa o agendamento para a etapa de
 internalização). Nada aqui escreve no banco de outro módulo.
 
 Tabelas:
-- `agf_agendamento` — um agendamento por NF/PO;
+- `agf_agendamento` — um agendamento (a entrega);
+- `agf_pedido` — uma linha por PO do agendamento, com a NF que a cobre
+  (a mesma NF pode aparecer em várias POs);
 - `agf_equipamento` — uma linha por equipamento do agendamento (n itens).
 """
 from __future__ import annotations
@@ -110,6 +112,11 @@ class Agendamento(Base):
     criado_por: Mapped[str] = mapped_column(String(80), default="")
     recebido_por: Mapped[str] = mapped_column(String(80), default="")
 
+    pedidos: Mapped[list["Pedido"]] = relationship(
+        back_populates="agendamento", cascade="all, delete-orphan",
+        order_by="Pedido.id",
+    )
+
     equipamentos: Mapped[list["Equipamento"]] = relationship(
         back_populates="agendamento", cascade="all, delete-orphan",
         order_by="Equipamento.id",
@@ -132,8 +139,46 @@ class Agendamento(Base):
             "criado_em": self.criado_em.isoformat() if self.criado_em else "",
             "criado_por": self.criado_por or "",
             "recebido_por": self.recebido_por or "",
+            # A tela reabre o agendamento por aqui: sem `pedidos` ela só veria
+            # a primeira PO (a que ficou nas colunas soltas) e as demais
+            # sumiriam na edição.
+            "pedidos": [p.to_dict() for p in self.pedidos],
             "equipamentos": [e.to_dict() for e in self.equipamentos],
         }
+
+
+class Pedido(Base):
+    """Uma PO do agendamento, com a NF que a cobre.
+
+    Antes o agendamento tinha uma PO e uma NF, em duas colunas. Na prática
+    uma entrega traz várias POs, e UMA NF pode cobrir mais de uma — por isso
+    a NF fica aqui, repetida em cada PO que ela atende, em vez de numa
+    tabela à parte. Assim a pergunta que se faz no dia a dia ("o que veio
+    nesta NF?" e "esta PO já foi agendada?") se responde sem join extra.
+
+    As colunas `po` e `nf` do agendamento continuam existindo e guardam a
+    PRIMEIRA delas: é o que a listagem e a busca já usavam, e mexer nisso
+    apagaria da tela os agendamentos que já estão gravados.
+    """
+
+    __tablename__ = "agf_pedido"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agendamento_id: Mapped[int] = mapped_column(
+        ForeignKey("agf_agendamento.id", ondelete="CASCADE"), index=True)
+    po: Mapped[str] = mapped_column(String(40), index=True)
+    nf: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # O que a consulta ao EBS respondeu quando a PO foi digitada. Guardado
+    # para a conferência na chegada não depender do banco do EBS estar de pé.
+    fornecedor_ebs: Mapped[str] = mapped_column(String(160), default="")
+    status_ebs: Mapped[str] = mapped_column(String(40), default="")
+
+    agendamento: Mapped["Agendamento"] = relationship(back_populates="pedidos")
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "po": self.po or "", "nf": self.nf or "",
+                "fornecedor_ebs": self.fornecedor_ebs or "",
+                "status_ebs": self.status_ebs or ""}
 
 
 class Equipamento(Base):
@@ -158,7 +203,33 @@ def init_db() -> None:
         if _ready:
             return
         Base.metadata.create_all(get_engine())
+        # Coluna nova em tabela que já existe: o create_all não acrescenta.
+        from db._esquema import migrar_colunas
+        migrar_colunas(Base, get_engine(), "agendamentos_forn")
+        # Agendamento gravado antes da tabela de pedidos fica sem linha nela
+        # e apareceria sem PO nenhuma na tela. Aqui a PO e a NF que estão nas
+        # colunas antigas viram a primeira linha — uma vez só, sem duplicar.
+        _semear_pedidos()
         _ready = True
+
+
+def _semear_pedidos() -> None:
+    """Passa a PO/NF antigas do agendamento para a tabela de pedidos.
+
+    Idempotente: só semeia agendamento que ainda não tem nenhuma linha.
+    Falha aqui não pode derrubar a subida do módulo — no pior caso a tela
+    mostra o agendamento sem PO, e o log diz por quê.
+    """
+    from sqlalchemy import select
+    try:
+        with SessionLocal.begin() as s:
+            ja = {p.agendamento_id for p in s.scalars(select(Pedido)).all()}
+            for ag in s.scalars(select(Agendamento)).all():
+                if ag.id in ja or not (ag.po or ag.nf):
+                    continue
+                s.add(Pedido(agendamento_id=ag.id, po=ag.po or "", nf=ag.nf or ""))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("agendamentos: não semeei os pedidos antigos: %s", exc)
 
 
 def ensure_db() -> None:
