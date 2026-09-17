@@ -287,6 +287,38 @@ for p in PRODUTO:
 checar(not gravacoes, f"nenhuma gravação em caminho absoluto fora de data/ ({gravacoes[:3]})")
 
 
+print("\n[12] O catálogo de telas acompanha o menu")
+# Documentação envelhece em silêncio: a tela entra no menu e ninguém
+# lembra do documento. Aqui o documento é conferido contra o menu de
+# verdade, então tela nova sem entrada no catálogo quebra a verificação.
+doc = texto("docs/DOCUMENTACAO_SISTEMA.md")
+html = texto("static/index.html")
+
+rotas_menu = set(re.findall(r'data-route="([^"]+)"', html))
+hrefs_menu = set(re.findall(r'data-href="([^"]+)"', html))
+# 'parametros' e 'parametros/conta' são a mesma tela do catálogo.
+rotas_menu -= {"parametros/conta"}
+
+faltando = sorted(r for r in rotas_menu if f"#{r}`" not in doc)
+checar(not faltando, f"toda rota do menu está no catálogo ({faltando})")
+faltando = sorted(h for h in hrefs_menu if f"`{h}`" not in doc)
+checar(not faltando, f"toda página do menu está no catálogo ({faltando})")
+
+# As abas de Parâmetros, que é onde as telas novas entraram.
+js_param = texto("static/modules/parametros.js")
+bloco = js_param[js_param.index("var allTabs = ["):]
+bloco = bloco[:bloco.index("];")]
+abas = re.findall(r"\['([a-z-]+)',\s*'([^']+)'\]", bloco)
+faltando = sorted(rot for chave, rot in abas if rot not in doc)
+checar(not faltando, f"toda aba de Configuração está no catálogo ({faltando})")
+checar(len(abas) >= 15, f"o catálogo cobre as {len(abas)} abas de Configuração")
+
+# Documento citado que não existe manda quem lê procurar o que não há.
+citados = set(re.findall(r"`(docs/[A-Z_]+\.md)`", doc))
+sumidos = sorted(c for c in citados if not (RAIZ / c).is_file())
+checar(not sumidos, f"todo documento citado existe ({sumidos})")
+
+
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
     print("Falhas:\n  - " + "\n  - ".join(falhas))
