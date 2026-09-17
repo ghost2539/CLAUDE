@@ -142,10 +142,91 @@ conhece. Agora `config._proxy()` encerra a busca na primeira variável
 declarada, vazia ou não. Foi assim que a verificação do Gestão de Compras
 passou a fechar.
 
+## Conferência `producao` → `migracao` (17/09)
+
+A junção por conteúdo, arquivo a arquivo, tem um risco conhecido: um
+trecho de back-end some sem que a tela some junto, e o defeito só aparece
+quando alguém clica. A conferência foi refeita comparando as duas branches
+inteiras — arquivos, rotas, colunas de modelo, itens de menu, colunas de
+tabela e rótulos de tela.
+
+O resultado: **`migracao` já continha tudo o que `producao` tem**, exceto
+dois pontos, os dois de back-end.
+
+### O painel do Orçamento de Manutenção não abria nos modelos
+
+Os cards *Aguardando aprovação* e *Aguardando devolução* mostram uma linha
+por categoria que abre nos modelos daquela categoria. A tela veio inteira
+(`om-catrow`, `om-modrow`, o cursor que gira), mas o `/resumo` agrupava só
+por categoria e família: sem `modelos` no retorno, `mods.length` era zero e
+a linha nunca virava clicável. Nada quebrava, nada aparecia no log — a
+linha simplesmente não abria.
+
+O agrupamento por modelo voltou, com as duas conferências que faltavam:
+a soma dos modelos fecha com a da categoria, coluna por coluna.
+
+### A credencial dos Correios não passava pelo cofre
+
+`routers/correios.py` era a última integração lendo `os.environ` direto —
+e com `os.environ['CORREIOS_USUARIO']`, que estoura `KeyError` e vira 500
+sem explicação quando a variável falta. Agora passa por `core.cofre.obter`,
+como Automações, Notificador e EBS: cofre corporativo → cofre local
+cifrado → ambiente. Quem roda com as variáveis no `environment` não muda
+nada; quem já usa cofre para de guardar a senha dos Correios em arquivo.
+
+### O que foi conferido e estava certo
+
+- **Rotas**: as 194 de `producao` existem em `migracao` (que tem 354).
+  As quatro de `/campos` são do *outro* Orçamento Spare — ver acima.
+- **Colunas de modelo**: nenhuma perdida. As diferenças em `db/` são o
+  `UtcDateTime`, que é correção de `migracao`.
+- **Menu**: os 10 itens de `producao` estão nos 32 de `migracao`.
+  `gestao_ativos` e `reparos` viraram submenu; `bemvindo` continua sendo
+  a tela de entrada, só saiu da barra lateral.
+- **Colunas e rótulos de tela**: nenhum rótulo ou coluna de `producao`
+  ficou de fora.
+- **Módulos com permissão**: os 14 de `producao` estão nos 30.
+
+### O campo `CA_BUNDLE` que faltava no `Settings`
+
+`integracoes/http.py` lê `_cfg.CA_BUNDLE` para achar o PEM da CA
+corporativa, mas `config.Settings` não tinha esse campo. Com
+`VERIFY_SSL=true`, a leitura estourava `AttributeError` **antes de sair a
+primeira requisição** — ou seja, ligar a verificação do TLS pelo caminho
+oficial do projeto não era possível. O campo entrou lendo
+`PORTAL_CA_BUNDLE` (e, na falta dele, `REQUESTS_CA_BUNDLE`); vazio
+continua significando "use a CA padrão do sistema".
+
+### TLS de saída: o que foi visto e o que NÃO foi mexido
+
+Duas coisas, as duas iguais nas duas branches — não são regressão da
+migração, e por isso ficaram de fora desta conferência:
+
+1. **`integracoes/http.py` não tem nenhum chamador.** O ajudante de
+   sessão com TLS verificado veio da revisão de segurança, mas cada
+   integração continua montando a própria sessão. `sess.verify = False`
+   aparece em `routers/servicenow.py` (8×), `routers/auth.py` (2×),
+   `correios.py`, `automacoes.py` e `controle_orcamento_exec.py`.
+2. **`VERIFY_SSL` tem padrão `false`** em `config.py`, e
+   `scripts/verificar_seguranca.py` espera o contrário já na primeira
+   conferência — como ele sai no primeiro erro, **a suíte de segurança
+   inteira não roda desde então**. O padrão também vale para
+   `routers/indicadores.py` e `integracoes/ebs_service.py`, que leem
+   `VERIFY_SSL` direto.
+
+Virar o padrão é uma linha em `config.py`, mas muda o comportamento de
+saída do EBS e dos indicadores. Com proxy que intercepta o TLS isso só
+funciona com `PORTAL_CA_BUNDLE` apontando para um PEM com a CA
+corporativa — e `deploy/environment.modelo`, `deploy/install.sh` e
+`.env.example` hoje escrevem `VERIFY_SSL=false` explicitamente. **Não foi
+mexido**: é trabalho próprio, a combinar antes da virada de servidor.
+
 ## Como conferir
 
 ```bash
 python3 scripts/verificar_migracao.py        # o que não pode voltar
+python3 scripts/verificar_orcamento_manutencao.py   # o painel, inclusive por modelo
+python3 scripts/verificar_correios_credencial.py    # a credencial dos Correios
 python3 scripts/verificar_ebs_oracle.py      # a conexão com a base do EBS
 python3 scripts/verificar_seguranca.py       # as decisões de segurança
 python3 scripts/verificar_ui.py              # o padrão de design

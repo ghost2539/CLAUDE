@@ -104,6 +104,12 @@ class Settings:
     EBS_LOGIN_URL: str = _env("EBS_LOGIN_URL", "")
     EBS_SEARCH_URL: str = _env("EBS_SEARCH_URL", "")
     VERIFY_SSL: bool = _env("VERIFY_SSL", "false").lower() == "true"
+    # PEM com a CA corporativa, para quando o proxy intercepta o TLS: a cadeia
+    # apresentada é a dele, e sem esta CA a verificação falha em toda chamada.
+    # `integracoes/http.py` lê daqui — o campo faltava no Settings, e com
+    # VERIFY_SSL=true a leitura estourava AttributeError antes de sair a
+    # primeira requisição. Vazio = usar a CA padrão do sistema.
+    CA_BUNDLE: str = _env("PORTAL_CA_BUNDLE", _env("REQUESTS_CA_BUNDLE", ""))
     TIMEOUT: int = int(_env("TIMEOUT_SECONDS", "15"))
     MAX_WORKERS: int = int(_env("MAX_WORKERS", "40"))
     CREDENTIALS_DIRECTORY: str = _env("CREDENTIALS_DIRECTORY", "")

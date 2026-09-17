@@ -219,6 +219,86 @@ consumos = [m["consumo"] for m in resumo["modelos"]]
 checar(consumos == sorted(consumos, reverse=True),
        f"a lista vem do maior consumo para o menor ({consumos})")
 
+print("\n[7.1] Cards Aguardando aprovação e Aguardando devolução abrem nos modelos")
+# A tela monta uma linha por categoria que abre nos modelos daquela categoria
+# (om-catrow / om-modrow). Sem `modelos` no retorno, a linha não abre.
+# Os cards são um retrato de agora, sem filtro de ano, e as seções acima já
+# deixaram reparos na base — por isso a conferência é sobre a diferença.
+def _card(painel, chave, categoria, familia):
+    for g in painel[chave]:
+        if (g["categoria"], g["familia"]) == (categoria, familia):
+            return g
+    return {}
+
+_antes = om.resumo(_Req(), ano=2026, mes="2026-03")
+_apr0 = _card(_antes, "aguardando_aprovacao", "Coletor", "COLETOR")
+_dev0 = _card(_antes, "aguardando_devolucao", "Coletor", "COLETOR")
+_sled0 = _card(_antes, "aguardando_devolucao", "SLED", "SLED")
+
+with dbm.SessionLocal.begin() as s:
+    s.add_all([
+        R(rma="AP1", serie="HF550AA1", categoria="Coletor", familia="COLETOR",
+          modelo="HF550", orcamento=300, ano=2026, mes_referencia="2026-03",
+          status="AGUARDANDO_APROVACAO", status_retorno="EM_MANUTENCAO"),
+        R(rma="AP2", serie="HF550AA2", categoria="Coletor", familia="COLETOR",
+          modelo="HF550", orcamento=200, ano=2026, mes_referencia="2026-03",
+          status="AGUARDANDO_APROVACAO", status_retorno="EM_MANUTENCAO"),
+        R(rma="AP3", serie="EF500AA1", categoria="Coletor", familia="COLETOR",
+          modelo="EF500", orcamento=100, ano=2026, mes_referencia="2026-03",
+          status="AGUARDANDO_APROVACAO", status_retorno="EM_MANUTENCAO"),
+        R(rma="DV1", serie="RFR901A1", categoria="SLED", familia="SLED",
+          modelo="SLED RFR901", orcamento=0, ano=2026, mes_referencia="2026-03",
+          status="APROVADO", status_retorno="EM_MANUTENCAO"),
+    ])
+
+painel = om.resumo(_Req(), ano=2026, mes="2026-03")
+
+checar(all("modelos" in g for g in painel["aguardando_aprovacao"]),
+       "toda categoria de Aguardando aprovação traz a lista de modelos")
+cole = _card(painel, "aguardando_aprovacao", "Coletor", "COLETOR")
+checar(cole.get("qtde", 0) - _apr0.get("qtde", 0) == 3,
+       f"os três novos entram no Coletor ({_apr0.get('qtde', 0)} -> {cole.get('qtde')})")
+checar(abs((cole.get("valor", 0) - _apr0.get("valor", 0)) - 600.0) < 1e-6,
+       f"o valor da categoria acompanha ({cole.get('valor')})")
+mods_apr = {m["modelo"]: m for m in cole.get("modelos", [])}
+checar({"HF550", "EF500"} <= set(mods_apr),
+       f"os modelos da categoria aparecem ({sorted(mods_apr)})")
+checar(mods_apr.get("HF550", {}).get("qtde") == 2
+       and abs(mods_apr.get("HF550", {}).get("valor", 0) - 500.0) < 1e-6,
+       f"HF550 com qtde e valor próprios ({mods_apr.get('HF550')})")
+checar(sum(m["qtde"] for m in mods_apr.values()) == cole.get("qtde"),
+       "a soma dos modelos fecha com a qtde da categoria")
+checar(abs(sum(m["valor"] for m in mods_apr.values()) - cole.get("valor", 0)) < 1e-6,
+       "e a soma dos valores também fecha")
+qtds = [m["qtde"] for m in cole.get("modelos", [])]
+checar(qtds == sorted(qtds, reverse=True),
+       f"os modelos vêm do maior para o menor ({qtds})")
+
+checar(all(isinstance(g.get("modelos"), list) for g in painel["aguardando_devolucao"]),
+       "Aguardando devolução também traz a lista de modelos")
+dcole = _card(painel, "aguardando_devolucao", "Coletor", "COLETOR")
+checar(dcole.get("total", 0) - _dev0.get("total", 0) == 3
+       and dcole.get("ag_aprovacao", 0) - _dev0.get("ag_aprovacao", 0) == 3,
+       f"os três novos entram como aguardando aprovação ({dcole.get('total')})")
+mods_dev = {m["modelo"]: m for m in dcole.get("modelos", [])}
+checar(mods_dev.get("HF550", {}).get("ag_aprovacao") == 2,
+       f"o modelo repete as colunas da categoria ({mods_dev.get('HF550')})")
+checar(sum(m["total"] for m in mods_dev.values()) == dcole.get("total"),
+       "a soma dos modelos fecha com o total da categoria")
+for _col in ("ag_manutencao", "ag_orcamento", "ag_aprovacao", "reprovado"):
+    checar(sum(m[_col] for m in mods_dev.values()) == dcole.get(_col),
+           f"coluna {_col} fecha entre modelo e categoria")
+dsled = _card(painel, "aguardando_devolucao", "SLED", "SLED")
+checar(dsled.get("ag_manutencao", 0) - _sled0.get("ag_manutencao", 0) == 1,
+       f"APROVADO conta como aguardando manutenção ({dsled.get('ag_manutencao')})")
+
+# Limpa o que este bloco criou para não contaminar as seções seguintes.
+with dbm.SessionLocal.begin() as s:
+    for rma in ("AP1", "AP2", "AP3", "DV1"):
+        alvo = s.scalar(select(R).where(R.rma == rma))
+        if alvo is not None:
+            s.delete(alvo)
+
 print("\n[8] Recalcular preenche a base antiga")
 with dbm.SessionLocal.begin() as s:
     s.add(R(rma="ANTIGO", serie="SEMPREFIXO1", categoria="Coletor HF550X",
