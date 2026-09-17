@@ -197,13 +197,30 @@ if not GRAVAR:
     print(f"    python3 {Path(__file__).relative_to(RAIZ)} {DUMP} --gravar")
     sys.exit(0)
 
+# Tabela do dump que não existe no destino é PARADA, não aviso. Antes ela era
+# pulada em silêncio no meio da gravação: o script terminava dizendo "N linhas
+# gravadas", ninguém somava, e só semanas depois a tela aparecia vazia. Se o
+# esquema não bate, o certo é descobrir agora por quê.
+if faltando and GRAVAR:
+    print()
+    print("ERRO: não vou gravar com tabela faltando no destino.")
+    print("      O dump traz linhas para tabela(s) que este banco não tem, e")
+    print("      gravar assim perderia esses dados sem ninguém perceber:")
+    for t in faltando:
+        print(f"        - {t} ({len(por_tabela[t])} linha(s) no dump)")
+    print()
+    print("      Quase sempre é o portal que ainda não subiu com este banco:")
+    print("      suba uma vez (o create_all monta o esquema), pare, e rode de novo.")
+    print("      Se a tabela for de um MÓDULO, ela mora em outro arquivo .db —")
+    print("      esse dump não é o destino certo para ela.")
+    sys.exit(1)
+
 # ── Gravação ────────────────────────────────────────────────────────────
 print("\nGravando…")
 con.execute("PRAGMA foreign_keys=OFF")   # a ordem do dump não garante pai antes de filho
 total, falhas = 0, []
+gravadas: dict[str, int] = {}
 for t in sorted(por_tabela):
-    if t not in existentes:
-        continue
     ok = 0
     for cmd in por_tabela[t]:
         try:
@@ -214,14 +231,37 @@ for t in sorted(por_tabela):
                 falhas.append(f"{t}: {type(exc).__name__}: {exc} | {cmd[:160]}")
     con.commit()
     total += ok
+    gravadas[t] = ok
     print(f"  {t:28} {ok:>9} linha(s)")
 con.execute("PRAGMA foreign_keys=ON")
+
+# Conferência final: o que o dump trazia contra o que está no banco AGORA.
+# Ler de volta é o único jeito de saber; contar o que o INSERT devolveu não
+# prova nada se um gatilho ou uma chave repetida descartou a linha.
+print(f"\n{'tabela':28} {'no dump':>9} {'gravadas':>9} {'no banco':>9}  situação")
+divergentes = []
+for t in sorted(por_tabela):
+    no_dump = len(por_tabela[t])
+    agora = con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+    if gravadas[t] == no_dump:
+        situacao = "ok"
+    else:
+        situacao = f"FALTOU {no_dump - gravadas[t]}"
+        divergentes.append(t)
+    print(f"{t:28} {no_dump:>9} {gravadas[t]:>9} {agora:>9}  {situacao}")
+con.close()
 
 print(f"\n{total} linha(s) gravadas.")
 if falhas:
     print(f"\n{len(falhas)} falha(s) (mostrando as primeiras):")
     for f in falhas:
         print("  -", f)
+if divergentes:
+    print("\nNEM TUDO ENTROU. Tabela(s) com diferença: " + ", ".join(divergentes))
+    print("As falhas acima dizem o motivo linha a linha. Resolva antes de liberar")
+    print("a tela — um banco meio carregado é pior que um banco vazio, porque")
+    print("parece certo.")
     sys.exit(1)
 
-print("\nConfira as contagens contra o servidor de origem antes de liberar.")
+print("\nTudo que o dump trazia entrou. Confira as contagens contra o servidor")
+print("de origem antes de liberar.")
