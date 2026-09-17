@@ -43,6 +43,7 @@ from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -234,7 +235,7 @@ class Ativo(Base):
     encerrado: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     criado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
 
     __table_args__ = (
@@ -268,7 +269,7 @@ class Movimentacao(Base):
     detalhe: Mapped[str] = mapped_column(Text, default="")   # JSON livre do processo
 
     quando: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
 
     __table_args__ = (
         Index("ix_trl_mov_ativo_quando", "ativo_id", "quando"),
@@ -297,9 +298,9 @@ class Intervalo(Base):
     sessao: Mapped[int] = mapped_column(Integer, default=1)
 
     inicio: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     fim: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
 
     # Quem detinha a custódia. Vazio em FILA: fila não é de ninguém.
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
@@ -323,7 +324,7 @@ class Meta(Base):
     ativa: Mapped[bool] = mapped_column(Boolean, default=True)
     atualizado_por: Mapped[str] = mapped_column(String(80), default="")
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+        UtcDateTime(), default=utcnow, onupdate=utcnow)
 
 
 class Snapshot(Base):
@@ -344,7 +345,7 @@ class Snapshot(Base):
     fechados_media: Mapped[int] = mapped_column(Integer, default=0)
     fechados_p90: Mapped[int] = mapped_column(Integer, default=0)
     fechados_na_meta: Mapped[int] = mapped_column(Integer, default=0)
-    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    gerado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
 
     __table_args__ = (Index("ix_trl_snapshot_dia_estado", "dia", "estado", unique=True),)
 

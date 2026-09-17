@@ -33,6 +33,7 @@ from sqlalchemy import (
     String, Text, Integer, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -148,12 +149,12 @@ class Chamado(Base):
     # que já foi encerrado por lá.
     estado_sn: Mapped[str] = mapped_column(String(20), default="")
     lido_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     aberto_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     resolvido_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     __table_args__ = (
         Index("ix_atd_fila", "estado", "frente"),
@@ -172,7 +173,7 @@ class Movimentacao(Base):
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
     motivo: Mapped[str] = mapped_column(Text, default="")
     quando: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
 
 
 class Intervalo(Base):
@@ -186,9 +187,9 @@ class Intervalo(Base):
     tipo: Mapped[str] = mapped_column(String(12), default=FILA, index=True)
     sessao: Mapped[int] = mapped_column(Integer, default=1)
     inicio: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     fim: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
 
     __table_args__ = (
@@ -212,7 +213,7 @@ class Vinculo(Base):
     valor: Mapped[str] = mapped_column(String(120), index=True)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
     criado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
     __table_args__ = (
         Index("ix_atd_vinculo_unico", "chamado_id", "especie", "valor", unique=True),

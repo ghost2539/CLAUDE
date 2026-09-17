@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import String, Text, DateTime, create_engine, event
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -83,7 +84,7 @@ class Snapshot(Base):
 
     referencia: Mapped[str] = mapped_column(String(7), primary_key=True)  # "YYYY-MM"
     payload: Mapped[str] = mapped_column(Text, nullable=False)            # JSON
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     criado_por: Mapped[str] = mapped_column(String(120), default="")
 
     def to_dict(self) -> dict:
@@ -106,7 +107,7 @@ class Config(Base):
 
     chave: Mapped[str] = mapped_column(String(40), primary_key=True)  # "indicadores"
     payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
 

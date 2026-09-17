@@ -32,6 +32,7 @@ from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, Numeric, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -141,7 +142,7 @@ class Descaracterizacao(Base):
 
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
     quando: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
 
     __table_args__ = (
         Index("ix_dst_desc_serial_data", "serial", "quando"),
@@ -175,10 +176,10 @@ class Lote(Base):
 
     aberto_por: Mapped[str] = mapped_column(String(80), default="")
     aberto_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     concluido_por: Mapped[str] = mapped_column(String(80), default="")
     concluido_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
 
 class LoteItem(Base):
@@ -218,7 +219,7 @@ class Anexo(Base):
     tamanho: Mapped[int] = mapped_column(Integer, default=0)
     enviado_por: Mapped[str] = mapped_column(String(80), default="")
     enviado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
 
 class Config(Base):

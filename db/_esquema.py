@@ -65,3 +65,36 @@ def migrar_colunas(base, engine, modulo: str = "") -> list[str]:
             except Exception as exc:  # noqa: BLE001
                 _log.error("%s: não acrescentei %s.%s: %s", modulo, tabela.name, coluna.name, exc)
     return acrescentadas
+
+# ── Data e hora que não perde o fuso no caminho ──────────────────────────
+
+from sqlalchemy import DateTime as _DateTime  # noqa: E402
+from sqlalchemy.types import TypeDecorator as _TypeDecorator  # noqa: E402
+from datetime import timezone as _timezone  # noqa: E402
+
+
+class UtcDateTime(_TypeDecorator):
+    """DateTime que volta do banco SEMPRE com fuso, mesmo em SQLite.
+
+    O portal grava UTC. O Postgres devolve com fuso; o SQLite não guarda
+    fuso nenhum e devolve a data "pelada". Aí o `isoformat()` da API sai
+    sem o `+00:00`, e o navegador lê string sem fuso como hora LOCAL —
+    em Brasília a hora aparece 3 horas à frente, ou seja, no futuro.
+
+    O defeito não é do SQLite: é de deixar a informação se perder na volta.
+    Aqui ela é recolocada, e a data sai da API já dizendo que é UTC. Assim
+    o mesmo código serve aos dois bancos e a tela mostra a hora certa em
+    qualquer fuso, sem a tela precisar adivinhar nada.
+    """
+
+    impl = _DateTime
+    cache_ok = True
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("timezone", True)
+        super().__init__(*args, **kwargs)
+
+    def process_result_value(self, value, dialect):  # noqa: ANN001
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=_timezone.utc)
+        return value

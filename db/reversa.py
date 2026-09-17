@@ -24,6 +24,7 @@ from sqlalchemy import (
     String, Text, Integer, DateTime, Date, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -135,22 +136,22 @@ class Coleta(Base):
     # código, e é por ele que o portal acompanha nos Correios.
     codigo_rastreio: Mapped[str] = mapped_column(String(40), default="", index=True)
     postada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     ultimo_evento: Mapped[str] = mapped_column(Text, default="")
     ultimo_evento_em: Mapped[str] = mapped_column(String(40), default="")
     chegou_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     estado: Mapped[str] = mapped_column(String(30), default=AG_POSTAGEM, index=True)
     prazo_conferencia: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     aberta_por: Mapped[str] = mapped_column(String(80), index=True)
     aberta_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     conferida_por: Mapped[str] = mapped_column(String(80), default="")
     encerrada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     observacao: Mapped[str] = mapped_column(Text, default="")
 
     # Ligação com o núcleo. Vazio se a trilha estava fora do ar.
@@ -194,7 +195,7 @@ class Recebido(Base):
     origem: Mapped[str] = mapped_column(String(20), default=ORIGEM_CONFERENCIA)
     recebido_por: Mapped[str] = mapped_column(String(80), default="")
     recebido_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
     __table_args__ = (
         # Nome próprio: `serial` já tem ix_rev_recebido_serial do index=True.

@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -88,8 +89,8 @@ class Regra(Base):
     mensagem: Mapped[str] = mapped_column(Text, default="")
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     ordem: Mapped[int] = mapped_column(Integer, default=100)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
 
     def to_dict(self) -> dict:
         return {
@@ -104,7 +105,7 @@ class LogAutomacao(Base):
     __tablename__ = "automacao_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    executado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+    executado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
     origem: Mapped[str] = mapped_column(String(20), default="")   # agendador|botao|manual
     usuario: Mapped[str] = mapped_column(String(120), default="")
     number: Mapped[str] = mapped_column(String(40), default="")
@@ -131,7 +132,7 @@ class Config(Base):
     __tablename__ = "automacao_config"
     chave: Mapped[str] = mapped_column(String(40), primary_key=True)
     payload: Mapped[str] = mapped_column(Text, default="{}")
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
 
 
 _CFG_KEY = "automacoes"

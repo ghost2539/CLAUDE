@@ -21,6 +21,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import (
     Date, DateTime, ForeignKey, Integer, String, create_engine, event,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
@@ -108,7 +109,7 @@ class Agendamento(Base):
     # Não é preenchida à mão: entra só quando alguém confirma o recebimento.
     data_recebimento: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="AGENDADO", index=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
     recebido_por: Mapped[str] = mapped_column(String(80), default="")
 

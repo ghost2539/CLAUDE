@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import String, Text, Integer, DateTime, create_engine, event, select
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -75,7 +76,7 @@ class Liberacao(Base):
     nome: Mapped[str] = mapped_column(String(160), default="")
     nivel: Mapped[str] = mapped_column(String(10), default="view")
     criado_por: Mapped[str] = mapped_column(String(120), default="")
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
 
     def to_dict(self) -> dict:
         return {"login": self.login, "nome": self.nome, "nivel": self.nivel,
@@ -90,7 +91,7 @@ class Acesso(Base):
     ip: Mapped[str] = mapped_column(String(80), default="")
     acao: Mapped[str] = mapped_column(String(40), index=True)
     detalhe: Mapped[str] = mapped_column(String(400), default="")
-    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    quando: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, index=True)
 
 
 class Config(Base):

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import (
     String, Text, Integer, DateTime, create_engine, event, select, func,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -76,7 +77,7 @@ class Evento(Base):
     __tablename__ = "monitor_evento"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow, index=True)
+    quando: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow, index=True)
     severidade: Mapped[str] = mapped_column(String(12), default="erro", index=True)   # erro|alerta|ok
     origem: Mapped[str] = mapped_column(String(24), default="", index=True)           # api|integracao|automacao|servidor
     alvo: Mapped[str] = mapped_column(String(200), default="")                        # rota / serviço
@@ -101,7 +102,7 @@ class Config(Base):
 
     chave: Mapped[str] = mapped_column(String(40), primary_key=True)
     payload: Mapped[str] = mapped_column(Text, default="{}")
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
 
 
 CFG_ALERTAS = "alertas"

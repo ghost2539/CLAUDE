@@ -21,6 +21,7 @@ from typing import Any, Optional
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, Integer, String, Text, create_engine, event, func, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -77,8 +78,8 @@ class Execucao(Base):
     tipo: Mapped[str] = mapped_column(String(40))            # teste_abertura | consulta
     parametros: Mapped[str] = mapped_column(Text, default="{}")
     usuario: Mapped[str] = mapped_column(String(120), default="")
-    inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    fim: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    inicio: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    fim: Mapped[Optional[datetime]] = mapped_column(UtcDateTime(), nullable=True)
     situacao: Mapped[str] = mapped_column(String(20), default="rodando")  # rodando|ok|erro
     erro: Mapped[str] = mapped_column(Text, default="")
     log: Mapped[str] = mapped_column(Text, default="")
@@ -92,7 +93,7 @@ class Roteiro(Base):
     descricao: Mapped[str] = mapped_column(Text, default="")
     passos: Mapped[str] = mapped_column(Text, default="[]")
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
 
@@ -102,7 +103,7 @@ class Ativo(Base):
     criterio: Mapped[str] = mapped_column(String(120), index=True)
     livro: Mapped[str] = mapped_column(String(60), default="")
     dados: Mapped[str] = mapped_column(Text, default="{}")
-    coletado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    coletado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     execucao_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
 

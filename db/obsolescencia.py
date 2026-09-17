@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -120,7 +121,7 @@ class Coletor(Base):
     conformidade: Mapped[str] = mapped_column(String(60), default="")
 
     visto_relativo: Mapped[str] = mapped_column(String(30), default="")
-    visto_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    visto_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     dias_sem_ver: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
 
     tags: Mapped[str] = mapped_column(Text, default="")   # nomes reais, separados por |
@@ -128,7 +129,7 @@ class Coletor(Base):
     # Idade do ativo: só o EBS tem a data de compra. Quando não achar, fica
     # nulo e `idade_desconhecida` avisa — estimar pela inscrição mentiria,
     # porque coletor reinscrito após reparo "rejuvenesce".
-    data_aquisicao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    data_aquisicao: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     idade_anos: Mapped[float | None] = mapped_column(default=None)
     idade_desconhecida: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -137,8 +138,8 @@ class Coletor(Base):
 
     situacao: Mapped[str] = mapped_column(String(12), default=ATIVO, index=True)
     visto_na_coleta: Mapped[int | None] = mapped_column(Integer, default=None)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
 
 
 class Coleta(Base):
@@ -146,8 +147,8 @@ class Coleta(Base):
     __tablename__ = "obs_coleta"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow)
-    fim: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    inicio: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow)
+    fim: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     usuario: Mapped[str] = mapped_column(String(80), default="")
     # aberta | concluida | falhou
     situacao: Mapped[str] = mapped_column(String(12), default="aberta")
@@ -165,7 +166,7 @@ class Escrita(Base):
     __tablename__ = "obs_escrita"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=localnow, index=True)
+    quando: Mapped[datetime] = mapped_column(UtcDateTime(), default=localnow, index=True)
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
     ip: Mapped[str] = mapped_column(String(80), default="")
     acao: Mapped[str] = mapped_column(String(30), default="")     # tag_incluir|tag_remover|deletar

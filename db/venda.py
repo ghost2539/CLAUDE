@@ -23,6 +23,7 @@ from sqlalchemy import (
     String, Text, Integer, Float, Boolean, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -115,10 +116,10 @@ class Ciclo(Base):
     valor_total: Mapped[float] = mapped_column(Float, default=0.0)
 
     aberto_por: Mapped[str] = mapped_column(String(80), default="")
-    aberto_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    aberto_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     concluido_por: Mapped[str] = mapped_column(String(80), default="")
     concluido_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
 
 class Item(Base):
@@ -136,9 +137,9 @@ class Item(Base):
     # Quando o ativo entrou na fila de venda: é daqui que sai o tempo
     # parado esperando o ciclo.
     na_fila_desde: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     incluido_por: Mapped[str] = mapped_column(String(80), default="")
-    incluido_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    incluido_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     baixado: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     __table_args__ = (

@@ -33,6 +33,7 @@ from sqlalchemy import (
     String, Text, Integer, DateTime, Date, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -178,9 +179,9 @@ class Projeto(Base):
     estado: Mapped[str] = mapped_column(String(20), default=PLANEJAMENTO, index=True)
     aberto_por: Mapped[str] = mapped_column(String(80), index=True)
     aberto_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     encerrado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
 
 class ItemProjeto(Base):
@@ -201,7 +202,7 @@ class ItemProjeto(Base):
 
     estado: Mapped[str] = mapped_column(String(30), default=AG_DEFINICAO, index=True)
     prazo: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
     responsavel: Mapped[str] = mapped_column(String(80), default="")
     observacao: Mapped[str] = mapped_column(Text, default="")
 
@@ -210,9 +211,9 @@ class ItemProjeto(Base):
     trilha_ativo_id: Mapped[int | None] = mapped_column(Integer, default=None)
 
     criado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
     encerrado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     __table_args__ = (
         Index("ix_prj_item_fila", "estado", "projeto_id"),
@@ -236,12 +237,12 @@ class UnidadeProjeto(Base):
     # Uma unidade sai do projeto quando volta para a bancada; a linha
     # fica, com o motivo, para a conta de retrabalho do projeto.
     devolvida_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     devolvida_motivo: Mapped[str] = mapped_column(Text, default="")
 
     separada_por: Mapped[str] = mapped_column(String(80), default="")
     separada_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
     __table_args__ = (
         # Nome próprio: `serial` já ganhou ix_prj_unidade_serial do

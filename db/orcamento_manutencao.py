@@ -21,6 +21,7 @@ from sqlalchemy import (
     BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, Text,
     create_engine, event, select, text,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -201,19 +202,19 @@ class Reparo(Base):
     mes_referencia: Mapped[str | None] = mapped_column(String(7), nullable=True, index=True)
     ano_devolucao: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 8.3 — confirmação do retorno pelo portal.
-    devolvido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    devolvido_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     devolvido_por: Mapped[str] = mapped_column(String(80), default="")
     lote_prime: Mapped[str] = mapped_column(String(200), default="")
     po: Mapped[str] = mapped_column(String(40), default="")
     qtde: Mapped[int] = mapped_column(Integer, default=1)
     observacao: Mapped[str] = mapped_column(Text, default="")
 
-    ebs_consultado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ebs_consultado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     ebs_erro: Mapped[str] = mapped_column(String(200), default="")
 
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
     criado_por: Mapped[str] = mapped_column(String(80), default="")
     atualizado_por: Mapped[str] = mapped_column(String(80), default="")
@@ -253,7 +254,7 @@ class Configuracao(Base):
     chave: Mapped[str] = mapped_column(String(40), primary_key=True)
     valor: Mapped[str] = mapped_column(Text, default="{}")
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
     atualizado_por: Mapped[str] = mapped_column(String(80), default="")
 
@@ -267,7 +268,7 @@ class Importacao(Base):
     )
     arquivo: Mapped[str] = mapped_column(String(200), default="")
     usuario: Mapped[str] = mapped_column(String(80), default="")
-    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    quando: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     lidas: Mapped[int] = mapped_column(Integer, default=0)
     incluidas: Mapped[int] = mapped_column(Integer, default=0)
     atualizadas: Mapped[int] = mapped_column(Integer, default=0)

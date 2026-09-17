@@ -20,6 +20,7 @@ from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, Numeric, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -113,11 +114,11 @@ class Envio(Base):
     justificativa: Mapped[str] = mapped_column(Text, default="")
 
     enviado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
     previsao: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
     retornado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     resultado: Mapped[str] = mapped_column(String(20), default="")
     # Substituição gera equipamento novo: a trilha do antigo encerra e a
@@ -128,7 +129,7 @@ class Envio(Base):
 
     aberto_por: Mapped[str] = mapped_column(String(80), default="")
     aberto_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     encerrado: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     __table_args__ = (

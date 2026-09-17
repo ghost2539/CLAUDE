@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer, BigInteger, Numeric, ForeignKey, UniqueConstraint,
     Index, JSON, func, select, text,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
@@ -68,10 +69,10 @@ class User(Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     last_access: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     # Último perfil de acesso aplicado. É só rótulo: o que vale são as
     # linhas de `permissions`. Fica aqui para a tela poder dizer "Operador"
@@ -83,7 +84,7 @@ class User(Base):
     # escolha voltava ao padrão a cada estação. Vazio = segue o padrão.
     tema: Mapped[str] = mapped_column(String(10), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
 
 
@@ -123,10 +124,10 @@ class AccessProfile(Base):
     # {modulo: nivel} — os níveis de core/permissoes.py.
     niveis: Mapped[dict] = mapped_column(JSON, default=dict)
     criado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
     atualizado_por: Mapped[str] = mapped_column(String(80), default="")
 
@@ -140,7 +141,7 @@ class AccessLog(Base):
     ip: Mapped[str] = mapped_column(String(80), default="")
     detail: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True
+        UtcDateTime(), default=utcnow, index=True
     )
 
 
@@ -149,7 +150,7 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
     updated_by: Mapped[str] = mapped_column(String(80), default="system")
 
@@ -163,10 +164,10 @@ class Classification(Base):
     model: Mapped[str] = mapped_column(String(180))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
 
 
@@ -197,10 +198,10 @@ class Asset(Base):
     acquisition_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     source: Mapped[str] = mapped_column(String(30), default="EBS")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
 
 
@@ -230,11 +231,11 @@ class ReceiptCycle(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
     updated_by: Mapped[str] = mapped_column(String(80), default="")
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UtcDateTime(), default=utcnow, onupdate=utcnow
     )
     asset: Mapped[Asset] = relationship()
     location: Mapped[Optional[StorageLocation]] = relationship()
@@ -260,7 +261,7 @@ class Movement(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     username: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True
+        UtcDateTime(), default=utcnow, index=True
     )
 
 
@@ -278,7 +279,7 @@ class Lot(Base):
     prefix: Mapped[str] = mapped_column(String(30))
     created_by: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
 
 
@@ -302,7 +303,7 @@ class Repair(Base):
     repair_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
     created_by: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
 
 
@@ -319,7 +320,7 @@ class LocalAsset(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     load_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
 
 
@@ -336,10 +337,10 @@ class LoadHistory(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(80))
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UtcDateTime(), default=utcnow
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
 
 

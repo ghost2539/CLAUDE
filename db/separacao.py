@@ -22,6 +22,7 @@ from sqlalchemy import (
     String, Text, Integer, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -128,17 +129,17 @@ class Solicitacao(Base):
 
     estado: Mapped[str] = mapped_column(String(20), default=AG_SEPARACAO, index=True)
     prazo: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
 
     aberta_por: Mapped[str] = mapped_column(String(80), index=True)
     aberta_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     separada_por: Mapped[str] = mapped_column(String(80), default="")
     separada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     enviada_por: Mapped[str] = mapped_column(String(80), default="")
     enviada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
 
     __table_args__ = (
         Index("ix_sep_fila", "estado", "tipo_atendimento"),
@@ -175,7 +176,7 @@ class Unidade(Base):
 
     separada_por: Mapped[str] = mapped_column(String(80), default="")
     separada_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
     __table_args__ = (
         # Nome próprio: `serial` já tem índice automático chamado

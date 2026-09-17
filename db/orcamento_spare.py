@@ -22,6 +22,7 @@ from sqlalchemy import (
     BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text,
     create_engine, event, func, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
@@ -119,11 +120,11 @@ class Projeto(Base):
     aprovado_spare: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     observacao: Mapped[str] = mapped_column(Text, default="")
     ebs_sincronizado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+        UtcDateTime(), nullable=True)
     ordem: Mapped[int] = mapped_column(Integer, default=0)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+        UtcDateTime(), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
     itens: Mapped[list["Item"]] = relationship(
@@ -335,9 +336,9 @@ class Catalogo(Base):
     preco_acordo: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     fornecedor: Mapped[str] = mapped_column(String(160), default="")
     vencimento: Mapped[str] = mapped_column(String(10), default="")   # YYYY-MM-DD
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+        UtcDateTime(), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
     def to_dict(self) -> dict:

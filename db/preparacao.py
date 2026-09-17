@@ -23,6 +23,7 @@ from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -137,7 +138,7 @@ class Passagem(Base):
 
     usuario: Mapped[str] = mapped_column(String(80), default="", index=True)
     quando: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
 
     __table_args__ = (
         # Nome distinto do índice automático de `serial`, que já se chama
@@ -174,7 +175,7 @@ class Baseline(Base):
     descricao: Mapped[str] = mapped_column(Text, default="")
     vigente: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     criada_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
     criada_por: Mapped[str] = mapped_column(String(80), default="")
 
 

@@ -23,6 +23,7 @@ from sqlalchemy import (
     String, Text, Integer, DateTime, ForeignKey, Index,
     create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -114,12 +115,12 @@ class Ciclo(Base):
 
     aberto_por: Mapped[str] = mapped_column(String(80), index=True)
     aberto_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     contado_por: Mapped[str] = mapped_column(String(80), default="")
     iniciado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     encerrado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     observacao: Mapped[str] = mapped_column(Text, default="")
 
     trilha_ativo_id: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -159,7 +160,7 @@ class Contado(Base):
     situacao_sistema: Mapped[str] = mapped_column(String(200), default="")
     contado_por: Mapped[str] = mapped_column(String(80), default="")
     contado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow)
+        UtcDateTime(), default=utcnow)
 
     __table_args__ = (
         # Nome próprio: `serial` já tem ix_inv_contado_serial do index=True.

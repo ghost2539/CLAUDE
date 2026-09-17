@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     String, Text, Integer, DateTime, Index, create_engine, event, select,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 import config as _config_mod
@@ -147,7 +148,7 @@ class Divergencia(Base):
     estado: Mapped[str] = mapped_column(String(30), default=AG_TRATATIVA, index=True)
     responsavel: Mapped[str] = mapped_column(String(80), default="", index=True)
     prazo: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None, index=True)
+        UtcDateTime(), default=None, index=True)
 
     resolucao: Mapped[str] = mapped_column(String(30), default="")
     resolucao_detalhe: Mapped[str] = mapped_column(Text, default="")
@@ -155,11 +156,11 @@ class Divergencia(Base):
 
     aberta_por: Mapped[str] = mapped_column(String(80), index=True)
     aberta_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True)
+        UtcDateTime(), default=utcnow, index=True)
     assumida_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     encerrada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None)
+        UtcDateTime(), default=None)
     encerrada_por: Mapped[str] = mapped_column(String(80), default="")
 
     trilha_ativo_id: Mapped[int | None] = mapped_column(Integer, default=None)

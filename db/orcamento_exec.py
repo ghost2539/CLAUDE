@@ -29,6 +29,7 @@ from sqlalchemy import (
     UniqueConstraint, create_engine, event, func, select,
 )
 from sqlalchemy.engine import make_url
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config import get_settings
@@ -159,9 +160,9 @@ class BudgetProject(Base):
     locked: Mapped[bool] = mapped_column(Boolean, default=False)                  # se True, "Atualizar (EBS)" NÃO altera
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    synced_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
     updated_by: Mapped[str] = mapped_column(String(80), default="")
 
 
@@ -174,7 +175,7 @@ class BudgetCategory(Base):
     name: Mapped[str] = mapped_column(String(60), unique=True)
     color: Mapped[str] = mapped_column(String(9), default="#9ca3af")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
 
 
 class Acesso(Base):
@@ -187,7 +188,7 @@ class Acesso(Base):
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True
     )
-    quando: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    quando: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, index=True)
     usuario: Mapped[str] = mapped_column(String(120), default="", index=True)
     ip: Mapped[str] = mapped_column(String(80), default="")
     acao: Mapped[str] = mapped_column(String(40), default="")      # abrir | consultar | incluir | alterar | excluir | sincronizar | negado
@@ -213,7 +214,7 @@ class OpexOrcado(Base):
     pais: Mapped[str] = mapped_column(String(4), index=True)   # BR | AR | UY
     ano: Mapped[int] = mapped_column(Integer, index=True)
     valor: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
     def to_dict(self) -> dict:
@@ -245,8 +246,8 @@ class OpexItem(Base):
     orcado_meses: Mapped[str] = mapped_column(Text, default="{}")
     realizado_meses: Mapped[str] = mapped_column(Text, default="{}")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
     atualizado_por: Mapped[str] = mapped_column(String(120), default="")
 
     def to_dict(self) -> dict:
@@ -288,8 +289,8 @@ class BudgetPermissao(Base):
     nome: Mapped[str] = mapped_column(String(160), default="")
     nivel: Mapped[str] = mapped_column(String(10), default="view")   # view | edit | admin
     criado_por: Mapped[str] = mapped_column(String(120), default="")
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
 
     def to_dict(self) -> dict:
         return {

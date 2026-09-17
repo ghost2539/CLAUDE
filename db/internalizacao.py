@@ -23,6 +23,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import (
     Date, DateTime, ForeignKey, Integer, String, create_engine, event,
 )
+from db._esquema import UtcDateTime
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker,
 )
@@ -103,9 +104,9 @@ class Processo(Base):
     estoque_destino_rotulo: Mapped[str] = mapped_column(String(60), default="")
     data_recebimento: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDENTE", index=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     atualizado_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+        UtcDateTime(), nullable=True)
 
     ativos: Mapped[list["Ativo"]] = relationship(
         back_populates="processo", cascade="all, delete-orphan",
@@ -143,7 +144,7 @@ class Ativo(Base):
     descricao: Mapped[str] = mapped_column(String(200), default="")
     plaqueta: Mapped[str] = mapped_column(String(60), default="")
     numero_serie: Mapped[str] = mapped_column(String(80), default="")
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
 
     processo: Mapped["Processo"] = relationship(back_populates="ativos")
