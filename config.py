@@ -121,6 +121,9 @@ class Settings:
     WORKERS: int = int(_env("WORKERS", "1"))
 
     DEFAULT_HOURLY_RATE: float = float(_env("DEFAULT_VALOR_HORA", "150"))
+    # Admin geral: quem pode trocar o ícone e o nome do portal. Em branco,
+    # vale o INITIAL_ADMIN_LOGIN.
+    ADMIN_GERAL_LOGIN: str = _env("ADMIN_GERAL_LOGIN", "")
     INITIAL_ADMIN_LOGIN: str = _env("INITIAL_ADMIN_LOGIN", "")
     INITIAL_ADMIN_PASSWORD: str = _env("INITIAL_ADMIN_PASSWORD", "")
     UPLOAD_MAX_MB: int = int(_env("UPLOAD_MAX_MB", "50"))

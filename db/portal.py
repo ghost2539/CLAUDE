@@ -180,6 +180,14 @@ class ReceiptCycle(Base):
         ForeignKey("storage_locations.id"), nullable=True
     )
     lot_number: Mapped[str] = mapped_column(String(120), default="", index=True)
+    # Origem da entrada: devolução da loja (reversa) ou compra nova
+    # (fornecedor). Na compra o ativo ainda não existe no EBS, então PO e NF
+    # vêm digitadas e ficam no ciclo — é por elas que se acha o lote depois.
+    origem_entrada: Mapped[str] = mapped_column(
+        String(20), default="reversa", server_default="reversa", index=True
+    )
+    po: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    nf: Mapped[str] = mapped_column(String(60), default="", server_default="")
     open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(80))
@@ -301,6 +309,10 @@ class LoadHistory(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+
+    # Coluna nova em tabela que já existe: o create_all não a acrescenta.
+    from db._esquema import migrar_colunas
+    migrar_colunas(Base, engine, "portal")
 
     from sqlalchemy import inspect as sa_inspect, text as sa_text
     insp = sa_inspect(engine)

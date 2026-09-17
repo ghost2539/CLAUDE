@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from config import get_settings
 from core.prefixo import com_prefixo, prefixo
-from core.security import check_rate_limit
+from core.security import check_rate_limit, client_ip, get_session, require_permission
+
+import db.consulta_times as dbct
 from db.portal import SessionLocal
 from routers.helpers import apply_class, xlsx_response
 
@@ -53,6 +55,48 @@ class ConsultaIn(BaseModel):
 def _pagina(req=None) -> HTMLResponse:
     html = (_DIR / "index.html").read_text(encoding="utf-8")
     return HTMLResponse(com_prefixo(html, prefixo(req)))
+
+
+class LiberacaoIn(BaseModel):
+    login: str
+    nivel: str = "view"
+    nome: str = ""
+
+# ── Listas das telas do ServiceNow, editáveis por quem administra o espaço ──
+class ListasIn(BaseModel):
+    estoques: list[str] = []
+    corredores: list[str] = []
+
+
+def _exigir(req: Request, minimo: str) -> dict:
+    sd = get_session(req)
+    n = nivel_efetivo(sd)
+    if _NIVEL.get(n, 0) < _NIVEL[minimo]:
+        raise HTTPException(403, "Acesso não liberado à Consulta de Ativos.")
+    return sd
+
+
+# ── Nível efetivo ──────────────────────────────────────────────────
+def nivel_efetivo(sd: dict) -> str:
+    """Admin do portal → admin. Senão, a maior entre a liberação por login
+    e a permissão `consulta_times` do portal."""
+    if sd.get("is_admin"):
+        return "admin"
+    niveis = []
+    n = dbct.nivel_do_login(sd.get("username", ""))
+    if n:
+        niveis.append(n)
+    p = (sd.get("permission_map") or {}).get(MODULO, {})
+    if p.get("can_admin"):
+        niveis.append("admin")
+    elif p.get("can_edit") or p.get("can_create"):
+        niveis.append("edit")
+    elif p.get("can_view"):
+        niveis.append("view")
+    return max(niveis, key=lambda x: _NIVEL.get(x, 0)) if niveis else ""
+
+
+_NIVEL = {"view": 1, "edit": 2, "admin": 3}
 
 
 @router.get("/consulta-times", response_class=HTMLResponse)
@@ -190,3 +234,76 @@ async def parar_espelho() -> None:
     if _servidor_espelho is not None:
         _servidor_espelho.should_exit = True
         _servidor_espelho = None
+
+
+# ── Liberações (admin do módulo) ───────────────────────────────────
+@router.get("/api/consulta-times/eu")
+def eu(req: Request):
+    sd = get_session(req)
+    return {"nivel": nivel_efetivo(sd), "login": sd.get("username", "")}
+
+
+@router.get("/api/consulta-times/liberacoes")
+def liberacoes(req: Request):
+    _exigir(req, "admin")
+    return {"liberacoes": dbct.listar(), "niveis": list(dbct.NIVEIS)}
+
+
+@router.post("/api/consulta-times/liberacoes")
+def liberar(body: LiberacaoIn, req: Request):
+    sd = _exigir(req, "admin")
+    check_rate_limit(req)
+    try:
+        r = dbct.liberar(body.login, body.nivel, body.nome, sd.get("username", ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "liberar", f"{r['login']} → {r['nivel']}")
+    return r
+
+
+@router.delete("/api/consulta-times/liberacoes/{login}")
+def revogar(login: str, req: Request):
+    sd = _exigir(req, "admin")
+    if not dbct.revogar(login):
+        raise HTTPException(404, "Login não está na lista.")
+    dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "revogar", login)
+    return {"ok": True}
+
+
+@router.get("/api/consulta-times/gestao-ativos")
+def listas_ler(req: Request):
+    """Listas do espaço Times, do banco DELE — o portal não entra aqui."""
+    _exigir(req, "view")
+    return dbct.ler_listas()
+
+
+@router.put("/api/consulta-times/gestao-ativos")
+def listas_gravar(body: ListasIn, req: Request):
+    """Configuração exclusiva do espaço: gravar aqui não mexe no portal."""
+    sd = _exigir(req, "admin")
+    dbct.gravar_listas({"estoques": body.estoques, "corredores": body.corredores})
+    dbct.registrar_acesso(sd.get("username", ""), client_ip(req), "configurar", "listas do ServiceNow")
+    return listas_ler(req)
+
+
+@router.get("/api/consulta-times/stockrooms")
+def stockrooms(req: Request):
+    """Estoques do ServiceNow (alm_stockroom) para o espaço Times.
+
+    Os estoques do SPARE ficam de fora: são da nossa área, e este espaço é
+    dos outros times. O filtro é por nome, sem distinguir maiúsculas.
+    """
+    _exigir(req, "view")
+    from routers.servicenow import _sn_session_from_portal, _sn_query_all
+    sessao = _sn_session_from_portal(req)
+    linhas = _sn_query_all(sessao, "alm_stockroom", "", "name", page_size=500, max_records=5000)
+    nomes = sorted({(r.get("name") or "").strip() for r in linhas if (r.get("name") or "").strip()})
+    fora = [n for n in nomes if "spare" in n.lower()]
+    return {"estoques": [n for n in nomes if "spare" not in n.lower()],
+            "excluidos": len(fora), "total": len(nomes)}
+
+
+@router.get("/api/consulta-times/acessos")
+def acessos(req: Request, limit: int = 300):
+    _exigir(req, "admin")
+    return {"acessos": dbct.listar_acessos(max(1, min(limit, 1000)))}

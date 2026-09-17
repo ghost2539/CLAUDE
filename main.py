@@ -99,6 +99,15 @@ def create_app() -> FastAPI:
     app.include_router(identificacao_router)
     app.include_router(servicenow_router)
     app.include_router(correios_router)
+    # O espaço dos times ganhou banco próprio (liberações, listas de estoque
+    # e a trilha de acesso). Sem o init_db as tabelas não existem e a tela
+    # abre com erro em vez de vazia.
+    try:
+        import db.consulta_times as _db_ct
+        _db_ct.init_db()
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("consulta_times").error(
+            "Banco do Consulta Times NÃO iniciado: %s", exc, exc_info=True)
     app.include_router(consulta_times_router)
     app.include_router(encerramento_router)
 

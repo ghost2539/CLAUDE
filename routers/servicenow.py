@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 
@@ -689,6 +689,27 @@ def _upload_worker(job_id: str, assets_data: list[dict], params: dict):
 # ═══════════════════════════════════════════════════════════════════
 # ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════
+
+def config_gestao_ativos() -> dict:
+    from db.portal import SessionLocal as _Portal, Setting
+    with _Portal() as s:
+        row = s.get(Setting, "gestao_ativos")
+    cfg = dict(GESTAO_ATIVOS_PADRAO)
+    for k, v in ((row.value or {}) if row else {}).items():
+        if k in cfg and isinstance(v, list):
+            cfg[k] = [str(x).strip() for x in v if str(x).strip()]
+    return cfg
+
+
+# Listas que as telas de Entrada, Saída e Movimentação interna oferecem.
+# Vêm de Configuração → Configuração Módulos (chave gestao_ativos) e
+# valem na hora, sem reiniciar. Os padrões são os de sempre.
+GESTAO_ATIVOS_PADRAO = {
+    "estoques": ["SPARE - CD324", "SPARE-ADM15", "SPARE-CD504"],
+    "corredores": [],
+    "anotacoes": [],
+}
+
 
 @router.get("/recebimentos")
 def list_for_upload(
@@ -1942,3 +1963,239 @@ def refresh_tv_cache(req: Request):
     return {"ok": True, "data": cache_data}
 
 
+def marcar_recebidos_em_estoque(session, itens: list, stockroom: str = "",
+                                install_status: str = "", aisle_space: str = "",
+                                criar: bool = True, depreciacao: str = "") -> dict:
+    """Reflete no ServiceNow o que chegou fisicamente ao CD.
+
+    Quem já existe é ATUALIZADO com os dados do recebimento (modelo,
+    categoria, identificadores) e passa a estar em estoque, no CD, no
+    espaço e corredor informados. Quem não existe é CRIADO ali mesmo:
+    equipamento no CD que o ServiceNow não conhece é ativo invisível, e
+    esperar a Entrada de Estoque deixava a diferença aberta.
+
+    Nunca se cria ativo pela metade: **custo, data de aquisição e
+    depreciação são obrigatórios**, e o cálculo da depreciação roda logo
+    depois da escrita. Item sem esses dados não sobe — entra em `falhas`
+    dizendo o que falta, e o ativo continua fora do ServiceNow em vez de
+    entrar como registro incompleto.
+
+    Antes de criar, o ativo é procurado uma segunda vez, um a um: um
+    índice vazio (consulta em lote que falhou, campo lido errado) faria o
+    ativo existente virar duplicata, e duplicata em cadastro de
+    patrimônio dá trabalho para o resto da vida.
+
+    `aisle_space` é obrigatório: gravar "em estoque" sem dizer onde é o
+    que faz o inventário não fechar depois. A escrita usa a sessão de
+    quem está logado — no ServiceNow o registro sai no nome de quem
+    recebeu.
+    """
+    # `por_item` é o que a tela mostra: uma linha por série, dizendo o que
+    # o ServiceNow fez com ela. Contador agregado não responde "e o MEU
+    # coletor?", que é a pergunta que sempre aparece.
+    resumo = {"encontrados": 0, "atualizados": 0, "criados": 0,
+              "nao_encontrados": 0, "incompletos": 0, "depreciados": 0,
+              "sem_depreciacao": 0, "falhas": [], "por_item": []}
+    if not itens:
+        return resumo
+
+    stockroom = (stockroom or RECEBIMENTO_STOCKROOM_PADRAO).strip()
+    status = (install_status or RECEBIMENTO_STATUS_PADRAO).strip()
+    status = INSTALL_STATUS_MAP.get(status.lower(), status)
+    aisle = (aisle_space or "").strip()
+    if not aisle:
+        raise HTTPException(400, "Informe o Espaço e Corredor antes de subir ao ServiceNow.")
+
+    registros = _hardware_records(session, itens)
+    resumo["encontrados"] = len(registros)
+
+    _req, BS = _get_http()
+    cache: dict = {}
+    stockroom_id = _lookup_reference(session, "stockroom", stockroom, cache, BS)
+    if not stockroom_id:
+        # Sem o estoque resolvido não se escreve nada: gravar só o status
+        # deixaria o ativo "em estoque" sem dizer em qual, que é pior do
+        # que não mexer.
+        resumo["falhas"].append(
+            f"estoque '{stockroom}' não encontrado no ServiceNow")
+        return resumo
+
+    # Depreciação é obrigatória, então ela é resolvida antes: sem o plano
+    # no ServiceNow não há como subir ativo completo, e subir incompleto
+    # não é opção.
+    plano = (depreciacao or RECEBIMENTO_DEPRECIACAO_PADRAO).strip()
+    depreciation_id = _lookup_reference(session, "depreciation", plano, cache, BS)
+    if not depreciation_id:
+        resumo["falhas"].append(
+            f"plano de depreciação '{plano}' não encontrado no ServiceNow")
+        return resumo
+
+    # Índice do que já existe, por etiqueta e por série.
+    por_tag = {r["asset_tag"].upper(): r for r in registros if r.get("asset_tag")}
+    por_serie = {r["serial_number"].upper(): r for r in registros if r.get("serial_number")}
+
+    base = {"install_status": status, "stockroom": stockroom_id,
+            "aisle_space_location": aisle, "depreciation": depreciation_id,
+            "cost.currency_type": CURRENCY_MAP.get("BRL", "BRL")}
+
+    for item in itens:
+        tag = _campo_item(item, "etiqueta", "asset_tag", "tag_number")
+        serie = _campo_item(item, "serial", "serial_number", "numero_serie")
+        modelo = _campo_item(item, "modelo", "model")
+        categoria = _campo_item(item, "categoria", "category")
+        rotulo = tag or serie or "(sem identificador)"
+        linha = {"serial": serie, "etiqueta": tag, "acao": "", "motivo": "",
+                 "sys_id": "", "depreciacao": ""}
+        resumo["por_item"].append(linha)
+
+        custo = _campo_item(item, "custo", "custo_asset", "cost")
+        aquisicao = _campo_item(item, "dpis", "data_aquisicao", "acquisition_date",
+                                "purchase_date")
+
+        existente = por_tag.get(tag.upper()) if tag else None
+        if existente is None and serie:
+            existente = por_serie.get(serie.upper())
+        # Segunda busca, individual: o índice do lote pode ter vindo vazio.
+        if existente is None and (tag or serie):
+            existente = _registro_individual(session, tag, serie)
+            if existente is not None:
+                resumo["encontrados"] += 1
+
+        # Ativo incompleto não sobe. Vale para criar E para atualizar: o
+        # recebimento é o momento em que esses dados existem.
+        faltando = []
+        if not custo:
+            faltando.append("custo")
+        if not _parse_date(aquisicao):
+            faltando.append("data de aquisição (DPIS)")
+        if faltando:
+            resumo["incompletos"] += 1
+            linha["acao"] = "não subiu"
+            linha["motivo"] = f"falta {' e '.join(faltando)}"
+            resumo["falhas"].append(
+                f"{rotulo}: não subiu porque falta {' e '.join(faltando)}. "
+                "Custo e depreciação são obrigatórios.")
+            continue
+
+        # Modelo e categoria só entram quando o ServiceNow os reconhece:
+        # mandar texto livre num campo de referência apaga o valor atual.
+        dados = dict(base)
+        dados["cost"] = str(custo).replace(",", ".")
+        dados["purchase_date"] = _parse_date(aquisicao)
+        dados["depreciation_date"] = _parse_date_with_time(aquisicao)
+        if modelo:
+            mid = _lookup_reference(session, "model", modelo, cache, BS)
+            if mid:
+                dados["model"] = mid
+        if categoria:
+            cid = _lookup_reference(session, "model_category", categoria, cache, BS)
+            if cid:
+                dados["model_category"] = cid
+
+        try:
+            if existente is not None:
+                alteracao = dict(dados)
+                # Completa identificador que faltava no registro do SN.
+                if tag and not existente.get("asset_tag"):
+                    alteracao["asset_tag"] = tag
+                if serie and not existente.get("serial_number"):
+                    alteracao["serial_number"] = serie
+                if _sn_update(session, HARDWARE_TABLE, existente["sys_id"], alteracao):
+                    resumo["atualizados"] += 1
+                    linha["acao"] = "atualizado"
+                    linha["sys_id"] = existente["sys_id"]
+                    _depreciar(session, existente["sys_id"], BS, rotulo, resumo,
+                               tag, serie, linha)
+                else:
+                    linha["acao"] = "falhou"
+                    linha["motivo"] = "o ServiceNow não confirmou a atualização"
+                    resumo["falhas"].append(f"{rotulo}: o ServiceNow não confirmou a atualização")
+            elif criar:
+                if not (tag or serie):
+                    resumo["falhas"].append("item sem etiqueta e sem série não pode ser criado")
+                    continue
+                registro = dict(dados)
+                if tag:
+                    registro["asset_tag"] = tag
+                if serie:
+                    registro["serial_number"] = serie
+                ok, novo_sys_id, detalhe = _insert_record(session, registro)
+                if ok:
+                    resumo["criados"] += 1
+                    linha["acao"] = "criado"
+                    linha["sys_id"] = novo_sys_id
+                    _depreciar(session, novo_sys_id, BS, rotulo, resumo,
+                               tag, serie, linha)
+                else:
+                    linha["acao"] = "falhou"
+                    linha["motivo"] = detalhe
+                    resumo["falhas"].append(f"{rotulo}: falha ao criar — {detalhe}")
+            else:
+                resumo["nao_encontrados"] += 1
+                linha["acao"] = "não encontrado"
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — um item ruim não derruba o lote
+            linha["acao"] = "falhou"
+            linha["motivo"] = str(exc)[:200]
+            resumo["falhas"].append(f"{rotulo}: {exc}")
+
+    return resumo
+
+
+@router.get("/diagnostico/depreciacao")
+def diagnostico_depreciacao(req: Request, serie: str = "", etiqueta: str = ""):
+    """Por que a depreciação não foi calculada — sem executar nada.
+
+    Percorre o mesmo caminho do cálculo e para onde ele pararia, dizendo
+    em qual passo e por quê.
+    """
+    require_permission(req, "servicenow", "view")
+    serie = (serie or "").strip()
+    etiqueta = (etiqueta or "").strip()
+    # O que o servidor REALMENTE recebeu. Sem este eco, "informei a série"
+    # e "a série não chegou" viram discussão em vez de diagnóstico.
+    recebido = {"serie": serie, "etiqueta": etiqueta,
+                "url": str(getattr(req, "url", ""))}
+    if not serie and not etiqueta:
+        return {"encontrado": False, "informado": False, "recebido": recebido,
+                "motivo": "o servidor recebeu a consulta SEM série e SEM "
+                          "etiqueta. Se você informou, o dado se perdeu no "
+                          "caminho — use a tela em Status → Diagnóstico de "
+                          "ativo, que envia direto."}
+    session = _sn_session_from_portal(req)
+    _req, BS = _get_http()
+    achado = _registro_individual(session, etiqueta, serie)
+    if not achado or not achado.get("sys_id"):
+        return {"encontrado": False, "informado": True, "recebido": recebido,
+                "motivo": f"o ativo não foi encontrado no ServiceNow por "
+                          f"série \"{serie or '—'}\" / etiqueta \"{etiqueta or '—'}\" "
+                          "— sem ativo no cadastro não há o que depreciar."}
+    saida = _depreciacao_passos(session, achado["sys_id"], BS, executar=False)
+    saida["encontrado"] = True
+    saida["recebido"] = recebido
+    saida["asset_tag"] = achado.get("asset_tag", "")
+    saida["serial_number"] = achado.get("serial_number", "")
+    return saida
+
+
+@router.post("/entrada/planilha")
+async def entrada_planilha(req: Request, arquivo: UploadFile = File(...)):
+    """Recebe a planilha preenchida e devolve as linhas para conferência."""
+    require_permission(req, "servicenow", "view")
+    check_rate_limit(req)
+    conteudo = await arquivo.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(conteudo) > 10 * 1024 * 1024:
+        raise HTTPException(400, "Arquivo acima de 10 MB.")
+    rows = ler_planilha_entrada(arquivo.filename or "", conteudo)
+    session = _sn_session_from_portal(req)
+    _marcar_existe_sn(session, rows)
+    return {"rows": rows, "total": len(rows)}
+
+
+@router.get("/gestao-ativos/config")
+def gestao_ativos_config(req: Request):
+    require_permission(req, "servicenow", "view")
+    return config_gestao_ativos()

@@ -11,6 +11,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import get_settings
 
+# Nome do cookie de sessão, num lugar só. Os módulos que vieram da
+# linha de desenvolvimento e as verificações se referem a ele por este
+# nome; o valor é o mesmo que já estava escrito à mão aqui.
+COOKIE_SESSAO = "spare_session"
+
+
 _cfg = get_settings()
 
 # ── Session management ──────────────────────────────────────────
@@ -189,3 +195,23 @@ class MaxBodyMiddleware(BaseHTTPMiddleware):
                 status_code=413,
             )
         return await call_next(request)
+def admin_geral_login() -> str:
+    return (_cfg.ADMIN_GERAL_LOGIN or _cfg.INITIAL_ADMIN_LOGIN or "").strip().lower()
+
+
+def is_admin_geral(sd: dict | None) -> bool:
+    """Admin geral: o login configurado. Sem login configurado, qualquer admin."""
+    if not sd:
+        return False
+    alvo = admin_geral_login()
+    if not alvo:
+        return bool(sd.get("is_admin"))
+    return (sd.get("username") or "").strip().lower() == alvo
+
+def require_admin_geral(req: Request) -> dict:
+    sd = get_session(req)
+    if not is_admin_geral(sd):
+        raise HTTPException(403, "Somente o administrador geral pode alterar isto.")
+    return sd
+
+
