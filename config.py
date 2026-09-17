@@ -384,12 +384,20 @@ class Settings:
         "venda": ("view", "edit", "admin"),
     }
 
-    MODULES: list[str] = [
-        "bemvindo", "consulta", "recebimento", "reparos", "status", "parametros",
-        "identificacao", "servicenow", "rastreio", "orcamento",
-        "orcamento_spare", "ebs_forms", "automacoes", "orcamento_manutencao",
-        "agendamentos_forn", "internalizacao"
-    ]
+    # Os módulos que podem receber permissão. Sai de MODULE_ACTIONS, que é
+    # onde se declara o que cada um oferece — a lista escrita à mão ficou
+    # para trás quando os módulos novos chegaram, e o resultado era pior que
+    # um erro: a tela oferecia torre, atendimento, separação e mais onze,
+    # o admin marcava, e a gravação descartava em silêncio. Ninguém
+    # descobre isso olhando a tela; descobre quando a pessoa liberada diz
+    # que não vê o menu.
+    #
+    # `property` porque MODULE_ACTIONS é atributo de classe declarado
+    # depois; a ordem segue a de lá, que é a ordem em que os módulos
+    # aparecem no portal.
+    @property
+    def MODULES(self) -> list[str]:  # noqa: N802
+        return list(self.MODULE_ACTIONS)
     # ── Bancos dos módulos que vieram da linha de desenvolvimento ──────
     # Um banco por módulo, isolado: erro num não contamina outro. O padrão
     # é um arquivo em data/db/ e só se declara para mudar de lugar.

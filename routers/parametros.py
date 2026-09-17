@@ -20,10 +20,11 @@ from config import get_settings
 from db.portal import (
     SessionLocal, Setting, Classification, StorageLocation,
     User, Permission, LotSequence, LocalAsset, LoadHistory,
-    AccessLog, hash_password,
+    AccessLog, AccessProfile, hash_password,
 )
 from core.security import (get_session, require_permission, client_ip,
                           check_rate_limit, is_admin_geral, require_admin_geral)
+import core.permissoes as _perm
 from routers.helpers import reapply_classification, reclassify_all
 
 _cfg = get_settings()
@@ -535,10 +536,24 @@ def permissions_list(req: Request):
                     else [m for m, v in pmap.items() if v.get("can_view")]
                 ),
                 "permission_map": pmap,
+                "niveis": _perm.niveis_do_mapa(pmap),
+                "perfil": u.perfil or "",
             })
         ac_row = s.get(Setting, "access_control")
         block_external = (ac_row.value if ac_row else {}).get("block_external", False)
-        return {"usuarios": out, "modules": MODULES, "block_external": block_external}
+        perfis = [
+            {"id": x.id, "nome": x.nome, "descricao": x.descricao,
+             "niveis": x.niveis or {}}
+            for x in s.scalars(select(AccessProfile).order_by(AccessProfile.nome)).all()
+        ]
+        return {
+            "usuarios": out, "modules": MODULES, "block_external": block_external,
+            # O vocabulário vem do servidor: a tela não deve ter a própria
+            # cópia da regra, senão as duas divergem e o que está escrito na
+            # tela deixa de ser o que foi gravado.
+            "niveis": [{"chave": n, "rotulo": _perm.ROTULOS[n]} for n in _perm.NIVEIS],
+            "perfis": perfis,
+        }
 
 
 @router.put("/permissoes/{login}")
@@ -559,6 +574,13 @@ def permissions_set(login: str, payload: dict, req: Request):
 
         requested = payload.get("permission_map") or {}
         legacy = payload.get("permissions") or []
+        # A tela nova manda nível por módulo; a tradução é do servidor, para
+        # não existirem duas versões da regra. `permission_map` continua
+        # aceito: chamada antiga não pode parar de funcionar por causa disto.
+        if payload.get("niveis"):
+            requested = _perm.mapa_de_niveis(payload["niveis"])
+        if "perfil" in payload:
+            u.perfil = str(payload.get("perfil") or "")[:60]
 
         # Clear existing permissions for this user
         existing = s.scalars(
@@ -599,6 +621,146 @@ def permissions_set(login: str, payload: dict, req: Request):
         ))
 
     return {"ok": True}
+
+
+# ── Perfis de acesso ──────────────────────────────────────────────
+#
+# Liberar alguém exigia percorrer trinta módulos. Com o perfil, escolhe-se
+# um e os trinta são preenchidos de uma vez; depois se ajusta a exceção.
+#
+# O perfil é MODELO, não vínculo: aplicar copia os níveis para as linhas de
+# permissão e acaba ali. Mudar um perfil depois NÃO altera quem já foi
+# liberado — de propósito, porque o contrário mudaria em silêncio o acesso
+# de gente que ninguém tocou, e a tela de permissões deixaria de dizer a
+# verdade sobre o usuário que está aberto.
+
+
+def _perfil_dict(x: AccessProfile) -> dict:
+    return {"id": x.id, "nome": x.nome, "descricao": x.descricao,
+            "niveis": x.niveis or {},
+            "atualizado_em": x.atualizado_em.isoformat() if x.atualizado_em else "",
+            "atualizado_por": x.atualizado_por or ""}
+
+
+def _niveis_validos(bruto: dict) -> dict:
+    """Só módulo que existe e nível que existe. O resto é descartado.
+
+    Vale a pena descartar em silêncio: perfil gravado com módulo que foi
+    removido do portal não é erro de quem está usando a tela, e recusar o
+    salvamento inteiro por causa disso travaria a edição sem motivo.
+    """
+    saida = {}
+    for modulo, nivel in (bruto or {}).items():
+        m, n = str(modulo), str(nivel).strip().lower()
+        if m in MODULES and n in _perm.NIVEIS and n != "nenhum":
+            saida[m] = n
+    return saida
+
+
+@router.get("/perfis")
+def perfis_listar(req: Request):
+    require_permission(req, "parametros", "admin")
+    with SessionLocal() as s:
+        return {"perfis": [_perfil_dict(x) for x in
+                           s.scalars(select(AccessProfile).order_by(AccessProfile.nome)).all()],
+                "modules": MODULES,
+                "niveis": [{"chave": n, "rotulo": _perm.ROTULOS[n]} for n in _perm.NIVEIS]}
+
+
+@router.post("/perfis")
+def perfil_criar(body: dict, req: Request):
+    sd = require_permission(req, "parametros", "admin")
+    nome = str((body or {}).get("nome") or "").strip()[:60]
+    if len(nome) < 2:
+        raise HTTPException(422, "Informe um nome com pelo menos 2 caracteres.")
+    with SessionLocal.begin() as s:
+        if s.scalar(select(AccessProfile).where(func.lower(AccessProfile.nome) == nome.lower())):
+            raise HTTPException(409, f"Já existe um perfil chamado '{nome}'.")
+        x = AccessProfile(
+            nome=nome, descricao=str((body or {}).get("descricao") or "")[:240],
+            niveis=_niveis_validos((body or {}).get("niveis")),
+            atualizado_por=sd["username"])
+        s.add(x)
+        s.flush()
+        return {"ok": True, "perfil": _perfil_dict(x)}
+
+
+@router.put("/perfis/{perfil_id}")
+def perfil_editar(perfil_id: int, body: dict, req: Request):
+    sd = require_permission(req, "parametros", "admin")
+    with SessionLocal.begin() as s:
+        x = s.get(AccessProfile, perfil_id)
+        if not x:
+            raise HTTPException(404, "Perfil não encontrado.")
+        if "nome" in (body or {}):
+            nome = str(body.get("nome") or "").strip()[:60]
+            if len(nome) < 2:
+                raise HTTPException(422, "Informe um nome com pelo menos 2 caracteres.")
+            outro = s.scalar(select(AccessProfile).where(
+                func.lower(AccessProfile.nome) == nome.lower(), AccessProfile.id != x.id))
+            if outro:
+                raise HTTPException(409, f"Já existe um perfil chamado '{nome}'.")
+            x.nome = nome
+        if "descricao" in (body or {}):
+            x.descricao = str(body.get("descricao") or "")[:240]
+        if "niveis" in (body or {}):
+            x.niveis = _niveis_validos(body.get("niveis"))
+        x.atualizado_por = sd["username"]
+        s.flush()
+        return {"ok": True, "perfil": _perfil_dict(x)}
+
+
+@router.delete("/perfis/{perfil_id}")
+def perfil_remover(perfil_id: int, req: Request):
+    require_permission(req, "parametros", "admin")
+    with SessionLocal.begin() as s:
+        x = s.get(AccessProfile, perfil_id)
+        if not x:
+            raise HTTPException(404, "Perfil não encontrado.")
+        s.delete(x)
+    # Ninguém perde acesso: o perfil é modelo, e o que vale são as linhas de
+    # permissão que já foram gravadas em cada usuário.
+    return {"ok": True}
+
+
+@router.post("/perfis/{perfil_id}/aplicar")
+def perfil_aplicar(perfil_id: int, body: dict, req: Request):
+    """Grava os níveis do perfil nas permissões dos usuários informados."""
+    sd = require_permission(req, "parametros", "admin")
+    check_rate_limit(req)
+    logins = [str(x).strip() for x in ((body or {}).get("logins") or []) if str(x).strip()]
+    if not logins:
+        raise HTTPException(422, "Informe ao menos um usuário.")
+    aplicados, ignorados = [], []
+    with SessionLocal.begin() as s:
+        perfil = s.get(AccessProfile, perfil_id)
+        if not perfil:
+            raise HTTPException(404, "Perfil não encontrado.")
+        mapa = _perm.mapa_de_niveis(perfil.niveis or {})
+        for login in logins:
+            u = s.scalar(select(User).where(func.lower(User.login) == login.lower()))
+            if not u:
+                ignorados.append(login)
+                continue
+            # Admin geral não recebe perfil: ele já pode tudo, e gravar
+            # linhas de permissão para ele daria a impressão de que o perfil
+            # é o que manda no acesso dele.
+            if u.is_admin:
+                ignorados.append(login)
+                continue
+            for antiga in s.scalars(select(Permission).where(Permission.user_id == u.id)).all():
+                s.delete(antiga)
+            s.flush()
+            for m, flags in mapa.items():
+                s.add(Permission(user_id=u.id, module=m, **flags))
+            u.perfil = perfil.nome
+            aplicados.append(u.login)
+        s.add(AccessLog(
+            login=sd["username"], auth_source=sd.get("auth_source", "LOCAL"),
+            success=True, ip=client_ip(req),
+            detail=f"Perfil '{perfil.nome}' aplicado a: {', '.join(aplicados) or 'ninguém'}"[:500]))
+    return {"ok": True, "aplicados": aplicados, "ignorados": ignorados,
+            "modulos": len(mapa)}
 
 
 # ── Access control ────────────────────────────────────────────────

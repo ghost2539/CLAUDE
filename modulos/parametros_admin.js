@@ -1438,7 +1438,10 @@ async function renderPermissions(c, S) {
                 '<button id="pm-save-ac" class="btn btn-sm btn-primary mt-2">Salvar</button>' +
             '</div>' +
         '</div>' +
-        '<button id="pm-user-add" class="btn btn-primary mb-3">Novo usuário</button>' +
+        '<div class="btn-row mb-3">' +
+            '<button id="pm-user-add" class="btn btn-primary">Novo usuário</button>' +
+            '<button id="pm-perfis" class="btn btn-secondary">Perfis de acesso</button>' +
+        '</div>' +
         '<div id="pm-users"></div>';
 
     var MODULES = ['bemvindo', 'consulta', 'recebimento', 'identificacao',
@@ -1475,7 +1478,13 @@ async function renderPermissions(c, S) {
         // A chave segue 'automacoes' (a permissão já existe nos usuários);
         // só o nome no menu mudou. "Visualizar" abre a tela e deixa mexer nas
         // regras; "Administrar" é quem configura a rotina.
-        automacoes: 'ServiceNow'
+        automacoes: 'ServiceNow',
+        // Módulos que existiam em MODULE_ACTIONS mas nunca chegaram aqui:
+        // sem rótulo, a grade mostrava a chave crua e ninguém sabia o que
+        // estava liberando.
+        agendamentos_forn: 'Agendamento de Fornecedores',
+        internalizacao: 'Internalização',
+        venda: 'Venda'
     };
     var ACTIONS = ['can_view', 'can_create', 'can_edit', 'can_export', 'can_admin'];
     var ACTION_LABELS = ['Visualizar', 'Criar', 'Editar', 'Exportar', 'Administrar'];
@@ -1483,6 +1492,39 @@ async function renderPermissions(c, S) {
     // a grade só oferece essas. O que não existe aparece como "—".
     var modulosServidor = null;
     var acoesPorModulo = {};
+    // Vocabulário e perfis vêm do servidor. A tela não guarda a própria
+    // cópia da regra: duas cópias divergem, e divergir aqui significa a tela
+    // dizer um acesso e o banco guardar outro.
+    var niveisVocab = [];
+    var perfis = [];
+
+    function selectDeNivel(modulo, atual) {
+        return '<select class="form-control perm-nivel" data-module="' + S.esc(modulo) + '">' +
+            niveisVocab.map(function (n) {
+                return '<option value="' + S.esc(n.chave) + '"' +
+                    (n.chave === atual ? ' selected' : '') + '>' + S.esc(n.rotulo) + '</option>';
+            }).join('') + '</select>';
+    }
+
+    // Tabela módulo × nível, usada tanto no usuário quanto no perfil.
+    function gradeDeNiveis(niveis, idCorpo) {
+        return '<div class="table-wrapper mt-3"><table class="data-table">' +
+            '<thead><tr><th>Módulo</th><th style="width:220px">Nível de acesso</th></tr></thead>' +
+            '<tbody id="' + idCorpo + '">' +
+            (modulosServidor || MODULES).map(function (m) {
+                return '<tr><td><strong>' + S.esc(MODULE_LABELS[m] || m) + '</strong></td>' +
+                    '<td>' + selectDeNivel(m, (niveis || {})[m] || 'nenhum') + '</td></tr>';
+            }).join('') +
+            '</tbody></table></div>';
+    }
+
+    function lerNiveis(escopo) {
+        var saida = {};
+        escopo.querySelectorAll('.perm-nivel').forEach(function (sel) {
+            if (sel.value && sel.value !== 'nenhum') saida[sel.dataset.module] = sel.value;
+        });
+        return saida;
+    }
 
     function acoesDe(m) {
         var lista = acoesPorModulo[m];
@@ -1493,6 +1535,8 @@ async function renderPermissions(c, S) {
         var d = await S.api('/parametros/permissoes');
         if (d.modules && d.modules.length) modulosServidor = d.modules;
         acoesPorModulo = d.module_actions || {};
+        niveisVocab = d.niveis || [];
+        perfis = d.perfis || [];
         document.getElementById('pm-block-external').checked = !!d.block_external;
         var cols = [
             { key: 'username',      label: 'Login' },
@@ -1507,6 +1551,9 @@ async function renderPermissions(c, S) {
             { key: 'is_admin',      label: 'Admin', html: true, render: function (v) {
                 return v ? '<span class="badge badge-info">Sim</span>' : '—';
             }},
+            // Quem revisa quer saber "este é igual ao resto do time?" sem
+            // abrir e ler trinta níveis.
+            { key: 'perfil',        label: 'Perfil', render: function (v) { return v || '—'; } },
             { key: 'last_access',   label: 'Último acesso', render: function (v) {
                 if (!v) return '—';
                 try { return new Date(v).toLocaleString('pt-BR'); } catch (_) { return v; }
@@ -1568,58 +1615,224 @@ async function renderPermissions(c, S) {
                     '</label>' +
                 '</div>' +
             '</div>' +
-            '<div class="table-wrapper mt-3">' +
-                '<table class="data-table">' +
-                    '<thead><tr>' +
-                        '<th>Módulo</th>' +
-                        ACTION_LABELS.map(function (l) { return '<th>' + l + '</th>'; }).join('') +
-                    '</tr></thead>' +
-                    '<tbody id="perm-body"></tbody>' +
-                '</table>' +
-            '</div>';
+            // Atalho que resolve o caso comum: o novo é igual ao colega.
+            // Escolher o perfil preenche os trinta seletores de uma vez e
+            // deixa ajustar a exceção antes de salvar.
+            '<div class="filter-grid mt-3">' +
+                '<div class="form-group"><label for="perm-perfil">Partir de um perfil</label>' +
+                    '<select id="perm-perfil" class="form-control">' +
+                        '<option value="">— escolher —</option>' +
+                        perfis.map(function (x) {
+                            return '<option value="' + S.esc(String(x.id)) + '">' + S.esc(x.nome) + '</option>';
+                        }).join('') +
+                    '</select></div>' +
+                '<div class="form-group"><label for="perm-tudo">Aplicar a todos os módulos</label>' +
+                    '<select id="perm-tudo" class="form-control">' +
+                        '<option value="">— escolher —</option>' +
+                        niveisVocab.map(function (n) {
+                            return '<option value="' + S.esc(n.chave) + '">' + S.esc(n.rotulo) + '</option>';
+                        }).join('') +
+                    '</select></div>' +
+            '</div>' +
+            '<p class="text-muted mb-0">' +
+                (u.perfil ? 'Perfil aplicado: <strong>' + S.esc(u.perfil) + '</strong>. ' : '') +
+                'O perfil é ponto de partida: o que vale é o que está na tabela abaixo ' +
+                'quando você salvar.</p>' +
+            '<div id="perm-aviso-admin"></div>' +
+            gradeDeNiveis(u.niveis || {}, 'perm-body');
 
-        var tbody = box.querySelector('#perm-body');
-        var permMap = u.permission_map || {};
+        // Admin total já pode tudo; mostrar a tabela como se ela decidisse
+        // alguma coisa faria a tela mentir.
+        function refletirAdmin() {
+            var adm = box.querySelector('#perm-admin').checked;
+            box.querySelector('#perm-aviso-admin').innerHTML = adm
+                ? '<div class="alert alert-info mt-2">Administrador total tem acesso a tudo. ' +
+                  'Os níveis abaixo ficam guardados, mas não limitam esse usuário.</div>'
+                : '';
+            box.querySelectorAll('.perm-nivel').forEach(function (s2) { s2.disabled = adm; });
+        }
+        box.querySelector('#perm-admin').onchange = refletirAdmin;
+        refletirAdmin();
 
-        (modulosServidor || MODULES).forEach(function (m) {
-            var perms = permMap[m] || {};
-            var existentes = acoesDe(m);
-            var tr = S.el('tr');
-            tr.innerHTML = '<td><strong>' + S.esc(MODULE_LABELS[m] || m) + '</strong></td>' +
-                ACTIONS.map(function (k) {
-                    if (existentes.indexOf(k) === -1) {
-                        return '<td class="text-muted" title="Esta ação não existe neste módulo">—</td>';
-                    }
-                    return '<td><input class="perm-check" data-module="' + S.esc(m) +
-                        '" data-key="' + k + '" type="checkbox" ' +
-                        (perms[k] ? 'checked' : '') + '></td>';
-                }).join('');
-            tbody.appendChild(tr);
-        });
+        box.querySelector('#perm-perfil').onchange = function () {
+            var escolhido = perfis.filter(function (x) { return String(x.id) === this.value; }, this)[0];
+            if (!escolhido) return;
+            var niveis = escolhido.niveis || {};
+            box.querySelectorAll('.perm-nivel').forEach(function (sel) {
+                sel.value = niveis[sel.dataset.module] || 'nenhum';
+            });
+            S.toast('Perfil "' + escolhido.nome + '" carregado. Revise e salve.', 'info');
+        };
+
+        box.querySelector('#perm-tudo').onchange = function () {
+            if (!this.value) return;
+            var v = this.value;
+            box.querySelectorAll('.perm-nivel').forEach(function (sel) { sel.value = v; });
+            this.value = '';
+        };
 
         var saveBtn = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar permissões' });
         saveBtn.onclick = async function () {
-            var map = {};
-            box.querySelectorAll('.perm-check').forEach(function (ch) {
-                var mod = ch.dataset.module;
-                if (!map[mod]) map[mod] = {};
-                map[mod][ch.dataset.key] = ch.checked;
-            });
-            await S.api('/parametros/permissoes/' + encodeURIComponent(u.username), {
-                method: 'PUT',
-                body: {
-                    active:         box.querySelector('#perm-active').checked,
-                    allowed:        box.querySelector('#perm-allowed').checked,
-                    is_admin:       box.querySelector('#perm-admin').checked,
-                    permission_map: map
-                }
-            });
-            S.closeModal();
-            S.toast('Permissões atualizadas.', 'success');
-            load();
+            var sel = box.querySelector('#perm-perfil');
+            var nome = sel.value
+                ? (perfis.filter(function (x) { return String(x.id) === sel.value; })[0] || {}).nome
+                : u.perfil;
+            try {
+                await S.api('/parametros/permissoes/' + encodeURIComponent(u.username), {
+                    method: 'PUT',
+                    body: {
+                        active:   box.querySelector('#perm-active').checked,
+                        allowed:  box.querySelector('#perm-allowed').checked,
+                        is_admin: box.querySelector('#perm-admin').checked,
+                        niveis:   lerNiveis(box),
+                        perfil:   nome || ''
+                    }
+                });
+                S.closeModal();
+                S.toast('Permissões atualizadas.', 'success');
+                load();
+            } catch (e) {
+                S.toast(e.message || 'Falha ao salvar.', 'error');
+            }
         };
         S.openModal('Permissões de ' + u.username, box, [saveBtn]);
     }
+
+    // ── Perfis ─────────────────────────────────────────────────────────
+    function abrirPerfis() {
+        var box = S.el('div');
+        function desenhar() {
+            box.innerHTML = '';
+            var topo = S.el('div', { className: 'btn-row mb-3' });
+            var novo = S.el('button', { className: 'btn btn-primary', textContent: 'Novo perfil' });
+            novo.onclick = function () { editarPerfil(null); };
+            topo.appendChild(novo);
+            box.appendChild(topo);
+            if (!perfis.length) {
+                box.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhum perfil ainda. Crie um com os níveis do time e ' +
+                                 'depois libere as pessoas em um clique.' }));
+                return;
+            }
+            box.appendChild(S.table([
+                { key: 'nome', label: 'Perfil' },
+                { key: 'descricao', label: 'Descrição', render: function (v) { return v || '—'; } },
+                { key: 'niveis', label: 'Módulos', render: function (v) {
+                    return String(Object.keys(v || {}).length);
+                } },
+                { key: 'a', label: '', render: function (_, x) {
+                    var w = S.el('div', { style: 'display:flex;gap:6px' });
+                    var e1 = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Editar' });
+                    e1.onclick = function () { editarPerfil(x); };
+                    var e2 = S.el('button', { className: 'btn btn-sm btn-outline', textContent: 'Aplicar' });
+                    e2.onclick = function () { aplicarPerfil(x); };
+                    var e3 = S.el('button', { className: 'btn btn-sm btn-outline-danger', textContent: 'Excluir' });
+                    e3.onclick = async function () {
+                        if (!confirm('Excluir o perfil "' + x.nome + '"?\n\n' +
+                                     'Quem já foi liberado com ele NÃO perde acesso: ' +
+                                     'o perfil é modelo, e as permissões já estão gravadas ' +
+                                     'em cada usuário.')) return;
+                        try {
+                            await S.api('/parametros/perfis/' + x.id, { method: 'DELETE' });
+                            S.toast('Perfil excluído.', 'success');
+                            await load(); desenhar();
+                        } catch (e) { S.toast(e.message, 'error'); }
+                    };
+                    w.appendChild(e1); w.appendChild(e2); w.appendChild(e3);
+                    return w;
+                } }
+            ], perfis));
+        }
+        desenhar();
+        S.openModal('Perfis de acesso', box, []);
+    }
+
+    function editarPerfil(x) {
+        x = x || { nome: '', descricao: '', niveis: {} };
+        var box = S.el('div');
+        box.innerHTML =
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="pf-nome">Nome</label>' +
+                    '<input id="pf-nome" class="form-control" value="' + S.esc(x.nome || '') + '"></div>' +
+                '<div class="form-group"><label for="pf-desc">Descrição</label>' +
+                    '<input id="pf-desc" class="form-control" value="' + S.esc(x.descricao || '') + '"></div>' +
+            '</div>' +
+            '<div class="filter-grid mt-2">' +
+                '<div class="form-group"><label for="pf-tudo">Aplicar a todos os módulos</label>' +
+                    '<select id="pf-tudo" class="form-control">' +
+                        '<option value="">— escolher —</option>' +
+                        niveisVocab.map(function (n) {
+                            return '<option value="' + S.esc(n.chave) + '">' + S.esc(n.rotulo) + '</option>';
+                        }).join('') +
+                    '</select></div>' +
+            '</div>' +
+            gradeDeNiveis(x.niveis || {}, 'pf-body');
+
+        box.querySelector('#pf-tudo').onchange = function () {
+            if (!this.value) return;
+            var v = this.value;
+            box.querySelectorAll('.perm-nivel').forEach(function (s2) { s2.value = v; });
+            this.value = '';
+        };
+
+        var salvar = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar perfil' });
+        salvar.onclick = async function () {
+            var corpo = {
+                nome: box.querySelector('#pf-nome').value.trim(),
+                descricao: box.querySelector('#pf-desc').value.trim(),
+                niveis: lerNiveis(box)
+            };
+            try {
+                await S.api('/parametros/perfis' + (x.id ? '/' + x.id : ''),
+                            { method: x.id ? 'PUT' : 'POST', body: corpo });
+                S.closeModal();
+                S.toast('Perfil salvo.', 'success');
+                await load();
+                abrirPerfis();
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        S.openModal(x.id ? 'Perfil: ' + x.nome : 'Novo perfil', box, [salvar]);
+    }
+
+    async function aplicarPerfil(x) {
+        var d = await S.api('/parametros/permissoes');
+        var candidatos = (d.usuarios || []).filter(function (u) { return !u.is_admin; });
+        var box = S.el('div');
+        box.innerHTML =
+            '<p>Marque quem recebe o perfil <strong>' + S.esc(x.nome) + '</strong>. ' +
+            'As permissões atuais dessas pessoas serão <strong>substituídas</strong> ' +
+            'pelas do perfil.</p>' +
+            '<p class="text-muted">Administradores totais não aparecem: eles já podem tudo, ' +
+            'e aplicar um perfil daria a impressão de que ele limita o acesso deles.</p>' +
+            '<div class="table-wrapper" style="max-height:340px;overflow:auto">' +
+            '<table class="data-table"><thead><tr><th></th><th>Login</th><th>Nome</th>' +
+            '<th>Perfil atual</th></tr></thead><tbody>' +
+            candidatos.map(function (u) {
+                return '<tr><td><input class="pf-alvo" type="checkbox" value="' +
+                    S.esc(u.username) + '"></td><td>' + S.esc(u.username) + '</td><td>' +
+                    S.esc(u.display_name || '') + '</td><td>' + S.esc(u.perfil || '—') + '</td></tr>';
+            }).join('') +
+            '</tbody></table></div>';
+
+        var aplicar = S.el('button', { className: 'btn btn-primary', textContent: 'Aplicar' });
+        aplicar.onclick = async function () {
+            var logins = [];
+            box.querySelectorAll('.pf-alvo:checked').forEach(function (ch) { logins.push(ch.value); });
+            if (!logins.length) return S.toast('Escolha ao menos um usuário.', 'warning');
+            if (!confirm('Aplicar "' + x.nome + '" a ' + logins.length + ' usuário(s)?\n\n' +
+                         'As permissões atuais deles serão substituídas.')) return;
+            try {
+                var r = await S.api('/parametros/perfis/' + x.id + '/aplicar',
+                                    { method: 'POST', body: { logins: logins } });
+                S.closeModal();
+                S.toast(r.aplicados.length + ' usuário(s) liberado(s) com ' + x.nome + '.', 'success');
+                load();
+            } catch (e) { S.toast(e.message, 'error'); }
+        };
+        S.openModal('Aplicar perfil', box, [aplicar]);
+    }
+
+    document.getElementById('pm-perfis').onclick = abrirPerfis;
 
     document.getElementById('pm-user-add').onclick = function () {
         var f = S.el('div');
