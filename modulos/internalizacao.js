@@ -146,8 +146,10 @@ window.SPARE_MODULES.internalizacao = {
 
         function exportar(id) {
             // GET autenticado por cookie; o browser baixa o arquivo.
-            var base = (S.base || '');
-            window.open(base + '/api/internalizacao/' + id + '/exportar', '_blank');
+            // `S.base` não existia quando isto foi escrito: caía sempre no
+            // '' do ||, virando caminho absoluto, e a exportação ia para
+            // fora do portal exatamente como a de Recebimentos.
+            window.open(S.apiUrl('/internalizacao/' + id + '/exportar'), '_blank');
         }
 
         // ── Formulário de internalização ──────────────────────────────

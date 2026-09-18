@@ -1408,7 +1408,9 @@ async function _cardIcone(S) {
 
 function _aplicarIcone(versao) {
     var link = document.querySelector('link[rel="icon"]');
-    if (link) link.href = '/favicon.ico?v=' + versao;
+    // Com prefixo de proxy, '/favicon.ico' busca na raiz do domínio — que é
+    // de outro sistema. A aba ficava com o ícone errado ou sem ícone.
+    if (link) link.href = window.SPARE.urlDoPortal('/favicon.ico') + '?v=' + versao;
 }
 
 /* ── Usuários e Permissões ──────────────────────────────────────── */
@@ -2124,7 +2126,10 @@ async function renderDashboards(c, S) {
             '<div class="card mb-3"><div class="card-header" ' +
                 'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
                 '<span>' + S.esc(nomePadrao) + '</span>' +
-                '<a class="btn btn-sm btn-secondary" href="/' + chave + '" target="_blank" ' +
+                // Pelo urlDoPortal: com prefixo de proxy, href="/chave" abre
+                // na raiz do domínio, fora do portal.
+                '<a class="btn btn-sm btn-secondary" href="' +
+                    S.esc(S.urlDoPortal('/' + chave)) + '" target="_blank" ' +
                     'rel="noopener">Abrir a tela</a>' +
             '</div>' +
             '<div class="card-body">' +

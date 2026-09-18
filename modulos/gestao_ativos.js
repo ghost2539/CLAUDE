@@ -91,7 +91,9 @@ function _gaRenderObsolescencia(container, S) {
     var btn = document.getElementById('ga-obs-abrir');
     if (btn) {
         btn.addEventListener('click', function () {
-            window.open('/obsolescencia', '_blank', 'noopener');
+            // Página do portal (não da API), mas o problema é o mesmo: sem
+            // o prefixo, '/obsolescencia' abre na raiz do domínio.
+            window.open(S.urlDoPortal('/obsolescencia'), '_blank', 'noopener');
         });
     }
 }

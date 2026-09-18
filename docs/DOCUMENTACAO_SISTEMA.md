@@ -223,6 +223,16 @@ portal inteiro**.
 Cada uma é servida por rota Python, passa pelo prefixo de proxy
 (`core/prefixo.py`) e tem o JavaScript em arquivo externo.
 
+**Nenhuma navegação usa caminho absoluto.** O portal roda num subcaminho
+(`/portal-spare`), então `/api/x` resolve contra a **raiz do domínio** — que
+é de outro sistema — e não contra o portal. Para montar URL à mão,
+`window.SPARE` expõe `apiUrl(caminho)`, `base`, `baixar(caminho)` (download
+por navegação) e `urlDoPortal(caminho)` (página do portal fora da API).
+`fetch`/`S.api` já passam pelo prefixo sozinhos; o risco está em
+`window.location`, `window.open` e `href`.
+`scripts/verificar_links_prefixo.py` varre os módulos e barra o caminho
+absoluto, com contraprova.
+
 | Caminho | O que é |
 |---|---|
 | `/obsolescencia` | Parque de coletores pelo MDM. Doc: `docs/MDM_OBSOLESCENCIA.md`. |

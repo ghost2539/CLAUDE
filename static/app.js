@@ -700,8 +700,33 @@
         });
     }
 
+    /* Navega para um caminho da API COM o prefixo do proxy. É o jeito de
+       baixar arquivo: um GET autenticado por cookie em que o navegador é
+       quem salva, sem passar pelo fetch.
+
+       Existe porque a falta dele custou caro. `apiUrl` não era exportado,
+       então quem escrevia módulo escrevia `window.location = '/api/...'` —
+       caminho absoluto, que atrás do proxy resolve contra a RAIZ do domínio
+       e cai no sistema do lado, não no portal. O botão "levava para a tela
+       de API do suporte.lojas". */
+    function baixar(caminho) {
+        window.location.href = apiUrl(caminho);
+    }
+
+    /* Idem para uma página do próprio portal que não é da API
+       (ex.: /obsolescencia). Mesmo problema, mesma correção. */
+    function urlDoPortal(caminho) {
+        return APP_BASE + (caminho.charAt(0) === '/' ? caminho : '/' + caminho);
+    }
+
     window.SPARE = {
         api: api,
+        // Sem estes dois, quem precisa montar uma URL à mão não tem como
+        // acertar — e escreve caminho absoluto, que quebra atrás do proxy.
+        apiUrl: apiUrl,
+        base: APP_BASE,
+        baixar: baixar,
+        urlDoPortal: urlDoPortal,
         el: el,
         esc: esc,
         toast: toast,

@@ -249,7 +249,9 @@ function _snRenderUpload(container, S) {
 
     var planModelo = document.getElementById('sn-plan-modelo');
     if (planModelo) planModelo.addEventListener('click', function () {
-        window.location.href = '/api/servicenow/entrada/planilha-modelo';
+        // Caminho absoluto aqui cai fora do portal quando há prefixo de
+        // proxy; S.baixar resolve contra a base do portal.
+        S.baixar('/servicenow/entrada/planilha-modelo');
     });
     var planEnviar = document.getElementById('sn-plan-enviar');
     if (planEnviar) planEnviar.addEventListener('click', function () { _snEnviarPlanilha(S); });

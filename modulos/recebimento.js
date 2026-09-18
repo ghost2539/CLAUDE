@@ -862,7 +862,10 @@ async function renderBase(c, S) {
 
     document.getElementById('bf-run').onclick = load;
     document.getElementById('bf-snow').onclick = function () {
-        window.location = '/api/recebimentos/export-servicenow';
+        // Pelo S.baixar, que põe o prefixo do proxy. Com o caminho absoluto
+        // ('/api/...') o navegador resolvia contra a RAIZ do domínio e o
+        // botão caía na API do outro sistema, não no portal.
+        S.baixar('/recebimentos/export-servicenow');
     };
     load();
 }
