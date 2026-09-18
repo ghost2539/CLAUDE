@@ -209,17 +209,50 @@ def _tracking_from(inc: dict, field: str) -> str:
 
 
 def _match_regra(subcategoria: str, regras: list[dict]) -> dict | None:
+    """A regra MAIS ESPECÍFICA para a subcategoria do chamado, não a primeira.
+
+    O casamento é tolerante por necessidade: a subcategoria vem do ServiceNow
+    com variação de caixa e de texto, e a regra lista apelidos. Mas casar por
+    "contém" e devolver a primeira que bate fazia a regra genérica engolir a
+    específica — com "Coletor" (encaminhar) na frente de "Coletor - Entrega ao
+    usuário" (encerrar), TODO chamado de coletor era encaminhado e nenhum
+    encerrava, porque "coletor" está contido em "coletor - entrega ao usuário".
+
+    Agora cada acerto recebe um peso e vence o mais forte:
+
+      3  apelido IGUAL à subcategoria
+      2  apelido CONTIDO na subcategoria  ("coletor" em "coletor - entrega")
+      1  subcategoria contida no apelido  (o inverso, mais frouxo)
+
+    Empate no peso decide pelo apelido mais LONGO, que é o mais específico; se
+    ainda empatar, vale a ordem configurada (`ordem`, depois `id`), que é como
+    a lista já chega aqui.
+    """
     n = _norm(subcategoria)
     if not n:
         return None
-    for r in regras:
+    melhor_chave = None
+    melhor_regra = None
+    for posicao, r in enumerate(regras):
         if not r.get("ativo"):
             continue
         aliases = [_norm(a) for a in re.split(r"[\n;,]+", r.get("subcategorias", "")) if a.strip()]
         for a in aliases:
-            if a and (a == n or a in n or n in a):
-                return r
-    return None
+            if not a:
+                continue
+            if a == n:
+                peso = 3
+            elif a in n:
+                peso = 2
+            elif n in a:
+                peso = 1
+            else:
+                continue
+            # -posicao: quem vem antes na ordem configurada vence o empate.
+            chave = (peso, len(a), -posicao)
+            if melhor_chave is None or chave > melhor_chave:
+                melhor_chave, melhor_regra = chave, r
+    return melhor_regra
 
 
 def _aplicar(session, sys_id: str, campos: dict, conferir: dict | None = None) -> dict:
@@ -281,8 +314,20 @@ def _rodar(session, origem: str, usuario: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, "Falha ao consultar o ServiceNow: %s" % exc)
 
+    # `ignorados` sozinho não explica nada: quando a rotina deixou de encerrar,
+    # não dava para saber se era falta de rastreio, objeto não entregue ou
+    # nenhuma regra casando. `motivos` conta cada porquê, e `por_regra` mostra
+    # qual regra pegou quantos — é onde se vê uma regra genérica engolindo a
+    # específica.
     resumo = {"analisados": 0, "encerrados": 0, "encaminhados": 0,
-              "ignorados": 0, "erros": 0, "acoes": []}
+              "ignorados": 0, "erros": 0, "acoes": [],
+              "motivos": {"sem_rastreio": 0, "rastreio_indisponivel": 0,
+                          "nao_entregue": 0, "sem_regra": 0},
+              "por_regra": {}}
+
+    def _ignorar(motivo: str) -> None:
+        resumo["ignorados"] += 1
+        resumo["motivos"][motivo] = resumo["motivos"].get(motivo, 0) + 1
 
     for inc in incidentes:
         resumo["analisados"] += 1
@@ -292,24 +337,26 @@ def _rodar(session, origem: str, usuario: str) -> dict:
         tracking = _tracking_from(inc, tracking_field)
 
         if not tracking:
-            resumo["ignorados"] += 1
+            _ignorar("sem_rastreio")
             continue
         try:
             rastreio = consultar_rastreio(tracking)
         except Exception:  # noqa: BLE001
-            resumo["ignorados"] += 1
+            _ignorar("rastreio_indisponivel")
             continue
         entregue, _ev = _ultimo_evento_entregue(rastreio)
         if not entregue:
-            resumo["ignorados"] += 1
+            _ignorar("nao_entregue")
             continue
 
         regra = _match_regra(subcat, regras)
         if not regra:
-            resumo["ignorados"] += 1
+            _ignorar("sem_regra")
             continue
 
         acao = regra.get("acao", "encerrar")
+        rotulo = f"{regra.get('nome', '(sem nome)')} [{acao}]"
+        resumo["por_regra"][rotulo] = resumo["por_regra"].get(rotulo, 0) + 1
         try:
             if acao == "encaminhar":
                 destino = regra.get("fila_destino", "")
@@ -420,6 +467,64 @@ def regras_del(rid: int, req: Request):
 
 
 # ── Endpoints: logs e config ────────────────────────────────────────────
+@router.get("/regras/testar")
+def regras_testar(req: Request, subcategoria: str = ""):
+    """Diz qual regra venceria para uma subcategoria, sem tocar no ServiceNow.
+
+    Com várias regras — e é para ter várias, cada subcategoria de equipamento
+    tem o seu apontamento — a dúvida deixa de ser "existe regra?" e passa a ser
+    "QUAL delas pega?". Aqui dá para conferir antes de rodar, digitando a
+    subcategoria como ela vem do ServiceNow.
+
+    Devolve também as OUTRAS que casariam, em ordem de força: é assim que se
+    enxerga uma regra genérica competindo com a específica."""
+    get_session(req)
+    alvo = (subcategoria or "").strip()
+    if not alvo:
+        raise HTTPException(422, "Informe a subcategoria a testar.")
+
+    regras = db.listar_regras()
+    vencedora = _match_regra(alvo, regras)
+
+    # Mesma pontuação de `_match_regra`, para listar quem mais casaria.
+    n = _norm(alvo)
+    candidatas = []
+    for posicao, r in enumerate(regras):
+        if not r.get("ativo"):
+            continue
+        melhor = None
+        for a in [_norm(x) for x in re.split(r"[\n;,]+", r.get("subcategorias", "")) if x.strip()]:
+            if not a:
+                continue
+            if a == n:
+                peso, como = 3, "igual"
+            elif a in n:
+                peso, como = 2, "contido na subcategoria"
+            elif n in a:
+                peso, como = 1, "contém a subcategoria"
+            else:
+                continue
+            chave = (peso, len(a), -posicao)
+            if melhor is None or chave > melhor[0]:
+                melhor = (chave, a, como)
+        if melhor:
+            candidatas.append({
+                "nome": r.get("nome", ""), "acao": r.get("acao", "encerrar"),
+                "fila_destino": r.get("fila_destino", ""), "ordem": r.get("ordem", 100),
+                "apelido": melhor[1], "casou_por": melhor[2],
+            })
+    candidatas.sort(key=lambda c: (c["nome"] != (vencedora or {}).get("nome"), c["nome"]))
+
+    return {
+        "subcategoria": alvo,
+        "vencedora": ({"nome": vencedora.get("nome", ""),
+                       "acao": vencedora.get("acao", "encerrar"),
+                       "fila_destino": vencedora.get("fila_destino", ""),
+                       "ordem": vencedora.get("ordem", 100)} if vencedora else None),
+        "candidatas": candidatas,
+    }
+
+
 @router.get("/logs")
 def logs_list(req: Request, origem: str = "", q: str = "", limit: int = 500):
     get_session(req)
