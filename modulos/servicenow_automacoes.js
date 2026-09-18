@@ -489,13 +489,15 @@ async function renderConsulta(c, S) {
             '</div></div>' +
         '<div class="card mb-3"><div class="card-header">Coleta pronta</div>' +
             '<div class="card-body">' +
-                '<p class="text-muted" style="margin-top:0">Chamados das quatro filas de ' +
-                    '<b>técnico de campo</b> (ENACEL_LOJAS, RNR_VSiT, SKY_LOJAS, ' +
-                    'RNR_LOJAS_REMOTO), pela tabela <code>task_sla</code>, com o tempo que ' +
-                    'cada um ficou na fila dele. Uma linha por chamado, coluna de mês, e ' +
-                    'resumo por mês e fila no fim do arquivo.<br>' +
-                    'Período longo demora: são duas passadas no ServiceNow, a segunda em ' +
-                    'lotes. Comece por um trimestre se quiser conferir antes.</p>' +
+                '<p class="text-muted" style="margin-top:0">A <b>lista</b> dos chamados das ' +
+                    'quatro filas de técnico de campo (ENACEL_LOJAS, RNR_VSiT, SKY_LOJAS, ' +
+                    'RNR_LOJAS_REMOTO), pela tabela <code>task_sla</code>. Uma linha por ' +
+                    'chamado, com mês, solicitante, categoria e subcategoria, e contagem ' +
+                    'por mês e fila no fim.<br>' +
+                    '<b>O tempo em fila sai depois</b>: cole a coluna <i>Chamado</i> na ' +
+                    'caixa “Chamados a consultar” acima, escreva a fila em “Tempo na fila” ' +
+                    'e exporte. Duas passadas curtas em vez de uma longa — cada uma ' +
+                    'termina rápido e, quando falha, falha com mensagem.</p>' +
                 '<div class="form-row">' +
                     '<div class="form-group"><label for="cn-d2-desde">De</label>' +
                         '<input id="cn-d2-desde" class="form-control" type="date" ' +
@@ -984,19 +986,28 @@ async function renderConsulta(c, S) {
             // Sem barra de progresso: o servidor faz as duas passadas e só
             // então manda o arquivo. O que dá para prometer é dizer que está
             // trabalhando — e o arquivo avisa, no fim, se parou no meio.
-            b.textContent = 'Coletando… pode demorar';
+            b.textContent = 'Buscando chamados…';
             try {
-                var r = await S.api('/sn-consulta/campo-lojas/exportar', {
+                var r = await S.api('/sn-consulta/campo-lojas/chamados', {
                     method: 'POST', body: { desde: desde, ate: ate }
                 });
+                // O servidor conta e diz no cabeçalho: dá para avisar sem
+                // abrir o arquivo, e zero deixa de passar despercebido.
+                var quantos = Number(r.headers.get('X-Chamados') || 0);
+                var sla = Number(r.headers.get('X-Linhas-SLA') || 0);
                 var blob = await r.blob();
                 var a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = 'campo_lojas_' + desde + '_a_' + ate + '.csv';
+                a.download = 'campo_lojas_chamados_' + desde + '_a_' + ate + '.csv';
                 a.click();
                 URL.revokeObjectURL(a.href);
-                S.toast('Arquivo gerado. Confira as últimas linhas: elas dizem se a ' +
-                        'coleta terminou inteira.', 'success');
+                if (quantos) {
+                    S.toast(quantos + ' chamado(s) no arquivo. Para o tempo em fila, ' +
+                            'cole a coluna Chamado na caixa acima.', 'success');
+                } else {
+                    S.toast('Nenhum chamado montado (' + sla + ' linha(s) de task_sla). ' +
+                            'O arquivo traz o diagnóstico nas últimas linhas.', 'warning');
+                }
             } catch (x) {
                 S.toast(x.message, 'error');
             } finally {

@@ -27,12 +27,21 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import sys
 import tempfile
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+# Antes de qualquer import do projeto: `chamados_campo_lojas` define
+# DATABASE_URL=:memory: no import dele, e o `:memory:` usa um pool que o
+# engine do portal recusa. Um arquivo real resolve, e nada é gravado nele.
+_TMP = Path(tempfile.mkdtemp())
+os.environ["DATABASE_URL"] = f"sqlite:///{_TMP/'portal.db'}"
+os.environ.setdefault("PORTAL_SESSION_SECRET", "verificacao-local-sem-valor")
+os.environ["PORTAL_COFRE_DIR"] = str(_TMP / "cofre")
 
 falhas: list[str] = []
 feitos = 0
@@ -94,7 +103,6 @@ def _falso(tabela, query, campos, *, display=True, limite=100000):
 cl.consultar = _falso
 cl.preparar_conta = lambda *a, **k: None
 
-_TMP = Path(tempfile.mkdtemp())
 SAIDA = _TMP / "campo.csv"
 sys.argv = ["x", "--desde", "2025-01-01", "--ate", "2025-06-30",
             "--saida", str(SAIDA)]
@@ -229,6 +237,91 @@ checar("query usada" in fonte,
        "e a query, quando nem linha de SLA veio")
 checar("le a tabela task_sla" in fonte,
        "apontando a permissão como uma das causas")
+
+print("\n[12] O botão exporta só a LISTA, e não é streaming")
+# Com StreamingResponse o HTTP 200 e os cabeçalhos saem antes da primeira
+# linha: um erro depois disso não vira mensagem na tela, vira download
+# truncado. Foi assim que a exportação chegou vazia SEM informação de erro.
+from core import security  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import main  # noqa: E402
+import routers.sn_consulta as _sc  # noqa: E402
+
+_sc._cfg.SN_API_USER, _sc._cfg.SN_API_PASS = "zabbix", "senha-que-nao-pode-sair"
+cliente = TestClient(main.app)
+with cliente:
+    _, ck = security.create_session(
+        {"username": "verificador", "is_admin": True, "permission_map": {}})
+    cliente.cookies.set("spare_session", ck)
+
+    linhas_sla = [{"task": {"value": f"{i:032x}"}, "task.number": f"INC{i:07d}",
+                   "task.opened_at": "2025-02-01 08:00:00",
+                   "task.caller_id": "Fulano", "task.category": "Hardware",
+                   "task.subcategory": "Loja",
+                   "task.assignment_group.name": FILA, "task.state": "7"}
+                  for i in range(1, 4)]
+    regra._get = lambda c, p, timeout=60: {
+        "result": linhas_sla if p.get("sysparm_offset", "0") == "0" else []}
+    r = cliente.post("/api/sn-consulta/campo-lojas/chamados",
+                     json={"desde": "2025-01-01", "ate": "2025-03-31"})
+    checar(r.status_code == 200, f"HTTP 200 ({r.status_code})")
+    checar(r.headers.get("X-Chamados") == "3",
+           "o cabeçalho diz quantos vieram — a tela avisa sem abrir o arquivo")
+    corpo = r.text.lstrip("\ufeff")
+    checar("Horas na fila" not in corpo,
+           "a lista NÃO traz tempo de fila: ele sai depois, pela aba Consulta")
+    checar(corpo.splitlines()[0].startswith("Mês;Chamado;Aberto em;Solicitante;"
+                                            "Categoria;Subcategoria"),
+           "com as colunas pedidas")
+    checar("RESUMO POR MES E FILA" in corpo, "e a contagem por mês e fila")
+    checar("cole a coluna Chamado" in corpo,
+           "e diz como obter o tempo em fila na segunda passada")
+    # Só uma consulta: sem histórico, sem sys_user_group. É o que a torna rápida.
+    chamadas = []
+    regra._get = lambda c, p, timeout=60: (
+        chamadas.append(c) or {"result": linhas_sla if p.get("sysparm_offset", "0") == "0" else []})
+    cliente.post("/api/sn-consulta/campo-lojas/chamados",
+                 json={"desde": "2025-01-01", "ate": "2025-03-31"})
+    checar(all("task_sla" in c for c in chamadas),
+           f"só a task_sla é consultada ({len(chamadas)} chamada(s))")
+    checar(not any("sys_audit" in c for c in chamadas),
+           "sem tocar no histórico — é o que fazia a passada longa")
+
+    print("\n[13] Falha vira MENSAGEM, não arquivo vazio")
+    def _nega(c, p, timeout=60):
+        raise HTTPException(502, "A conta de serviço não tem acesso a esta tabela (403).")
+
+    regra._get = _nega
+    r2 = cliente.post("/api/sn-consulta/campo-lojas/chamados",
+                      json={"desde": "2025-01-01", "ate": "2025-03-31"})
+    checar(r2.status_code == 502,
+           f"erro no ServiceNow vira erro HTTP ({r2.status_code}), não 200 com nada")
+    checar("403" in r2.json().get("detail", ""),
+           "com o motivo, que a tela mostra em toast")
+    fonte_r = (RAIZ / "routers" / "sn_campo_lojas.py").read_text(encoding="utf-8")
+    trecho = fonte_r[fonte_r.index("def exportar_chamados"):
+                     fonte_r.index('@router.post("/exportar")')]
+    # A CHAMADA, não a palavra: o comentário da própria função explica por que
+    # o streaming saiu, e procurar o nome solto acusava o texto que explica.
+    checar("StreamingResponse(" not in trecho and "return Response(" in trecho,
+           "a rota da lista devolve resposta pronta, sem streaming — é o "
+           "streaming que engolia o erro")
+
+    print("\n[14] Zero chamados: 200 com diagnóstico, e a tela avisa")
+    regra._get = lambda c, p, timeout=60: {"result": []}
+    r3 = cliente.post("/api/sn-consulta/campo-lojas/chamados",
+                      json={"desde": "2025-01-01", "ate": "2025-03-31"})
+    checar(r3.status_code == 200 and r3.headers.get("X-Chamados") == "0",
+           "vazio é 200 com a contagem zerada no cabeçalho")
+    checar("NENHUM CHAMADO MONTADO" in r3.text and "query usada" in r3.text,
+           "e o arquivo traz o diagnóstico, não silêncio")
+
+js = (RAIZ / "modulos" / "servicenow_automacoes.js").read_text(encoding="utf-8")
+checar("campo-lojas/chamados" in js, "o botão chama a rota da lista")
+checar("X-Chamados" in js, "e lê a contagem do cabeçalho")
+checar("Nenhum chamado montado" in js,
+       "avisando quando vier zero — antes o arquivo vazio passava despercebido")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

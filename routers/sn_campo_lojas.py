@@ -325,6 +325,105 @@ def _paginar(tabela: str, query: str, campos: str, display: str,
     return fora
 
 
+# Só a LISTA de chamados: uma consulta, sem histórico, sem medição. O tempo
+# de fila sai depois, colando esta lista na aba Consulta de chamados — que já
+# aceita lista colada e já mede. Duas etapas separadas porque é o que
+# funciona: cada uma termina rápido e, quando falha, falha com mensagem.
+COLUNAS_LISTA = [
+    ("mes", "Mês"),
+    ("numero", "Chamado"),
+    ("aberto_em", "Aberto em"),
+    ("solicitante", "Solicitante"),
+    ("categoria", "Categoria"),
+    ("subcategoria", "Subcategoria"),
+    ("fila", "Fila"),
+    ("estado", "Estado"),
+]
+
+
+@router.post("/chamados")
+def exportar_chamados(corpo: PeriodoIn, req: Request):
+    """A lista dos chamados das quatro filas, e só ela.
+
+    NÃO é streaming, de propósito. Com `StreamingResponse` o HTTP 200 e os
+    cabeçalhos saem antes da primeira linha: um erro depois disso não vira
+    mensagem na tela, vira download truncado — e foi assim que a exportação
+    chegou vazia SEM nenhuma informação de erro. Aqui o arquivo é montado
+    inteiro e só então devolvido; qualquer falha vira erro HTTP de verdade,
+    que a tela mostra.
+
+    O tempo de fila NÃO sai daqui. Sai depois: cole a coluna `Chamado` na
+    caixa "Chamados a consultar" da aba Consulta, informe a fila em "Tempo na
+    fila" e exporte. São duas passadas curtas em vez de uma longa.
+    """
+    require_permission(req, MODULO, "export")
+    ate = (corpo.ate or "").strip() or datetime.now(timezone.utc).date().isoformat()
+    desde = (corpo.desde or "").strip()
+    conferir_datas(desde, ate)
+
+    query = query_task_sla(desde, ate)
+    sla = _paginar("task_sla", query, CAMPOS_TASK_SLA, "true")
+    chamados = montar_chamados(sla)
+    _log.info("campo-lojas/chamados: %d linhas de SLA → %d chamados (%s a %s)",
+              len(sla), len(chamados), desde, ate)
+
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    w.writerow([rot for _c, rot in COLUNAS_LISTA])
+
+    if not chamados:
+        # Vazio não diagnostica nada, e as causas levam a ações opostas: zero
+        # linhas de SLA é consulta ou permissão; linhas de SLA com zero
+        # chamados é campo não lido (o dot-walk voltou noutro formato).
+        w.writerow([])
+        w.writerow(["NENHUM CHAMADO MONTADO - diagnostico:"])
+        w.writerow(["linhas de task_sla recebidas", len(sla)])
+        w.writerow(["periodo", f"{desde} a {ate}"])
+        w.writerow(["filas procuradas", " | ".join(FILAS)])
+        w.writerow(["query usada", query])
+        if sla:
+            primeira = sla[0]
+            w.writerow(["chaves que a API devolveu", " | ".join(sorted(primeira.keys()))])
+            for caminho in ("task.sys_id", "task.number",
+                            f"task.{CAMPO_FILA}.name", "task.opened_at"):
+                w.writerow([f"{caminho} lido", campo(primeira, caminho) or "(vazio)"])
+            w.writerow(["Vieram linhas de SLA mas nenhum chamado foi montado: ou os "
+                        "campos acima estao vazios, ou o grupo nao casou com as filas."])
+        else:
+            w.writerow(["A consulta nao devolveu linha nenhuma. Confira o periodo, o "
+                        "nome das filas, e se a conta de servico le a tabela task_sla."])
+    else:
+        chamados.sort(key=lambda c: (c["mes"], c["fila"], c["numero"]))
+        for c in chamados:
+            w.writerow([c.get(chave, "") for chave, _r in COLUNAS_LISTA])
+        # Contagem por mês e fila: o recorte do dado histórico pedido.
+        contagem: dict[tuple, int] = defaultdict(int)
+        for c in chamados:
+            contagem[(c["mes"], c["fila"])] += 1
+        w.writerow([])
+        w.writerow(["RESUMO POR MES E FILA"])
+        w.writerow(["Mes", "Fila", "Chamados"])
+        for (mes, fila), quantos in sorted(contagem.items()):
+            w.writerow([mes, fila, quantos])
+        w.writerow([])
+        w.writerow([f"Total de chamados: {len(chamados)}",
+                    f"(de {len(sla)} linhas de task_sla)"])
+        w.writerow(["Para o tempo em fila: cole a coluna Chamado na aba Consulta de "
+                    "chamados, informe a fila em 'Tempo na fila' e exporte."])
+
+    nome = f"campo_lojas_chamados_{desde}_a_{ate}.csv"
+    from fastapi.responses import Response
+    return Response(
+        content=buf.getvalue().encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"',
+                 # A tela lê isto para dizer quantos vieram sem abrir o arquivo.
+                 "X-Chamados": str(len(chamados)),
+                 "X-Linhas-SLA": str(len(sla))},
+    )
+
+
 @router.post("/exportar")
 def exportar(corpo: PeriodoIn, req: Request):
     """O CSV da coleta, pelas duas fases."""
