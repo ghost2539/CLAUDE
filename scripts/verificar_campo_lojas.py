@@ -258,6 +258,38 @@ checar("nameLIKE" in q_nome and q_nome.count("^OR") == 3,
 checar(q_nome.index("opened_at>=") > q_nome.rindex("^OR"),
        "e o período continua DEPOIS do último ^OR")
 
+print("\n[12b] A fonte padrão é a `task`: sem dot-walk, sem junção")
+# A `task_sla` cobra 11 junções por linha (task_sla → task → sys_user_group,
+# uma por campo pontilhado). Medido em produção: minutos por mês, e ZERO
+# chamado montado, porque o dot-walk do nome do grupo não vinha. Na `task`
+# todo campo é local.
+q_task = regra.query_task("2025-01-01", "2025-01-31", {"9" * 32: FILA})
+checar(q_task.startswith(f"{regra.CAMPO_FILA}IN"),
+       "filtra pelo grupo direto, sem passar por task_sla")
+checar("task." not in q_task, "nenhum campo pontilhado na consulta")
+checar("." not in regra.CAMPOS_TASK,
+       "e nenhum campo pontilhado na lista de campos — é o que custava caro")
+
+# O caso que devolvia zero: o grupo vem como REFERÊNCIA, sem o nome.
+so_referencia = [{"sys_id": "a" * 32, "number": "INC0000001",
+                  "opened_at": "2025-02-01 08:00:00", "opened_by": "Fulano",
+                  "category": "HW", "subcategory": "Loja",
+                  "assignment_group": {"value": "9" * 32, "display_value": ""},
+                  "state": "7", "sys_class_name": "incident"}]
+sem_mapa = regra.montar_da_task(so_referencia, {})
+com_mapa = regra.montar_da_task(so_referencia, {"9" * 32: FILA})
+checar(len(com_mapa) == 1 and com_mapa[0]["fila"] == FILA,
+       "com o mapa de grupos, o sys_id vira a fila e o chamado é montado")
+checar(len(sem_mapa) == 0,
+       "contraprova: sem o mapa, a linha é descartada — era o 'zero chamados'")
+checar(com_mapa[0]["solicitante"] == "Fulano" and com_mapa[0]["mes"] == "2025-02",
+       "com solicitante e mês")
+
+# E o nome, quando vem, continua valendo.
+com_nome = regra.montar_da_task(
+    [dict(so_referencia[0], assignment_group=FILA)], {})
+checar(len(com_nome) == 1, "e quando o grupo vem por nome, funciona sem mapa")
+
 print("\n[13] A coleta vai mês a mês, e um mês que falha não derruba o resto")
 js = (RAIZ / "modulos" / "servicenow_automacoes.js").read_text(encoding="utf-8")
 checar("d2Meses" in js and "campo-lojas/chamados" in js,
@@ -278,7 +310,7 @@ print("\n[14] A sonda rápida, para conferir antes de coletar")
 # terminava em 504 sem dizer nada.
 fonte_r = (RAIZ / "routers" / "sn_campo_lojas.py").read_text(encoding="utf-8")
 checar('@router.post("/contagem")' in fonte_r, "existe a rota de contagem")
-checar("api/now/stats/task_sla" in fonte_r,
+checar("/api/now/stats/{tabela}" in fonte_r and '"sysparm_count": "true"' in fonte_r,
        "que conta no servidor, sem baixar chamado nenhum")
 checar("cn-d2-testar" in js and "campo-lojas/contagem" in js,
        "e o botão Testar consulta na tela")

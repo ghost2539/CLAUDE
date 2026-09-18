@@ -89,6 +89,18 @@ COLUNAS = [
     ("base_medicao", "Base da medição"),
 ]
 
+# A consulta pela `task` direta: TODO campo é local, nenhum dot-walk. É o que
+# faz a coleta caber no tempo — pela `task_sla` são 11 junções por linha
+# (task_sla → task → sys_user_group, uma por campo pontilhado), e a diferença
+# medida em produção foi de minutos por mês contra segundos.
+#
+# O conjunto de chamados é o mesmo: são as tasks daquelas filas no período. A
+# `task_sla` era o caminho para achá-las, não o dado em si.
+CAMPOS_TASK = ",".join([
+    "sys_id", "number", "opened_at", "opened_by", "category", "subcategory",
+    CAMPO_FILA, "state", "sys_class_name", "resolved_at", "closed_at",
+])
+
 CAMPOS_TASK_SLA = ",".join([
     # `task` cru além do `task.sys_id`: em algumas versões o dot-walk do
     # sys_id não volta, e a referência crua traz o sys_id no `value`.
@@ -210,7 +222,56 @@ def query_task_sla(desde: str, ate: str, ids: dict[str, str] | None = None) -> s
             f"^task.opened_at<={ate} 23:59:59")
 
 
-def montar_chamados(linhas_sla: list[dict]) -> list[dict]:
+def query_task(desde: str, ate: str, ids: dict[str, str] | None = None) -> str:
+    """A mesma seleção, direto na `task`: sem junção, sem dot-walk."""
+    if ids:
+        alvo = f"{CAMPO_FILA}IN" + ",".join(sorted(ids))
+    else:
+        alvo = "^OR".join(f"{CAMPO_FILA}.nameLIKE{f}" for f in FILAS)
+    return (f"{alvo}"
+            f"^opened_at>={desde} 00:00:00"
+            f"^opened_at<={ate} 23:59:59")
+
+
+def montar_da_task(linhas: list[dict], ids: dict[str, str] | None = None) -> list[dict]:
+    """Uma linha por chamado, a partir da `task`. Campos locais, sem dot-walk."""
+    mapa = ids or {}
+    saida: list[dict] = []
+    vistos: set[str] = set()
+    for l in linhas:
+        sid = campo(l, "sys_id")
+        if not sid or sid in vistos:
+            continue
+        # A fila sai de três lugares, nesta ordem: o rótulo do grupo, o
+        # sys_id traduzido pelo mapa que já temos, ou o valor cru. Depender
+        # de um só descarta a linha inteira em silêncio quando ele não vem —
+        # e foi assim que a coleta voltou com ZERO chamado.
+        bruto = l.get(CAMPO_FILA)
+        nome_grupo = _valor_plano(bruto)
+        fila = qual_fila(nome_grupo)
+        if not fila:
+            cru = bruto.get("value") if isinstance(bruto, dict) else bruto
+            fila = qual_fila(mapa.get(_valor_plano(cru), ""))
+        if not fila:
+            continue
+        vistos.add(sid)
+        aberto = _quando(campo(l, "opened_at"))
+        saida.append({
+            "sys_id": sid,
+            "numero": campo(l, "number"),
+            "aberto_em": campo(l, "opened_at"),
+            "mes": aberto.strftime("%Y-%m") if aberto else "",
+            "solicitante": campo(l, "opened_by"),
+            "categoria": campo(l, "category"),
+            "subcategoria": campo(l, "subcategory"),
+            "fila": fila,
+            "estado": campo(l, "state"),
+            "tipo": campo(l, "sys_class_name"),
+        })
+    return saida
+
+
+def montar_chamados(linhas_sla: list[dict], ids: dict[str, str] | None = None) -> list[dict]:
     """Uma linha por CHAMADO, a partir das linhas de SLA.
 
     Uma `task` tem uma linha de `task_sla` por SLA. Sem deduplicar por
@@ -222,6 +283,10 @@ def montar_chamados(linhas_sla: list[dict]) -> list[dict]:
         if not sid or sid in por_chamado:
             continue
         fila = qual_fila(campo(l, f"task.{CAMPO_FILA}.name"))
+        if not fila:
+            # O dot-walk do nome pode não vir; o grupo, sim. Traduz pelo mapa
+            # que já temos em vez de descartar a linha.
+            fila = qual_fila((ids or {}).get(campo(l, f"task.{CAMPO_FILA}"), ""))
         if not fila:
             continue
         aberto = _quando(campo(l, "task.opened_at"))
@@ -344,6 +409,10 @@ def conferir_datas(desde: str, ate: str) -> None:
 class PeriodoIn(BaseModel):
     desde: str = "2025-01-01"
     ate: str = ""
+    # "task" (padrão) lê a própria tabela de chamados: todo campo é local e a
+    # consulta volta em segundos. "task_sla" era o caminho original, e cobra
+    # 11 junções por linha — minutos por mês em vez de segundos.
+    fonte: str = "task"
 
 
 def _paginar(tabela: str, query: str, campos: str, display: str,
@@ -413,21 +482,31 @@ def chamados_do_periodo(corpo: PeriodoIn, req: Request):
                  "caiu para a busca por nome, que é mais lenta.")
 
     inicio = time.monotonic()
-    query = query_task_sla(desde, ate, ids)
-    sla = _paginar("task_sla", query, CAMPOS_TASK_SLA, "true")
-    chamados = montar_chamados(sla)
+    pela_task = (corpo.fonte or "task").strip().lower() != "task_sla"
+    if pela_task:
+        query = query_task(desde, ate, ids)
+        brutas = _paginar("task", query, CAMPOS_TASK, "true")
+        chamados = montar_da_task(brutas, ids)
+    else:
+        query = query_task_sla(desde, ate, ids)
+        brutas = _paginar("task_sla", query, CAMPOS_TASK_SLA, "true")
+        chamados = montar_chamados(brutas, ids)
     for c in chamados:
         for interno in ("_aberto", "_resolvido", "_encerrado"):
             c.pop(interno, None)
     segundos = round(time.monotonic() - inicio, 1)
-    _log.info("campo-lojas %s..%s: %d SLA → %d chamados em %ss (por %s)",
-              desde, ate, len(sla), len(chamados), segundos,
-              "sys_id" if ids else "nome")
+    _log.info("campo-lojas %s..%s [%s]: %d linhas → %d chamados em %ss (por %s)",
+              desde, ate, "task" if pela_task else "task_sla",
+              len(brutas), len(chamados), segundos, "sys_id" if ids else "nome")
 
     return {
         "desde": desde, "ate": ate,
         "chamados": chamados,
-        "linhas_sla": len(sla),
+        "fonte": "task" if pela_task else "task_sla",
+        # Linhas que vieram CONTRA chamados montados: é o par que separa "a
+        # consulta não achou" de "achou e eu não consegui ler os campos".
+        "linhas_brutas": len(brutas),
+        "linhas_sla": len(brutas),
         "segundos": segundos,
         "por_sys_id": bool(ids),
         "filas_resolvidas": sorted(ids.values()),
@@ -435,7 +514,7 @@ def chamados_do_periodo(corpo: PeriodoIn, req: Request):
         # Para o caso de vir zero: é o que separa "a consulta não achou" de
         # "vieram linhas e os campos não foram lidos".
         "query": query,
-        "amostra_chaves": sorted(sla[0].keys()) if sla else [],
+        "amostra_chaves": sorted(brutas[0].keys()) if brutas else [],
     }
 
 
@@ -457,16 +536,19 @@ def contagem(corpo: PeriodoIn, req: Request):
         ids = ids_das_filas()
     except HTTPException as exc:
         erro = str(exc.detail)
-    query = query_task_sla(desde, ate, ids)
+    pela_task = (corpo.fonte or "task").strip().lower() != "task_sla"
+    tabela = "task" if pela_task else "task_sla"
+    query = (query_task(desde, ate, ids) if pela_task
+             else query_task_sla(desde, ate, ids))
     total = None
     try:
-        dados = _get("/api/now/stats/task_sla",
+        dados = _get(f"/api/now/stats/{tabela}",
                      {"sysparm_query": query, "sysparm_count": "true"}, timeout=90)
         total = int(((dados.get("result") or {}).get("stats") or {}).get("count") or 0)
     except HTTPException as exc:
         erro = erro or str(exc.detail)
     return {
-        "desde": desde, "ate": ate, "linhas_sla": total,
+        "desde": desde, "ate": ate, "linhas_sla": total, "fonte": tabela,
         "filas_resolvidas": sorted(ids.values()),
         "por_sys_id": bool(ids), "query": query, "erro": erro,
     }
