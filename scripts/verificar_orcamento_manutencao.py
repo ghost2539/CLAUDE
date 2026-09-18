@@ -299,6 +299,70 @@ with dbm.SessionLocal.begin() as s:
         if alvo is not None:
             s.delete(alvo)
 
+print("\n[7.2] A lista roda no SQLite do servidor, sem sintaxe só do Postgres")
+# O 500 que derrubou a tela no servidor novo era isto:
+#   sqlite3.OperationalError: near "NULLS": syntax error
+# `nullslast()` compila para `DESC NULLS LAST`, aceito pelo Postgres e pelo
+# SQLite só a partir da 3.30 (2019). O RHEL do servidor traz a 3.26. Como o
+# servidor antigo era Postgres, o defeito só nasceu na migração — e o dado
+# estava todo lá, o que fazia parecer problema de banco.
+import sqlite3 as _sqlite3  # noqa: E402
+from sqlalchemy.dialects import postgresql as _pg, sqlite as _sqlite  # noqa: E402
+
+_stmt = om._ordenado(select(R))
+for _nome, _dial in (("SQLite", _sqlite.dialect()), ("Postgres", _pg.dialect())):
+    _sql = str(_stmt.compile(dialect=_dial)).upper()
+    checar("NULLS" not in _sql, f"a lista não usa NULLS LAST/FIRST no {_nome}")
+
+# A ordem tem de continuar a mesma: mês mais novo primeiro, sem mês no fim.
+with dbm.SessionLocal.begin() as s:
+    for _rma, _mes in [("ORD-A", "2026-01"), ("ORD-B", "2026-03"),
+                       ("ORD-C", None), ("ORD-D", "2026-02"), ("ORD-E", None)]:
+        s.add(R(rma=_rma, serie=f"HF550XO{_rma[-1]}", categoria="Coletor",
+                familia="COLETOR", modelo="HF550", orcamento=1, ano=2026,
+                mes_referencia=_mes, status="APROVADO"))
+with dbm.SessionLocal() as s:
+    _linhas = [r for r in s.execute(om._ordenado(select(R))).scalars().all()
+               if r.rma.startswith("ORD-")]
+_meses = [r.mes_referencia for r in _linhas]
+_cheios = [m for m in _meses if m]
+checar(_cheios == sorted(_cheios, reverse=True),
+       f"mês mais novo primeiro ({_cheios})")
+checar(all(m is None for m in _meses[len(_cheios):]),
+       f"quem não tem mês fica no fim ({_meses})")
+
+# E o endpoint de verdade, que é o que a tela chama.
+_resposta = om.listar(_Req(), limit=10)
+checar(isinstance(_resposta, dict) and "itens" in _resposta,
+       f"GET /reparos responde sem erro ({sorted(_resposta)[:4]})")
+
+# Nenhum outro lugar do código pode voltar a usar a forma do Postgres.
+# Por AST, não por texto: comentário e docstring citam o nome de propósito,
+# e um detector que casa string acusaria a própria explicação.
+import ast as _ast  # noqa: E402
+
+_achados = []
+for _arq in sorted((RAIZ / "routers").glob("*.py")) + sorted((RAIZ / "db").glob("*.py")):
+    try:
+        _arvore = _ast.parse(_arq.read_text(encoding="utf-8"))
+    except SyntaxError:
+        continue
+    for _no in _ast.walk(_arvore):
+        if (isinstance(_no, _ast.Call)
+                and isinstance(_no.func, _ast.Attribute)
+                and _no.func.attr in ("nullslast", "nullsfirst")):
+            _achados.append(f"{_arq.name}:{_no.lineno}")
+checar(not _achados,
+       f"nenhuma chamada a .nullslast()/.nullsfirst() no código ({_achados or 'nenhuma'})")
+checar(_sqlite3.sqlite_version_info >= (3, 30) or True,
+       f"(SQLite desta máquina: {_sqlite3.sqlite_version} — o do servidor é 3.26)")
+
+with dbm.SessionLocal.begin() as s:
+    for _rma in ("ORD-A", "ORD-B", "ORD-C", "ORD-D", "ORD-E"):
+        _alvo = s.scalar(select(R).where(R.rma == _rma))
+        if _alvo is not None:
+            s.delete(_alvo)
+
 print("\n[8] Recalcular preenche a base antiga")
 with dbm.SessionLocal.begin() as s:
     s.add(R(rma="ANTIGO", serie="SEMPREFIXO1", categoria="Coletor HF550X",

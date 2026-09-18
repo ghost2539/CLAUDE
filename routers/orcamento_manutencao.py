@@ -29,6 +29,7 @@ from sqlalchemy import case, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 import db.orcamento_manutencao as db
+from db._esquema import nulos_por_ultimo, nulos_primeiro
 from core.security import check_rate_limit, require_permission
 
 _log = logging.getLogger("orcamento_manutencao")
@@ -602,7 +603,8 @@ def _filtrar(stmt, ano=None, mes=None, familia=None, categoria=None, status=None
 
 
 def _ordenado(stmt):
-    return stmt.order_by(R.mes_referencia.desc().nullslast(), R.id.desc())
+    # `nullslast()` sai como `NULLS LAST`, que o SQLite do servidor não aceita.
+    return stmt.order_by(*nulos_por_ultimo(R.mes_referencia), R.id.desc())
 
 
 def _mes_do_filtro(mes: Optional[str], ano: int) -> Optional[str]:
@@ -1887,7 +1889,7 @@ def _resumo_series(s, min_reparos: int, familia=None, categoria=None, ano=None,
                                   R.status_retorno),
                            familia, categoria, ano, q)
             .where(R.serie.in_(series[i:i + 400]))
-            .order_by(R.serie, R.mes_referencia.asc().nullsfirst(), R.id)
+            .order_by(R.serie, *nulos_primeiro(R.mes_referencia), R.id)
         ).all():
             d = detalhes.setdefault(serie, {"categoria": "", "familia": "",
                                             "lojas": [], "atendimentos": []})

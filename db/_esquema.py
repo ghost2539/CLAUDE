@@ -98,3 +98,31 @@ class UtcDateTime(_TypeDecorator):
         if value is not None and value.tzinfo is None:
             return value.replace(tzinfo=_timezone.utc)
         return value
+
+
+# ── Ordenação com nulos, que o SQLite antigo não sabe escrever ───────────
+def nulos_por_ultimo(coluna, desc: bool = True):
+    """`ORDER BY` que joga os nulos para o fim nos DOIS bancos.
+
+    `coluna.desc().nullslast()` vira `... DESC NULLS LAST`, que é sintaxe do
+    Postgres. O SQLite só passou a aceitar na 3.30 (2019) — o RHEL do
+    servidor traz a 3.26, e lá a consulta morre com
+    `near "NULLS": syntax error`. Como no servidor antigo o banco era
+    Postgres, isso nunca apareceu: o defeito só nasce na migração.
+
+    A forma portátil é ordenar antes pelo "é nulo?": `col IS NULL` dá 0 para
+    quem tem valor e 1 para quem não tem, então ASC põe os preenchidos
+    primeiro. Funciona igual nos dois bancos, sem `NULLS`.
+
+    Devolve uma TUPLA de critérios — use com `*`:
+
+        stmt.order_by(*nulos_por_ultimo(R.mes_referencia), R.id.desc())
+    """
+    ordem = coluna.desc() if desc else coluna.asc()
+    return (coluna.is_(None).asc(), ordem)
+
+
+def nulos_primeiro(coluna, desc: bool = False):
+    """O mesmo, do outro lado: nulos na frente. Ver `nulos_por_ultimo`."""
+    ordem = coluna.desc() if desc else coluna.asc()
+    return (coluna.is_(None).desc(), ordem)
