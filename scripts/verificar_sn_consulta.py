@@ -107,9 +107,19 @@ chamadas: list[dict] = []
 _interferir = {"ligado": False, "feito": False}
 
 
+# O que um servidor/proxy real faz com URL grande: 414. Sem isto a
+# verificação passaria feliz com uma query de 60 KB que nunca funcionaria em
+# produção — e o defeito só apareceria com a lista de verdade na mão.
+LIMITE_URL = 8000
+
+
 def _falso_get(caminho, params, timeout=60):
     chamadas.append({"caminho": caminho, "params": dict(params)})
     q = params.get("sysparm_query", "")
+    tamanho = sum(len(str(k)) + len(str(v)) + 2 for k, v in params.items())
+    if tamanho > LIMITE_URL:
+        from fastapi import HTTPException as _HE
+        raise _HE(502, f"ServiceNow retornou 414 (URL de {tamanho} bytes).")
 
     if caminho == "/api/now/table/sys_db_object":
         nome = q.split("name=")[-1]
@@ -156,6 +166,9 @@ def _filtrar(q: str) -> list[dict]:
             if _interferir["ligado"] and not _interferir["feito"]:
                 _interferir["feito"] = True
                 BASE.insert(0, dict(BASE[0], sys_id="0" * 32, number="INC-INTRUSO"))
+        elif parte.startswith("numberIN"):
+            querem = set(parte[len("numberIN"):].split(","))
+            linhas = [l for l in linhas if l["number"] in querem]
         elif "LIKE" in parte and not parte.startswith("NOT"):
             campo, alvo = parte.split("LIKE", 1)
             linhas = [l for l in linhas if alvo in str(l.get(campo, ""))]
@@ -168,6 +181,8 @@ def _filtrar(q: str) -> list[dict]:
 sc._get = _falso_get
 sc._cache_campos.clear()
 
+
+TETO_TELA_ESPERADO = sc.TETO_TELA
 
 print("[1] As tabelas oferecidas são as que o pedido cita")
 d = cliente.get("/api/sn-consulta/tabelas").json()
@@ -343,6 +358,109 @@ checar("ATENCAO" in r6.text and "100" in r6.text,
 sc.TETO_EXPORTACAO = antes
 
 
+print("\n[5b] Consultar POR LISTA de chamados, acima de 5 mil")
+# O caso que originou a tela: "tenho esta lista de 5 mil chamados, me traga
+# estes campos deles".
+PEDIDOS = [f"INC{i:07d}" for i in range(0, 5200)]
+# Trezentos que NÃO existem, no meio da lista — é o que a conferência
+# precisa separar, e no meio (não no fim) para pegar erro de bloco.
+INVENTADOS = [f"INC9{i:06d}" for i in range(300)]
+LISTA = PEDIDOS[:2600] + INVENTADOS + PEDIDOS[2600:]
+
+chamadas.clear()
+r20 = cliente.post("/api/sn-consulta/buscar", json={
+    "tabela": "incident", "campos": ["number", "state"],
+    "numeros": "\n".join(LISTA),
+})
+checar(r20.status_code == 200, f"HTTP 200 com {len(LISTA)} chamados ({r20.status_code})")
+d20 = r20.json()
+checar(d20["por_lista"] is True, "a resposta diz que foi por lista, não por filtro")
+checar(d20["pedidos"] == len(LISTA), f"conta os {len(LISTA)} pedidos")
+checar(d20["total"] == 5200, f"acha os 5.200 que existem ({d20['total']})")
+checar(d20["nao_encontrados_total"] == 300,
+       f"e diz que 300 não foram encontrados ({d20['nao_encontrados_total']})")
+checar(set(d20["nao_encontrados"]) <= set(INVENTADOS),
+       "nomeando exatamente os que não existem")
+checar(len(d20["linhas"]) <= TETO_TELA_ESPERADO,
+       "a tela recebe uma amostra, não as 5 mil linhas")
+
+# O ponto todo: a lista NÃO cabe numa URL só.
+tabela = [c for c in chamadas if c["caminho"].startswith("/api/now/table/")]
+checar(len(tabela) >= 22,
+       f"a lista foi partida em blocos ({len(tabela)} chamadas ao ServiceNow)")
+checar(all(len(c["params"]["sysparm_query"]) < 8000 for c in tabela),
+       "e nenhum bloco chega perto do limite de tamanho da URL")
+checar(all("numberIN" in c["params"]["sysparm_query"] for c in tabela),
+       "cada bloco pergunta pelos números daquele bloco")
+
+# Contraprova: em uma query só, a mesma lista é recusada pelo servidor.
+# Sem isto, "partimos em blocos" seria só uma afirmação no comentário.
+from fastapi import HTTPException as _HE  # noqa: E402
+try:
+    _falso_get("/api/now/table/incident", {
+        "sysparm_query": "numberIN" + ",".join(LISTA),
+        "sysparm_fields": "number", "sysparm_limit": "1",
+    })
+    estourou = False
+except _HE as exc:
+    estourou = "414" in str(exc.detail)
+checar(estourou,
+       "contraprova: os 5.500 numa query só levam 414 — por isso os blocos")
+
+# Lista + filtro se somam: "destes 5 mil, só os resolvidos".
+chamadas.clear()
+r21 = cliente.post("/api/sn-consulta/buscar", json={
+    "tabela": "incident", "campos": ["number", "state"],
+    "numeros": ", ".join(PEDIDOS[:500]),
+    "filtros": [{"campo": "state", "operador": "igual", "valor": "6"}],
+})
+d21 = r21.json()
+checar(d21["total"] == 250, f"lista e filtro se somam ({d21['total']} de 500)")
+checar(d21["nao_encontrados_total"] == 250,
+       "e o que o filtro excluiu entra em 'não encontrado' — a tela explica as causas")
+
+# A colagem de verdade: vírgula, espaço, quebra de linha, aspas e repetidos.
+r22 = cliente.post("/api/sn-consulta/buscar", json={
+    "tabela": "incident", "campos": ["number"],
+    "numeros": ' "inc0000001" , INC0000002\nINC0000003;INC0000002\n\n  ',
+})
+d22 = r22.json()
+checar(d22["pedidos"] == 3,
+       "aceita vírgula, espaço, quebra de linha e aspas, e descarta repetido")
+checar(d22["total"] == 3, "e acha os três — minúscula é normalizada")
+
+for ruim, desc in (("INC1^ORstate=7", "número com ^ é recusado"),
+                   ("INC1=2", "número com = é recusado"),
+                   ("javascript:x", "número com script é recusado")):
+    r23 = cliente.post("/api/sn-consulta/buscar",
+                       json={"tabela": "incident", "numeros": ruim})
+    checar(r23.status_code == 422, desc + f" ({r23.status_code})")
+r24 = cliente.post("/api/sn-consulta/buscar", json={
+    "tabela": "incident",
+    "numeros": "\n".join(f"INC{i:07d}" for i in range(sc.TETO_NUMEROS + 5)),
+})
+checar(r24.status_code == 422 and "teto" in r24.json().get("detail", ""),
+       "acima do teto, recusa dizendo que pode ser colagem errada")
+
+print("\n[5c] Exportação por lista: o arquivo diz quem faltou")
+r25 = cliente.post("/api/sn-consulta/exportar", json={
+    "tabela": "incident", "campos": ["number", "state"],
+    "numeros": "\n".join(PEDIDOS[:400] + INVENTADOS[:10]),
+})
+checar(r25.status_code == 200, f"HTTP 200 ({r25.status_code})")
+corpo25 = r25.text
+numeros25 = [l.split(";")[0] for l in corpo25.splitlines()[2:] if l.startswith("INC")]
+checar(len([n for n in numeros25 if n in set(PEDIDOS[:400])]) == 400,
+       "os 400 que existem estão no arquivo")
+checar("Nao encontrados: 10" in corpo25,
+       "e o arquivo fecha com a conta do que faltou")
+checar(all(n in corpo25 for n in INVENTADOS[:10]),
+       "listando cada um deles — é o que fecha a conferência")
+checar("Pedidos: 410" in corpo25, "com o total pedido, para bater a conta")
+# No MESMO arquivo: um segundo arquivo se perde entre a pasta de downloads
+# e o anexo do e-mail.
+checar(corpo25.count("\ufeff") <= 1, "tudo num arquivo só, não em dois")
+
 print("\n[6] Sem sessão e sem permissão, não responde")
 anon = TestClient(app)
 checar(anon.get("/api/sn-consulta/tabelas").status_code in (401, 403),
@@ -398,6 +516,20 @@ checar("['consulta',   'Consulta de chamados']" in js, "a aba está na lista")
 checar("S.tabs(ABAS, sub, 'servicenow_automacoes')" in js, "ligada ao roteador de abas")
 checar("renderConsulta" in js and "/sn-consulta/buscar" in js, "e chama a busca")
 checar("/sn-consulta/exportar" in js, "e a exportação")
+checar("cn-numeros" in js and "Chamados a consultar" in js,
+       "o campo da lista de chamados está na tela")
+checar("numeros: document.getElementById('cn-numeros').value" in js,
+       "e a lista vai no corpo da consulta")
+checar("contarNumeros" in js and "bloco(s)" in js,
+       "a tela conta os chamados colados e diz em quantos blocos vão")
+# A tela conta do mesmo jeito que o servidor: separadores iguais, aspas fora,
+# maiúscula, repetido descartado. Contagem diferente seria a tela mentindo.
+checar("/[\\s,;]+/" in js, "com os mesmos separadores do servidor")
+checar("toUpperCase()" in js and "repetido(s) descartado(s)" in js,
+       "e a mesma normalização, senão a tela diz 5.000 e o servidor 4.812")
+checar("nao_encontrados" in js and "está em outra tabela" in js,
+       "a tela explica as três causas de um chamado não vir")
+checar("por_lista" in js, "e separa o resultado por lista do resultado por filtro")
 checar("can_export" in js, "o botão de exportar respeita a permissão própria")
 # `S.el` faz setAttribute: `disabled: false` DESABILITA, `innerHTML` não
 # renderiza e `htmlFor` não vira `for`. Já custou tela quebrada antes.

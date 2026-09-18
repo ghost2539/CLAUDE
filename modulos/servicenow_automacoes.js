@@ -423,6 +423,23 @@ async function renderConsulta(c, S) {
             '</div></div>' +
         '<div class="card mb-3"><div class="card-header" ' +
             'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<span>Chamados a consultar</span>' +
+            '<span id="cn-num-conta" class="text-muted" style="font-size:12px"></span>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted" style="margin-top:0">Cole os números — um por linha, ' +
+                    'ou separados por vírgula/espaço. Colar uma coluna da planilha funciona. ' +
+                    'Passa de 5 mil: a lista é partida em blocos, porque a consulta vai na ' +
+                    'URL e 5 mil números de uma vez não cabem nela.<br>' +
+                    '<b>Deixe vazio</b> para buscar pelos filtros abaixo, em vez de por lista.</p>' +
+                '<div class="form-group"><label for="cn-numeros">Números dos chamados</label>' +
+                    '<textarea id="cn-numeros" class="form-control" rows="4" ' +
+                    'placeholder="INC1234567&#10;RITM1234567&#10;INC1234568"></textarea></div>' +
+                '<div class="btn-row"><button id="cn-num-limpar" class="btn btn-sm btn-secondary" ' +
+                    'type="button">Limpar lista</button></div>' +
+            '</div></div>' +
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Colunas da visão</span>' +
             '<span><input id="cn-busca-campo" class="form-control form-control-inline" ' +
                 'placeholder="Filtrar campos" style="min-width:200px"> ' +
@@ -600,10 +617,33 @@ async function renderConsulta(c, S) {
             tabela: document.getElementById('cn-tabela').value,
             campos: escolhidos.slice(),
             filtros: lerFiltros(),
+            numeros: document.getElementById('cn-numeros').value,
             ordenar_por: document.getElementById('cn-ordem-campo').value,
             ordem: document.getElementById('cn-ordem-dir').value,
             exibir_rotulos: true
         };
+    }
+
+    /* Conta o que foi colado do mesmo jeito que o servidor conta: mesmos
+       separadores, mesma remoção de repetido. Se a tela dissesse 5.000 e o
+       servidor 4.812, seria a tela mentindo — e a diferença (repetidos) é
+       justamente o que a pessoa quer saber antes de consultar. */
+    function contarNumeros() {
+        var bruto = document.getElementById('cn-numeros').value || '';
+        var vistos = Object.create(null), n = 0, repetidos = 0;
+        bruto.split(/[\s,;]+/).forEach(function (x) {
+            var v = x.trim().replace(/^["']|["']$/g, '').toUpperCase();
+            if (!v) return;
+            if (vistos[v]) { repetidos++; return; }
+            vistos[v] = 1; n++;
+        });
+        var alvo = document.getElementById('cn-num-conta');
+        alvo.textContent = n
+            ? (n.toLocaleString('pt-BR') + ' chamado(s)' +
+               (repetidos ? ' · ' + repetidos + ' repetido(s) descartado(s)' : '') +
+               ' · ' + Math.ceil(n / 250) + ' bloco(s)')
+            : 'lista vazia — a consulta vai pelos filtros';
+        return n;
     }
 
     /* ── Carga ────────────────────────────────────────────────── */
@@ -627,6 +667,10 @@ async function renderConsulta(c, S) {
         opcoesDeCampo(ordem, '— sem ordenação —');
         ordem.value = porNome.opened_at ? 'opened_at'
             : (porNome.sys_created_on ? 'sys_created_on' : '');
+        // Os filtros são por campo, e os campos mudam com a tabela — por isso
+        // eles se vão. A LISTA de chamados fica: trocar de Incidentes para
+        // RITMs para procurar os mesmos números é exatamente o que se faz
+        // quando parte da lista não aparece.
         document.getElementById('cn-filtros').innerHTML = '';
         desenharCampos(); desenharEscolhidos();
     }
@@ -652,11 +696,43 @@ async function renderConsulta(c, S) {
 
         var de = (d.pagina - 1) * d.por_pagina + 1;
         var ate = Math.min(d.pagina * d.por_pagina, d.total);
-        resumo.textContent = d.total
-            ? ('Mostrando ' + de + '–' + ate + ' de ' + d.total.toLocaleString('pt-BR') + ' chamados.')
-            : 'Nenhum chamado com esses filtros.';
+        if (d.por_lista) {
+            resumo.textContent = d.total.toLocaleString('pt-BR') + ' de ' +
+                d.pedidos.toLocaleString('pt-BR') + ' chamados encontrados' +
+                (d.nao_encontrados_total
+                    ? ' · ' + d.nao_encontrados_total.toLocaleString('pt-BR') + ' não encontrado(s)'
+                    : '') + '.';
+        } else {
+            resumo.textContent = d.total
+                ? ('Mostrando ' + de + '–' + ate + ' de ' + d.total.toLocaleString('pt-BR') + ' chamados.')
+                : 'Nenhum chamado com esses filtros.';
+        }
 
         saida.innerHTML = '';
+
+        /* "Não encontrado" tem três causas e a tela precisa dizer as três,
+           senão a conclusão vira "o chamado não existe" — que é só uma
+           delas, e normalmente a errada. */
+        if (d.por_lista && d.nao_encontrados_total) {
+            var av = S.el('div', { className: 'alert alert-warning mb-3' });
+            var tit = S.el('div');
+            tit.innerHTML = '<b>' + d.nao_encontrados_total.toLocaleString('pt-BR') +
+                ' chamado(s) da sua lista não vieram.</b> Pode ser: o número não existe; ' +
+                'está em outra tabela (um RITM procurado em Incidentes não aparece); ' +
+                'ou os filtros abaixo o excluíram.';
+            av.appendChild(tit);
+            av.appendChild(S.el('div', {
+                className: 'mt-2',
+                style: 'font-family:monospace;font-size:11px;max-height:120px;overflow:auto',
+                textContent: d.nao_encontrados.join(', ') +
+                    (d.nao_encontrados_total > d.nao_encontrados.length
+                        ? ' … (+' + (d.nao_encontrados_total - d.nao_encontrados.length) +
+                          '; a lista completa vai no CSV)'
+                        : '')
+            }));
+            saida.appendChild(av);
+        }
+
         if (d.total > d.teto_exportacao) {
             saida.appendChild(S.el('div', { className: 'alert alert-warning',
                 textContent: 'A busca pegou ' + d.total.toLocaleString('pt-BR') +
@@ -668,6 +744,18 @@ async function renderConsulta(c, S) {
             return { key: nome, label: (d.rotulos || {})[nome] || nome };
         });
         saida.appendChild(S.table(cols, d.linhas));
+
+        // Por lista não há paginação: a consulta já percorreu os blocos todos
+        // para saber quem faltou, e a tela mostra a primeira fatia. O resto
+        // sai no CSV — paginar de novo custaria outra varredura inteira.
+        if (d.por_lista) {
+            if (d.total > d.linhas.length) {
+                saida.appendChild(S.el('p', { className: 'text-muted mt-3',
+                    textContent: 'Mostrando os primeiros ' + d.linhas.length +
+                        ' na tela. Exporte para ver os ' + d.total.toLocaleString('pt-BR') + '.' }));
+            }
+            return;
+        }
 
         // Paginação da amostra. Quem vai até a página 40 devia estar
         // exportando — mas fechar a porta seria pior que deixar aberta.
@@ -719,6 +807,12 @@ async function renderConsulta(c, S) {
     document.getElementById('cn-filtro-add').onclick = function () {
         document.getElementById('cn-filtros').appendChild(linhaFiltro());
     };
+    document.getElementById('cn-numeros').addEventListener('input', contarNumeros);
+    document.getElementById('cn-num-limpar').onclick = function () {
+        document.getElementById('cn-numeros').value = '';
+        contarNumeros();
+    };
+    contarNumeros();
     document.getElementById('cn-buscar').onclick = function () { consultar(1); };
 
     if (podeExportar) {

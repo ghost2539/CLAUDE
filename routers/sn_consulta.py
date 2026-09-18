@@ -95,6 +95,29 @@ PAGINA_REST = 1000
 # para o navegador trava a aba e não ajuda ninguém a conferir nada.
 TETO_TELA = 1000
 
+# ── Consulta por lista de chamados ─────────────────────────────────────
+# O caso de uso que originou a tela: "tenho esta lista de 5 mil chamados,
+# me traga estes campos deles".
+#
+# A encoded query vai na URL (`sysparm_query=numberIN INC1,INC2,...`), e URL
+# tem limite de tamanho. Cinco mil números dão uns 60 KB — nenhum servidor
+# aceita, e o erro que volta é 414 ou um 400 genérico que não explica nada.
+# Por isso a lista é partida em blocos e cada bloco vira uma consulta; os
+# resultados se somam.
+#
+# 250 números por bloco dão ~3 KB de query, bem abaixo dos ~8 KB que
+# servidor e proxy costumam aceitar, e mantêm o número de idas ao
+# ServiceNow razoável (5 mil chamados = 20 blocos).
+LOTE_NUMEROS = 250
+# Teto da lista colada. Não é "o máximo que dá": é onde paramos para uma
+# colagem errada (a planilha inteira, em vez da coluna) não virar centenas
+# de idas ao ServiceNow.
+TETO_NUMEROS = 50000
+# `number` é o campo do número do chamado nas três tabelas oferecidas —
+# `incident`, `sc_req_item` e `task` herdam todas de `task`.
+CAMPO_NUMERO = "number"
+_RE_NUMERO = re.compile(r"^[A-Z0-9][A-Z0-9._-]{0,39}$")
+
 
 # ── Operadores aceitos ─────────────────────────────────────────────────
 # Lista fechada. O valor da direita é o que entra na encoded query do
@@ -318,6 +341,10 @@ class ConsultaIn(BaseModel):
     tabela: str = "incident"
     campos: list[str] = Field(default_factory=list)
     filtros: list[Filtro] = Field(default_factory=list)
+    # A lista de chamados, como a pessoa colou: separada por vírgula, espaço,
+    # ponto e vírgula ou quebra de linha (colar uma coluna do Excel cai aqui).
+    # Vazio = a consulta é só pelos filtros.
+    numeros: str = ""
     ordenar_por: str = ""
     ordem: str = "desc"
     pagina: int = 1
@@ -392,6 +419,77 @@ def _montar_query(corpo: ConsultaIn, validos: dict) -> str:
     return "^".join(partes)
 
 
+def _numeros_pedidos(texto: str) -> list[str]:
+    """Os chamados que a pessoa colou, normalizados e sem repetição.
+
+    Aceita o que sai de uma colagem de verdade: vírgula, ponto e vírgula,
+    espaço, tabulação e quebra de linha, tudo misturado — colar uma coluna do
+    Excel cai aqui, e colar uma célula com aspas também.
+
+    A ordem é preservada porque é a ordem da planilha de quem pediu: na hora
+    de conferir o que não foi encontrado, "a linha 300" ainda quer dizer
+    alguma coisa.
+    """
+    saida: list[str] = []
+    vistos: set[str] = set()
+    for bruto in re.split(r"[\s,;]+", (texto or "").strip()):
+        n = bruto.strip().strip("\"'").upper()
+        if not n:
+            continue
+        # O número entra na encoded query, onde `^` e `=` são estrutura e a
+        # vírgula separa a lista. Recusar aqui é melhor que deixar um número
+        # torto mudar o sentido da consulta inteira.
+        if not _RE_NUMERO.match(n):
+            raise HTTPException(422, (
+                f"Número de chamado inválido: {n[:60]!r}. Esperado algo como "
+                "INC1234567 ou RITM1234567 — letras, números, ponto, hífen "
+                "ou sublinhado."
+            ))
+        if n not in vistos:
+            vistos.add(n)
+            saida.append(n)
+    if len(saida) > TETO_NUMEROS:
+        raise HTTPException(422, (
+            f"{len(saida)} chamados na lista, e o teto é {TETO_NUMEROS}. "
+            "Confira se não foi colada a planilha inteira no lugar da coluna "
+            "dos números; se forem todos mesmo, consulte em partes."
+        ))
+    return saida
+
+
+def _blocos(numeros: list[str], tamanho: int = LOTE_NUMEROS):
+    for i in range(0, len(numeros), tamanho):
+        yield numeros[i:i + tamanho]
+
+
+def _query_do_bloco(bloco: list[str], base: str) -> str:
+    """`numberIN ...` do bloco, somado ao resto dos filtros."""
+    q = CAMPO_NUMERO + "IN" + ",".join(bloco)
+    return (q + "^" + base) if base else q
+
+
+def _percorrer(tabela: str, base: str, numeros: list[str], campos: list[str],
+               rotulos: bool, teto: int):
+    """Todas as linhas do resultado — por lista de chamados ou pelos filtros.
+
+    Sem lista, é a varredura de sempre. Com lista, é um `numberIN` por bloco,
+    e cada bloco ainda pagina por `sys_id`: um bloco de 250 números devolve no
+    máximo 250 linhas (o número é único), mas a paginação sai de graça e cobre
+    o caso de alguém mexer no tamanho do lote.
+    """
+    if not numeros:
+        yield from _paginar_por_sys_id(tabela, base, campos, rotulos, teto)
+        return
+    trazidos = 0
+    for bloco in _blocos(numeros):
+        if trazidos >= teto:
+            return
+        for linha in _paginar_por_sys_id(tabela, _query_do_bloco(bloco, base),
+                                         campos, rotulos, teto - trazidos):
+            yield linha
+            trazidos += 1
+
+
 def _contar(tabela: str, query: str) -> int:
     """Conta no servidor, sem baixar linha nenhuma.
 
@@ -419,14 +517,20 @@ def buscar(corpo: ConsultaIn, req: Request):
         escolhidos = list(TABELAS[corpo.tabela]["campos_padrao"])
     escolhidos = [_conferir_campo(c, validos, "Campo") for c in escolhidos]
 
-    query = _montar_query(corpo, validos)
+    base = _montar_query(corpo, validos)
+    numeros = _numeros_pedidos(corpo.numeros)
+    por_pagina = max(1, min(int(corpo.por_pagina or 100), TETO_TELA))
+    pagina = max(1, int(corpo.pagina or 1))
+
+    if numeros:
+        return _buscar_por_lista(corpo, base, numeros, escolhidos, validos, por_pagina)
+
+    query = base
     if corpo.ordenar_por:
         ordem = "ORDERBYDESC" if (corpo.ordem or "desc").lower() == "desc" else "ORDERBY"
         campo_ordem = _conferir_campo(corpo.ordenar_por, validos, "Campo de ordenação")
         query = (query + "^" if query else "") + ordem + campo_ordem
 
-    por_pagina = max(1, min(int(corpo.por_pagina or 100), TETO_TELA))
-    pagina = max(1, int(corpo.pagina or 1))
     dados = _get(f"/api/now/table/{corpo.tabela}", {
         "sysparm_query": query,
         "sysparm_fields": ",".join(escolhidos),
@@ -450,7 +554,60 @@ def buscar(corpo: ConsultaIn, req: Request):
         "por_pagina": por_pagina,
         "total": total,
         "query": query,
+        "por_lista": False,
+        "pedidos": 0,
+        "nao_encontrados": [],
+        "nao_encontrados_total": 0,
         "teto_exportacao": TETO_EXPORTACAO,
+        "teto_numeros": TETO_NUMEROS,
+    }
+
+
+def _buscar_por_lista(corpo: ConsultaIn, base: str, numeros: list[str],
+                      escolhidos: list[str], validos: dict, por_pagina: int) -> dict:
+    """Consulta por lista de chamados: a lista inteira, em blocos.
+
+    Aqui não há paginação por offset como na busca por filtro, e o motivo é
+    que a pergunta é outra. Quem cola 5 mil números quer saber duas coisas:
+    quantos foram encontrados e QUAIS não foram. A segunda só se responde
+    percorrendo a lista toda — não dá para adivinhar na página 1 que o
+    chamado do bloco 17 não existe.
+
+    Então percorre-se tudo, uma vez. Para não segurar 5 mil linhas na
+    memória à toa, só as primeiras `por_pagina` são guardadas inteiras; das
+    demais fica apenas o número, que é o que a conferência precisa.
+
+    Um chamado "não encontrado" pode ser três coisas, e a tela diz isso: não
+    existe, está em outra tabela (um RITM procurado em `incident`), ou os
+    filtros do formulário o excluíram.
+    """
+    amostra: list[dict] = []
+    achados: set[str] = set()
+    campos_pedidos = list(dict.fromkeys(escolhidos + [CAMPO_NUMERO]))
+    for linha in _percorrer(corpo.tabela, base, numeros, campos_pedidos,
+                            corpo.exibir_rotulos, TETO_EXPORTACAO):
+        achados.add(_valor_plano(linha.get(CAMPO_NUMERO)).upper())
+        if len(amostra) < por_pagina:
+            amostra.append({c: _valor_plano(linha.get(c)) for c in escolhidos})
+    faltando = [n for n in numeros if n not in achados]
+    return {
+        "tabela": corpo.tabela,
+        "campos": escolhidos,
+        "rotulos": {c: validos.get(c.split(".")[0], {}).get("rotulo", c) for c in escolhidos},
+        "linhas": amostra,
+        "pagina": 1,
+        "por_pagina": por_pagina,
+        "total": len(achados),
+        "query": _query_do_bloco(numeros[:3], base) + (" …" if len(numeros) > 3 else ""),
+        "por_lista": True,
+        "pedidos": len(numeros),
+        "blocos": (len(numeros) + LOTE_NUMEROS - 1) // LOTE_NUMEROS,
+        # A lista inteira de faltantes pode ser enorme; a tela mostra as
+        # primeiras e o arquivo exportado leva todas.
+        "nao_encontrados": faltando[:200],
+        "nao_encontrados_total": len(faltando),
+        "teto_exportacao": TETO_EXPORTACAO,
+        "teto_numeros": TETO_NUMEROS,
     }
 
 
@@ -508,7 +665,8 @@ def exportar(corpo: ConsultaIn, req: Request):
     if not escolhidos:
         escolhidos = list(TABELAS[corpo.tabela]["campos_padrao"])
     escolhidos = [_conferir_campo(c, validos, "Campo") for c in escolhidos]
-    query = _montar_query(corpo, validos)
+    base = _montar_query(corpo, validos)
+    numeros = _numeros_pedidos(corpo.numeros)
 
     def linhas():
         buf = io.StringIO()
@@ -523,8 +681,14 @@ def exportar(corpo: ConsultaIn, req: Request):
         buf.seek(0), buf.truncate(0)
 
         contados = 0
-        for registro in _paginar_por_sys_id(corpo.tabela, query, escolhidos,
-                                            corpo.exibir_rotulos, TETO_EXPORTACAO):
+        achados: set[str] = set()
+        # Com lista, o número entra nos campos pedidos mesmo que não esteja
+        # entre as colunas escolhidas: é por ele que se sabe quem faltou.
+        pedidos = list(dict.fromkeys(escolhidos + [CAMPO_NUMERO])) if numeros else escolhidos
+        for registro in _percorrer(corpo.tabela, base, numeros, pedidos,
+                                   corpo.exibir_rotulos, TETO_EXPORTACAO):
+            if numeros:
+                achados.add(_valor_plano(registro.get(CAMPO_NUMERO)).upper())
             escritor.writerow([_valor_plano(registro.get(c)) for c in escolhidos])
             contados += 1
             if buf.tell() > 64 * 1024:
@@ -533,6 +697,27 @@ def exportar(corpo: ConsultaIn, req: Request):
         if buf.tell():
             yield buf.getvalue()
             buf.seek(0), buf.truncate(0)
+
+        # O que foi pedido e não voltou. Vai no MESMO arquivo, no fim, porque
+        # é o que fecha a conferência: a pessoa colou 5 mil números e precisa
+        # saber quais dos 5 mil não estão ali — e um segundo arquivo se perde.
+        if numeros:
+            faltando = [n for n in numeros if n not in achados]
+            escritor.writerow([])
+            escritor.writerow([f"Pedidos: {len(numeros)}",
+                               f"Encontrados: {len(achados)}",
+                               f"Nao encontrados: {len(faltando)}"])
+            if faltando:
+                escritor.writerow(["Nao encontrados nesta tabela "
+                                   "(pode ser outra tabela, ou os filtros excluiram):"])
+                for n in faltando:
+                    escritor.writerow([n])
+                    if buf.tell() > 64 * 1024:
+                        yield buf.getvalue()
+                        buf.seek(0), buf.truncate(0)
+            yield buf.getvalue()
+            buf.seek(0), buf.truncate(0)
+
         # Um arquivo truncado calado é pior que um erro: a pessoa fecha o
         # mês com 50 mil de 63 mil chamados e não tem como saber.
         if contados >= TETO_EXPORTACAO:

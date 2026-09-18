@@ -148,7 +148,7 @@ agrupadas pela etapa do ciclo do ativo. A rota entre crases é a que o menu usa
 | **Logística Reversa** | `#reversa` | O que volta da loja: coleta, esperado × recebido. |
 | **Preparação** | `#preparacao` | Preparo do equipamento para devolver ao uso. |
 | **ServiceNow** | `#servicenow_automacoes` | Automações do ServiceNow. Roda **só pelo botão**, com o usuário logado — não há agendador nem conta de serviço escrevendo. |
-| **Consulta de chamados** | `#servicenow_automacoes/consulta` | Aba da tela acima. Extração em lote de **incidents** (`incident.do`) e **RITMs** (`sc_req_item`), com escolha de colunas e exportação em CSV. Passa de 5 mil chamados. Só **leitura**, pela conta de serviço. |
+| **Consulta de chamados** | `#servicenow_automacoes/consulta` | Aba da tela acima. Extração em lote de **incidents** (`incident.do`) e **RITMs** (`sc_req_item`). Aceita uma **lista colada de números de chamado** (acima de 5 mil) e/ou filtros por campo, escolha de colunas e exportação em CSV. Só **leitura**, pela conta de serviço. |
 
 ### Central de Reparos
 | Módulo | Rota | O que faz |
@@ -277,6 +277,14 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   sendo abertos enquanto a exportação roda; com `sysparm_offset` uma linha
   muda de página e sai duplicada ou some. A verificação tem contraprova
   disso (`scripts/verificar_sn_consulta.py`).
+- **A lista de chamados vai em blocos de 250.** A *encoded query* viaja na
+  URL (`sysparm_query=numberIN INC1,INC2,…`), e 5 mil números dão uns 60 KB —
+  nenhum servidor aceita, e o que volta é 414 ou um 400 sem explicação. A
+  lista é partida, cada bloco vira uma consulta e os resultados se somam.
+- **A consulta por lista diz quais números não voltaram**, na tela e no fim
+  do CSV. Não voltar tem três causas e a tela nomeia as três: o chamado não
+  existe, está em outra tabela (um RITM procurado em `incident`), ou os
+  filtros o excluíram.
 - A consulta nunca chega pronta da tela: ela manda linhas de
   (campo, operador, valor); o campo é conferido contra a lista lida do
   dicionário e o operador contra uma lista fechada, para que `^` e `=`
