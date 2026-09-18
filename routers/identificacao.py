@@ -587,18 +587,29 @@ def gerar_lote(body: GerarLoteIn, req: Request):
     new_status = "AG TRIAGEM" if tipo_upper == "TRIAGEM" else "VENDA"
     year_key = str(datetime.now().year)
 
-    # Consume sequence atomically (YYYY-NNNN, reset anual)
+    # Consome a sequência (AAAA-NNNN, reset anual) sem duas caixas com o mesmo
+    # número. Era `SELECT ... FOR UPDATE`, que o Postgres entende e o SQLite
+    # não tem: no servidor novo isto virava
+    #   sqlite3.OperationalError: near "FOR": syntax error
+    # e o botão Gerar lote parava. Como o SQL é escrito à mão, o SQLAlchemy
+    # não traduzia nada (pelo ORM, `.with_for_update()` é omitido no SQLite).
+    #
+    # O incremento em UM comando resolve nos dois bancos e é mais correto que
+    # o original: ler e depois gravar abria janela para dois pedidos pegarem
+    # o mesmo número. Aqui quem chega primeiro trava a linha (Postgres) ou a
+    # escrita (SQLite), e o segundo só lê depois de o primeiro terminar.
     with SessionLocal.begin() as s:
-        row = s.execute(
-            text("SELECT next_number FROM box_sequences WHERE prefix = :p FOR UPDATE"),
+        avancou = s.execute(
+            text("UPDATE box_sequences SET next_number = next_number + 1 "
+                 "WHERE prefix = :p"),
             {"p": year_key},
-        ).fetchone()
-        if row:
-            seq = row[0]
-            s.execute(
-                text("UPDATE box_sequences SET next_number = :n WHERE prefix = :p"),
-                {"n": seq + 1, "p": year_key},
-            )
+        ).rowcount
+        if avancou:
+            # O SELECT devolve o número JÁ incrementado; o desta caixa é o anterior.
+            seq = s.execute(
+                text("SELECT next_number FROM box_sequences WHERE prefix = :p"),
+                {"p": year_key},
+            ).scalar() - 1
         else:
             seq = 1
             s.execute(

@@ -375,6 +375,81 @@ checar(antigo.modelo == "HF550", f"modelo deduzido do texto antigo ({antigo.mode
 checar(antigo.categoria == "Coletor", f"categoria reduzida ({antigo.categoria!r})")
 checar(r["modelos_preenchidos"] >= 1, "o recálculo conta quantos ajustou")
 
+print("\n[8.1] Recalcular vai ao EBS e grava a EMPRESA")
+# Antes, o recálculo só refazia conta local: quem recalculava ficava com a
+# empresa vazia e não sabia que faltava clicar no outro botão.
+_chamadas: list[str] = []
+
+
+def _ebs_de_mentira(serie):
+    _chamadas.append(serie)
+    if serie.startswith("SEMEBS"):
+        return {"encontrado": False, "custo": None, "empresa": "", "erro": "Ativo não encontrado no EBS"}
+    return {"encontrado": True, "custo": 3000.0, "empresa": "CAMICADO", "erro": ""}
+
+
+_ebs_real = om._consultar_ebs
+om._consultar_ebs = _ebs_de_mentira
+try:
+    with dbm.SessionLocal.begin() as s:
+        s.add_all([
+            # sem empresa: tem de ser consultado
+            R(rma="EBS-1", serie="HF550XE1", categoria="Coletor", familia="COLETOR",
+              modelo="HF550", orcamento=100, ano=2026, mes_referencia="2026-03",
+              status="APROVADO", empresa=""),
+            # com empresa E com valor: não precisa de EBS
+            R(rma="EBS-2", serie="HF550XE2", categoria="Coletor", familia="COLETOR",
+              modelo="HF550", orcamento=100, ano=2026, mes_referencia="2026-03",
+              status="APROVADO", empresa="RENNER", valor_compra=1234.0,
+              valor_compra_fonte="MANUAL"),
+            # série que o EBS não acha: erro relatado, não explode
+            R(rma="EBS-3", serie="SEMEBS01", categoria="Coletor", familia="COLETOR",
+              modelo="HF550", orcamento=100, ano=2026, mes_referencia="2026-03",
+              status="APROVADO", empresa=""),
+        ])
+
+    _r = om.recalcular(_Req())
+    _consultadas = set(_chamadas)
+    checar("HF550XE1" in _consultadas,
+           f"a linha sem empresa foi ao EBS ({sorted(_consultadas)})")
+    checar("SEMEBS01" in _consultadas, "a linha sem empresa e sem valor também foi")
+    checar("HF550XE2" not in _consultadas,
+           "quem já tem empresa e valor NÃO é consultado de novo")
+
+    with dbm.SessionLocal() as s:
+        _e1 = s.scalar(select(R).where(R.rma == "EBS-1"))
+        _e2 = s.scalar(select(R).where(R.rma == "EBS-2"))
+        _e3 = s.scalar(select(R).where(R.rma == "EBS-3"))
+    checar(_e1.empresa == "CAMICADO", f"a empresa veio do EBS e foi gravada ({_e1.empresa!r})")
+    checar(_e1.ebs_consultado_em is not None, "a linha guarda quando o EBS foi consultado")
+    checar(_e2.empresa == "RENNER" and _e2.valor_compra == 1234.0,
+           f"valor MANUAL não é sobrescrito pelo recálculo ({_e2.valor_compra})")
+    checar(_e3.empresa == "" and "não encontrado" in (_e3.ebs_erro or "").lower(),
+           f"série sem EBS fica sem empresa e com o erro registrado ({_e3.ebs_erro!r})")
+
+    checar(_r["ebs_consultados"] >= 2 and _r["ebs_atualizados"] >= 1,
+           f"o retorno conta o que foi ao EBS ({_r['ebs_consultados']}/{_r['ebs_atualizados']})")
+    checar(any(f["erro"] for f in _r["ebs_falhas"]),
+           f"a falha do EBS chega à tela ({_r['ebs_falhas'][:1]})")
+
+    # Quem não quer rede continua conseguindo recalcular.
+    _chamadas.clear()
+    _sem = om.recalcular(_Req(), ebs=False)
+    checar(not _chamadas, "com ebs=false, nenhuma consulta é feita")
+    checar(_sem["ebs_consultados"] == 0, "e o retorno diz zero consultados")
+
+    # O teto segura a varredura: o EBS é de terceiro.
+    _chamadas.clear()
+    _lim = om.recalcular(_Req(), limite_ebs=1)
+    checar(len(_chamadas) <= 1, f"limite_ebs respeitado ({len(_chamadas)} consulta(s))")
+finally:
+    om._consultar_ebs = _ebs_real
+    with dbm.SessionLocal.begin() as s:
+        for _rma in ("EBS-1", "EBS-2", "EBS-3"):
+            _alvo = s.scalar(select(R).where(R.rma == _rma))
+            if _alvo is not None:
+                s.delete(_alvo)
+
 print("\n[9] Banco que já existe ganha a coluna sem perder dado")
 import sqlite3  # noqa: E402
 

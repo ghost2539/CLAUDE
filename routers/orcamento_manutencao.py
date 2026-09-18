@@ -1676,12 +1676,20 @@ def config_gravar(body: ConfigIn, req: Request):
 
 
 @router.post("/recalcular")
-def recalcular(req: Request):
+def recalcular(req: Request, ebs: bool = True, limite_ebs: int = 200):
     """Refaz percentual/avaliação de todas as linhas (e o valor PADRAO, se a
     configuração mudou) e aplica a regra 3.5 nas pendentes.
 
     Também preenche o modelo pela série e reduz a categoria a Coletor/SLED
-    na base antiga, que guardava o modelo dentro do texto da categoria."""
+    na base antiga, que guardava o modelo dentro do texto da categoria.
+
+    No fim consulta o EBS pelas linhas que ainda estão sem EMPRESA ou sem
+    valor de compra e grava o que vier — a empresa inclusive. Antes isso só
+    acontecia no botão separado "Completar valor de compra pelo EBS", e quem
+    recalculava ficava com a empresa vazia sem saber que faltava um segundo
+    passo. `ebs=false` recalcula sem tocar na rede; `limite_ebs` segura o
+    tamanho da consulta (o EBS é de terceiro e a base tem dezenas de
+    milhares de linhas, então isto nunca varre tudo de uma vez)."""
     sd = _exigir(req, "admin")
     check_rate_limit(req, "api")
     mudaram = 0
@@ -1706,8 +1714,33 @@ def recalcular(req: Request):
                     or antes_ident != (r.modelo, r.categoria, r.familia)):
                 mudaram += 1
                 r.atualizado_por = _usuario(sd)
-    return {"total": len(linhas), "mudaram": mudaram,
-            "modelos_preenchidos": modelos_preenchidos}
+    saida = {"total": len(linhas), "mudaram": mudaram,
+             "modelos_preenchidos": modelos_preenchidos,
+             "ebs_consultados": 0, "ebs_atualizados": 0, "ebs_falhas": []}
+    if not ebs:
+        return saida
+
+    # O recálculo acima pode ter mudado o modelo, e o valor de compra padrão
+    # sai do modelo — por isso a ida ao EBS vem depois, já com a linha certa.
+    limite_ebs = max(1, min(int(limite_ebs or 200), 1000))
+    with db.SessionLocal() as s:
+        alvos = s.execute(
+            select(R.id, R.serie)
+            .where(or_(R.empresa == "", R.empresa.is_(None), R.valor_compra.is_(None)))
+            .where(R.serie != "")
+            .order_by(R.id.desc()).limit(limite_ebs)
+        ).all()
+    # Rede primeiro, banco depois: nada de transação aberta durante as chamadas.
+    resultados = [(rid, _consultar_ebs(serie)) for rid, serie in alvos]
+    if resultados:
+        # sobrescrever_manual=False: quem digitou o valor à mão manda.
+        r_ebs = _gravar_ebs(resultados, _usuario(sd), sobrescrever_manual=False)
+        saida["ebs_consultados"] = r_ebs["consultados"]
+        saida["ebs_atualizados"] = r_ebs["atualizados"]
+        saida["ebs_falhas"] = r_ebs["falhas"][:20]
+        # Bateu no teto: ainda há linha sem empresa/valor esperando outra rodada.
+        saida["ebs_limite_atingido"] = len(alvos) >= limite_ebs
+    return saida
 
 
 # ── 5.10 Opções para os selects ─────────────────────────────────────────

@@ -2442,6 +2442,9 @@
                         S.esc(String(Math.round(limiar * 10000) / 100)) + '"></div>' +
                     '<p class="om-hint">Orçamento acima deste percentual do valor de compra é avaliado como FORA e, se o status ainda estiver pendente, reprovado automaticamente. ' +
                     'Mudar o limiar não recalcula o histórico: use o botão Recalcular.</p>' +
+                    '<p class="om-hint">O Recalcular também consulta o EBS pela série das linhas que ainda '+
+                    'estão sem empresa ou sem valor de compra, e grava o que vier — a empresa inclusive. '+
+                    'Vai até 200 por vez; se sobrar, o aviso diz para rodar de novo.</p>' +
                 '</div></div>' +
             '</div>' +
             '<div class="card mb-3"><div class="card-header">Valor de compra padrão por categoria (R$)</div><div class="card-body">' +
@@ -2528,11 +2531,23 @@
         };
 
         q('om-recalc').onclick = async function () {
-            if (!window.confirm('Recalcular percentual e avaliação de todos os reparos e aplicar a regra dos 60 % nos pendentes?')) return;
+            if (!window.confirm('Recalcular percentual e avaliação de todos os reparos, aplicar a regra dos 60 % ' +
+                                'nos pendentes e consultar o EBS para completar empresa e valor de compra ' +
+                                'de quem ainda está sem?')) return;
             try {
                 var r = await busy(function () { return S.api(BASE + '/recalcular', { method: 'POST' }); });
-                var txt = 'Recálculo concluído — ' + resumoNumerico(r);
-                S.toast(txt, 'success');
+                // Resumo escrito à mão: o genérico despejaria todas as chaves e
+                // a parte do EBS é o que a área precisa ler.
+                var txt = 'Recálculo: ' + fmtInt(r.mudaram) + ' de ' + fmtInt(r.total) + ' linha(s) alterada(s)';
+                if (r.modelos_preenchidos) txt += ', ' + fmtInt(r.modelos_preenchidos) + ' modelo(s) preenchido(s)';
+                txt += '. EBS: ' + fmtInt(r.ebs_consultados) + ' consultado(s), ' +
+                       fmtInt(r.ebs_atualizados) + ' com empresa/valor atualizado(s)';
+                if (r.ebs_limite_atingido) txt += ' — ainda há linhas sem empresa: rode de novo';
+                txt += '.';
+                var falhas = r.ebs_falhas || [];
+                S.toast(txt, falhas.length ? 'warning' : 'success');
+                if (falhas.length) txt += ' ' + fmtInt(falhas.length) + ' falha(s) no EBS: ' +
+                                          S.esc(falhas[0].erro || 'consulta sem resposta');
                 q('om-cfg-msg').textContent = txt;
             } catch (e) {
                 S.toast(e.message, 'error');
