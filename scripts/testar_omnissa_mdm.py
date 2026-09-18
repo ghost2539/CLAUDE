@@ -116,6 +116,84 @@ def credencial_basica(usuario_arg: str) -> tuple[str, str]:
     return usuario, senha
 
 
+def avisar_tls() -> bool:
+    """Grita se a verificação de certificado estiver desligada no ambiente.
+
+    Aqui se manda senha e segredo de cliente pela rede. Com `VERIFY_SSL=false`
+    qualquer coisa no caminho pode se passar pelo destino e ficar com as duas.
+    O script não desliga nada — mas também não vai deixar isso passar calado,
+    que é como esse tipo de ajuste temporário costuma virar permanente.
+    """
+    try:
+        from integracoes import http as http_saida
+        if http_saida.verificacao_tls("omnissa") is False:
+            print("\n  ⚠⚠ TLS SEM VERIFICAÇÃO neste ambiente (VERIFY_SSL=false).")
+            print("     Credencial mandada assim vai para quem estiver no caminho.")
+            print("     Para um teste de leitura, tudo bem; antes de automatizar,")
+            print("     ligue de volta — com proxy que intercepta o TLS, o certo é")
+            print("     PORTAL_CA_BUNDLE apontando para a CA corporativa.")
+            return False
+    except Exception:  # noqa: BLE001 — fora do servidor não há config a consultar
+        pass
+    return True
+
+
+def carregar_credencial(caminho: str) -> dict:
+    """A service account do Intelligence: de um arquivo, ou do ambiente.
+
+    `cred.json` não é um arquivo que exista em lugar nenhum por padrão — é o
+    JSON que o console da Omnissa **baixa na hora** em que a service account
+    é criada, e que só aparece naquele momento. Ele tem esta cara:
+
+        {"clientId": "...", "clientSecret": "...",
+         "tokenEndpoint": "https://<regiao>.uemauth...com/connect/token",
+         "resourceIds": ["..."]}
+
+    Quem recebeu a chave em pedaços soltos (num chamado, num chat) não
+    precisa remontar arquivo nenhum: basta o ambiente.
+
+        export OMNISSA_CLIENT_ID=...
+        export OMNISSA_TOKEN_ENDPOINT=https://.../connect/token
+        read -rs OMNISSA_CLIENT_SECRET && export OMNISSA_CLIENT_SECRET
+
+    O segredo não entra por argumento pelo mesmo motivo da senha: `ps`
+    mostra o comando inteiro, e ele ficaria no histórico do shell.
+    """
+    if caminho:
+        arq = Path(caminho)
+        if not arq.is_file():
+            raise SystemExit(
+                f"Não existe o arquivo {arq}.\n"
+                "  Ele é o JSON que o console da Omnissa baixa quando a service\n"
+                "  account é criada (clientId, clientSecret, tokenEndpoint) — e\n"
+                "  só é oferecido naquele momento.\n"
+                "  Se você tem os valores soltos, não precisa de arquivo:\n"
+                "    export OMNISSA_CLIENT_ID=...\n"
+                "    export OMNISSA_TOKEN_ENDPOINT=https://.../connect/token\n"
+                "    read -rs OMNISSA_CLIENT_SECRET && export OMNISSA_CLIENT_SECRET\n"
+                "  e rode de novo sem o --credencial.")
+        return json.loads(arq.read_text(encoding="utf-8"))
+
+    cred = {
+        "name": "(do ambiente)",
+        "clientId": os.environ.get("OMNISSA_CLIENT_ID", ""),
+        "clientSecret": os.environ.get("OMNISSA_CLIENT_SECRET", ""),
+        "tokenEndpoint": os.environ.get("OMNISSA_TOKEN_ENDPOINT", ""),
+    }
+    faltando = [nome for nome, chave in
+                (("OMNISSA_CLIENT_ID", "clientId"),
+                 ("OMNISSA_CLIENT_SECRET", "clientSecret"),
+                 ("OMNISSA_TOKEN_ENDPOINT", "tokenEndpoint"))
+                if not cred[chave]]
+    if faltando:
+        raise SystemExit(
+            "Faltou a credencial do Intelligence: " + ", ".join(faltando) + ".\n"
+            "  Ou aponte o arquivo com --credencial <arquivo>, ou defina as três\n"
+            "  variáveis. O tokenEndpoint acompanha a chave quando ela é emitida;\n"
+            "  sem ele não há para onde pedir o token.")
+    return cred
+
+
 def cabecalhos_basicos(usuario: str, senha: str, tenant: str, versao: int) -> dict:
     """Basic + aw-tenant-code. A UEM costuma exigir os dois juntos.
 
@@ -356,7 +434,11 @@ def main() -> int:
                    help="aw-tenant-code (ou a variável OMNISSA_UEM_TENANT)")
     p.add_argument("--serie", default="", help="série de um coletor para procurar")
     p.add_argument("--credencial", default="",
-                   help="JSON de service account do Intelligence (outro produto)")
+                   help="JSON de service account do Intelligence, se você tiver o "
+                        "arquivo. Sem ele, valem OMNISSA_CLIENT_ID, "
+                        "OMNISSA_CLIENT_SECRET e OMNISSA_TOKEN_ENDPOINT.")
+    p.add_argument("--intelligence", action="store_true",
+                   help="testar o Intelligence (relatórios) com a credencial acima")
     p.add_argument("--bearer", action="store_true",
                    help="tentar o token do --credencial na API da UEM. Não é "
                         "caminho documentado (não há esquema Bearer na "
@@ -367,21 +449,23 @@ def main() -> int:
     p.add_argument("--saida", default="uem_api_help.txt")
     a = p.parse_args()
 
-    if not a.basic and not a.credencial:
-        p.error("escolha --basic (API da UEM) ou --credencial <arquivo> (Intelligence)")
-    if a.bearer and not a.credencial:
-        p.error("--bearer precisa do --credencial: o token sai de lá")
+    if not (a.basic or a.bearer or a.intelligence or a.credencial):
+        p.error("escolha o que testar: --basic (usuário/senha na UEM), "
+                "--bearer (o token do Intelligence na UEM) ou --intelligence")
 
     s = _sessao()
+    avisar_tls()
     host = a.uem or UEM_PADRAO
     base = host if host.startswith("http") else f"https://{host}"
     jwt = ""
 
-    if a.credencial:
-        print("\n[Intelligence] relatórios")
-        cred = json.loads(Path(a.credencial).read_text(encoding="utf-8"))
+    if a.bearer or a.intelligence or a.credencial:
+        print("\n[credencial do Intelligence]")
+        cred = carregar_credencial(a.credencial)
         jwt = token_intelligence(s, cred)
-        intelligence(s, cred, jwt)
+        if a.intelligence or not a.bearer:
+            print("\n[Intelligence] relatórios")
+            intelligence(s, cred, jwt)
 
     if a.bearer:
         print(f"\n[UEM com o token do Intelligence] {base}")

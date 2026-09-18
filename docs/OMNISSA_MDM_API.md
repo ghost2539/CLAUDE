@@ -216,12 +216,46 @@ python3 scripts/testar_omnissa_mdm.py --uem as258.awmdm.com --basic --serie ABC1
 python3 scripts/testar_omnissa_mdm.py --uem as258.awmdm.com --basic --descobrir
 
 # sem o aw-tenant-code: o token do Intelligence vale na UEM?
-python3 scripts/testar_omnissa_mdm.py --credencial cred.json --bearer
+python3 scripts/testar_omnissa_mdm.py --bearer
 ```
 
-A senha **não** é aceita na linha de comando (`ps` mostra o comando inteiro
-para quem estiver logado na máquina). Ela vem do cofre, da variável
-`OMNISSA_UEM_SENHA`, ou é digitada na hora.
+### Como informar cada credencial
+
+São **duas**, de dois produtos, e nenhuma das duas entra por argumento da
+linha de comando: `ps` mostra o comando inteiro para qualquer um logado na
+máquina, e o valor ficaria no histórico do shell.
+
+**UEM (`--basic`)** — usuário e senha. A sonda procura nesta ordem:
+
+1. `OMNISSA_UEM_USUARIO` e `OMNISSA_UEM_SENHA` no ambiente;
+2. o **cofre do portal** (`MDM_USUARIO` / `MDM_SENHA`) — rodando no
+   servidor, não é preciso informar nada: é a credencial de serviço que já
+   entra no console hoje;
+3. digitado na hora (a senha não é ecoada).
+
+**Intelligence (`--bearer` e `--intelligence`)** — `clientId`,
+`clientSecret` e `tokenEndpoint`. Ou o arquivo que o console baixou:
+
+```bash
+python3 scripts/testar_omnissa_mdm.py --credencial /caminho/arquivo.json --bearer
+```
+
+Ou, se a chave veio em pedaços soltos (num chamado, num chat), sem arquivo
+nenhum:
+
+```bash
+export OMNISSA_CLIENT_ID=...
+export OMNISSA_TOKEN_ENDPOINT=https://<regiao>.uemauth...com/connect/token
+read -rs OMNISSA_CLIENT_SECRET && export OMNISSA_CLIENT_SECRET   # não ecoa
+python3 scripts/testar_omnissa_mdm.py --bearer
+```
+
+O `tokenEndpoint` acompanha a chave quando ela é emitida — sem ele não há
+para onde pedir o token, e nenhum valor padrão serve porque ele varia por
+região.
+
+> Um `export` fica valendo para a sessão inteira do shell. Terminado o
+> teste, `unset OMNISSA_CLIENT_SECRET OMNISSA_UEM_SENHA`.
 
 `scripts/verificar_omnissa_mdm.py` prova que a sonda não escreve: todas as
 chamadas são GET, nenhum caminho de exclusão é tocado, a senha não passa

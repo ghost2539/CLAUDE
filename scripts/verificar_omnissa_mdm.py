@@ -210,10 +210,61 @@ checar("verify=False" not in FONTE and "verify = False" not in FONTE,
        "a sonda não desliga a verificação de certificado")
 checar("integracoes import http" in FONTE or "from integracoes import http" in FONTE,
        "a sessão sai de integracoes/http.py (a política de TLS do portal)")
+checar(hasattr(sonda, "avisar_tls"), "há aviso de TLS desligado antes de mandar credencial")
 
 
-# ── 6. O host certo ───────────────────────────────────────────────────
-print("\n[6] Host da API, que não é o do console")
+# ── 6. A credencial pode vir sem arquivo ──────────────────────────────
+print("\n[6] Informar a credencial sem ter o arquivo do console")
+
+for var in ("OMNISSA_CLIENT_ID", "OMNISSA_CLIENT_SECRET", "OMNISSA_TOKEN_ENDPOINT"):
+    os.environ.pop(var, None)
+
+# Arquivo que não existe: mensagem que ensina, não traceback.
+erro = ""
+try:
+    sonda.carregar_credencial("cred-que-nao-existe.json")
+except SystemExit as exc:
+    erro = str(exc)
+checar("Não existe o arquivo" in erro, "arquivo ausente vira explicação, não traceback")
+checar("OMNISSA_CLIENT_ID" in erro, "a mensagem diz a saída pelo ambiente")
+
+# Sem arquivo e sem ambiente: diz exatamente o que falta.
+erro = ""
+try:
+    sonda.carregar_credencial("")
+except SystemExit as exc:
+    erro = str(exc)
+checar(all(v in erro for v in ("OMNISSA_CLIENT_ID", "OMNISSA_CLIENT_SECRET",
+                               "OMNISSA_TOKEN_ENDPOINT")),
+       "sem nada definido, as três variáveis que faltam são nomeadas")
+
+os.environ["OMNISSA_CLIENT_ID"] = "id-de-mentira"
+os.environ["OMNISSA_CLIENT_SECRET"] = "segredo-de-mentira"
+os.environ["OMNISSA_TOKEN_ENDPOINT"] = "https://exemplo/connect/token"
+cred = sonda.carregar_credencial("")
+checar(cred["clientId"] == "id-de-mentira" and cred["clientSecret"] == "segredo-de-mentira"
+       and cred["tokenEndpoint"] == "https://exemplo/connect/token",
+       "com as três variáveis, a credencial é montada sem arquivo nenhum")
+
+# Contraprova: faltando UMA, não pode seguir com o campo vazio.
+del os.environ["OMNISSA_TOKEN_ENDPOINT"]
+erro = ""
+try:
+    sonda.carregar_credencial("")
+except SystemExit as exc:
+    erro = str(exc)
+checar("OMNISSA_TOKEN_ENDPOINT" in erro,
+       "contraprova: faltando uma variável, o campo não é preenchido vazio")
+for var in ("OMNISSA_CLIENT_ID", "OMNISSA_CLIENT_SECRET"):
+    os.environ.pop(var, None)
+
+# O segredo do cliente não pode ser aceito por argumento, como a senha.
+ruins = [o for o in opcoes if any(x in o.lower() for x in ("secret", "segredo"))]
+checar(not ruins, f"nenhuma opção aceita o clientSecret {ruins or ''}")
+
+
+# ── 7. O host certo ───────────────────────────────────────────────────
+print("\n[7] Host da API, que não é o do console")
 checar(sonda.UEM_PADRAO == "as258.awmdm.com",
        f"o padrão é o host de API das especificações ({sonda.UEM_PADRAO})")
 try:
