@@ -164,6 +164,61 @@ def _audit_por_chamado(sys_ids: list[str], tabela: str) -> dict[str, list[dict]]
     return saida
 
 
+_cache_grupos: dict[str, str] = {}
+
+
+def _nomes_dos_grupos(ids: list[str]) -> dict[str, str]:
+    """sys_id de fila → nome. Sem isto, procurar "SPARE" não acha nada.
+
+    O `sys_audit` guarda o valor do campo como o ServiceNow o guardou. Para
+    uma referência isso pode ser o NOME do grupo ou o SYS_ID dele, conforme a
+    versão e a configuração da instância. Quando é sys_id, comparar com
+    "SPARE" nunca casa — e o resultado não é erro: é **zero para todo mundo**,
+    que foi exatamente o que apareceu.
+
+    Então: o que parecer sys_id é traduzido antes de comparar. O que já vier
+    por nome passa direto.
+    """
+    faltando = [i for i in dict.fromkeys(ids)
+                if _RE_SYS_ID.match(i) and i not in _cache_grupos]
+    for bloco in _blocos(faltando, LOTE_NUMEROS):
+        try:
+            dados = _get("/api/now/table/sys_user_group", {
+                "sysparm_query": "sys_idIN" + ",".join(bloco),
+                "sysparm_fields": "sys_id,name",
+                "sysparm_display_value": "false",
+                "sysparm_exclude_reference_link": "true",
+                "sysparm_limit": str(len(bloco)),
+            }, timeout=60)
+        except HTTPException as exc:
+            # Sem tradução o número sai errado (zero), então isto não pode
+            # passar calado: quem chamou decide, mas fica registrado.
+            _log.warning("não deu para traduzir sys_id de fila: %s", exc.detail)
+            break
+        for linha in dados.get("result") or []:
+            _cache_grupos[_valor_plano(linha.get("sys_id"))] = _valor_plano(linha.get("name"))
+    return {i: _cache_grupos.get(i, i) for i in dict.fromkeys(ids)}
+
+
+def _traduzir_filas(por_chamado: dict[str, list[dict]]) -> int:
+    """Troca sys_id por nome nos eventos. Devolve quantos traduziu."""
+    brutos = [v for eventos in por_chamado.values() for e in eventos
+              for v in (e.get("de"), e.get("para")) if v]
+    sids = [v for v in brutos if _RE_SYS_ID.match(v)]
+    if not sids:
+        return 0
+    mapa = _nomes_dos_grupos(sids)
+    trocados = 0
+    for eventos in por_chamado.values():
+        for e in eventos:
+            for lado in ("de", "para"):
+                novo = mapa.get(e.get(lado) or "")
+                if novo and novo != e.get(lado):
+                    e[lado] = novo
+                    trocados += 1
+    return trocados
+
+
 @router.get("/fontes")
 def fontes(req: Request, tabela: str = "incident"):
     """Qual fonte de histórico esta instalação tem, e se a conta a lê.
@@ -231,36 +286,99 @@ class TempoFilaIn(BaseModel):
     fila: str = "SPARE"
 
 
-def medir(tabela: str, chamados: list[dict], fila: str) -> dict[str, dict]:
-    """Por sys_id: quanto tempo na fila, quantas passagens, e se deu para medir.
+# Estados que contam como CANCELADO. Sai da mesma configuração que os
+# Indicadores usam, para as duas telas não discordarem sobre o que é um
+# chamado cancelado.
+try:
+    from config import get_settings as _gs
+    _ESTADOS_CANCELADO = {x.strip() for x in
+                          (getattr(_gs(), "SN_STATE_CANCELADO", "8") or "8").split(",")
+                          if x.strip()}
+except Exception:  # noqa: BLE001 — sem config, o valor padrão do ServiceNow
+    _ESTADOS_CANCELADO = {"8"}
+_RE_CANCELADO = re.compile(r"cancel", re.I)
 
-    `chamados`: [{sys_id, opened_at, closed_at}] — os carimbos vêm da própria
-    consulta, sem ida extra ao ServiceNow.
+
+def _cancelado(estado_cru: str, estado_rotulo: str) -> bool:
+    """Cancelado pelo código do estado ou pelo rótulo.
+
+    Pelos dois porque nenhum dos dois basta sozinho: o código 8 é o padrão do
+    ServiceNow mas instância customizada muda, e o rótulo depende do idioma
+    da conta de serviço. Casar em qualquer um erra menos que casar em um só.
+    """
+    return (estado_cru or "").strip() in _ESTADOS_CANCELADO or bool(
+        _RE_CANCELADO.search(estado_rotulo or ""))
+
+
+def medir(tabela: str, chamados: list[dict], fila: str) -> dict[str, dict]:
+    """Por sys_id: quanto tempo na fila, quantas passagens, e em que base.
+
+    `chamados`: [{sys_id, opened_at, closed_at, resolved_at, fila_atual,
+    estado, estado_rotulo}] — tudo vindo da própria consulta, sem ida extra
+    ao ServiceNow.
+
+    Três bases de medição, e a coluna diz qual foi usada em cada chamado:
+
+    *   **histórico** — houve troca de fila; os intervalos saem dela.
+    *   **sem troca de fila** — o chamado nunca mudou de fila, então esteve a
+        vida inteira na fila em que está. Se essa fila é a procurada, o tempo
+        é da abertura até o encerramento. Antes isto respondia "não medido",
+        o que era conservador demais: um chamado que nasce no SPARE e é
+        resolvido no SPARE tem tempo de fila, e ele é a vida toda do chamado.
+    *   **cancelado** — o chamado foi cancelado. O tempo é dito assim mesmo,
+        mas marcado: cancelado não é atendimento, e misturá-lo na média do
+        TMA responde outra pergunta.
     """
     ids = [c["sys_id"] for c in chamados
            if _RE_SYS_ID.match((c.get("sys_id") or "").strip())]
     eventos = _audit_por_chamado(ids, tabela) if ids else {}
+    # Antes de comparar com "SPARE": o histórico pode guardar a fila por
+    # sys_id, e aí nada casa e tudo dá zero.
+    traduzidos = _traduzir_filas(eventos)
+    if traduzidos:
+        _log.info("traduzidos %d valores de fila de sys_id para nome", traduzidos)
+
     agora = datetime.now(timezone.utc)
+    alvo = (fila or "").strip().upper()
     saida: dict[str, dict] = {}
     for c in chamados:
         sid = (c.get("sys_id") or "").strip()
+        estado = _valor_plano(c.get("estado_rotulo")) or _valor_plano(c.get("estado"))
+        cancelado = _cancelado(_valor_plano(c.get("estado")), estado)
+        abertura = _quando(c.get("opened_at"))
+        fim = _quando(c.get("closed_at")) or _quando(c.get("resolved_at"))
         do_chamado = eventos.get(sid) or []
-        if not do_chamado:
-            # Sem histórico não se afirma nada. Poderia supor "ficou a vida
-            # toda na fila atual", mas suposição vira número na planilha e
-            # número na planilha vira decisão.
-            saida[sid] = {"medido": False, "segundos": None, "horas": None,
-                          "passagens": None, "legivel": "",
-                          "motivo": "sem histórico de troca de fila para este chamado"}
-            continue
-        r = intervalos_da_fila(
-            do_chamado, fila,
-            _quando(c.get("opened_at")),
-            _quando(c.get("closed_at")) or _quando(c.get("resolved_at")),
-            agora)
-        saida[sid] = {"medido": True, "segundos": r["segundos"], "horas": r["horas"],
-                      "passagens": r["passagens"], "legivel": _humano(r["segundos"]),
-                      "motivo": ""}
+
+        if do_chamado:
+            r = intervalos_da_fila(do_chamado, fila, abertura, fim, agora)
+            base = "histórico"
+        else:
+            # Sem troca de fila, o chamado esteve sempre na fila em que está.
+            atual = _valor_plano(c.get("fila_atual"))
+            if not atual:
+                saida[sid] = {"medido": False, "segundos": None, "horas": None,
+                              "passagens": None, "legivel": "", "estado": estado,
+                              "cancelado": cancelado, "base": "não medido",
+                              "fila_atual": "",
+                              "motivo": "sem troca de fila e sem a fila atual do chamado"}
+                continue
+            if alvo not in atual.upper():
+                r = {"segundos": 0, "horas": 0.0, "passagens": 0}
+            else:
+                fechamento = fim or agora
+                segundos = max(0.0, (fechamento - abertura).total_seconds()) if abertura else 0.0
+                r = {"segundos": round(segundos), "horas": round(segundos / 3600, 2),
+                     "passagens": 1}
+            base = "sem troca de fila"
+
+        saida[sid] = {
+            "medido": True, "segundos": r["segundos"], "horas": r["horas"],
+            "passagens": r["passagens"], "legivel": _humano(r["segundos"]),
+            "estado": estado, "cancelado": cancelado,
+            "base": "cancelado" if cancelado else base,
+            "fila_atual": _valor_plano(c.get("fila_atual")),
+            "motivo": "",
+        }
     return saida
 
 
@@ -277,16 +395,23 @@ def calcular(corpo: TempoFilaIn, req: Request):
     por_id = medir(corpo.tabela, corpo.chamados, corpo.fila)
     medidos = [v for v in por_id.values() if v["medido"]]
     passou = [v for v in medidos if v["segundos"]]
-    total = sum(v["segundos"] for v in passou)
+    # Cancelado fora da média do atendimento: o chamado não foi atendido, foi
+    # cancelado, e o tempo dele responde outra pergunta. O número continua na
+    # linha, para quem quiser somar por conta própria.
+    para_media = [v for v in passou if not v["cancelado"]]
+    total = sum(v["segundos"] for v in para_media)
     return {
         "fila": corpo.fila,
         "por_sys_id": por_id,
         "pedidos": len(corpo.chamados),
         "medidos": len(medidos),
-        "sem_historico": len(por_id) - len(medidos),
+        "nao_medidos": len(por_id) - len(medidos),
+        "cancelados": sum(1 for v in medidos if v["cancelado"]),
+        "sem_troca_de_fila": sum(1 for v in medidos if v["base"] == "sem troca de fila"),
         # Chamado que nunca passou pela fila não entra na média: ele arrastaria
         # o número para baixo respondendo outra pergunta.
         "passaram_pela_fila": len(passou),
-        "media_horas": round(total / len(passou) / 3600, 2) if passou else None,
+        "media_horas": (round(total / len(para_media) / 3600, 2)
+                        if para_media else None),
         "total_horas": round(total / 3600, 2),
     }

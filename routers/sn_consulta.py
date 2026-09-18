@@ -195,9 +195,21 @@ def _get(caminho: str, params: dict, timeout: int = 60) -> dict:
 
 
 def _valor_plano(v) -> str:
-    """O campo pode vir string ou {value, display_value} — sempre texto."""
+    """O que a pessoa lê: o rótulo quando existe, senão o valor."""
     if isinstance(v, dict):
         return str(v.get("display_value") or v.get("value") or "")
+    return "" if v is None else str(v)
+
+
+def _valor_cru(v) -> str:
+    """O valor guardado: UTC nas datas, código nas escolhas, sys_id nas referências.
+
+    A medição de tempo precisa disto e não do rótulo: o rótulo de uma data
+    sai no fuso e no formato do usuário da integração, e a conta de horas
+    mudaria sozinha se esse usuário fosse reconfigurado.
+    """
+    if isinstance(v, dict):
+        return str(v.get("value") or "")
     return "" if v is None else str(v)
 
 
@@ -535,13 +547,22 @@ COLUNAS_TEMPO = [
     ("tempo_fila_horas", "Horas na fila"),
     ("tempo_fila_legivel", "Tempo na fila"),
     ("tempo_fila_passagens", "Idas à fila"),
-    ("tempo_fila_medido", "Medição"),
+    # O estado do chamado ao lado do tempo, porque muda a leitura do número:
+    # um chamado cancelado com 40 h de fila não é atendimento de 40 h.
+    ("estado_chamado", "Estado"),
+    ("tempo_fila_base", "Base da medição"),
 ]
-# Para medir é preciso o sys_id (é como o histórico endereça o chamado) e os
-# carimbos de abertura e encerramento (é o que fecha o primeiro e o último
-# intervalo). Entram na consulta mesmo sem estarem entre as colunas
-# escolhidas, e não aparecem na saída por isso.
-CAMPOS_PARA_MEDIR = ["sys_id", "opened_at", "closed_at", "resolved_at"]
+# Para medir é preciso o sys_id (é como o histórico endereça o chamado), os
+# carimbos de abertura e encerramento (fecham o primeiro e o último
+# intervalo), o ESTADO (para separar cancelado) e a FILA ATUAL (para o
+# chamado que nunca trocou de fila). Entram na consulta mesmo sem estarem
+# entre as colunas escolhidas, e não aparecem na saída por isso.
+#
+# `assignment_group.name` e não `assignment_group`: o dot-walk traz o NOME
+# mesmo quando o campo volta como sys_id, e é o nome que se compara com
+# "SPARE".
+CAMPOS_PARA_MEDIR = ["sys_id", "opened_at", "closed_at", "resolved_at",
+                     "state", "assignment_group.name"]
 
 
 def _rotulos(campos: list[str], validos: dict) -> dict:
@@ -552,21 +573,35 @@ def _rotulos(campos: list[str], validos: dict) -> dict:
 
 
 def _linhas_com_tempo(tabela: str, brutas: list[dict], fila: str) -> list[dict]:
-    """Acrescenta as colunas de tempo de fila às linhas já lidas."""
+    """Acrescenta as colunas de tempo de fila às linhas já lidas.
+
+    Os carimbos e o código do estado saem do valor CRU (UTC, código), e o
+    estado mostrado sai do rótulo. É por isso que a consulta pede
+    `display_value=all` quando mede: os dois vêm na mesma resposta.
+    """
     from routers.sn_tempo_fila import medir
-    chamados = [{"sys_id": _valor_plano(l.get("sys_id")),
-                 "opened_at": l.get("opened_at"),
-                 "closed_at": l.get("closed_at"),
-                 "resolved_at": l.get("resolved_at")} for l in brutas]
+    chamados = [{"sys_id": _valor_cru(l.get("sys_id")),
+                 "opened_at": _valor_cru(l.get("opened_at")),
+                 "closed_at": _valor_cru(l.get("closed_at")),
+                 "resolved_at": _valor_cru(l.get("resolved_at")),
+                 "estado": _valor_cru(l.get("state")),
+                 "estado_rotulo": _valor_plano(l.get("state")),
+                 "fila_atual": _valor_plano(l.get("assignment_group.name"))
+                               or _valor_plano(l.get("assignment_group"))}
+                for l in brutas]
     por_id = medir(tabela, chamados, fila)
     for linha in brutas:
-        m = por_id.get(_valor_plano(linha.get("sys_id"))) or {}
+        m = por_id.get(_valor_cru(linha.get("sys_id"))) or {}
         linha["tempo_fila_horas"] = "" if m.get("horas") is None else m["horas"]
         linha["tempo_fila_legivel"] = m.get("legivel") or ""
         linha["tempo_fila_passagens"] = ("" if m.get("passagens") is None
                                          else m["passagens"])
-        linha["tempo_fila_medido"] = ("medido" if m.get("medido")
-                                      else (m.get("motivo") or "não medido"))
+        linha["estado_chamado"] = m.get("estado") or ""
+        # "Cancelado" vence as outras bases: é o que mais muda a leitura do
+        # número, e quem olha a planilha precisa ver isso na mesma célula.
+        linha["tempo_fila_base"] = (
+            "Cancelado" if m.get("cancelado")
+            else (m.get("base") if m.get("medido") else (m.get("motivo") or "não medido")))
     return brutas
 
 
@@ -620,7 +655,7 @@ def _query_do_bloco(bloco: list[str], base: str) -> str:
 
 
 def _percorrer(tabela: str, base: str, numeros: list[str], campos: list[str],
-               rotulos: bool, teto: int):
+               rotulos, teto: int):
     """Todas as linhas do resultado — por lista de chamados ou pelos filtros.
 
     Sem lista, é a varredura de sempre. Com lista, é um `numberIN` por bloco,
@@ -687,9 +722,11 @@ def buscar(corpo: ConsultaIn, req: Request):
     dados = _get(f"/api/now/table/{corpo.tabela}", {
         "sysparm_query": query,
         "sysparm_fields": ",".join(pedidos),
-        # Os carimbos precisam sair em UTC e formato fixo para a conta de
-        # tempo fechar; por isso a medição desliga os rótulos.
-        "sysparm_display_value": "false" if fila else (
+        # Medindo, pede-se `all`: cada campo volta com `value` (UTC nas
+        # datas, código nas escolhas) E `display_value` (o rótulo). Antes a
+        # medição desligava os rótulos, e a planilha inteira vinha com
+        # código cru — o preço de medir era perder a leitura de todo o resto.
+        "sysparm_display_value": "all" if fila else (
             "true" if corpo.exibir_rotulos else "false"),
         "sysparm_exclude_reference_link": "true",
         "sysparm_limit": str(por_pagina),
@@ -745,7 +782,7 @@ def _buscar_por_lista(corpo: ConsultaIn, base: str, numeros: list[str],
     achados: set[str] = set()
     campos_pedidos = list(dict.fromkeys(
         escolhidos + [CAMPO_NUMERO] + (CAMPOS_PARA_MEDIR if fila else [])))
-    rotulos = False if fila else corpo.exibir_rotulos
+    rotulos = "all" if fila else corpo.exibir_rotulos
     for linha in _percorrer(corpo.tabela, base, numeros, campos_pedidos,
                             rotulos, TETO_EXPORTACAO):
         achados.add(_valor_plano(linha.get(CAMPO_NUMERO)).upper())
@@ -782,7 +819,7 @@ def _buscar_por_lista(corpo: ConsultaIn, base: str, numeros: list[str],
 
 
 def _paginar_por_sys_id(tabela: str, query: str, campos: list[str],
-                        rotulos: bool, teto: int):
+                        rotulos, teto: int):
     """Percorre o resultado inteiro sem usar offset.
 
     Offset escorrega: entre a página 3 e a página 4 alguém abre um chamado, o
@@ -803,7 +840,9 @@ def _paginar_por_sys_id(tabela: str, query: str, campos: list[str],
             "sysparm_query": f"{faixa}{query}^ORDERBYsys_id" if query
                              else f"{faixa}ORDERBYsys_id",
             "sysparm_fields": ",".join(pedidos),
-            "sysparm_display_value": "true" if rotulos else "false",
+            # `rotulos` pode ser True/False ou a string "all" (medindo).
+            "sysparm_display_value": (rotulos if isinstance(rotulos, str)
+                                      else ("true" if rotulos else "false")),
             "sysparm_exclude_reference_link": "true",
             "sysparm_limit": str(min(PAGINA_REST, teto - trazidos)),
         }, timeout=90)
@@ -861,7 +900,7 @@ def exportar(corpo: ConsultaIn, req: Request):
             escolhidos
             + ([CAMPO_NUMERO] if numeros else [])
             + (CAMPOS_PARA_MEDIR if fila else [])))
-        rotulos = False if fila else corpo.exibir_rotulos
+        rotulos = "all" if fila else corpo.exibir_rotulos
 
         # A medição vai em lotes: uma leitura do histórico por lote, em vez de
         # uma por chamado. O lote é do mesmo tamanho do bloco da lista, pelo
@@ -920,8 +959,32 @@ def exportar(corpo: ConsultaIn, req: Request):
                                "Estreite o filtro (por periodo, por exemplo) e exporte em partes."])
             yield buf.getvalue()
 
+    def linhas_protegidas():
+        """O mesmo fluxo, mas nenhum erro vira arquivo vazio.
+
+        Com `StreamingResponse` o HTTP 200 e os cabeçalhos já saíram quando a
+        primeira linha é gerada. Uma exceção depois disso não vira erro na
+        tela: vira download truncado — e foi assim que uma exportação chegou
+        vazia sem ninguém saber por quê. Quem baixa não tem como distinguir
+        "nenhum chamado" de "quebrou no meio".
+
+        Então o erro vai PARA DENTRO do arquivo, na última linha, onde quem
+        abrir a planilha vê.
+        """
+        try:
+            yield from linhas()
+        except HTTPException as exc:
+            _log.warning("exportação interrompida: %s", exc.detail)
+            yield ("\r\n\r\nERRO: a exportacao parou no meio e este arquivo "
+                   "esta INCOMPLETO.\r\n" + str(exc.detail).replace("\n", " ") + "\r\n")
+        except Exception as exc:  # noqa: BLE001
+            _log.error("exportação interrompida: %s", exc, exc_info=True)
+            yield ("\r\n\r\nERRO: a exportacao parou no meio e este arquivo "
+                   "esta INCOMPLETO.\r\n"
+                   f"{type(exc).__name__}: {str(exc)[:300]}".replace("\n", " ") + "\r\n")
+
     nome = f"{corpo.tabela}-{time.strftime('%Y%m%d-%H%M')}.csv"
     return StreamingResponse(
-        linhas(), media_type="text/csv; charset=utf-8",
+        linhas_protegidas(), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{nome}"'},
     )

@@ -294,9 +294,22 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   - O último intervalo fecha em `closed_at`/`resolved_at` quando o chamado
     está encerrado. Fechando em *agora*, um chamado encerrado há dois anos
     com a última fila em SPARE mostraria dois anos de fila.
-  - **Zero e "não medido" são colunas diferentes.** Chamado sem histórico
-    guardado não tem zero hora: tem medição ausente. A média do portal só
-    conta quem realmente passou pela fila.
+  - **Três bases de medição**, e a coluna *Base da medição* diz qual valeu em
+    cada chamado: `histórico` (houve troca de fila), `sem troca de fila` (o
+    chamado nunca mudou de fila — se a fila atual é a procurada, conta da
+    abertura ao encerramento) e `Cancelado`.
+  - **Cancelado é dito na linha**, na coluna *Estado* e na *Base da medição*,
+    e fica **fora da média**: cancelamento não é atendimento. O tempo sai
+    assim mesmo, para quem quiser somar por conta própria.
+  - **A fila do histórico é traduzida de sys_id para nome antes de comparar.**
+    O `sys_audit` guarda o valor do campo como o ServiceNow o guardou, e para
+    uma referência isso pode ser o nome ou o sys_id. Quando é sys_id,
+    comparar com "SPARE" não casa — e o resultado não é erro: é **zero para
+    todos**.
+  - Medindo, a consulta pede `sysparm_display_value=all`: cada campo volta
+    com `value` (UTC nas datas, código no estado) e `display_value` (o
+    rótulo). Sem isso, medir custaria perder a leitura de todas as outras
+    colunas.
   - `GET /api/sn-consulta/tempo-fila/fontes` diz se esta instalação tem a
     auditoria de `assignment_group` e se a conta de serviço a lê. Sem ela o
     portal responde *não medido*, nunca zero.
@@ -306,6 +319,11 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   URL (`sysparm_query=numberIN INC1,INC2,…`), e 5 mil números dão uns 60 KB —
   nenhum servidor aceita, e o que volta é 414 ou um 400 sem explicação. A
   lista é partida, cada bloco vira uma consulta e os resultados se somam.
+- **Erro no meio da exportação não vira arquivo vazio.** Com
+  `StreamingResponse` o HTTP 200 e os cabeçalhos já saíram quando a primeira
+  linha é gerada, então uma exceção depois disso dava download truncado —
+  indistinguível de "nenhum resultado". O erro passa a ir para dentro do
+  CSV, na última linha, com a palavra `INCOMPLETO`.
 - **A consulta por lista diz quais números não voltaram**, na tela e no fim
   do CSV. Não voltar tem três causas e a tela nomeia as três: o chamado não
   existe, está em outra tabela (um RITM procurado em `incident`), ou os

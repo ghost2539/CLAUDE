@@ -153,14 +153,26 @@ checar(tf._humano(3600) == "01:00", "menos de um dia não inventa '0d'")
 print("\n[8] Medição de uma lista de chamados, pelo sys_audit")
 sc._cfg.SN_API_USER, sc._cfg.SN_API_PASS = "zabbix", "senha-que-nao-pode-sair"
 
+ID_SPARE = "9" * 32          # o sys_id da fila do SPARE, para a tradução
 CHAMADOS = {
-    # sys_id: (número, abertura, encerramento, eventos)
-    "a" * 32: ("INC0000001", t(1, 8), t(7, 0), [
+    # sys_id: (número, abertura, encerramento, estado, fila atual, eventos)
+    "a" * 32: ("INC0000001", t(1, 8), t(7, 0), "7", OUTRA, [
         (t(1, 10), OUTRA, SPARE), (t(2, 10), SPARE, TERCEIRA),
         (t(4, 10), TERCEIRA, SPARE), (t(6, 10), SPARE, OUTRA)]),
-    "b" * 32: ("INC0000002", t(1, 8), t(3, 8), [
+    "b" * 32: ("INC0000002", t(1, 8), t(3, 8), "7", TERCEIRA, [
         (t(1, 9), OUTRA, TERCEIRA)]),                       # nunca no SPARE
-    "c" * 32: ("INC0000003", t(1, 8), None, []),            # sem histórico
+    # Sem troca de fila e ATUALMENTE no SPARE: nasceu e morreu na fila. Antes
+    # isto respondia "não medido"; agora conta a vida inteira do chamado.
+    "c" * 32: ("INC0000003", t(1, 8), t(3, 8), "7", SPARE, []),
+    # Sem troca de fila e em outra fila: zero, e zero de verdade.
+    "d" * 32: ("INC0000004", t(1, 8), t(2, 8), "7", TERCEIRA, []),
+    # CANCELADO, e passou pelo SPARE: o tempo sai, mas marcado.
+    "e" * 32: ("INC0000005", t(1, 8), t(2, 8), "8", SPARE, [
+        (t(1, 8), OUTRA, SPARE)]),
+    # O histórico deste guarda a fila por SYS_ID, não por nome. Sem tradução,
+    # "SPARE" não casa e o chamado vira zero — o defeito relatado.
+    "f" * 32: ("INC0000006", t(1, 8), t(3, 8), "7", SPARE, [
+        (t(1, 8), "0" * 32, ID_SPARE)]),
 }
 chamadas: list[dict] = []
 
@@ -172,13 +184,17 @@ def _falso_get(caminho, params, timeout=60):
         querem = set(q.split("documentkeyIN")[1].split("^")[0].split(",")) \
             if "documentkeyIN" in q else set(CHAMADOS)
         fora = []
-        for sid, (_n, _a, _f, eventos) in CHAMADOS.items():
+        for sid, (_n, _a, _f, _e, _g, eventos) in CHAMADOS.items():
             if sid not in querem:
                 continue
             for quando, de, para in eventos:
                 fora.append({"documentkey": sid, "oldvalue": de, "newvalue": para,
                              "sys_created_on": quando.strftime("%Y-%m-%d %H:%M:%S")})
         return {"result": fora}
+    if caminho == "/api/now/table/sys_user_group":
+        pedidos = set(q.split("sys_idIN")[1].split("^")[0].split(","))
+        return {"result": [{"sys_id": ID_SPARE, "name": SPARE}]
+                if ID_SPARE in pedidos else {"result": []}["result"]}
     if caminho == "/api/now/table/metric_instance":
         return {"result": []}
     # A seção [11] passa pela consulta inteira, que descobre os campos antes
@@ -206,22 +222,47 @@ sc._get = _falso_get
 
 entrada = [{"sys_id": sid,
             "opened_at": ab.strftime("%Y-%m-%d %H:%M:%S"),
-            "closed_at": (fe.strftime("%Y-%m-%d %H:%M:%S") if fe else "")}
-           for sid, (_n, ab, fe, _e) in CHAMADOS.items()]
+            "closed_at": (fe.strftime("%Y-%m-%d %H:%M:%S") if fe else ""),
+            "estado": est, "estado_rotulo": "", "fila_atual": grupo}
+           for sid, (_n, ab, fe, est, grupo, _e) in CHAMADOS.items()]
 res = tf.medir("incident", entrada, "SPARE")
 
 checar(res["a" * 32]["medido"] is True and res["a" * 32]["horas"] == 72.0,
        f"o que foi e voltou: 3 dias ({res['a' * 32]['horas']}h)")
 checar(res["a" * 32]["passagens"] == 2, "com duas idas à fila")
+checar(res["a" * 32]["base"] == "histórico", "medido pelo histórico")
 checar(res["b" * 32]["medido"] is True and res["b" * 32]["segundos"] == 0,
        "o que nunca passou pela fila: medido, e zero")
-checar(res["c" * 32]["medido"] is False and res["c" * 32]["segundos"] is None,
-       "o sem histórico: NÃO medido, e sem número")
-checar("histórico" in res["c" * 32]["motivo"], "dizendo por quê")
-# É a distinção que salva a média. Zero e "não sei" na mesma coluna fariam o
-# chamado sem histórico puxar a média para baixo.
-checar(res["b" * 32]["segundos"] == 0 and res["c" * 32]["segundos"] is None,
-       "zero e 'não sei' NÃO são a mesma célula")
+
+print("\n[8b] Sem troca de fila: conta a vida do chamado, se a fila casa")
+checar(res["c" * 32]["medido"] is True and res["c" * 32]["horas"] == 48.0,
+       f"nasceu e morreu no SPARE: 2 dias ({res['c' * 32]['horas']}h)")
+checar(res["c" * 32]["base"] == "sem troca de fila",
+       "e a coluna diz que a base foi outra — o número não sai do histórico")
+checar(res["d" * 32]["segundos"] == 0 and res["d" * 32]["base"] == "sem troca de fila",
+       "sem troca e em outra fila: zero, e zero de verdade")
+
+print("\n[8c] Cancelado é dito, e o tempo sai marcado")
+checar(res["e" * 32]["cancelado"] is True, "o estado 8 é reconhecido como cancelado")
+checar(res["e" * 32]["base"] == "cancelado",
+       "a base da medição diz 'cancelado' — muda a leitura do número")
+checar(res["e" * 32]["horas"] == 24.0,
+       f"e o tempo sai assim mesmo ({res['e' * 32]['horas']}h), para quem quiser somar")
+checar(res["e" * 32]["estado"] == "8", "com o estado na linha")
+# Pelo rótulo também, porque o código muda em instância customizada.
+checar(tf._cancelado("99", "Cancelado pelo solicitante") is True,
+       "e reconhece pelo rótulo quando o código não é o padrão")
+checar(tf._cancelado("7", "Closed Complete") is False, "sem falso positivo")
+
+print("\n[8d] Fila guardada por sys_id: traduz antes de comparar")
+# Sem isto, comparar "SPARE" com um sys_id não casa nunca — e o resultado
+# não é erro, é ZERO PARA TODO MUNDO. Foi o que apareceu.
+checar(res["f" * 32]["horas"] == 48.0,
+       f"o histórico por sys_id é traduzido e mede certo ({res['f' * 32]['horas']}h)")
+bruto = {"x": [{"quando": t(1, 0), "de": "", "para": ID_SPARE}]}
+semtrad = tf.intervalos_da_fila(bruto["x"], "SPARE", t(1, 0), t(3, 0))
+checar(semtrad["segundos"] == 0,
+       "contraprova: sem traduzir, o mesmo chamado daria zero")
 
 checar(all(c["params"].get("sysparm_display_value") == "false"
            for c in chamadas if c["caminho"] == "/api/now/table/sys_audit"),
@@ -241,11 +282,21 @@ r9 = cliente.post("/api/sn-consulta/tempo-fila",
                   json={"tabela": "incident", "chamados": entrada, "fila": "SPARE"})
 checar(r9.status_code == 200, f"HTTP 200 ({r9.status_code})")
 d9 = r9.json()
-checar(d9["pedidos"] == 3 and d9["medidos"] == 2 and d9["sem_historico"] == 1,
-       "separa pedidos, medidos e sem histórico")
-checar(d9["passaram_pela_fila"] == 1, "e quantos realmente passaram pela fila")
-checar(d9["media_horas"] == 72.0,
-       f"a média é dos que passaram: 72h, não 36 nem 24 ({d9['media_horas']})")
+checar(d9["pedidos"] == 6 and d9["medidos"] == 6 and d9["nao_medidos"] == 0,
+       "separa pedidos, medidos e não medidos")
+checar(d9["sem_troca_de_fila"] == 2,
+       "conta quantos foram medidos sem histórico de troca de fila")
+checar(d9["cancelados"] == 1, "e quantos estão cancelados")
+# Passaram pela fila: a, c, e, f (b e d deram zero).
+checar(d9["passaram_pela_fila"] == 4, "e quantos realmente passaram pela fila")
+# A média exclui o cancelado (e = 24h): (72 + 48 + 48) / 3 = 56.
+checar(d9["media_horas"] == 56.0,
+       f"a média deixa o cancelado de fora: 56h ({d9['media_horas']})")
+# Contraprova: incluindo o cancelado a média cairia, porque cancelamento é
+# rápido e não é atendimento.
+com_cancelado = round((72 + 48 + 48 + 24) / 4, 2)
+checar(com_cancelado < d9["media_horas"],
+       f"contraprova: com o cancelado dentro a média cairia para {com_cancelado}h")
 checar(sc._cfg.SN_API_PASS not in r9.text, "sem vazar a senha da conta")
 checar(cliente.post("/api/sn-consulta/tempo-fila",
                     json={"tabela": "incident", "chamados": [], "fila": " "}
@@ -286,8 +337,13 @@ fonte = (RAIZ / "routers" / "sn_consulta.py").read_text(encoding="utf-8")
 checar("tempo_fila: str = \"\"" in fonte, "a medição é opção do corpo da consulta")
 checar("CAMPOS_PARA_MEDIR" in fonte and "sys_id" in fonte,
        "e pede sys_id e os carimbos, que a medição precisa")
-checar('"tempo_fila_medido"' in fonte or "tempo_fila_medido" in fonte,
-       "a coluna que separa medido de não medido existe")
+checar("tempo_fila_base" in fonte and "estado_chamado" in fonte,
+       "as colunas de base da medição e de estado do chamado existem")
+checar('"assignment_group.name"' in fonte,
+       "a fila atual é pedida por .name — o dot-walk traz o NOME mesmo quando "
+       "o campo volta como sys_id")
+checar('"sysparm_display_value": "all"' in fonte,
+       "medindo, pede-se `all`: UTC nas datas E rótulo no estado, na mesma resposta")
 # Sem pedir, nada muda: quem só quer a lista não paga a leitura do histórico.
 chamadas.clear()
 cliente.post("/api/sn-consulta/buscar", json={"tabela": "incident", "campos": ["number"]})
@@ -299,8 +355,8 @@ checar("cn-tempo-fila" in js, "a tela tem o campo da fila a medir")
 checar("tempo_fila:" in js, "e manda a opção na consulta")
 # O rótulo das colunas vem do servidor (COLUNAS_TEMPO), não do JS — a tela só
 # desenha o que `rotulos` manda. O que é DELA é avisar que mediu só a amostra.
-checar('("Medição"' in fonte or '"Medição"' in fonte,
-       "o rótulo da coluna de medição está no servidor")
+checar('"Base da medição"' in fonte and '"Estado"' in fonte,
+       "os rótulos das colunas calculadas estão no servidor")
 checar("tempo_fila_so_amostra" in js and "mede todas" in js,
        "a tela avisa quando mediu só a amostra — senão a média da tela "
        "parece a do total")
@@ -317,12 +373,18 @@ def _com_chamados(caminho, params, timeout=60):
         if "sys_id>" in params.get("sysparm_query", ""):
             return {"result": []}
         linhas = []
-        for sid, (num, ab, fe, _e) in CHAMADOS.items():
-            linha = {"sys_id": sid, "number": num,
-                     "opened_at": ab.strftime("%Y-%m-%d %H:%M:%S"),
-                     "closed_at": fe.strftime("%Y-%m-%d %H:%M:%S") if fe else "",
-                     "resolved_at": "", "state": "7"}
-            linhas.append({c: linha.get(c, "") for c in pedidos})
+        for sid, (num, ab, fe, est, grupo, _e) in CHAMADOS.items():
+            # `display_value=all`: cada campo volta como {value, display_value}.
+            # É assim que a data sai em UTC e o estado sai com rótulo na mesma
+            # resposta, e é o formato que `_valor_cru`/`_valor_plano` esperam.
+            crus = {"sys_id": sid, "number": num,
+                    "opened_at": ab.strftime("%Y-%m-%d %H:%M:%S"),
+                    "closed_at": fe.strftime("%Y-%m-%d %H:%M:%S") if fe else "",
+                    "resolved_at": "", "state": est,
+                    "assignment_group.name": grupo}
+            rotulos = dict(crus, state={"7": "Encerrado", "8": "Cancelado"}.get(est, est))
+            linhas.append({c: {"value": crus.get(c, ""),
+                               "display_value": rotulos.get(c, "")} for c in pedidos})
         return {"result": linhas}
     return _falso_get(caminho, params, timeout)
 
@@ -334,9 +396,10 @@ r12 = cliente.post("/api/sn-consulta/exportar", json={
 })
 checar(r12.status_code == 200, f"HTTP 200 ({r12.status_code})")
 linhas12 = [l for l in r12.text.splitlines() if l.strip()]
-checar("Horas na fila" in linhas12[0] and "Medição" in linhas12[0],
+checar("Horas na fila" in linhas12[0] and "Base da medição" in linhas12[0]
+       and "Estado" in linhas12[0],
        "o cabeçalho traz as colunas calculadas")
-checar(linhas12[1].endswith("tempo_fila_medido"),
+checar(linhas12[1].endswith("tempo_fila_base"),
        "e a linha técnica também, para quem for cruzar com outro sistema")
 por_num = {l.split(";")[0]: l for l in linhas12[2:] if l.startswith("INC")}
 checar("72.0" in por_num["INC0000001"] and "3d 00:00" in por_num["INC0000001"],
@@ -346,10 +409,42 @@ checar("2" == por_num["INC0000001"].split(";")[3], "com as duas idas contadas")
 # formatação, não conteúdo.
 checar(float(por_num["INC0000002"].split(";")[1]) == 0.0,
        "o que nunca passou pela fila sai com zero")
-checar(por_num["INC0000003"].split(";")[1] == "",
-       "e o sem histórico sai VAZIO, não zero — somar a coluna não mente")
-checar("histórico" in por_num["INC0000003"],
-       "com o motivo escrito na linha")
+checar(float(por_num["INC0000003"].split(";")[1]) == 48.0,
+       "o sem troca de fila conta a vida do chamado")
+checar("sem troca de fila" in por_num["INC0000003"],
+       "e a linha diz que a base foi essa, não o histórico")
+# O que muda a leitura do número: cancelado precisa estar na MESMA linha.
+checar("Cancelado" in por_num["INC0000005"],
+       "o cancelado é dito na linha dele, na coluna de estado e na base")
+checar(float(por_num["INC0000005"].split(";")[1]) == 24.0,
+       "com o tempo saindo assim mesmo")
+checar(float(por_num["INC0000006"].split(";")[1]) == 48.0,
+       "e o histórico gravado por sys_id é traduzido antes de comparar")
+
+print("\n[13] Erro no meio da exportação não vira arquivo vazio")
+# Com StreamingResponse o HTTP 200 e os cabeçalhos já saíram quando a
+# primeira linha é gerada. Uma exceção depois disso dava download truncado —
+# e foi assim que uma exportação chegou vazia sem ninguém saber por quê.
+def _audit_negado(caminho, params, timeout=60):
+    if caminho == "/api/now/table/sys_audit":
+        raise HTTPException(502, "A conta de serviço não tem acesso a esta tabela (403).")
+    return _com_chamados(caminho, params, timeout)
+
+
+from fastapi import HTTPException  # noqa: E402
+
+sc._get = _audit_negado
+tf._get = _audit_negado
+r13 = cliente.post("/api/sn-consulta/exportar", json={
+    "tabela": "incident", "campos": ["number"], "tempo_fila": "SPARE",
+})
+checar(r13.status_code == 200, f"responde 200, como qualquer streaming ({r13.status_code})")
+checar("INCOMPLETO" in r13.text,
+       "mas o ARQUIVO diz que está incompleto — vazio calado é o pior resultado")
+checar("403" in r13.text,
+       "e traz o motivo, para não virar caça ao fantasma")
+sc._get = _com_chamados
+tf._get = _com_chamados
 sc._get = _falso_get
 tf._get = _falso_get
 
