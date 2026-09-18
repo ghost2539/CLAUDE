@@ -18,6 +18,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 
 from core.prefixo import com_prefixo, prefixo
+from core.security import get_session
 from fastapi.responses import HTMLResponse
 
 import config as _config_mod
@@ -472,8 +473,11 @@ def indicadores_page(req: Request):
 
 
 @router.get("/indicadores/", response_class=HTMLResponse)
-def indicadores_page_slash():
-    return indicadores_page()
+def indicadores_page_slash(req: Request):
+    # Sem o `req` aqui, a chamada abaixo estourava TypeError e /indicadores/
+    # (com barra) respondia 500 — e a barra vem de graça quando o portal é
+    # publicado atrás de prefixo.
+    return indicadores_page(req)
 
 
 @router.get("/api/indicadores/dados")
@@ -485,6 +489,152 @@ def indicadores_dados(referencia: str = ""):
         "referencias": db.listar_referencias(),
         "config": {"queue": QUEUE, "campo_tma": TMA_START},
     }
+
+
+MESES_PT = {1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun",
+            7: "jul", 8: "ago", 9: "set", 10: "out", 11: "nov", 12: "dez"}
+
+
+def _mes_legivel(chave: str) -> str:
+    """'2026-09' -> 'set/26'. O eixo da tela já mostra assim."""
+    try:
+        ano, mes = str(chave).split("-")
+        return f"{MESES_PT[int(mes)]}/{ano[2:]}"
+    except Exception:  # noqa: BLE001 — chave fora do padrão sai como veio
+        return str(chave)
+
+
+def _serie_por_mes(serie) -> dict:
+    """[{mes, total}] -> {mes: total}, para cruzar as séries numa tabela só."""
+    fora = {}
+    for item in (serie or []):
+        if isinstance(item, dict) and item.get("mes") is not None:
+            fora[str(item["mes"])] = item.get("total")
+    return fora
+
+
+@router.get("/api/indicadores/exportar")
+def indicadores_exportar(req: Request, referencia: str = ""):
+    """Baixa o snapshot em planilha — é o que se leva para a reunião.
+
+    Exporta o que ESTÁ na tela, do snapshot gravado: não vai ao ServiceNow.
+    Se os números estiverem velhos, o caminho é o botão Atualizar e depois
+    baixar de novo; a aba Resumo diz de quando é o snapshot, para ninguém
+    apresentar dado de semana passada sem perceber."""
+    get_session(req)
+    snap = db.obter_snapshot(referencia) if referencia else db.ultimo_snapshot()
+    if not snap:
+        raise HTTPException(404, "Ainda não há snapshot para exportar. "
+                                 "Use o botão Atualizar na tela de Indicadores.")
+    dados = snap.get("dados") or {}
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from fastapi.responses import StreamingResponse
+    import io as _io
+
+    wb = Workbook()
+    negrito = Font(bold=True, color="FFFFFF")
+    fundo = PatternFill("solid", fgColor="1F4E79")
+    titulo = Font(bold=True, size=12)
+
+    def cabecalho(ws, linha: int, rotulos: list[str]) -> None:
+        for col, rot in enumerate(rotulos, start=1):
+            cel = ws.cell(row=linha, column=col, value=rot)
+            cel.font = negrito
+            cel.fill = fundo
+            cel.alignment = Alignment(horizontal="center")
+            largura = max(12, len(str(rot)) + 3)
+            atual = ws.column_dimensions[cel.column_letter].width or 0
+            ws.column_dimensions[cel.column_letter].width = max(atual, largura)
+
+    # ── Resumo ──────────────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = "Resumo"
+    ws["A1"] = "Indicadores — CSC TI Spare"
+    ws["A1"].font = titulo
+    ws["A2"] = "Mês de referência"
+    ws["B2"] = snap.get("referencia") or "—"
+    ws["A3"] = "Snapshot gerado em"
+    ws["B3"] = (snap.get("criado_em") or "—").replace("T", " ")[:19]
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 26
+
+    kpis = dados.get("kpis") or {}
+    sla = dados.get("sla") or {}
+    linha = 5
+    cabecalho(ws, linha, ["Indicador", "Valor"])
+    for rotulo, valor in (
+        ("Backlog (abertos)", kpis.get("backlog")),
+        ("RITMs abertos", kpis.get("ritms")),
+        ("Aguardando atendimento", kpis.get("ag_atendimento")),
+        ("Priorizados", kpis.get("priorizados")),
+        ("SLA — cumprimento (%)", sla.get("compliance_pct")),
+        ("SLED — total no período", sum(
+            (x.get("total") or 0) for x in (dados.get("sled_por_mes") or []))),
+        ("Coletores — total no período", sum(
+            (x.get("total") or 0) for x in (dados.get("coletor_por_mes") or []))),
+    ):
+        linha += 1
+        ws.cell(row=linha, column=1, value=rotulo)
+        ws.cell(row=linha, column=2, value=valor if valor is not None else "—")
+
+    erros = dados.get("erros") or {}
+    if erros:
+        linha += 2
+        ws.cell(row=linha, column=1, value="Indicadores que NÃO calcularam").font = titulo
+        for chave, msg in erros.items():
+            linha += 1
+            ws.cell(row=linha, column=1, value=chave)
+            ws.cell(row=linha, column=2, value=str(msg)[:250])
+
+    # ── Mensal: uma linha por mês, todas as séries lado a lado ──────────
+    ws = wb.create_sheet("Mensal")
+    cabecalho(ws, 1, ["Mês", "Tratados", "Backlog", "SLA dentro", "SLA total",
+                      "SLA %", "SLED", "Coletores"])
+    tratado = _serie_por_mes(dados.get("tratado_por_mes"))
+    backlog = _serie_por_mes(dados.get("backlog_por_mes"))
+    sled = _serie_por_mes(dados.get("sled_por_mes"))
+    coletor = _serie_por_mes(dados.get("coletor_por_mes"))
+    sla_mes = {str(x.get("mes")): x for x in (sla.get("por_mes") or [])}
+    # `meses` é a ordem que a tela usa; sem ela, a união do que existir.
+    meses = [str(m) for m in (dados.get("meses") or [])] or sorted(
+        set(tratado) | set(backlog) | set(sla_mes) | set(sled) | set(coletor))
+    for i, mes in enumerate(meses, start=2):
+        s_mes = sla_mes.get(mes) or {}
+        ws.cell(row=i, column=1, value=_mes_legivel(mes))
+        ws.cell(row=i, column=2, value=tratado.get(mes))
+        ws.cell(row=i, column=3, value=backlog.get(mes))
+        ws.cell(row=i, column=4, value=s_mes.get("dentro"))
+        ws.cell(row=i, column=5, value=s_mes.get("total"))
+        ws.cell(row=i, column=6, value=s_mes.get("pct"))
+        ws.cell(row=i, column=7, value=sled.get(mes))
+        ws.cell(row=i, column=8, value=coletor.get(mes))
+    ws.freeze_panes = "A2"
+
+    # ── Distribuições: cada ranking na sua aba ──────────────────────────
+    # Rótulo explícito: derivar do nome da aba transformava "BU" em "Bu".
+    for aba, rotulo, chave in (("Por status", "Status", "abertos_por_status"),
+                               ("Por localidade", "Localidade", "por_localidade"),
+                               ("Por BU", "BU", "por_bu"),
+                               ("Por subcategoria", "Subcategoria", "por_subcategoria")):
+        ws = wb.create_sheet(aba)
+        cabecalho(ws, 1, [rotulo, "Total"])
+        itens = dados.get(chave) or []
+        for i, item in enumerate(itens, start=2):
+            ws.cell(row=i, column=1, value=item.get("nome"))
+            ws.cell(row=i, column=2, value=item.get("total"))
+        if not itens:
+            ws.cell(row=2, column=1, value="Sem dados neste snapshot.")
+        ws.freeze_panes = "A2"
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    nome = f"indicadores_{(snap.get('referencia') or 'atual').replace('-', '')}.xlsx"
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
 @router.get("/api/indicadores/config")

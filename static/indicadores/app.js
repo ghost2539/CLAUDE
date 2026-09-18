@@ -5,6 +5,27 @@
 (function () {
     "use strict";
 
+    // Prefixo quando o portal é servido num subcaminho do proxy: o router
+    // injeta <meta name="app-base">. Sem isto, as chamadas saíam para
+    // /api/... na raiz do domínio e a tela não carregava nada no servidor
+    // que publica em /portal-spare.
+    var BASE = (function () {
+        var m = document.querySelector('meta[name="app-base"]');
+        return (m && m.content ? m.content : '').replace(/\/+$/, '');
+    })();
+    // Proxy que acrescenta a barra por REDIRECIONAMENTO quebra POST (o 301
+    // vira GET). Com a marca ligada, a URL já sai com a barra.
+    var API_BARRA = !!document.querySelector('meta[name="api-barra-final"]');
+    function url(caminho) {
+        var completo = BASE + caminho;
+        if (!API_BARRA) return completo;
+        var corte = completo.indexOf('?');
+        var base = corte === -1 ? completo : completo.slice(0, corte);
+        var query = corte === -1 ? '' : completo.slice(corte);
+        if (base.charAt(base.length - 1) !== '/') base += '/';
+        return base + query;
+    }
+
     var AUTO_MS = 120000;              // 2 min
     var SVGNS = "http://www.w3.org/2000/svg";
     var MES_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun",
@@ -261,7 +282,7 @@
 
     // ── carregar / atualizar ─────────────────────────────────
     function carregar() {
-        return fetch("/api/indicadores/dados", { credentials: "same-origin" })
+        return fetch(url("/api/indicadores/dados"), { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 state.dados = j.snapshot;
@@ -271,10 +292,21 @@
             .catch(function (e) { setStatus(null, "Falha ao carregar: " + e.message); });
     }
 
+    /* Baixa o snapshot em planilha. Não recalcula nada: leva para a reunião
+       exatamente o que está na tela, e a aba Resumo diz de quando é. */
+    function exportar() {
+        var ref = (state.dados && state.dados.referencia) || "";
+        var destino = url("/api/indicadores/exportar") +
+                      (ref ? (url("/api/indicadores/exportar").indexOf("?") === -1 ? "?" : "&") +
+                             "referencia=" + encodeURIComponent(ref) : "");
+        // GET autenticado por cookie: o navegador baixa o arquivo.
+        window.location.href = destino;
+    }
+
     function atualizar() {
         var btn = $("#btn-refresh");
         btn.disabled = true; var txt = btn.textContent; btn.textContent = "⏳ Atualizando…";
-        fetch("/api/indicadores/atualizar", { method: "POST", credentials: "same-origin" })
+        fetch(url("/api/indicadores/atualizar"), { method: "POST", credentials: "same-origin" })
             .then(function (r) {
                 if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || ("HTTP " + r.status)); });
                 return r.json();
@@ -322,6 +354,7 @@
     document.addEventListener("DOMContentLoaded", function () {
         $("#btn-refresh").addEventListener("click", atualizar);
         $("#btn-auto").addEventListener("click", toggleAuto);
+        $("#btn-exportar").addEventListener("click", exportar);
         Array.prototype.forEach.call(document.querySelectorAll("#tabs button"), function (b) {
             b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
         });
