@@ -447,6 +447,12 @@ if __name__ == "__main__":
         ssl_kwargs["ssl_certfile"] = _cfg.SSL_CERTFILE
         ssl_kwargs["ssl_keyfile"] = _cfg.SSL_KEYFILE
 
+    # Sessão mora na memória do processo; com mais de um worker o login some
+    # de forma intermitente. Avisa alto antes de subir, em vez de virar
+    # "a sessão do ServiceNow expira sozinha".
+    from core.security import avisar_se_multiprocesso
+    avisar_se_multiprocesso(_cfg.WORKERS)
+
     uvicorn.run(
         "main:app",
         host=_cfg.HOST,

@@ -1009,19 +1009,63 @@ def proxy_check(req: Request):
     return resultado
 
 
+# O keep-alive precisa ser AUDITÁVEL. Sem isto, "a sessão está expirando"
+# não tem como ser investigado: o selo fica verde, o ping roda, e ninguém
+# sabe se ele está realmente renovando ou se falha há horas. Estes campos
+# ficam na sessão do portal (memória do processo) e saem no diagnóstico.
+CHAVE_KEEPALIVE = "sn_keepalive"
+
+
+def _registrar_ping(sd: dict, estado: str, detalhe: str = "") -> dict:
+    """Guarda o resultado do ping e devolve o histórico curto."""
+    from datetime import datetime, timezone
+    agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    info = sd.get(CHAVE_KEEPALIVE) or {}
+    info["ultimo_ping"] = agora
+    info["ultimo_estado"] = estado
+    info["ultimo_detalhe"] = detalhe
+    info["pings"] = int(info.get("pings") or 0) + 1
+    if estado == "ativa":
+        info["ultima_renovacao"] = agora
+        info["renovacoes"] = int(info.get("renovacoes") or 0) + 1
+        info["falhas_seguidas"] = 0
+    else:
+        info["falhas_seguidas"] = int(info.get("falhas_seguidas") or 0) + 1
+        info["ultima_falha"] = agora
+        info["ultima_falha_motivo"] = f"{estado}: {detalhe}" if detalhe else estado
+    sd[CHAVE_KEEPALIVE] = info
+    return info
+
+
 @router.get("/session-status")
 def sn_session_status(req: Request):
-    """Check if the ServiceNow session is still valid and keep it alive."""
+    """Diz se a sessão do ServiceNow está viva — e a mantém viva.
+
+    É o keep-alive do usuário NOMINAL: o portal guarda os cookies de SSO de
+    quem entrou e, a cada ping, faz uma chamada autenticada ao ServiceNow.
+    Essa chamada é o que reinicia o relógio de inatividade de lá; a resposta
+    traz os cookies renovados, que voltam para a sessão do portal.
+
+    Três estados, e a diferença entre os dois últimos é o que faltava:
+
+    *   `ativa`        — respondeu autenticado; os cookies foram renovados.
+    *   `expirada`     — o ServiceNow mandou para a tela de login.
+    *   `desconhecida` — o ping não chegou lá (rede, proxy, timeout).
+
+    `desconhecida` era devolvido como ATIVA. A intenção era não derrubar o
+    selo por um soluço de rede; o efeito era pior: com o ping falhando há
+    horas, o selo continuava verde, nada renovava, e a sessão morria sem que
+    nada na tela indicasse o porquê. Agora o estado sai como é, e a tela
+    mostra amarelo em vez de verde.
+    """
     sd = get_session(req)
     sn_cookies = sd.get("sn_cookies")
     if not sn_cookies:
-        return {"active": False, "reason": "no_session"}
+        return {"active": False, "estado": "sem_sessao", "reason": "no_session",
+                "keepalive": sd.get(CHAVE_KEEPALIVE) or {}}
     try:
-        _req, _ = _get_http()
-        sess = _req.Session()
-        sess.verify = False
-        if SN_PROXY:
-            sess.proxies = {"https": SN_PROXY, "http": SN_PROXY}
+        from integracoes import http as http_saida
+        sess = http_saida.sessao("servicenow", proxy=SN_PROXY or None)
         sess.cookies.update(sn_cookies)
         url = f"{SERVICENOW_BASE}/sys_user.do?JSONv2&sysparm_action=getRecords&sysparm_record_count=1"
         r = sess.get(url, headers={
@@ -1037,20 +1081,41 @@ def sn_session_status(req: Request):
             "login.do" in final or "ssologin" in final
             or "/login" in final or "oauth" in final
         )
-        expirado = (
-            r.status_code in (401, 403)
-            or redirecionou_login
-            or bool(r.history and any(h.status_code in (301, 302, 303, 307) for h in r.history)
-                    and redirecionou_login)
-        )
+        expirado = r.status_code in (401, 403) or redirecionou_login
         if not expirado:
+            # O que mantém a sessão viva: os cookies que VOLTARAM. Sem
+            # guardá-los, o próximo ping reenvia os antigos e a renovação
+            # nunca se acumula.
             sd["sn_cookies"] = dict(sess.cookies)
-            return {"active": True}
-        return {"active": False, "reason": "expired"}
-    except Exception:
-        # Erro de rede/timeout não significa sessão expirada — não derruba o
-        # badge à toa; mantém como "desconhecido" (tratado como ativo na UI).
-        return {"active": True, "reason": "probe_error"}
+            info = _registrar_ping(sd, "ativa")
+            return {"active": True, "estado": "ativa", "keepalive": info}
+        info = _registrar_ping(sd, "expirada", f"HTTP {r.status_code} → {final[:120]}")
+        return {"active": False, "estado": "expirada", "reason": "expired",
+                "keepalive": info}
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("keep-alive do ServiceNow não completou: %s", exc)
+        info = _registrar_ping(sd, "desconhecida", f"{type(exc).__name__}: {str(exc)[:160]}")
+        # NÃO é "ativa". Erro de rede repetido significa que nada está sendo
+        # renovado, e é isso que a tela precisa mostrar.
+        return {"active": False, "estado": "desconhecida", "reason": "probe_error",
+                "keepalive": info}
+
+
+@router.get("/keepalive-diagnostico")
+def sn_keepalive_diagnostico(req: Request):
+    """O histórico do keep-alive desta sessão, para responder 'está rodando?'.
+
+    Sem isto, a única evidência de que o keep-alive funciona é a ausência de
+    reclamação — e quando a reclamação vem, não há o que olhar.
+    """
+    sd = get_session(req)
+    info = dict(sd.get(CHAVE_KEEPALIVE) or {})
+    info["tem_cookies"] = bool(sd.get("sn_cookies"))
+    info["usuario"] = sd.get("username", "")
+    # O intervalo que a tela usa, para conferir se bate com o que se vê nos
+    # carimbos: pings espaçados demais são ping que não está rodando.
+    info["intervalo_esperado_segundos"] = 180
+    return info
 
 
 @router.post("/upload")

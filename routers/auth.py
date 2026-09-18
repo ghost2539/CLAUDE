@@ -329,30 +329,21 @@ class SNReloginIn(BaseModel):
 
 @router.get("/sn-session")
 def sn_session_status(req: Request):
-    """Check if the ServiceNow session is still valid."""
-    sd = get_session(req)
-    sn_cookies = sd.get("sn_cookies")
-    if not sn_cookies:
-        return {"active": False, "reason": "no_session"}
-    try:
-        import requests as _req
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        from routers.servicenow import SERVICENOW_BASE, SN_PROXY
-        proxies = {"https": SN_PROXY, "http": SN_PROXY} if SN_PROXY else None
-        r = _req.get(
-            f"{SERVICENOW_BASE}/api/now/table/sys_user?sysparm_limit=1",
-            cookies=sn_cookies,
-            timeout=15,
-            verify=False,
-            allow_redirects=False,
-            proxies=proxies,
-        )
-        if r.status_code == 200:
-            return {"active": True}
-        return {"active": False, "reason": "expired"}
-    except Exception:
-        return {"active": False, "reason": "error"}
+    """Estado da sessão do ServiceNow. Delega para o keep-alive de verdade.
+
+    Existiam DUAS sondas, e elas discordavam em tudo o que importa: esta
+    batia em `/api/now/table/sys_user` sem seguir redirecionamento e tratava
+    erro de rede como EXPIRADA; a outra bate em `sys_user.do?JSONv2`
+    seguindo redirecionamento. Pior: esta aqui não guardava os cookies
+    renovados, então perguntar por ela não mantinha nada vivo — ela só
+    parecia um keep-alive.
+
+    Agora há uma só. Esta rota fica como apelido, para não quebrar quem já a
+    chama, e o que ela faz é exatamente o que a outra faz: perguntar E
+    renovar.
+    """
+    from routers.servicenow import sn_session_status as _estado
+    return _estado(req)
 
 
 @router.post("/sn-relogin")

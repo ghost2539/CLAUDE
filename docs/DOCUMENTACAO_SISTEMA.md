@@ -272,6 +272,26 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
 **ServiceNow** (`renner.service-now.com`)
 - **Escrita como o usuário logado** (cookies SSO da sessão) — entrada, saída,
   encerramento. Nunca com conta de serviço.
+- **Keep-alive da sessão nominal**: o navegador chama
+  `/api/servicenow/session-status` a cada 3 min (e ao voltar para a aba, e
+  ao voltar a rede). O servidor faz uma chamada autenticada ao ServiceNow —
+  é ela que reinicia o relógio de inatividade de lá — e **guarda os cookies
+  renovados** na sessão do portal. Sem guardar, o ping seguinte reenvia os
+  antigos e a renovação nunca se acumula.
+  - **Três estados**: `ativa`, `expirada` e `desconhecida` (o ping não
+    chegou lá). `desconhecida` era devolvido como ativa, e o selo ficava
+    verde enquanto nada era renovado.
+  - Em `expirada`, o portal **pede a senha para reconectar**. A janela
+    existia e nunca era chamada.
+  - `/api/servicenow/keepalive-diagnostico` traz último ping, última
+    renovação, falhas seguidas e o motivo da última falha — é o que responde
+    "o keep-alive está rodando?". O mesmo resumo fica no título do selo.
+  - `/api/auth/sn-session` é apelido desta rota. Era uma segunda sonda, com
+    outra URL e outro tratamento de erro, e **não renovava** nada.
+- **Sessão do portal mora na memória do processo.** Reiniciar o serviço
+  derruba todas, e os cookies do ServiceNow vão junto. Com `WORKERS>1` cada
+  processo tem o seu dicionário e o login some de forma intermitente — o
+  portal avisa no log ao subir, e todos os deploys usam `--workers 1`.
 - **Leitura por conta de serviço** — Indicadores e a Consulta de chamados,
   por **GET** em `/api/now/table` e `/api/now/stats`. **POST não é
   suportado** por essa API.

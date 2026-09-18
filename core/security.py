@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import logging
 import secrets
 import time
 from collections import defaultdict
@@ -22,7 +24,29 @@ _cfg = get_settings()
 # ── Session management ──────────────────────────────────────────
 
 _serializer = URLSafeTimedSerializer(_cfg.SESSION_SECRET, salt="portal-spare-v2")
+# As sessões vivem na MEMÓRIA DESTE PROCESSO. Duas consequências que
+# aparecem como "a sessão do ServiceNow expirou", e nenhuma delas é relógio:
+#
+# 1.  Reiniciar o serviço apaga todas. Quem estava logado perde também os
+#     cookies de SSO do ServiceNow e precisa reconectar.
+# 2.  Com mais de um worker, cada processo tem o SEU dicionário. O navegador
+#     manda o mesmo cookie, o balanceador escolhe outro worker, e a sessão
+#     "some" — de forma intermitente, que é o pior jeito de falhar. Todos os
+#     deploys usam `--workers 1` por isso; o aviso abaixo existe para o dia
+#     em que alguém subir esse número sem saber do acoplamento.
 SESSIONS: dict[str, dict] = {}
+
+
+def avisar_se_multiprocesso(workers: int) -> str:
+    """Aviso quando o número de workers é incompatível com sessão em memória."""
+    if workers and workers > 1:
+        msg = (f"WORKERS={workers} com sessão em memória: cada processo tem o "
+               "seu dicionário de sessões, e o login (e os cookies do "
+               "ServiceNow) vai sumir de forma intermitente. Use WORKERS=1 "
+               "enquanto a sessão não for compartilhada.")
+        logging.getLogger("security").error(msg)
+        return msg
+    return ""
 
 
 def create_session(data: dict) -> tuple[str, str]:

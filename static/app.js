@@ -322,12 +322,41 @@
     var _snKeepAlive = null;
     var _snUltimoPing = 0;
 
+    var _snEstado = null;      // último estado conhecido, para o selo e o aviso
+    var _snPedindoSenha = false;
+
     function snPing() {
         _snUltimoPing = Date.now();
         return fetch(apiUrl('/servicenow/session-status'), { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) marcarIntegracao(!!d.active); })
-            .catch(function () {});
+            .then(function (d) {
+                if (!d) {
+                    // O portal não respondeu. Não é a sessão do SN que caiu,
+                    // mas também não dá para afirmar que está viva.
+                    _snEstado = { estado: 'desconhecida' };
+                    marcarIntegracao(_snEstado);
+                    return;
+                }
+                _snEstado = d;
+                marcarIntegracao(d);
+                // A reconexão existia e ninguém a chamava: quando a sessão
+                // expirava, o keep-alive só pintava o selo de vermelho e a
+                // pessoa descobria ao ver uma ação falhar. Agora o portal
+                // pede a senha na hora em que percebe.
+                if (d.estado === 'expirada') pedirReconexaoSN();
+            })
+            .catch(function () {
+                _snEstado = { estado: 'desconhecida' };
+                marcarIntegracao(_snEstado);
+            });
+    }
+
+    function pedirReconexaoSN() {
+        if (_snPedindoSenha) return;
+        _snPedindoSenha = true;
+        Promise.resolve(snReloginModal())
+            .then(function (ok) { if (ok) snPing(); })
+            .finally(function () { _snPedindoSenha = false; });
     }
 
     // O relógio do navegador não é confiável para isto: aba em segundo
@@ -442,14 +471,43 @@
             if (mudou && state.current) nav(location.hash.slice(1) || state.current);
         }
     }
-    function marcarIntegracao(ok) {
+    /* Três estados, não dois. "Não consegui perguntar" virava VERDE, e era o
+       pior caso: com o ping falhando há horas nada estava sendo renovado, a
+       sessão morria, e o selo dizia que estava tudo bem até uma ação falhar.
+       Aceita o objeto do ping ou um booleano (o estado inicial do login). */
+    function marcarIntegracao(info) {
         var p = $('#topbar-integ');
         if (!p) return;
-        p.classList.toggle('off', !ok);
+        var estado = (info && typeof info === 'object')
+            ? (info.estado || (info.active ? 'ativa' : 'sem_sessao'))
+            : (info ? 'ativa' : 'sem_sessao');
+        var cor = { ativa: 'green', expirada: 'red', sem_sessao: 'red',
+                    desconhecida: 'orange' }[estado] || 'orange';
+        var texto = { ativa: 'ServiceNow ok', expirada: 'ServiceNow expirou',
+                      sem_sessao: 'ServiceNow off',
+                      desconhecida: 'ServiceNow ?' }[estado] || 'ServiceNow ?';
+        p.classList.toggle('off', estado !== 'ativa');
         var d = $('.dot', p);
-        if (d) d.className = 'dot ' + (ok ? 'dot-green' : 'dot-red');
-        $('#topbar-integ-texto').textContent = ok ? 'ServiceNow ok' : 'ServiceNow off';
-        p.title = ok ? 'Sessão do ServiceNow ativa' : 'Sem sessão no ServiceNow';
+        if (d) d.className = 'dot dot-' + cor;
+        $('#topbar-integ-texto').textContent = texto;
+
+        // O título carrega o diagnóstico: é onde se responde "o keep-alive
+        // está rodando?" sem abrir ferramenta nenhuma.
+        var ka = (info && typeof info === 'object' && info.keepalive) || {};
+        var linhas = {
+            ativa: 'Sessão do ServiceNow ativa.',
+            expirada: 'A sessão do ServiceNow expirou — reconecte para continuar.',
+            sem_sessao: 'Sem sessão no ServiceNow.',
+            desconhecida: 'Não foi possível falar com o ServiceNow. ' +
+                'Enquanto isso, a sessão NÃO está sendo renovada.'
+        }[estado] || '';
+        if (ka.ultimo_ping) {
+            linhas += '\nÚltimo ping: ' + ka.ultimo_ping;
+            if (ka.ultima_renovacao) linhas += '\nÚltima renovação: ' + ka.ultima_renovacao;
+            if (ka.falhas_seguidas) linhas += '\nFalhas seguidas: ' + ka.falhas_seguidas;
+            if (ka.ultima_falha_motivo) linhas += '\nMotivo: ' + ka.ultima_falha_motivo;
+        }
+        p.title = linhas;
     }
     function iniciais(nome) {
         var partes = String(nome || '').trim().split(/\s+/).filter(Boolean);
