@@ -672,7 +672,11 @@ async function renderBase(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Base de Recebimentos</h1>' +
         '<div class="btn-row mb-3">' +
-            '<button id="bf-snow" class="btn btn-secondary">Exportar ServiceNow CSV</button>' +
+            '<button id="bf-export" class="btn btn-primary">Exportar base</button>' +
+            '<button id="bf-snow" class="btn btn-secondary" ' +
+                'title="Converte a base para o formato de importação do alm_hardware ' +
+                'do ServiceNow: colunas em inglês e valores fixos. Não é a base.">' +
+                'Exportar modelo do ServiceNow</button>' +
         '</div>' +
         '<div class="card mb-3">' +
             '<div class="card-body filter-grid">' +
@@ -860,11 +864,27 @@ async function renderBase(c, S) {
         }
     }
 
+    // Os filtros da tela valem para a exportação: quem filtra 200 linhas e
+    // clica em exportar espera as 200, não a base inteira.
+    function filtrosDaTela() {
+        return new URLSearchParams({
+            status:    document.getElementById('bf-status').value,
+            empresa:   document.getElementById('bf-company').value,
+            categoria: document.getElementById('bf-cat').value,
+            q:         document.getElementById('bf-q').value
+        });
+    }
+
     document.getElementById('bf-run').onclick = load;
+    document.getElementById('bf-export').onclick = function () {
+        // A BASE: as mesmas colunas da tabela acima, com os mesmos valores.
+        S.baixar('/recebimentos/export?' + filtrosDaTela());
+    };
     document.getElementById('bf-snow').onclick = function () {
-        // Pelo S.baixar, que põe o prefixo do proxy. Com o caminho absoluto
-        // ('/api/...') o navegador resolvia contra a RAIZ do domínio e o
-        // botão caía na API do outro sistema, não no portal.
+        // Outra coisa: a base traduzida para o formato de importação do
+        // ServiceNow. Pelo S.baixar, que põe o prefixo do proxy — com o
+        // caminho absoluto ('/api/...') o navegador resolvia contra a RAIZ do
+        // domínio e o botão caía na API do outro sistema.
         S.baixar('/recebimentos/export-servicenow');
     };
     load();

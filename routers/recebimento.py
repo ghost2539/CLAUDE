@@ -903,6 +903,44 @@ def update_receipt_asset(cycle_id: int, body: AssetUpdateIn, req: Request):
     return {"ok": True}
 
 
+def _consulta_base(status="", empresa="", categoria="", data_inicio="",
+                   data_fim="", q="", limit=1000):
+    """A consulta da Base de Recebimentos, com os filtros da tela.
+
+    Uma só, usada pela listagem E pela exportação. Estavam separadas, e o
+    resultado era a exportação ignorar o filtro que a pessoa acabara de
+    aplicar — ela filtra 200 linhas na tela, clica em exportar e recebe a
+    base inteira, sem que nada avise.
+    """
+    stmt = (
+        select(ReceiptCycle)
+        .join(Asset)
+        .where(ReceiptCycle.status != "REMOVIDO")
+        .order_by(ReceiptCycle.id.desc())
+        .limit(min(limit, 20000))
+    )
+    if status:
+        stmt = stmt.where(ReceiptCycle.status == status)
+    if empresa:
+        stmt = stmt.where(func.upper(Asset.company).contains(empresa.upper()))
+    if categoria:
+        stmt = stmt.where(func.upper(Asset.category).contains(categoria.upper()))
+    if data_inicio:
+        stmt = stmt.where(ReceiptCycle.received_date >= date.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(ReceiptCycle.received_date <= date.fromisoformat(data_fim))
+    if q:
+        term = q.upper()
+        stmt = stmt.where(or_(
+            func.upper(Asset.asset_id).contains(term),
+            func.upper(Asset.asset_number).contains(term),
+            func.upper(Asset.serial_number).contains(term),
+            func.upper(Asset.tag_number).contains(term),
+            func.upper(Asset.description).contains(term),
+        ))
+    return stmt
+
+
 @router.get("/recebimentos")
 def list_receipts(
     req: Request,
@@ -917,35 +955,85 @@ def list_receipts(
     require_permission(req, "recebimento", "view")
 
     with SessionLocal() as s:
-        stmt = (
-            select(ReceiptCycle)
-            .join(Asset)
-            .where(ReceiptCycle.status != "REMOVIDO")
-            .order_by(ReceiptCycle.id.desc())
-            .limit(min(limit, 5000))
-        )
-        if status:
-            stmt = stmt.where(ReceiptCycle.status == status)
-        if empresa:
-            stmt = stmt.where(func.upper(Asset.company).contains(empresa.upper()))
-        if categoria:
-            stmt = stmt.where(func.upper(Asset.category).contains(categoria.upper()))
-        if data_inicio:
-            stmt = stmt.where(ReceiptCycle.received_date >= date.fromisoformat(data_inicio))
-        if data_fim:
-            stmt = stmt.where(ReceiptCycle.received_date <= date.fromisoformat(data_fim))
-        if q:
-            term = q.upper()
-            stmt = stmt.where(or_(
-                func.upper(Asset.asset_id).contains(term),
-                func.upper(Asset.asset_number).contains(term),
-                func.upper(Asset.serial_number).contains(term),
-                func.upper(Asset.tag_number).contains(term),
-                func.upper(Asset.description).contains(term),
-            ))
-
-        rows = s.scalars(stmt).unique().all()
+        rows = s.scalars(_consulta_base(
+            status, empresa, categoria, data_inicio, data_fim, q,
+            min(limit, 5000))).unique().all()
         return {"registros": [cycle_dict(x) for x in rows]}
+
+
+# As colunas da Base, na ordem em que a tela as mostra. A exportação da base
+# é a BASE: as mesmas colunas, com os mesmos valores, sem conversão para
+# formato de outro sistema.
+#
+# A lista fica aqui, e `scripts/verificar_recebimento_export.py` confere que
+# ela bate, coluna a coluna e na mesma ordem, com a da tela em
+# modulos/recebimento.js. Se uma mudar sem a outra, a verificação falha —
+# senão a planilha começa a divergir da tela e ninguém nota.
+COLUNAS_BASE = [
+    ("id", "ID"),
+    ("data_recebimento", "Data"),
+    ("origem_entrada", "Origem"),
+    ("po", "PO"),
+    ("nf", "NF"),
+    ("empresa", "Empresa"),
+    ("imobilizado", "Imobilizado"),
+    ("etiqueta", "Etiqueta"),
+    ("numero_serie", "Nº Série"),
+    ("descricao", "Descrição"),
+    ("categoria", "Categoria"),
+    ("modelo", "Modelo"),
+    ("status", "Status"),
+    ("local", "Local"),
+    ("lote", "Lote"),
+]
+
+
+@router.get("/recebimentos/export")
+def export_base(
+    req: Request,
+    status: str = "",
+    empresa: str = "",
+    categoria: str = "",
+    data_inicio: str = "",
+    data_fim: str = "",
+    q: str = "",
+):
+    """A Base de Recebimentos como ela é, nas colunas da tela.
+
+    Não confundir com `/recebimentos/export-servicenow`, que é outra coisa:
+    aquele traduz a base para o formato de importação do `alm_hardware` do
+    ServiceNow, com colunas em inglês e valores fixos ("In stock",
+    "SPARE - CD324", "Capex", "SL 5 Years") que não estão na base. Serve para
+    alimentar o ServiceNow, não para olhar os recebimentos.
+
+    Este exporta o que a tela mostra, com os filtros que a tela aplicou.
+    """
+    require_permission(req, "recebimento", "export")
+
+    with SessionLocal() as s:
+        rows = s.scalars(_consulta_base(
+            status, empresa, categoria, data_inicio, data_fim, q,
+            20000)).unique().all()
+        registros = [cycle_dict(x) for x in rows]
+
+    saida = io.StringIO()
+    # `;` e BOM: é o que o Excel em português abre com as colunas separadas
+    # sem passar pelo assistente de importação.
+    escritor = csv.writer(saida, delimiter=";", quotechar='"',
+                          quoting=csv.QUOTE_ALL, lineterminator="\r\n")
+    escritor.writerow([rotulo for _chave, rotulo in COLUNAS_BASE])
+    for r in registros:
+        escritor.writerow(["" if r.get(chave) is None else str(r.get(chave))
+                           for chave, _rotulo in COLUNAS_BASE])
+
+    dados = ("\ufeff" + saida.getvalue()).encode("utf-8")
+    from fastapi.responses import StreamingResponse
+    nome = f"base_recebimentos_{datetime.now():%Y%m%d-%H%M}.csv"
+    return StreamingResponse(
+        io.BytesIO(dados),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 @router.put("/recebimentos/{cycle_id}")
