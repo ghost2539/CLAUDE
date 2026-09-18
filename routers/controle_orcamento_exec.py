@@ -1550,3 +1550,92 @@ def excluir_categoria(categoria_id: int, req: Request):
             raise HTTPException(409, f"A categoria {c.name!r} está em uso por {em_uso} projeto(s).")
         s.delete(c)
     return {"ok": True}
+
+
+# ── POs de um projeto, lidas do EBS (consulta, sem gravar nada) ────────
+# Toda ID de projeto está atrelada a uma PO. Esta tela responde, para um
+# projeto: quais POs existem, quanto valem, que itens e quantidades têm, e
+# se já viraram nota fiscal.
+#
+# NÃO ALIMENTA O DASHBOARD. Nada daqui é gravado: é leitura do EBS na hora,
+# para conferir os números antes de decidir se eles entram no painel. Se um
+# dia entrarem, vai ser por uma gravação explícita, não por efeito colateral
+# de abrir a tela.
+#
+# O SQL está em consultas/ebs/orcamento_po_do_projeto.sql e
+# consultas/ebs/orcamento_po_itens.sql — não aqui. Este endpoint só valida o
+# parâmetro, chama pelo nome e devolve.
+_RE_PROJETO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$")
+
+
+def _chamar_ebs(consulta: str, binds: dict, max_rows: int = 2000) -> list[dict]:
+    """Uma consulta nomeada do EBS, com os erros traduzidos para a tela."""
+    try:
+        from integracoes import ebs_oracle
+        return ebs_oracle.run_named(consulta, binds, max_rows=max_rows)
+    except ImportError as exc:
+        raise HTTPException(
+            503, "O driver Oracle não está instalado neste servidor "
+                 f"(pip install oracledb). Detalhe: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("consulta %s falhou: %s", consulta, exc)
+        # Falta de credencial é 503 (configure o serviço), não 502: ninguém
+        # recusou nada — a conexão nem chegou a ser tentada.
+        if type(exc).__name__ == "EbsOracleSemCredencial":
+            raise HTTPException(503, str(exc)) from exc
+        from core.mascara import sem_dado_de_acesso
+        raise HTTPException(502, sem_dado_de_acesso(str(exc))) from exc
+
+
+@router.get("/api/controle-orcamento-exec/ebs/projeto/{numero}/pos")
+def ebs_pos_do_projeto(numero: str, req: Request):
+    """As POs de um projeto, com a NF atrelada quando houver."""
+    _exigir(req, "view")
+    check_rate_limit(req, "api")
+    numero = (numero or "").strip()
+    # Entra como bind variable de qualquer jeito; validar antes evita ida ao
+    # banco por engano de digitação e dá erro melhor que o do driver.
+    if not _RE_PROJETO.match(numero):
+        raise HTTPException(422, "Número de projeto inválido.")
+
+    linhas = _chamar_ebs("orcamento_po_do_projeto", {"p_project_number": numero})
+    if not linhas:
+        raise HTTPException(
+            404, f"O projeto {numero} não foi encontrado no EBS, ou não tem "
+                 "nenhuma PO com distribuição para ele.")
+
+    executadas = sum(1 for l in linhas if l.get("status_execucao") == "Executada")
+    # A chave da NF pode vir vazia mesmo com NF lançada: ela mora num dos
+    # GLOBAL_ATTRIBUTE da AP_INVOICES_ALL e qual deles varia por instalação.
+    # A tela precisa saber a diferença entre "não tem NF" e "tem NF e não
+    # achei a chave", senão alguém conclui que a nota não existe.
+    com_nf = [l for l in linhas if (l.get("nf_qtd") or 0)]
+    sem_chave = sum(1 for l in com_nf if not (l.get("nf_chave") or "").strip())
+    return {
+        "projeto": numero,
+        "projeto_nome": (linhas[0].get("projeto_nome") or ""),
+        "total": len(linhas),
+        "executadas": executadas,
+        "em_andamento": len(linhas) - executadas,
+        "nf_sem_chave": sem_chave,
+        "pos": linhas,
+    }
+
+
+@router.get("/api/controle-orcamento-exec/ebs/projeto/{numero}/pos/{po}/itens")
+def ebs_itens_da_po(numero: str, po: str, req: Request):
+    """Os itens de uma PO dentro do projeto — o detalhe de uma linha da lista."""
+    _exigir(req, "view")
+    check_rate_limit(req, "api")
+    numero, po = (numero or "").strip(), (po or "").strip()
+    if not _RE_PROJETO.match(numero):
+        raise HTTPException(422, "Número de projeto inválido.")
+    if not _RE_PROJETO.match(po):
+        raise HTTPException(422, "Número de PO inválido.")
+
+    linhas = _chamar_ebs("orcamento_po_itens",
+                         {"p_project_number": numero, "numero_po": po}, max_rows=500)
+    if not linhas:
+        raise HTTPException(
+            404, f"A PO {po} não tem linha ativa para o projeto {numero}.")
+    return {"projeto": numero, "po": po, "total": len(linhas), "itens": linhas}

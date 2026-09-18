@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line, Tooltip, LabelList, ResponsiveContainer,
@@ -1005,6 +1005,14 @@ export default function App() {
   const [cambio, setCambio] = useState(null);
   const [cambioEdit, setCambioEdit] = useState({ ARS: "", UYU: "" });
   const [cambioBusy, setCambioBusy] = useState(false);
+  /* Consulta de POs do projeto (EBS). Só leitura: nada daqui alimenta o
+     dashboard — é para conferir os números antes de decidir se entram. */
+  const [poProjeto, setPoProjeto] = useState("");
+  const [poDados, setPoDados] = useState(null);
+  const [poErro, setPoErro] = useState("");
+  const [poBusy, setPoBusy] = useState(false);
+  const [poItens, setPoItens] = useState({});   // po_numero -> itens | "erro"
+  const [poAberta, setPoAberta] = useState(""); // qual PO está expandida
 
   /* Barra de inclusão de projetos (Número puxa do EBS) */
   const [inc, setInc] = useState({ numero: "", tipo: "CAPEX", projeto_demanda: "", categoria: "", area: "" });
@@ -1053,6 +1061,38 @@ export default function App() {
     } catch { /* sem permissão de ver: o card não aparece preenchido */ }
   }, []);
   useEffect(() => { if (view === "config") carregarCambio(); }, [view, carregarCambio]);
+
+  /* ── POs de um projeto (EBS) ─────────────────────────────────────── */
+  const consultarPOs = useCallback(async () => {
+    const numero = poProjeto.trim();
+    if (!numero) return;
+    setPoBusy(true); setPoErro(""); setPoDados(null);
+    setPoItens({}); setPoAberta("");
+    try {
+      setPoDados(await api(API_BASE + "/ebs/projeto/" + encodeURIComponent(numero) + "/pos"));
+    } catch (e) {
+      setPoErro(e.message || String(e));
+    } finally {
+      setPoBusy(false);
+    }
+  }, [poProjeto]);
+
+  /* Os itens vêm só quando a linha é aberta: uma PO pode ter dezenas, e
+     buscar todas de uma vez faria uma ida ao EBS por PO só para desenhar
+     uma lista que ninguém pediu. */
+  const alternarItens = useCallback(async (po) => {
+    if (poAberta === po) { setPoAberta(""); return; }
+    setPoAberta(po);
+    if (poItens[po]) return;
+    const numero = (poDados?.projeto || "").trim();
+    try {
+      const d = await api(API_BASE + "/ebs/projeto/" + encodeURIComponent(numero) +
+                          "/pos/" + encodeURIComponent(po) + "/itens");
+      setPoItens((a) => ({ ...a, [po]: d.itens || [] }));
+    } catch (e) {
+      setPoItens((a) => ({ ...a, [po]: { erro: e.message || String(e) } }));
+    }
+  }, [poAberta, poItens, poDados]);
 
   async function salvarCambio() {
     setCambioBusy(true);
@@ -1962,6 +2002,156 @@ export default function App() {
                 </>
               ) : (
                 <span className="text-xs text-gray-500">Carregando câmbio…</span>
+              )}
+            </section>
+
+            {/* POs do projeto, lidas do EBS na hora. Nada daqui é gravado e
+                nada alimenta o dashboard: é para CONFERIR os números antes
+                de decidir se eles entram no painel. */}
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-sm font-semibold text-gray-800">POs do projeto (EBS)</h2>
+                <span className="text-[11px] text-gray-500">
+                  Consulta ao vivo. Não grava nada e não altera o dashboard.
+                </span>
+              </div>
+              <div className="flex flex-wrap items-end gap-2 mb-3">
+                <label className="block">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">Projeto</span>
+                  <input value={poProjeto}
+                         onChange={(e) => setPoProjeto(e.target.value)}
+                         onKeyDown={(e) => { if (e.key === "Enter") consultarPOs(); }}
+                         placeholder="ex.: 120345"
+                         className="w-[170px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                </label>
+                <button onClick={consultarPOs} disabled={poBusy || !poProjeto.trim()}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+                  {poBusy ? "Consultando…" : "Consultar POs"}
+                </button>
+              </div>
+
+              {poErro && (
+                <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-3">
+                  {poErro}
+                </div>
+              )}
+
+              {poDados && (
+                <>
+                  <div className="flex flex-wrap items-center gap-3 mb-2 text-xs text-gray-600">
+                    <span><b>{poDados.projeto}</b>{poDados.projeto_nome ? " · " + poDados.projeto_nome : ""}</span>
+                    <span>{poDados.total} PO(s)</span>
+                    <span className="text-green-700">{poDados.executadas} executada(s)</span>
+                    <span className="text-amber-700">{poDados.em_andamento} em andamento</span>
+                  </div>
+                  {poDados.nf_sem_chave > 0 && (
+                    <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2 leading-relaxed">
+                      {poDados.nf_sem_chave} PO(s) têm NF lançada mas a <b>chave</b> não foi encontrada.
+                      Na localização brasileira a chave mora num dos GLOBAL_ATTRIBUTE da AP_INVOICES_ALL, e
+                      qual deles muda de instalação para instalação. Chave vazia aqui quer dizer
+                      <b> não encontrei</b>, não <b>não existe</b> — rode <code>nf_onde_esta_a_chave</code>
+                      na aba Base EBS para descobrir a coluna desta instalação.
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b border-gray-200">
+                          <th className="py-1.5 pr-2 font-semibold">PO</th>
+                          <th className="py-1.5 pr-2 font-semibold">Fornecedor</th>
+                          <th className="py-1.5 pr-2 font-semibold">Status PO</th>
+                          <th className="py-1.5 pr-2 font-semibold text-right">Itens</th>
+                          <th className="py-1.5 pr-2 font-semibold text-right">Qtd.</th>
+                          <th className="py-1.5 pr-2 font-semibold text-right">Valor</th>
+                          <th className="py-1.5 pr-2 font-semibold">NF</th>
+                          <th className="py-1.5 pr-2 font-semibold">Chave da NF</th>
+                          <th className="py-1.5 pr-2 font-semibold">Situação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {poDados.pos.map((l) => {
+                          const po = String(l.po_numero || "");
+                          const aberta = poAberta === po;
+                          const itens = poItens[po];
+                          return (
+                            <Fragment key={po}>
+                              <tr onClick={() => alternarItens(po)}
+                                  className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer align-top">
+                                <td className="py-1.5 pr-2 font-medium text-blue-700">{aberta ? "▾ " : "▸ "}{po}</td>
+                                <td className="py-1.5 pr-2">{l.fornecedor || "—"}</td>
+                                <td className="py-1.5 pr-2">{l.status_po || "—"}</td>
+                                <td className="py-1.5 pr-2 text-right tabular-nums">{l.qtd_itens ?? "—"}</td>
+                                <td className="py-1.5 pr-2 text-right tabular-nums">{l.qtd_total ?? "—"}</td>
+                                <td className="py-1.5 pr-2 text-right tabular-nums">{fmtMoeda(l.valor_total, l.moeda)}</td>
+                                <td className="py-1.5 pr-2">{l.nf_numero || "—"}</td>
+                                {/* Chave de 44 dígitos numa célula estreita vira uma linha só
+                                    de números. Quebra em qualquer caractere e fonte menor. */}
+                                <td className="py-1.5 pr-2 font-mono text-[10px] break-all max-w-[190px]">
+                                  {l.nf_chave || (Number(l.nf_qtd) > 0 ? "não encontrada" : "—")}
+                                </td>
+                                <td className="py-1.5 pr-2">
+                                  <span className={"inline-block rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                                    (l.status_execucao === "Executada"
+                                      ? "bg-green-100 text-green-800"
+                                      : "bg-amber-100 text-amber-800")}>
+                                    {l.status_execucao}
+                                  </span>
+                                </td>
+                              </tr>
+                              {aberta && (
+                                <tr className="border-b border-gray-100 bg-gray-50">
+                                  <td colSpan={9} className="py-2 px-3">
+                                    {!itens && <span className="text-gray-500">Carregando itens…</span>}
+                                    {itens?.erro && <span className="text-red-700">{itens.erro}</span>}
+                                    {Array.isArray(itens) && (
+                                      <table className="w-full text-[11px]">
+                                        <thead>
+                                          <tr className="text-left text-gray-500">
+                                            <th className="py-1 pr-2 font-semibold">Linha</th>
+                                            <th className="py-1 pr-2 font-semibold">Item</th>
+                                            <th className="py-1 pr-2 font-semibold">Descrição</th>
+                                            <th className="py-1 pr-2 font-semibold">Un.</th>
+                                            <th className="py-1 pr-2 font-semibold text-right">Pedida</th>
+                                            <th className="py-1 pr-2 font-semibold text-right">Recebida</th>
+                                            <th className="py-1 pr-2 font-semibold text-right">Faturada</th>
+                                            <th className="py-1 pr-2 font-semibold text-right">Unitário</th>
+                                            <th className="py-1 pr-2 font-semibold text-right">Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {itens.map((i, n) => (
+                                            <tr key={n} className="border-t border-gray-200">
+                                              <td className="py-1 pr-2 tabular-nums">{i.linha}</td>
+                                              <td className="py-1 pr-2">{i.item_ebs || "—"}</td>
+                                              <td className="py-1 pr-2">{i.descricao || "—"}</td>
+                                              <td className="py-1 pr-2">{i.unidade || "—"}</td>
+                                              <td className="py-1 pr-2 text-right tabular-nums">{i.quantidade_pedida}</td>
+                                              <td className="py-1 pr-2 text-right tabular-nums">{i.quantidade_recebida}</td>
+                                              <td className="py-1 pr-2 text-right tabular-nums">{i.quantidade_faturada}</td>
+                                              <td className="py-1 pr-2 text-right tabular-nums">{fmtMoeda(i.preco_unitario, l.moeda, 2)}</td>
+                                              <td className="py-1 pr-2 text-right tabular-nums">{fmtMoeda(i.valor_total, l.moeda)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-gray-500 leading-relaxed mt-2">
+                    <b>Executada</b> = a PO já tem nota fiscal lançada contra ela.
+                    <b> Em andamento</b> = a PO existe e nenhuma NF chegou ainda.
+                    Valor e quantidade contam só as linhas que <b>este</b> projeto paga — numa PO
+                    rateada entre projetos, somar a PO inteira faria o projeto parecer o dobro.
+                    Clique na linha para ver os itens.
+                  </p>
+                </>
               )}
             </section>
 

@@ -282,6 +282,24 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   dicionário e o operador contra uma lista fechada, para que `^` e `=`
   digitados não virem estrutura da *encoded query*.
 
+**Base EBS (Oracle)** — as consultas ficam em **`consultas/ebs/*.sql`**, um
+arquivo por consulta, e não mais num dicionário dentro do código. O nome do
+arquivo é o nome da consulta; os binds saem do próprio SQL. Duas razões:
+quem entende de EBS lê o SQL sem abrir módulo Python, e `routers/ebs_oracle.py`
+passou a montar a lista da tela lendo a pasta — antes ele arrancava o
+dicionário do arquivo-fonte com regex e rodava `exec`, porque `import oracledb`
+estoura num servidor sem o driver. O **texto** do SQL continua sem sair na API.
+
+Para o Controle de Orçamento há três consultas novas: `orcamento_po_do_projeto`
+(as POs de um projeto, com valor, itens e a NF atrelada — *Executada* quando
+existe NF, *Em andamento* quando não), `orcamento_po_itens` (o detalhe de uma
+PO **dentro daquele projeto**, para a soma bater com a linha do resumo) e
+`nf_onde_esta_a_chave`. Esta última é de diagnóstico: na localização brasileira
+a chave de acesso da NF-e mora num dos `GLOBAL_ATTRIBUTE` da `AP_INVOICES_ALL`
+e **qual deles varia por instalação**, então a consulta principal varre os
+vinte e aceita só o que tem 44 dígitos. Chave vazia na tela quer dizer *não
+encontrei*, não *não existe*.
+
 **Correios** — credenciais pelo **cofre** (`CORREIOS_USUARIO`, `CORREIOS_CHAVE`,
 `CORREIOS_CARTOES`, `CORREIOS_DR`, `CORREIOS_CONTRATO`), com o ambiente como
 última parada. Doc: `docs/CORREIOS_SERVICENOW.md`.

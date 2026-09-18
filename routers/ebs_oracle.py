@@ -260,24 +260,37 @@ def _validar_sql(sql: str) -> str:
     return limpo
 
 
-def _consultas_nomeadas() -> tuple[dict, dict]:
-    """QUERIES e BINDS do módulo de acesso, mesmo sem o driver Oracle.
+# Nome de consulta é nome de arquivo: nada de subpasta nem de "..".
+_RE_NOME_CONSULTA = _re.compile(r"^[a-z][a-z0-9_]{0,60}$")
 
-    O módulo importa `oracledb` no topo; sem o driver, o import estoura e a
-    tela ficaria sem a lista. Ler o dicionário do fonte por regex é feio,
-    mas mantém a tela útil num servidor onde o driver ainda não foi instalado.
+
+def _consultas_nomeadas() -> tuple[dict, dict]:
+    """As consultas nomeadas e seus binds, mesmo sem o driver Oracle.
+
+    Lê `consultas/ebs/*.sql` direto. Antes isto importava
+    `integracoes.ebs_oracle`, e como aquele módulo faz `import oracledb` no
+    topo, num servidor sem o driver a tela ficava sem a lista — o contorno
+    era arrancar o dicionário do arquivo-fonte com regex e rodar `exec`
+    nele. Com as consultas em arquivo não há mais nem import nem `exec`:
+    a pasta é a fonte, e é a MESMA pasta que o módulo de acesso usa, então
+    tela e execução não podem divergir.
     """
-    try:
-        from integracoes import ebs_oracle
-        return dict(ebs_oracle.QUERIES), dict(ebs_oracle.BINDS)
-    except ImportError:
-        from pathlib import Path as _P
-        fonte = (_P(__file__).resolve().parent.parent / "integracoes" / "ebs_oracle.py"
-                 ).read_text(encoding="utf-8")
-        escopo: dict = {"re": _re}
-        exec(_re.search(r"QUERIES: dict\[str, str\] = \{.*?\n\}\n", fonte, _re.S).group(0), escopo)  # noqa: S102
-        exec(_re.search(r"BINDS: dict.*?\n\}\n", fonte, _re.S).group(0), escopo)  # noqa: S102
-        return escopo["QUERIES"], escopo["BINDS"]
+    from pathlib import Path as _P
+    pasta = _P(__file__).resolve().parent.parent / "consultas" / "ebs"
+    queries, binds = {}, {}
+    if not pasta.is_dir():
+        return queries, binds
+    for arq in sorted(pasta.glob("*.sql")):
+        if not _RE_NOME_CONSULTA.match(arq.stem):
+            continue
+        sql = arq.read_text(encoding="utf-8")
+        queries[arq.stem] = sql
+        # Comentário fora antes de procurar bind: um `:coisa` escrito num
+        # `--` viraria campo no formulário da tela.
+        sem_comentario = _re.sub(r"--[^\n]*", "", sql)
+        binds[arq.stem] = tuple(dict.fromkeys(
+            _re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", sem_comentario)))
+    return queries, binds
 
 
 @router.get("/consultas")

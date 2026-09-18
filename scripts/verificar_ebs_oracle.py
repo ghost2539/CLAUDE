@@ -196,10 +196,18 @@ print("\n[5] As consultas nomeadas, com os binds derivados do próprio SQL")
 r = cliente.get("/api/ebs-oracle/consultas")
 d = r.json()
 nomes = {q["nome"]: q for q in d["consultas"]}
+# A lista é exaustiva de propósito: consulta que some da pasta some da tela
+# sem ninguém notar, e a tela é a única porta para ela. Acrescentar consulta
+# é acrescentar linha aqui — de graça, e obriga a olhar o conjunto.
 checar(set(nomes) == {"acordos", "ativo_por_serial", "busca_po", "catalogo",
                       "po", "po_itens", "rc", "saldo", "vendor_items",
-                      "vendor_lookup"},
-       "as dez consultas de negócio estão lá")
+                      "vendor_lookup",
+                      # Controle de Orçamento: POs de um projeto e seus itens,
+                      # com a NF atrelada; mais a que descobre em qual coluna
+                      # esta instalação guarda a chave da NF.
+                      "orcamento_po_do_projeto", "orcamento_po_itens",
+                      "nf_onde_esta_a_chave"},
+       "as consultas de negócio estão todas lá")
 # É ela que a tela Internalização → Patrimônio usa para saber se o
 # equipamento já virou ativo fixo no EBS. A busca é pelo SERIAL porque é o
 # que o portal tem na mão: a plaqueta é o próprio EBS quem atribui.

@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path as _P
 
 import oracledb
 
@@ -252,222 +253,58 @@ def sql_livre(texto: str, max_rows: int = 200) -> list[dict]:
 
 
 # ── Registro de consultas (VOCÊS configuram aqui) ─────────────────
-# Preencha com as consultas de negócio. Sempre use bind variables (:param).
-# As consultas do módulo Gestão de Compras (oracle_helper.py do time), tal e
-# qual: os nomes e os binds são os de lá, de propósito. Elas continuam aqui
-# porque quem as usa é a Base EBS — a ponte HTTP que também as chamava saiu
-# do portal junto com a aba Gestão de Compras.
-QUERIES: dict[str, str] = {
-    "saldo": """
-WITH proj AS (
-    SELECT project_id, segment1 AS nro_projeto, name AS nome_projeto
-    FROM APPS.PA_PROJECTS_ALL WHERE segment1 = :p_project_number
-)
-SELECT DISTINCT p.nro_projeto, p.nome_projeto, NVL(bl.burdened_cost, 0) AS burdened_cost,
-    bl.creation_date AS dt_criacao_linha, bv.version_number
-FROM proj p
-JOIN APPS.PA_TASKS t ON t.project_id = p.project_id
-JOIN APPS.PA_RESOURCE_ASSIGNMENTS ra ON ra.task_id = t.task_id
-JOIN APPS.PA_BUDGET_LINES bl ON bl.resource_assignment_id = ra.resource_assignment_id
-JOIN APPS.PA_BUDGET_VERSIONS bv ON bv.budget_version_id = bl.budget_version_id
-WHERE (bv.current_flag = 'Y' OR bv.budget_status_code = 'B')
-  AND (NVL(bl.raw_cost,0)>0 OR NVL(bl.burdened_cost,0)>0 OR NVL(bl.project_raw_cost,0)>0 OR NVL(bl.project_burdened_cost,0)>0)
-""",
-    "po": """
-SELECT ph.authorization_status AS status, NVL(pll.amount_billed, 0) AS amount_billed_ship,
-    CASE WHEN NVL(pll.amount_billed, 0)=0 THEN 'Comprometida' ELSE 'Realizado' END AS status_faturado,
-    ph.segment1 || ' / ' || pll.shipment_num AS numero_po, ph.creation_date AS data_criacao,
-    ph.approved_date AS data_aprovacao, pl.line_num AS po_line_num, pll.shipment_num,
-    pl.item_description AS desc_po, pll.need_by_date AS necessario_em,
-    NVL(pll.quantity, 0) AS qty_pedida, NVL(pll.quantity_received, 0) AS qty_recebida,
-    NVL(pll.quantity_billed, 0) AS qty_faturada, NVL(pll.quantity_cancelled, 0) AS qty_cancelada,
-    NVL(pll.price_override, NVL(pl.unit_price, 0)) AS price_override,
-    NVL(pll.amount, NVL(pll.quantity, 0) * NVL(pll.price_override, NVL(pl.unit_price, 0))) AS amount_ship
-FROM APPS.PA_PROJECTS_ALL p
-JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.project_id = p.project_id
-JOIN APPS.PO_LINE_LOCATIONS_ALL pll ON pll.line_location_id = pd.line_location_id
-JOIN APPS.PO_LINES_ALL pl ON pl.po_line_id = pd.po_line_id
-JOIN APPS.PO_HEADERS_ALL ph ON ph.po_header_id = pl.po_header_id
-WHERE p.segment1 = :p_project_number ORDER BY ph.segment1, pll.shipment_num
-""",
-    "rc": """
-SELECT p.segment1 AS project_number, prh.segment1 AS rc_numero, prh.authorization_status AS rc_status,
-    prh.description AS rc_descricao, prh.creation_date AS rc_data_criacao, prl.line_num AS rc_line_num,
-    prl.item_description AS rc_item_desc, prl.quantity AS rc_qty, prl.unit_price AS rc_unit_price
-FROM apps.pa_projects_all p
-JOIN apps.po_req_distributions_all prd ON prd.project_id = p.project_id
-JOIN apps.po_requisition_lines_all prl ON prl.requisition_line_id = prd.requisition_line_id
-JOIN apps.po_requisition_headers_all prh ON prh.requisition_header_id = prl.requisition_header_id
-WHERE p.segment1 = :p_project_number ORDER BY rc_data_criacao DESC
-""",
-    "acordos": """
-SELECT pha.segment1 AS agreement_num, pv.vendor_name, pha.start_date, pha.end_date,
-    ROUND(pha.end_date - SYSDATE) AS days_to_expire, pha.authorization_status,
-    hou.name AS operating_unit
-FROM APPS.PO_HEADERS_ALL pha
-JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
-LEFT JOIN APPS.HR_OPERATING_UNITS hou ON hou.organization_id = pha.org_id
-WHERE pha.type_lookup_code = 'BLANKET' AND pha.authorization_status = 'APPROVED'
-  AND pha.end_date IS NOT NULL AND TRUNC(pha.end_date) BETWEEN TRUNC(SYSDATE) AND TRUNC(SYSDATE) + :p_days
-ORDER BY days_to_expire ASC
-""",
-    "vendor_lookup": """
-SELECT DISTINCT pv.vendor_name
-FROM APPS.PO_HEADERS_ALL pha
-JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
-WHERE pha.type_lookup_code IN ('BLANKET','CONTRACT') AND pha.authorization_status = 'APPROVED'
-  AND TRUNC(SYSDATE) >= TRUNC(NVL(pha.start_date, SYSDATE))
-  AND (pha.end_date IS NULL OR TRUNC(SYSDATE) <= TRUNC(pha.end_date))
-ORDER BY pv.vendor_name
-""",
-    "vendor_items": """
-SELECT hou.name AS operating_unit, NVL(msib.description, pl.item_description) AS item_description,
-    pl.unit_meas_lookup_code AS uom, pl.list_price_per_unit AS unit_price
-FROM APPS.PO_HEADERS_ALL pha
-JOIN APPS.PO_VENDORS pv ON pv.vendor_id = pha.vendor_id
-LEFT JOIN APPS.HR_OPERATING_UNITS hou ON hou.organization_id = pha.org_id
-JOIN APPS.PO_LINES_ALL pl ON pl.po_header_id = pha.po_header_id
-LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = pl.item_id AND msib.organization_id = 0
-WHERE pha.type_lookup_code IN ('BLANKET','CONTRACT') AND pha.authorization_status = 'APPROVED'
-  AND UPPER(pv.vendor_name) = UPPER(:p_vendor_name)
-  AND TRUNC(SYSDATE) >= TRUNC(NVL(pha.start_date, SYSDATE))
-  AND (pha.end_date IS NULL OR TRUNC(SYSDATE) <= TRUNC(pha.end_date))
-ORDER BY hou.name, pha.segment1, pl.line_num
-""",
-    # ── Nossa consulta: os itens de uma PO, para o Agendamento ──────────
-    # A busca_po acima veio do módulo do outro time e devolve uma linha por
-    # DISTRIBUIÇÃO: o mesmo item repete quando há várias entregas ou vários
-    # projetos rateando. Para a tela de Agendamento isso é ruído — ela
-    # precisa de "10 desktops, 20 leitores", uma linha por item.
-    #
-    # Então aqui agrega por linha do pedido e devolve o que a tela usa:
-    # descrição, unidade, quantidade pedida, já recebida e o que falta.
-    # Linha cancelada fica de fora; quantidade_pendente é o que se espera
-    # receber de verdade.
-    # Onde o patrimônio aparece depois de capitalizado. É o que a tela
-    # Internalização → Patrimônio consulta para saber se o equipamento já
-    # virou ativo fixo no EBS: enquanto não aparece, ele fica esperando.
-    #
-    # A busca é pelo SERIAL porque é o que o portal tem na mão — a plaqueta
-    # é atribuída pelo próprio EBS e por isso não serve para procurar.
-    # UPPER nos dois lados: serial digitado por pessoa vem em qualquer caixa,
-    # e o que está gravado no EBS nem sempre segue a mesma.
-    "ativo_por_serial": """
-SELECT fa.asset_number                               AS ativo,
-       fa.serial_number                              AS numero_serie,
-       fa.tag_number                                 AS plaqueta,
-       fa.description                                AS descricao,
-       fa.manufacturer_name                          AS fabricante,
-       fa.model_number                               AS modelo,
-       fc.segment1                                   AS categoria,
-       fb.date_placed_in_service                     AS data_capitalizacao,
-       fb.book_type_code                             AS empresa
-FROM APPS.FA_ADDITIONS_B fa
-LEFT JOIN APPS.FA_BOOKS fb
-       ON fb.asset_id = fa.asset_id
-      AND NVL(fb.date_ineffective, SYSDATE + 1) > SYSDATE
-LEFT JOIN APPS.FA_CATEGORIES_B fc ON fc.category_id = fa.asset_category_id
-WHERE UPPER(fa.serial_number) = UPPER(:numero_serie)
-ORDER BY fb.date_placed_in_service DESC
-""",
-    "po_itens": """
-SELECT ph.segment1                                   AS po_numero,
-       pr.release_num                                AS liberacao,
-       s.vendor_name                                 AS fornecedor,
-       ph.authorization_status                       AS status_po,
-       ph.currency_code                              AS moeda,
-       pl.line_num                                   AS linha,
-       LTRIM(msib.segment1, '0')                     AS item_ebs,
-       NVL(pl.item_description, msib.description)    AS descricao,
-       NVL(pl.unit_meas_lookup_code, msib.primary_uom_code) AS unidade,
-       SUM(NVL(pll.quantity, 0))                     AS quantidade_pedida,
-       SUM(NVL(pll.quantity_received, 0))            AS quantidade_recebida,
-       SUM(NVL(pll.quantity, 0) - NVL(pll.quantity_received, 0)) AS quantidade_pendente,
-       MAX(NVL(pll.price_override, pl.unit_price))   AS preco_unitario
-FROM APPS.PO_HEADERS_ALL ph
-JOIN APPS.PO_LINES_ALL          pl  ON pl.po_header_id = ph.po_header_id
-JOIN APPS.PO_LINE_LOCATIONS_ALL pll ON pll.po_line_id  = pl.po_line_id
-LEFT JOIN APPS.PO_RELEASES_ALL  pr  ON pr.po_release_id = pll.po_release_id
-LEFT JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = ph.vendor_id
-LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib
-       ON msib.inventory_item_id = pl.item_id
-      AND msib.organization_id   = pll.ship_to_organization_id
-WHERE ph.segment1 = :numero_po
-  -- Acordo de compras tem UM número de PO e várias liberações: o que muda de
-  -- um pedido para outro é o número depois do hífen (2570313-25 → liberação
-  -- 25). Sem este filtro a consulta somaria as quantidades de TODAS as
-  -- liberações do acordo, e o agendamento nasceria pedindo o total do ano.
-  -- `:liberacao` nulo traz a PO inteira, que é o caso da compra avulsa.
-  AND (:liberacao IS NULL OR pr.release_num = :liberacao)
-  AND NVL(pl.cancel_flag, 'N') = 'N'
-  AND NVL(pll.cancel_flag, 'N') = 'N'
-GROUP BY ph.segment1, pr.release_num, s.vendor_name, ph.authorization_status,
-         ph.currency_code, pl.line_num, msib.segment1, pl.item_description,
-         msib.description, pl.unit_meas_lookup_code, msib.primary_uom_code
-ORDER BY pl.line_num
-""",
-    "busca_po": """
-SELECT h.segment1 AS po_numero, ppa.segment1 AS projeto_numero, ppa.name AS projeto_nome,
-    s.vendor_name AS fornecedor, h.authorization_status AS status_po, l.line_num AS linha,
-    NVL(l.item_description, msib.description) AS descricao_item,
-    NVL(l.unit_meas_lookup_code, msib.primary_uom_code) AS uom,
-    l.unit_price AS preco_unitario, l.closed_code AS status_linha,
-    ll.shipment_num AS entrega, ll.quantity AS quantidade_pedida,
-    ll.promised_date AS data_prometida, ll.need_by_date AS data_necessidade,
-    ll.closed_code AS status_entrega, pd.distribution_num AS distribuicao,
-    pat.task_number AS tarefa_numero, pat.task_name AS tarefa_nome,
-    pd.expenditure_type AS tipo_despesa, pd.destination_type_code AS destino,
-    COALESCE(pah_ll.note, pah_hdr.note) AS motivo_rejeicao,
-    COALESCE(pah_ll.action_date, pah_hdr.action_date) AS data_rejeicao,
-    COALESCE(fu_ll.user_name, fu_hdr.user_name) AS rejeitado_por
-FROM APPS.PO_HEADERS_ALL h
-JOIN APPS.PO_LINES_ALL l ON l.po_header_id = h.po_header_id
-JOIN APPS.PO_LINE_LOCATIONS_ALL ll ON ll.po_line_id = l.po_line_id
-JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = h.vendor_id
-LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = l.item_id AND msib.organization_id = ll.ship_to_organization_id
-JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.line_location_id = ll.line_location_id
-LEFT JOIN APPS.PA_PROJECTS_ALL ppa ON ppa.project_id = pd.project_id
-LEFT JOIN APPS.PA_TASKS pat ON pat.task_id = pd.task_id
-LEFT JOIN (SELECT pah1.* FROM APPS.PO_ACTION_HISTORY pah1 WHERE pah1.object_type_code='PO' AND pah1.action_code='REJECT'
-  AND pah1.sequence_num=(SELECT MAX(pah2.sequence_num) FROM APPS.PO_ACTION_HISTORY pah2
-  WHERE pah2.object_type_code=pah1.object_type_code AND pah2.object_id=pah1.object_id AND pah2.action_code='REJECT')
-) pah_hdr ON pah_hdr.object_id = h.po_header_id
-LEFT JOIN APPS.FND_USER fu_hdr ON fu_hdr.user_id = pah_hdr.last_updated_by
-LEFT JOIN (SELECT pah1.* FROM APPS.PO_ACTION_HISTORY pah1 WHERE pah1.object_type_code='PO_LINE_LOCATION' AND pah1.action_code='REJECT'
-  AND pah1.sequence_num=(SELECT MAX(pah2.sequence_num) FROM APPS.PO_ACTION_HISTORY pah2
-  WHERE pah2.object_type_code=pah1.object_type_code AND pah2.object_id=pah1.object_id AND pah2.action_code='REJECT')
-) pah_ll ON pah_ll.object_id = ll.line_location_id
-LEFT JOIN APPS.FND_USER fu_ll ON fu_ll.user_id = pah_ll.last_updated_by
-WHERE h.segment1 = :numero_po AND (:p_line_num IS NULL OR l.line_num = :p_line_num)
-ORDER BY l.line_num, ll.shipment_num, pd.distribution_num
-""",
-    "catalogo": """
-SELECT * FROM (
-    SELECT LTRIM(msib.segment1, '0') AS item_ebs, msib.description AS descricao,
-        CASE msib.item_type WHEN 'ATIVO FIXO' THEN 'HARDWARE' WHEN 'SERVICO' THEN 'SERVICOS'
-            WHEN 'SERVICO ATIVO FIXO' THEN 'SERVICOS' WHEN 'USO CONSUMO' THEN 'HARDWARE' ELSE 'OUTROS' END AS tipo_item,
-        s.vendor_name AS fornecedor, pl.unit_price AS valor_unitario, pd.expenditure_type,
-        pat.task_number AS tarefa, ph.creation_date AS po_date,
-        ROW_NUMBER() OVER (PARTITION BY msib.inventory_item_id ORDER BY ph.creation_date DESC) AS rn
-    FROM APPS.PO_HEADERS_ALL ph
-    JOIN APPS.PO_LINES_ALL pl ON pl.po_header_id = ph.po_header_id
-    JOIN APPS.PO_DISTRIBUTIONS_ALL pd ON pd.po_line_id = pl.po_line_id
-    JOIN APPS.AP_SUPPLIERS s ON s.vendor_id = ph.vendor_id
-    LEFT JOIN APPS.PA_TASKS pat ON pat.task_id = pd.task_id
-    LEFT JOIN APPS.MTL_SYSTEM_ITEMS_B msib ON msib.inventory_item_id = pl.item_id AND msib.organization_id = 101
-    WHERE ph.authorization_status IN ('APPROVED','CLOSED')
-      AND pd.expenditure_type IN ('Computadores e Perifericos','Sistemas de Informatica')
-      AND msib.segment1 IS NOT NULL AND ph.creation_date >= ADD_MONTHS(SYSDATE, -36)
-) WHERE rn = 1 ORDER BY descricao
-""",
-}
+# ── As consultas ficam em arquivos, não aqui ───────────────────────
+# Elas moravam num dicionário `QUERIES` neste arquivo. Saíram por dois
+# motivos concretos:
+#
+# 1.  Quem precisa LER o SQL é quem entende de EBS, e essa pessoa não
+#     precisa abrir um módulo Python para achar a consulta no meio de
+#     `_secret_multi`, `call_timeout` e tratamento de exceção.
+# 2.  `routers/ebs_oracle.py` precisa da LISTA de consultas para montar a
+#     tela, e não pode importar este módulo num servidor sem o driver
+#     Oracle (`import oracledb` estoura no topo). A saída era ler o
+#     dicionário do próprio arquivo-fonte com regex e `exec` — ou seja,
+#     executar um pedaço de código deste módulo para não executar o módulo.
+#     Com as consultas em arquivo, o router lê a pasta e pronto.
+#
+# Um arquivo por consulta, em `consultas/ebs/<nome>.sql`. O nome do arquivo
+# é o nome da consulta. Comentário de linha (`--`) fica no arquivo e é o
+# lugar de explicar o porquê de cada recorte.
+PASTA_CONSULTAS = _P(__file__).resolve().parent.parent / "consultas" / "ebs"
 
-# Binds de cada consulta, para a tela montar o formulário e validar antes de
-# ir ao banco. Derivado do SQL: um bind fora daqui é erro de digitação.
-BINDS: dict[str, tuple[str, ...]] = {
-    nome: tuple(dict.fromkeys(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", sql)))
-    for nome, sql in QUERIES.items()
-}
+# Só nome de arquivo simples entra: nada de subpasta nem de `..`. O nome
+# chega por parâmetro em `run_named`, e um dia vai chegar de uma tela.
+_RE_NOME_CONSULTA = re.compile(r"^[a-z][a-z0-9_]{0,60}$")
+
+
+def carregar_consultas(pasta=None) -> dict[str, str]:
+    """Lê `consultas/ebs/*.sql`. O nome do arquivo é o nome da consulta."""
+    pasta = _P(pasta) if pasta else PASTA_CONSULTAS
+    saida: dict[str, str] = {}
+    if not pasta.is_dir():
+        return saida
+    for arq in sorted(pasta.glob("*.sql")):
+        if not _RE_NOME_CONSULTA.match(arq.stem):
+            continue
+        saida[arq.stem] = arq.read_text(encoding="utf-8")
+    return saida
+
+
+def binds_de(sql: str) -> tuple[str, ...]:
+    """Os binds que um SQL usa, na ordem em que aparecem.
+
+    Sai do próprio SQL: um bind que a tela peça e a consulta não use — ou o
+    contrário — seria erro de digitação em dois lugares em vez de um.
+    Comentário é descartado antes, senão um `:coisa` escrito num `--` viraria
+    campo no formulário da tela.
+    """
+    sem_comentario = re.sub(r"--[^\n]*", "", sql)
+    return tuple(dict.fromkeys(
+        re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", sem_comentario)))
+
+
+QUERIES: dict[str, str] = carregar_consultas()
+BINDS: dict[str, tuple[str, ...]] = {n: binds_de(s) for n, s in QUERIES.items()}
 
 
 def run_named(name: str, binds: dict | None = None, max_rows: int = DEFAULT_MAX_ROWS):
