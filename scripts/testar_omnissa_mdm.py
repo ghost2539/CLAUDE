@@ -471,8 +471,12 @@ def main() -> int:
     p.add_argument("--usuario", default="",
                    help="usuário da UEM. A SENHA não é aceita aqui: use "
                         "OMNISSA_UEM_SENHA, o cofre, ou digite quando for pedida.")
-    p.add_argument("--tenant-code", default=os.environ.get("OMNISSA_UEM_TENANT", ""),
-                   help="aw-tenant-code (ou a variável OMNISSA_UEM_TENANT)")
+    # O aw-tenant-code é credencial como a senha: chave compartilhada que dá
+    # acesso à API do tenant inteiro. Por isso NÃO entra por argumento — `ps`
+    # mostra o comando completo para qualquer um logado na máquina. Só ambiente.
+    p.add_argument("--tenant-code", action="store_true",
+                   help="apenas lembra de definir OMNISSA_UEM_TENANT; o valor "
+                        "não é aceito aqui, pela mesma razão da senha")
     p.add_argument("--serie", default="", help="série de um coletor para procurar")
     p.add_argument("--credencial", default="",
                    help="JSON de service account do Intelligence, se você tiver o "
@@ -528,18 +532,19 @@ def main() -> int:
         print("\n  ⚠ Se a senha estiver errada, cada tentativa conta como falha de")
         print("    login no AD. Confira a credencial ANTES de repetir, para não")
         print("    bloquear a conta.")
-        if not a.tenant_code:
-            print("  ⚠ Sem aw-tenant-code. Se vier 401 em tudo, é o primeiro suspeito:")
-            print("    a chave sai no console em Groups & Settings > All Settings >")
-            print("    System > Advanced > API > REST API. Ela é do organization")
-            print("    group, não de uma pessoa: quem tem o papel de admin lê ali.")
+        tenant = os.environ.get("OMNISSA_UEM_TENANT", "")
+        if not tenant:
+            print("  ⚠ Sem aw-tenant-code (defina OMNISSA_UEM_TENANT). Se vier 401")
+            print("    em tudo, é o primeiro suspeito: a chave sai no console em")
+            print("    Groups & Settings > All Settings > System > Advanced > API >")
+            print("    REST API. Ela é do organization group, não de uma pessoa.")
         usuario, senha = credencial_basica(a.usuario)
         if not usuario or not senha:
             raise SystemExit("Sem usuário e senha não dá para testar.")
         print(f"  usuário: {usuario}")
 
         def cabecalho(versao):
-            return cabecalhos_basicos(usuario, senha, a.tenant_code, versao)
+            return cabecalhos_basicos(usuario, senha, tenant, versao)
 
         ok = provas_uem(s, base, cabecalho, a.serie)
         if not ok:

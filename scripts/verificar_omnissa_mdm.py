@@ -182,6 +182,17 @@ checar(opcoes, f"{len(opcoes)} opções de linha de comando encontradas")
 ruins = [o for o in opcoes if any(x in o.lower() for x in ("senha", "password", "--pass"))]
 checar(not ruins, f"nenhuma opção aceita senha {ruins or ''}")
 
+# O aw-tenant-code é chave compartilhada do tenant inteiro: credencial como
+# a senha, e portanto fora do argv pelo mesmo motivo. Contraprova de que a
+# opção existe só como lembrete, sem receber valor.
+com_valor = [n for n in ast.walk(ARVORE) if isinstance(n, ast.Call)
+             and _nome_do_metodo(n) == "add_argument"
+             and any(isinstance(c, ast.Constant) and "tenant" in str(c.value).lower()
+                     for c in n.args)
+             and not any(k.arg == "action" for k in n.keywords)]
+checar(not com_valor, "o aw-tenant-code não é aceito por argumento (só ambiente)")
+checar("OMNISSA_UEM_TENANT" in FONTE, "o aw-tenant-code vem de OMNISSA_UEM_TENANT")
+
 os.environ["OMNISSA_UEM_USUARIO"] = "renner\\teste"
 os.environ["OMNISSA_UEM_SENHA"] = "senha-de-mentira"
 u, sn = sonda.credencial_basica("")
