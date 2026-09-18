@@ -462,6 +462,10 @@ class ConsultaIn(BaseModel):
     # Valor de referência em vez do código interno (state=6 → "Resolvido").
     # É o que serve para ler; quem for cruzar com outro sistema desliga.
     exibir_rotulos: bool = True
+    # Medir quanto tempo cada chamado ficou numa fila. Fora do fluxo normal
+    # porque custa uma leitura do histórico (sys_audit) por bloco de chamados
+    # — quem só quer a lista não paga por isso.
+    tempo_fila: str = ""
 
 
 def _campos_validos(tabela: str) -> dict[str, dict]:
@@ -521,6 +525,49 @@ def _montar_query(corpo: ConsultaIn, validos: dict) -> str:
             raise HTTPException(422, f"O filtro em '{campo}' está sem valor.")
         partes.append(f"{campo}{op['sn']}{valor}")
     return "^".join(partes)
+
+
+# Colunas que o portal CALCULA — não existem no ServiceNow. Ficam no fim da
+# visão, na ordem em que se lê: quanto tempo, em quantas idas, e se deu para
+# medir. A última é obrigatória: sem ela, "0 h" e "não sei" viram a mesma
+# célula na planilha, e a média sai errada sem ninguém perceber.
+COLUNAS_TEMPO = [
+    ("tempo_fila_horas", "Horas na fila"),
+    ("tempo_fila_legivel", "Tempo na fila"),
+    ("tempo_fila_passagens", "Idas à fila"),
+    ("tempo_fila_medido", "Medição"),
+]
+# Para medir é preciso o sys_id (é como o histórico endereça o chamado) e os
+# carimbos de abertura e encerramento (é o que fecha o primeiro e o último
+# intervalo). Entram na consulta mesmo sem estarem entre as colunas
+# escolhidas, e não aparecem na saída por isso.
+CAMPOS_PARA_MEDIR = ["sys_id", "opened_at", "closed_at", "resolved_at"]
+
+
+def _rotulos(campos: list[str], validos: dict) -> dict:
+    """Rótulo de cada coluna, inclusive as que o portal calcula."""
+    calculadas = dict(COLUNAS_TEMPO)
+    return {c: calculadas.get(c) or validos.get(c.split(".")[0], {}).get("rotulo", c)
+            for c in campos}
+
+
+def _linhas_com_tempo(tabela: str, brutas: list[dict], fila: str) -> list[dict]:
+    """Acrescenta as colunas de tempo de fila às linhas já lidas."""
+    from routers.sn_tempo_fila import medir
+    chamados = [{"sys_id": _valor_plano(l.get("sys_id")),
+                 "opened_at": l.get("opened_at"),
+                 "closed_at": l.get("closed_at"),
+                 "resolved_at": l.get("resolved_at")} for l in brutas]
+    por_id = medir(tabela, chamados, fila)
+    for linha in brutas:
+        m = por_id.get(_valor_plano(linha.get("sys_id"))) or {}
+        linha["tempo_fila_horas"] = "" if m.get("horas") is None else m["horas"]
+        linha["tempo_fila_legivel"] = m.get("legivel") or ""
+        linha["tempo_fila_passagens"] = ("" if m.get("passagens") is None
+                                         else m["passagens"])
+        linha["tempo_fila_medido"] = ("medido" if m.get("medido")
+                                      else (m.get("motivo") or "não medido"))
+    return brutas
 
 
 def _numeros_pedidos(texto: str) -> list[str]:
@@ -635,16 +682,24 @@ def buscar(corpo: ConsultaIn, req: Request):
         campo_ordem = _conferir_campo(corpo.ordenar_por, validos, "Campo de ordenação")
         query = (query + "^" if query else "") + ordem + campo_ordem
 
+    fila = (corpo.tempo_fila or "").strip()
+    pedidos = list(dict.fromkeys(escolhidos + CAMPOS_PARA_MEDIR)) if fila else escolhidos
     dados = _get(f"/api/now/table/{corpo.tabela}", {
         "sysparm_query": query,
-        "sysparm_fields": ",".join(escolhidos),
-        "sysparm_display_value": "true" if corpo.exibir_rotulos else "false",
+        "sysparm_fields": ",".join(pedidos),
+        # Os carimbos precisam sair em UTC e formato fixo para a conta de
+        # tempo fechar; por isso a medição desliga os rótulos.
+        "sysparm_display_value": "false" if fila else (
+            "true" if corpo.exibir_rotulos else "false"),
         "sysparm_exclude_reference_link": "true",
         "sysparm_limit": str(por_pagina),
         "sysparm_offset": str((pagina - 1) * por_pagina),
     })
-    linhas = [{c: _valor_plano(l.get(c)) for c in escolhidos}
-              for l in (dados.get("result") or [])]
+    brutas = dados.get("result") or []
+    if fila:
+        brutas = _linhas_com_tempo(corpo.tabela, brutas, fila)
+        escolhidos = escolhidos + [c for c, _ in COLUNAS_TEMPO]
+    linhas = [{c: _valor_plano(l.get(c)) for c in escolhidos} for l in brutas]
 
     # A contagem é do servidor: a pessoa precisa saber que a busca dela pega
     # 12 mil chamados ANTES de mandar exportar.
@@ -652,7 +707,7 @@ def buscar(corpo: ConsultaIn, req: Request):
     return {
         "tabela": corpo.tabela,
         "campos": escolhidos,
-        "rotulos": {c: validos.get(c.split(".")[0], {}).get("rotulo", c) for c in escolhidos},
+        "rotulos": _rotulos(escolhidos, validos),
         "linhas": linhas,
         "pagina": pagina,
         "por_pagina": por_pagina,
@@ -685,20 +740,31 @@ def _buscar_por_lista(corpo: ConsultaIn, base: str, numeros: list[str],
     existe, está em outra tabela (um RITM procurado em `incident`), ou os
     filtros do formulário o excluíram.
     """
-    amostra: list[dict] = []
+    fila = (corpo.tempo_fila or "").strip()
+    amostra_bruta: list[dict] = []
     achados: set[str] = set()
-    campos_pedidos = list(dict.fromkeys(escolhidos + [CAMPO_NUMERO]))
+    campos_pedidos = list(dict.fromkeys(
+        escolhidos + [CAMPO_NUMERO] + (CAMPOS_PARA_MEDIR if fila else [])))
+    rotulos = False if fila else corpo.exibir_rotulos
     for linha in _percorrer(corpo.tabela, base, numeros, campos_pedidos,
-                            corpo.exibir_rotulos, TETO_EXPORTACAO):
+                            rotulos, TETO_EXPORTACAO):
         achados.add(_valor_plano(linha.get(CAMPO_NUMERO)).upper())
-        if len(amostra) < por_pagina:
-            amostra.append({c: _valor_plano(linha.get(c)) for c in escolhidos})
+        if len(amostra_bruta) < por_pagina:
+            amostra_bruta.append(linha)
+    if fila:
+        # Só a amostra é medida: medir 5 mil chamados para mostrar 100 na tela
+        # seriam 20 leituras do histórico para nada. A exportação mede tudo.
+        amostra_bruta = _linhas_com_tempo(corpo.tabela, amostra_bruta, fila)
+        escolhidos = escolhidos + [c for c, _ in COLUNAS_TEMPO]
+    amostra = [{c: _valor_plano(l.get(c)) for c in escolhidos} for l in amostra_bruta]
     faltando = [n for n in numeros if n not in achados]
     return {
         "tabela": corpo.tabela,
         "campos": escolhidos,
-        "rotulos": {c: validos.get(c.split(".")[0], {}).get("rotulo", c) for c in escolhidos},
+        "rotulos": _rotulos(escolhidos, validos),
         "linhas": amostra,
+        "tempo_fila": fila,
+        "tempo_fila_so_amostra": bool(fila) and len(achados) > len(amostra),
         "pagina": 1,
         "por_pagina": por_pagina,
         "total": len(achados),
@@ -771,6 +837,9 @@ def exportar(corpo: ConsultaIn, req: Request):
     escolhidos = [_conferir_campo(c, validos, "Campo") for c in escolhidos]
     base = _montar_query(corpo, validos)
     numeros = _numeros_pedidos(corpo.numeros)
+    fila = (corpo.tempo_fila or "").strip()
+    # As colunas do arquivo: as escolhidas, mais as calculadas quando se mede.
+    colunas = escolhidos + ([c for c, _ in COLUNAS_TEMPO] if fila else [])
 
     def linhas():
         buf = io.StringIO()
@@ -778,9 +847,9 @@ def exportar(corpo: ConsultaIn, req: Request):
         # separadas sem ninguém passar pelo assistente de importação.
         escritor = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
         buf.write("﻿")
-        escritor.writerow([validos.get(c.split(".")[0], {}).get("rotulo", c)
-                           for c in escolhidos])
-        escritor.writerow(escolhidos)
+        rot = _rotulos(colunas, validos)
+        escritor.writerow([rot[c] for c in colunas])
+        escritor.writerow(colunas)
         yield buf.getvalue()
         buf.seek(0), buf.truncate(0)
 
@@ -788,12 +857,33 @@ def exportar(corpo: ConsultaIn, req: Request):
         achados: set[str] = set()
         # Com lista, o número entra nos campos pedidos mesmo que não esteja
         # entre as colunas escolhidas: é por ele que se sabe quem faltou.
-        pedidos = list(dict.fromkeys(escolhidos + [CAMPO_NUMERO])) if numeros else escolhidos
-        for registro in _percorrer(corpo.tabela, base, numeros, pedidos,
-                                   corpo.exibir_rotulos, TETO_EXPORTACAO):
+        pedidos = list(dict.fromkeys(
+            escolhidos
+            + ([CAMPO_NUMERO] if numeros else [])
+            + (CAMPOS_PARA_MEDIR if fila else [])))
+        rotulos = False if fila else corpo.exibir_rotulos
+
+        # A medição vai em lotes: uma leitura do histórico por lote, em vez de
+        # uma por chamado. O lote é do mesmo tamanho do bloco da lista, pelo
+        # mesmo motivo — a consulta ao histórico também viaja na URL.
+        def medidos():
+            lote: list[dict] = []
+            for reg in _percorrer(corpo.tabela, base, numeros, pedidos,
+                                  rotulos, TETO_EXPORTACAO):
+                if not fila:
+                    yield reg
+                    continue
+                lote.append(reg)
+                if len(lote) >= LOTE_NUMEROS:
+                    yield from _linhas_com_tempo(corpo.tabela, lote, fila)
+                    lote = []
+            if lote:
+                yield from _linhas_com_tempo(corpo.tabela, lote, fila)
+
+        for registro in medidos():
             if numeros:
                 achados.add(_valor_plano(registro.get(CAMPO_NUMERO)).upper())
-            escritor.writerow([_valor_plano(registro.get(c)) for c in escolhidos])
+            escritor.writerow([_valor_plano(registro.get(c)) for c in colunas])
             contados += 1
             if buf.tell() > 64 * 1024:
                 yield buf.getvalue()

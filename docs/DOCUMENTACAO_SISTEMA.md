@@ -285,6 +285,23 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   sendo abertos enquanto a exportação roda; com `sysparm_offset` uma linha
   muda de página e sai duplicada ou some. A verificação tem contraprova
   disso (`scripts/verificar_sn_consulta.py`).
+- **Tempo na fila** (opcional): quanto cada chamado ficou numa fila cujo nome
+  contém o texto informado. A conta sai do **histórico de troca de
+  `assignment_group`** (`sys_audit`), não de um campo de data — um campo só
+  responde "entrou quando?", e erra o caso que mais acontece: o chamado que
+  vai, volta e é atendido de novo. Todas as passagens são somadas, e a tela
+  diz quantas foram.
+  - O último intervalo fecha em `closed_at`/`resolved_at` quando o chamado
+    está encerrado. Fechando em *agora*, um chamado encerrado há dois anos
+    com a última fila em SPARE mostraria dois anos de fila.
+  - **Zero e "não medido" são colunas diferentes.** Chamado sem histórico
+    guardado não tem zero hora: tem medição ausente. A média do portal só
+    conta quem realmente passou pela fila.
+  - `GET /api/sn-consulta/tempo-fila/fontes` diz se esta instalação tem a
+    auditoria de `assignment_group` e se a conta de serviço a lê. Sem ela o
+    portal responde *não medido*, nunca zero.
+  - Isto substitui, para esta pergunta, o `SN_TMA_START_FIELD`
+    (`u_data_bouncing`) usado nos Indicadores, que é campo único.
 - **A lista de chamados vai em blocos de 250.** A *encoded query* viaja na
   URL (`sysparm_query=numberIN INC1,INC2,…`), e 5 mil números dão uns 60 KB —
   nenhum servidor aceita, e o que volta é 414 ou um 400 sem explicação. A

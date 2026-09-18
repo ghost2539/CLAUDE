@@ -458,6 +458,25 @@ async function renderConsulta(c, S) {
             '</div></div>' +
         '<div class="card mb-3"><div class="card-header" ' +
             'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<span>Tempo na fila (opcional)</span>' +
+            '<button id="cn-tf-fontes" class="btn btn-sm btn-secondary" type="button">' +
+                'Conferir se dá para medir</button>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted" style="margin-top:0">Mede quanto tempo cada chamado ' +
+                    'ficou numa fila cujo nome CONTÉM o texto abaixo — somando todas as ' +
+                    'passagens, se o chamado foi e voltou. A conta sai do histórico de troca ' +
+                    'de fila do ServiceNow, então custa uma leitura a mais: deixe vazio para ' +
+                    'não medir.</p>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label for="cn-tempo-fila">Fila a medir</label>' +
+                        '<input id="cn-tempo-fila" class="form-control" placeholder="SPARE" ' +
+                        'style="max-width:260px"></div>' +
+                '</div>' +
+                '<div id="cn-tf-saida" class="mt-2"></div>' +
+            '</div></div>' +
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
             '<span>Filtros</span>' +
             '<button id="cn-filtro-add" class="btn btn-sm btn-primary" type="button">Novo filtro</button>' +
             '</div>' +
@@ -637,6 +656,7 @@ async function renderConsulta(c, S) {
             campos: escolhidos.slice(),
             filtros: lerFiltros(),
             numeros: document.getElementById('cn-numeros').value,
+            tempo_fila: document.getElementById('cn-tempo-fila').value.trim(),
             ordenar_por: document.getElementById('cn-ordem-campo').value,
             ordem: document.getElementById('cn-ordem-dir').value,
             exibir_rotulos: true
@@ -788,6 +808,15 @@ async function renderConsulta(c, S) {
             saida.appendChild(av);
         }
 
+        /* Medir 5 mil chamados para mostrar 100 na tela seriam 20 leituras do
+           histórico jogadas fora. A tela mede a amostra; o CSV mede tudo — e
+           isso precisa estar dito, senão a média da tela parece a do total. */
+        if (d.tempo_fila_so_amostra) {
+            saida.appendChild(S.el('div', { className: 'alert alert-info mb-3',
+                textContent: 'O tempo de fila na tela foi medido só nas ' +
+                    d.linhas.length + ' linhas mostradas. A exportação mede todas.' }));
+        }
+
         if (d.total > d.teto_exportacao) {
             saida.appendChild(S.el('div', { className: 'alert alert-warning',
                 textContent: 'A busca pegou ' + d.total.toLocaleString('pt-BR') +
@@ -871,6 +900,41 @@ async function renderConsulta(c, S) {
     document.getElementById('cn-filtro-add').onclick = function () {
         document.getElementById('cn-filtros').appendChild(linhaFiltro());
     };
+    /* A conferência da fonte antes de confiar no número. Sem auditoria de
+       assignment_group, "0 h de fila" pode ser "nunca passou" ou "o histórico
+       não está guardado" — e as duas leituras levam a decisões opostas. */
+    document.getElementById('cn-tf-fontes').onclick = async function () {
+        var alvo = document.getElementById('cn-tf-saida');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> ' +
+            'Perguntando ao ServiceNow…</div>';
+        try {
+            var d = await S.api('/sn-consulta/tempo-fila/fontes?tabela=' +
+                encodeURIComponent(document.getElementById('cn-tabela').value));
+            alvo.innerHTML = '';
+            alvo.appendChild(S.el('div', {
+                className: 'alert alert-' + (d.pode_medir ? 'success' : 'warning'),
+                textContent: d.recado
+            }));
+            alvo.appendChild(S.table([
+                { key: 'rotulo', label: 'Fonte' },
+                { key: 'fonte', label: 'Tabela' },
+                { key: 'acessivel', label: 'A conta lê', html: true,
+                  render: function (v) {
+                      return '<span class="badge badge-' + (v ? 'success' : 'danger') +
+                          '">' + (v ? 'sim' : 'não') + '</span>';
+                  } },
+                { key: 'tem_dado', label: 'Tem registro', html: true,
+                  render: function (v) {
+                      return '<span class="badge badge-' + (v ? 'success' : 'warning') +
+                          '">' + (v ? 'sim' : 'não') + '</span>';
+                  } },
+                { key: 'explica', label: 'Para quê' }
+            ], d.fontes || []));
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    };
+
     document.getElementById('cn-numeros').addEventListener('input', contarNumeros);
     document.getElementById('cn-num-limpar').onclick = function () {
         document.getElementById('cn-numeros').value = '';
