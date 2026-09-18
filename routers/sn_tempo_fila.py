@@ -148,11 +148,17 @@ def _audit_por_chamado(sys_ids: list[str], tabela: str) -> dict[str, list[dict]]
     # O que a query gasta ANTES dos ids. Sem descontar isto o bloco estoura a
     # URL: foi daqui que veio um 414 na exportação — 250 `sys_id` de 32
     # caracteres dão 8,3 KB, contra 2,7 KB dos mesmos 250 números de chamado.
-    fixo = len(f"tablename={tabela}^fieldname={CAMPO_FILA}"
+    # `sys_audit.tablename` guarda a tabela REAL do registro: `incident`,
+    # `sc_req_item`. Filtrar por `task` — a tabela-mãe — não casa com nenhuma
+    # linha, e o resultado não seria erro: seria zero para todo mundo. Quando
+    # os chamados vêm misturados (de `task` ou de `task_sla`), o filtro por
+    # tabela sai e sobra o `documentkey`, que já é um sys_id único.
+    filtro_tabela = f"tablename={tabela}^" if tabela and tabela != "task" else ""
+    fixo = len(f"{filtro_tabela}fieldname={CAMPO_FILA}"
                "^documentkeyIN^ORDERBYsys_created_on") + 40
     for bloco in _blocos(sys_ids, LOTE_NUMEROS, reservado=fixo):
         dados = _get("/api/now/table/sys_audit", {
-            "sysparm_query": (f"tablename={tabela}^fieldname={CAMPO_FILA}"
+            "sysparm_query": (f"{filtro_tabela}fieldname={CAMPO_FILA}"
                               "^documentkeyIN" + ",".join(bloco)
                               + "^ORDERBYsys_created_on"),
             "sysparm_fields": "documentkey,oldvalue,newvalue,sys_created_on",
