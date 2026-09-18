@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
-"""Verificação da credencial dos Correios: sai do cofre, não do código.
+"""Verificação da credencial dos Correios: vem do AMBIENTE do serviço.
 
     python3 scripts/verificar_correios_credencial.py
 
-Roda contra um cofre temporário, sem tocar em nada do servidor e sem rede.
-O que está em jogo: a credencial dos Correios era a única integração que
-ainda lia `os.environ` direto e estourava `KeyError` quando faltava. Aqui
-ela passa pelo caminho único do projeto (`core.cofre`): cofre corporativo,
-cofre local cifrado e, por último, variável de ambiente.
+Roda isolado, sem tocar em nada do servidor e sem rede.
+
+A REGRA
+As credenciais dos Correios (e as do Oracle EBS) são injetadas no ambiente
+do processo pelo próprio serviço, antes do portal subir:
+
+    ExecStartPre=... grep -E '^(CORREIOS_|EBS_|ORACLE_EBS_)' \
+        /etc/vcreports/.secrets.env > /run/portal-spare.env
+
+Então o portal lê `os.environ` e ponto. `integracoes/ebs_oracle.py` faz igual.
+
+POR QUE ISTO É CONFERIDO
+Uma tentativa de "padronizar" pôs `core.cofre.obter` na frente dessa leitura.
+Além de indireção desnecessária, `obter` chama `_fernet()`, que CRIA o
+diretório do cofre e grava um arquivo de chave quando não existe — I/O em
+disco a cada leitura de uma variável que já está na memória do processo.
+Esta verificação trava a decisão: a credencial sai do ambiente, e o cofre
+não entra nesse caminho.
 """
 from __future__ import annotations
 
@@ -22,11 +35,9 @@ sys.path.insert(0, str(RAIZ))
 _TMP = Path(tempfile.mkdtemp())
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TMP/'portal.db'}")
 os.environ.setdefault("PORTAL_SESSION_SECRET", "verificacao-local-sem-valor")
-os.environ["PORTAL_COFRE_DIR"] = str(_TMP)
 
 from fastapi import HTTPException  # noqa: E402
 
-from core import cofre  # noqa: E402
 import routers.correios as correios  # noqa: E402
 
 falhas: list[str] = []
@@ -59,15 +70,8 @@ def _creds():
         return ("", "", [], "", "")
 
 
-def _limpar_cofre() -> None:
-    for nome in ("CORREIOS_USUARIO", "CORREIOS_CHAVE", "CORREIOS_CARTOES",
-                 "CORREIOS_DR", "CORREIOS_CONTRATO"):
-        cofre.remover(nome)
-
-
-print("[1] Sem credencial em lugar nenhum: recusa explicada, não KeyError")
+print("[1] Sem credencial no ambiente: recusa explicada, não KeyError")
 _limpar_ambiente()
-_limpar_cofre()
 try:
     correios._check_credenciais()
     checar(False, "deveria recusar quando não há credencial")
@@ -77,51 +81,66 @@ except KeyError:
     checar(False, "(mensagem não avaliada)")
 except HTTPException as e:
     checar(e.status_code == 500, f"responde 500, não uma exceção crua ({e.status_code})")
-    checar("cofre" in e.detail.lower(),
-           f"a mensagem manda o operador para o cofre ({e.detail[:48]}…)")
+    checar("ambiente do serviço" in e.detail,
+           f"a mensagem manda olhar o ambiente do serviço ({e.detail[:46]}…)")
 
-print("\n[2] Credencial só no cofre, sem variável de ambiente nenhuma")
-cofre.definir("CORREIOS_USUARIO", "usuario-de-teste")
-cofre.definir("CORREIOS_CHAVE", "chave-de-teste")
-cofre.definir("CORREIOS_CARTOES", " 111 , 222 ,")
+print("\n[2] Credencial lida do ambiente do processo")
+os.environ["CORREIOS_USUARIO"] = "usuario-de-teste"
+os.environ["CORREIOS_CHAVE"] = "chave-de-teste"
+os.environ["CORREIOS_CARTOES"] = " 111 , 222 ,"
 usuario, chave, cartoes, dr, contrato = _creds()
-checar(usuario == "usuario-de-teste", f"usuário vem do cofre ({usuario!r})")
-checar(chave == "chave-de-teste", "chave vem do cofre")
+checar(usuario == "usuario-de-teste", f"usuário vem do ambiente ({usuario!r})")
+checar(chave == "chave-de-teste", "chave vem do ambiente")
 checar(cartoes == ["111", "222"],
        f"cartões sem espaço em volta e sem entrada vazia ({cartoes})")
 checar(dr == "64", f"DR mantém o padrão quando não é informado ({dr!r})")
 checar(contrato == "", "contrato vazio quando não é informado")
 try:
     correios._check_credenciais()
-    checar(True, "com credencial no cofre, não recusa")
+    checar(True, "com credencial no ambiente, não recusa")
 except HTTPException:
-    checar(False, "com credencial no cofre, não deveria recusar")
+    checar(False, "com credencial no ambiente, não deveria recusar")
 
-print("\n[3] Trocar no cofre vale na chamada seguinte, sem reiniciar o serviço")
-cofre.definir("CORREIOS_CHAVE", "chave-nova")
-checar(_creds()[1] == "chave-nova",
-       "nada fica guardado em variável de módulo")
+print("\n[3] Lê no momento do uso, sem guardar em variável de módulo")
+os.environ["CORREIOS_CHAVE"] = "chave-nova"
+checar(_creds()[1] == "chave-nova", "trocar a variável vale na chamada seguinte")
 
-print("\n[4] Servidor em transição: sem cofre, o ambiente ainda vale")
-_limpar_cofre()
-os.environ["CORREIOS_USUARIO"] = "do-ambiente"
-os.environ["CORREIOS_CHAVE"] = "chave-ambiente"
-os.environ["CORREIOS_CARTOES"] = "999"
-usuario, chave, cartoes, *_ = _creds()
-checar(usuario == "do-ambiente", f"usuário lido do ambiente ({usuario!r})")
-checar(cartoes == ["999"], f"cartões lidos do ambiente ({cartoes})")
+print("\n[4] O cofre NÃO entra neste caminho")
+# `core.cofre.obter` cria diretório e grava arquivo de chave quando precisa
+# montar o Fernet. Isso não pode acontecer ao ler uma variável de ambiente.
+import core.cofre as _cofre  # noqa: E402
 
-print("\n[5] O cofre tem prioridade sobre o ambiente")
-cofre.definir("CORREIOS_USUARIO", "do-cofre")
-checar(_creds()[0] == "do-cofre",
-       "com os dois preenchidos, vence o cofre")
+_chamou = {"obter": 0}
+_obter_real = _cofre.obter
 
-print("\n[6] Nenhuma credencial escrita no código")
+
+def _espiao(nome, default=""):
+    _chamou["obter"] += 1
+    return _obter_real(nome, default)
+
+
+_cofre.obter = _espiao
+try:
+    _creds()
+finally:
+    _cofre.obter = _obter_real
+checar(_chamou["obter"] == 0,
+       f"ler a credencial não chama o cofre ({_chamou['obter']} chamada(s))")
+
 fonte = (RAIZ / "routers" / "correios.py").read_text(encoding="utf-8")
-checar("os.environ['CORREIOS_" not in fonte and 'os.environ["CORREIOS_' not in fonte,
-       "o router não lê CORREIOS_* direto de os.environ")
-checar("from core.cofre import obter" in fonte,
-       "o router passa pelo caminho único do projeto (core.cofre)")
+import ast as _ast  # noqa: E402
+
+_chamadas_cofre = []
+for _no in _ast.walk(_ast.parse(fonte)):
+    if isinstance(_no, _ast.ImportFrom) and (_no.module or "").startswith("core.cofre"):
+        _chamadas_cofre.append(f"linha {_no.lineno}")
+checar(not _chamadas_cofre,
+       f"o router não importa core.cofre ({_chamadas_cofre or 'nenhum'})")
+
+print("\n[5] O EBS Oracle segue a mesma regra")
+ebs = (RAIZ / "integracoes" / "ebs_oracle.py").read_text(encoding="utf-8")
+checar("os.environ.get(nome)" in ebs,
+       "integracoes/ebs_oracle.py também lê o ambiente primeiro")
 
 print(f"\n{total - len(falhas)} de {total} verificações passaram.")
 if falhas:
@@ -129,4 +148,4 @@ if falhas:
     for f in falhas:
         print(f"  - {f}")
     sys.exit(1)
-print("Credencial dos Correios íntegra.")
+print("Credencial dos Correios íntegra: sai do ambiente do serviço.")

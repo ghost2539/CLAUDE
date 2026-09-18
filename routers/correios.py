@@ -74,20 +74,27 @@ def evento_de_entrega(ev: dict) -> bool:
 
 
 def _secret(nome: str, default: str = "") -> str:
-    """Segredo pelo caminho único do projeto (`core.cofre`): cofre corporativo,
-    cofre local cifrado e, por último, variável de ambiente.
+    """Credencial dos Correios: DIRETO do ambiente do processo.
 
-    Ler direto de `os.environ` aqui deixava a credencial dos Correios de fora
-    do cofre — era a única integração que ainda fazia isso."""
-    from core.cofre import obter
-    return obter(nome, default)
+    Não passa pelo cofre, e isso é decisão de quem mantém o servidor, não
+    descuido. O serviço injeta as chaves no ambiente antes de subir o portal:
+
+        ExecStartPre=... grep -E '^(CORREIOS_|EBS_|ORACLE_EBS_)' \
+            /etc/vcreports/.secrets.env > /run/portal-spare.env
+
+    `integracoes/ebs_oracle.py` lê do mesmo jeito, pelo mesmo motivo. Pôr o
+    cofre na frente aqui não só era indireção à toa: `core.cofre.obter`
+    chama `_fernet()`, que CRIA o diretório do cofre e grava um arquivo de
+    chave quando não existe — I/O em disco a cada leitura de credencial, num
+    caminho que só precisava ler uma variável já carregada na memória."""
+    return os.environ.get(nome, default)
 
 
 def _correios_creds():
     """(usuario, chave, cartoes, dr, contrato) lidos no momento do uso.
 
-    Nada fica em variável de módulo: trocar a credencial no cofre vale na
-    chamada seguinte, sem reiniciar o serviço."""
+    Nada fica em variável de módulo: trocar a variável e reiniciar o serviço
+    basta, sem mexer em código."""
     usuario = _secret("CORREIOS_USUARIO")
     chave = _secret("CORREIOS_CHAVE")
     cartoes = [c.strip() for c in _secret("CORREIOS_CARTOES", "").split(",") if c.strip()]
@@ -129,9 +136,10 @@ def _correios_request(method: str, url: str, **kwargs):
 
 
 _MSG_CREDS = (
-    "Credenciais dos Correios ausentes. Elas saem do cofre "
-    "(CORREIOS_USUARIO, CORREIOS_CHAVE, CORREIOS_CARTOES) e, na falta dele, "
-    "do environment com que o portal-spare sobe."
+    "Credenciais dos Correios ausentes no ambiente do serviço "
+    "(CORREIOS_USUARIO, CORREIOS_CHAVE, CORREIOS_CARTOES). Elas são injetadas "
+    "a partir de /etc/vcreports/.secrets.env quando o serviço sobe — confira o "
+    "arquivo e reinicie o portal-spare."
 )
 
 
