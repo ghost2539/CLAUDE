@@ -238,90 +238,52 @@ checar("query usada" in fonte,
 checar("le a tabela task_sla" in fonte,
        "apontando a permissão como uma das causas")
 
-print("\n[12] O botão exporta só a LISTA, e não é streaming")
-# Com StreamingResponse o HTTP 200 e os cabeçalhos saem antes da primeira
-# linha: um erro depois disso não vira mensagem na tela, vira download
-# truncado. Foi assim que a exportação chegou vazia SEM informação de erro.
-from core import security  # noqa: E402
-from fastapi import HTTPException  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-import main  # noqa: E402
-import routers.sn_consulta as _sc  # noqa: E402
+print("\n[12] A consulta é rápida: sys_id indexado e data literal")
+# O período inteiro numa requisição só tomava 504 do proxy. Duas causas de
+# lentidão, as duas removidas:
+#   - `task.assignment_group.nameLIKE` obriga a juntar task_sla → task →
+#     sys_user_group e varrer por SUBSTRING, linha a linha;
+#   - `javascript:gs.dateGenerate(...)` é avaliado pelo servidor do SN.
+q_id = regra.query_task_sla("2025-01-01", "2025-01-31", {"9" * 32: FILA})
+checar(f"task.{regra.CAMPO_FILA}IN" in q_id,
+       "com o sys_id resolvido, filtra por igualdade em campo indexado")
+checar("nameLIKE" not in q_id, "sem LIKE por substring")
+checar("javascript:" not in q_id,
+       "e sem javascript: na query — era avaliado pelo servidor a cada linha")
+checar("opened_at>=2025-01-01 00:00:00" in q_id, "datas literais")
 
-_sc._cfg.SN_API_USER, _sc._cfg.SN_API_PASS = "zabbix", "senha-que-nao-pode-sair"
-cliente = TestClient(main.app)
-with cliente:
-    _, ck = security.create_session(
-        {"username": "verificador", "is_admin": True, "permission_map": {}})
-    cliente.cookies.set("spare_session", ck)
+q_nome = regra.query_task_sla("2025-01-01", "2025-01-31", {})
+checar("nameLIKE" in q_nome and q_nome.count("^OR") == 3,
+       "sem os sys_id, cai para a busca por nome — mais lenta, mas funciona")
+checar(q_nome.index("opened_at>=") > q_nome.rindex("^OR"),
+       "e o período continua DEPOIS do último ^OR")
 
-    linhas_sla = [{"task": {"value": f"{i:032x}"}, "task.number": f"INC{i:07d}",
-                   "task.opened_at": "2025-02-01 08:00:00",
-                   "task.caller_id": "Fulano", "task.category": "Hardware",
-                   "task.subcategory": "Loja",
-                   "task.assignment_group.name": FILA, "task.state": "7"}
-                  for i in range(1, 4)]
-    regra._get = lambda c, p, timeout=60: {
-        "result": linhas_sla if p.get("sysparm_offset", "0") == "0" else []}
-    r = cliente.post("/api/sn-consulta/campo-lojas/chamados",
-                     json={"desde": "2025-01-01", "ate": "2025-03-31"})
-    checar(r.status_code == 200, f"HTTP 200 ({r.status_code})")
-    checar(r.headers.get("X-Chamados") == "3",
-           "o cabeçalho diz quantos vieram — a tela avisa sem abrir o arquivo")
-    corpo = r.text.lstrip("\ufeff")
-    checar("Horas na fila" not in corpo,
-           "a lista NÃO traz tempo de fila: ele sai depois, pela aba Consulta")
-    checar(corpo.splitlines()[0].startswith("Mês;Chamado;Aberto em;Solicitante;"
-                                            "Categoria;Subcategoria"),
-           "com as colunas pedidas")
-    checar("RESUMO POR MES E FILA" in corpo, "e a contagem por mês e fila")
-    checar("cole a coluna Chamado" in corpo,
-           "e diz como obter o tempo em fila na segunda passada")
-    # Só uma consulta: sem histórico, sem sys_user_group. É o que a torna rápida.
-    chamadas = []
-    regra._get = lambda c, p, timeout=60: (
-        chamadas.append(c) or {"result": linhas_sla if p.get("sysparm_offset", "0") == "0" else []})
-    cliente.post("/api/sn-consulta/campo-lojas/chamados",
-                 json={"desde": "2025-01-01", "ate": "2025-03-31"})
-    checar(all("task_sla" in c for c in chamadas),
-           f"só a task_sla é consultada ({len(chamadas)} chamada(s))")
-    checar(not any("sys_audit" in c for c in chamadas),
-           "sem tocar no histórico — é o que fazia a passada longa")
-
-    print("\n[13] Falha vira MENSAGEM, não arquivo vazio")
-    def _nega(c, p, timeout=60):
-        raise HTTPException(502, "A conta de serviço não tem acesso a esta tabela (403).")
-
-    regra._get = _nega
-    r2 = cliente.post("/api/sn-consulta/campo-lojas/chamados",
-                      json={"desde": "2025-01-01", "ate": "2025-03-31"})
-    checar(r2.status_code == 502,
-           f"erro no ServiceNow vira erro HTTP ({r2.status_code}), não 200 com nada")
-    checar("403" in r2.json().get("detail", ""),
-           "com o motivo, que a tela mostra em toast")
-    fonte_r = (RAIZ / "routers" / "sn_campo_lojas.py").read_text(encoding="utf-8")
-    trecho = fonte_r[fonte_r.index("def exportar_chamados"):
-                     fonte_r.index('@router.post("/exportar")')]
-    # A CHAMADA, não a palavra: o comentário da própria função explica por que
-    # o streaming saiu, e procurar o nome solto acusava o texto que explica.
-    checar("StreamingResponse(" not in trecho and "return Response(" in trecho,
-           "a rota da lista devolve resposta pronta, sem streaming — é o "
-           "streaming que engolia o erro")
-
-    print("\n[14] Zero chamados: 200 com diagnóstico, e a tela avisa")
-    regra._get = lambda c, p, timeout=60: {"result": []}
-    r3 = cliente.post("/api/sn-consulta/campo-lojas/chamados",
-                      json={"desde": "2025-01-01", "ate": "2025-03-31"})
-    checar(r3.status_code == 200 and r3.headers.get("X-Chamados") == "0",
-           "vazio é 200 com a contagem zerada no cabeçalho")
-    checar("NENHUM CHAMADO MONTADO" in r3.text and "query usada" in r3.text,
-           "e o arquivo traz o diagnóstico, não silêncio")
-
+print("\n[13] A coleta vai mês a mês, e um mês que falha não derruba o resto")
 js = (RAIZ / "modulos" / "servicenow_automacoes.js").read_text(encoding="utf-8")
-checar("campo-lojas/chamados" in js, "o botão chama a rota da lista")
-checar("X-Chamados" in js, "e lê a contagem do cabeçalho")
-checar("Nenhum chamado montado" in js,
-       "avisando quando vier zero — antes o arquivo vazio passava despercebido")
+checar("d2Meses" in js and "campo-lojas/chamados" in js,
+       "a tela fatia o período em meses e pede um de cada vez")
+checar("'Mês ' + (i + 1) + '/' + fatias.length" in js,
+       "mostrando o progresso — o 504 acontecia em silêncio")
+checar("falhou.push" in js and "NÃO estão no arquivo" in js,
+       "um mês que falha é anotado e nomeado, e a coleta segue")
+checar("d2Csv" in js and "RESUMO POR MES E FILA" in js,
+       "o CSV é montado no navegador, com a contagem por mês e fila")
+checar("document.body.appendChild(a)" in js,
+       "a âncora entra no documento antes do clique — o Firefox ignora âncora solta")
+checar("d2Diz" in js and "alert-danger" in js,
+       "o erro vai para a TELA, não só para um toast que some em 4,5 s")
+
+print("\n[14] A sonda rápida, para conferir antes de coletar")
+# Descobrir que a conta não lê a task_sla custava uma coleta longa que
+# terminava em 504 sem dizer nada.
+fonte_r = (RAIZ / "routers" / "sn_campo_lojas.py").read_text(encoding="utf-8")
+checar('@router.post("/contagem")' in fonte_r, "existe a rota de contagem")
+checar("api/now/stats/task_sla" in fonte_r,
+       "que conta no servidor, sem baixar chamado nenhum")
+checar("cn-d2-testar" in js and "campo-lojas/contagem" in js,
+       "e o botão Testar consulta na tela")
+checar("filas_resolvidas" in js and "mais lenta" in js,
+       "dizendo se os grupos foram resolvidos — é o que separa rápido de lento")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:

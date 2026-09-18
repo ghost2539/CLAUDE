@@ -154,19 +154,60 @@ def qual_fila(nome: str) -> str:
     return ""
 
 
-def query_task_sla(desde: str, ate: str) -> str:
-    """A consulta da fase 1.
+_cache_ids_filas: dict[str, str] = {}
+
+
+def ids_das_filas() -> dict[str, str]:
+    """sys_id → nome das quatro filas. Uma consulta pequena, guardada.
+
+    Existe por causa de VELOCIDADE, e velocidade aqui é a diferença entre
+    responder e tomar 504 do proxy. Filtrar `task.assignment_group.nameLIKE`
+    obriga o ServiceNow a juntar `task_sla` → `task` → `sys_user_group` e
+    varrer por SUBSTRING, para cada linha, em 18 meses de dados. Filtrando
+    pelo sys_id do grupo, vira igualdade num campo indexado.
+    """
+    if _cache_ids_filas:
+        return _cache_ids_filas
+    ors = "^OR".join(f"nameLIKE{f}" for f in FILAS)
+    dados = _get("/api/now/table/sys_user_group", {
+        "sysparm_query": ors, "sysparm_fields": "sys_id,name",
+        "sysparm_display_value": "false",
+        "sysparm_exclude_reference_link": "true", "sysparm_limit": "200",
+    }, timeout=60)
+    for l in dados.get("result") or []:
+        nome = _valor_plano(l.get("name"))
+        if qual_fila(nome):
+            _cache_ids_filas[_valor_plano(l.get("sys_id"))] = nome
+    return _cache_ids_filas
+
+
+def query_task_sla(desde: str, ate: str, ids: dict[str, str] | None = None) -> str:
+    """A consulta da fase 1, pelo caminho mais barato que existir.
+
+    Duas coisas mudaram aqui depois de a consulta tomar 504:
+
+    1.  **Pelo sys_id do grupo**, quando dá para resolvê-lo. Igualdade em
+        campo indexado, em vez de `LIKE` por substring num nome que está a
+        duas referências de distância.
+    2.  **Datas literais** em vez de `javascript:gs.dateGenerate(...)`. O
+        `javascript:` é avaliado pelo servidor do ServiceNow, e numa
+        consulta grande isso pesa sem precisar.
+
+    O caminho por nome fica como reserva: se a conta não lê
+    `sys_user_group`, ou se nenhum dos quatro grupos existe com esse nome, a
+    consulta ainda funciona — só mais devagar.
 
     `^OR` agrupa com a condição ANTERIOR; um `^` seguinte começa novo grupo
-    em E. Por isso as quatro filas vêm primeiro e as datas depois:
-    (fila1 OU fila2 OU fila3 OU fila4) E (aberto no período). Invertido, o
-    período valeria só para a última fila, e viriam anos de chamados das
-    outras três — sem erro nenhum.
+    em E. Por isso as filas vêm primeiro e as datas depois: invertido, o
+    período valeria só para a última fila.
     """
-    ors = "^OR".join(f"task.{CAMPO_FILA}.nameLIKE{f}" for f in FILAS)
-    return (f"{ors}"
-            f"^task.opened_at>=javascript:gs.dateGenerate('{desde}','00:00:00')"
-            f"^task.opened_at<=javascript:gs.dateGenerate('{ate}','23:59:59')")
+    if ids:
+        alvo = f"task.{CAMPO_FILA}IN" + ",".join(sorted(ids))
+    else:
+        alvo = "^OR".join(f"task.{CAMPO_FILA}.nameLIKE{f}" for f in FILAS)
+    return (f"{alvo}"
+            f"^task.opened_at>={desde} 00:00:00"
+            f"^task.opened_at<={ate} 23:59:59")
 
 
 def montar_chamados(linhas_sla: list[dict]) -> list[dict]:
@@ -342,86 +383,93 @@ COLUNAS_LISTA = [
 
 
 @router.post("/chamados")
-def exportar_chamados(corpo: PeriodoIn, req: Request):
-    """A lista dos chamados das quatro filas, e só ela.
+def chamados_do_periodo(corpo: PeriodoIn, req: Request):
+    """Os chamados de UMA FATIA do período, em JSON.
 
-    NÃO é streaming, de propósito. Com `StreamingResponse` o HTTP 200 e os
-    cabeçalhos saem antes da primeira linha: um erro depois disso não vira
-    mensagem na tela, vira download truncado — e foi assim que a exportação
-    chegou vazia SEM nenhuma informação de erro. Aqui o arquivo é montado
-    inteiro e só então devolvido; qualquer falha vira erro HTTP de verdade,
-    que a tela mostra.
+    Devolve JSON e não CSV, e uma fatia e não o período inteiro, porque o
+    período inteiro tomava **504 do proxy**: a consulta demorava mais que o
+    tempo que o proxy espera, a conexão era cortada, e o que chegava ao
+    navegador era um download vazio — sem erro, porque o erro vinha do proxy
+    e não do portal.
 
-    O tempo de fila NÃO sai daqui. Sai depois: cole a coluna `Chamado` na
-    caixa "Chamados a consultar" da aba Consulta, informe a fila em "Tempo na
-    fila" e exporte. São duas passadas curtas em vez de uma longa.
+    A tela chama esta rota MÊS A MÊS e junta o resultado. Cada chamada
+    termina em segundos, nenhuma chega perto do limite, e o que já veio não
+    se perde se uma falhar.
     """
     require_permission(req, MODULO, "export")
     ate = (corpo.ate or "").strip() or datetime.now(timezone.utc).date().isoformat()
     desde = (corpo.desde or "").strip()
     conferir_datas(desde, ate)
 
-    query = query_task_sla(desde, ate)
+    # Pelo sys_id do grupo quando der: é o que faz a consulta caber no tempo.
+    ids, aviso = {}, ""
+    try:
+        ids = ids_das_filas()
+        if not ids:
+            aviso = ("Nenhum dos quatro grupos foi encontrado em sys_user_group; "
+                     "a consulta caiu para a busca por nome, que é mais lenta.")
+    except HTTPException as exc:
+        aviso = (f"Não deu para resolver os grupos ({exc.detail}); a consulta "
+                 "caiu para a busca por nome, que é mais lenta.")
+
+    inicio = time.monotonic()
+    query = query_task_sla(desde, ate, ids)
     sla = _paginar("task_sla", query, CAMPOS_TASK_SLA, "true")
     chamados = montar_chamados(sla)
-    _log.info("campo-lojas/chamados: %d linhas de SLA → %d chamados (%s a %s)",
-              len(sla), len(chamados), desde, ate)
+    for c in chamados:
+        for interno in ("_aberto", "_resolvido", "_encerrado"):
+            c.pop(interno, None)
+    segundos = round(time.monotonic() - inicio, 1)
+    _log.info("campo-lojas %s..%s: %d SLA → %d chamados em %ss (por %s)",
+              desde, ate, len(sla), len(chamados), segundos,
+              "sys_id" if ids else "nome")
 
-    buf = io.StringIO()
-    buf.write("\ufeff")
-    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
-    w.writerow([rot for _c, rot in COLUNAS_LISTA])
+    return {
+        "desde": desde, "ate": ate,
+        "chamados": chamados,
+        "linhas_sla": len(sla),
+        "segundos": segundos,
+        "por_sys_id": bool(ids),
+        "filas_resolvidas": sorted(ids.values()),
+        "aviso": aviso,
+        # Para o caso de vir zero: é o que separa "a consulta não achou" de
+        # "vieram linhas e os campos não foram lidos".
+        "query": query,
+        "amostra_chaves": sorted(sla[0].keys()) if sla else [],
+    }
 
-    if not chamados:
-        # Vazio não diagnostica nada, e as causas levam a ações opostas: zero
-        # linhas de SLA é consulta ou permissão; linhas de SLA com zero
-        # chamados é campo não lido (o dot-walk voltou noutro formato).
-        w.writerow([])
-        w.writerow(["NENHUM CHAMADO MONTADO - diagnostico:"])
-        w.writerow(["linhas de task_sla recebidas", len(sla)])
-        w.writerow(["periodo", f"{desde} a {ate}"])
-        w.writerow(["filas procuradas", " | ".join(FILAS)])
-        w.writerow(["query usada", query])
-        if sla:
-            primeira = sla[0]
-            w.writerow(["chaves que a API devolveu", " | ".join(sorted(primeira.keys()))])
-            for caminho in ("task.sys_id", "task.number",
-                            f"task.{CAMPO_FILA}.name", "task.opened_at"):
-                w.writerow([f"{caminho} lido", campo(primeira, caminho) or "(vazio)"])
-            w.writerow(["Vieram linhas de SLA mas nenhum chamado foi montado: ou os "
-                        "campos acima estao vazios, ou o grupo nao casou com as filas."])
-        else:
-            w.writerow(["A consulta nao devolveu linha nenhuma. Confira o periodo, o "
-                        "nome das filas, e se a conta de servico le a tabela task_sla."])
-    else:
-        chamados.sort(key=lambda c: (c["mes"], c["fila"], c["numero"]))
-        for c in chamados:
-            w.writerow([c.get(chave, "") for chave, _r in COLUNAS_LISTA])
-        # Contagem por mês e fila: o recorte do dado histórico pedido.
-        contagem: dict[tuple, int] = defaultdict(int)
-        for c in chamados:
-            contagem[(c["mes"], c["fila"])] += 1
-        w.writerow([])
-        w.writerow(["RESUMO POR MES E FILA"])
-        w.writerow(["Mes", "Fila", "Chamados"])
-        for (mes, fila), quantos in sorted(contagem.items()):
-            w.writerow([mes, fila, quantos])
-        w.writerow([])
-        w.writerow([f"Total de chamados: {len(chamados)}",
-                    f"(de {len(sla)} linhas de task_sla)"])
-        w.writerow(["Para o tempo em fila: cole a coluna Chamado na aba Consulta de "
-                    "chamados, informe a fila em 'Tempo na fila' e exporte."])
 
-    nome = f"campo_lojas_chamados_{desde}_a_{ate}.csv"
-    from fastapi.responses import Response
-    return Response(
-        content=buf.getvalue().encode("utf-8"),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{nome}"',
-                 # A tela lê isto para dizer quantos vieram sem abrir o arquivo.
-                 "X-Chamados": str(len(chamados)),
-                 "X-Linhas-SLA": str(len(sla))},
-    )
+@router.post("/contagem")
+def contagem(corpo: PeriodoIn, req: Request):
+    """Quantos chamados há no período — sem baixar nenhum.
+
+    Sonda rápida, para conferir antes de rodar a coleta inteira: responde em
+    segundos se a conta lê a `task_sla`, se os grupos foram resolvidos e se o
+    período tem chamados. Sem ela, descobrir isso custava uma coleta longa
+    que terminava em 504 sem dizer nada.
+    """
+    require_permission(req, MODULO, "view")
+    ate = (corpo.ate or "").strip() or datetime.now(timezone.utc).date().isoformat()
+    desde = (corpo.desde or "").strip()
+    conferir_datas(desde, ate)
+    ids, erro = {}, ""
+    try:
+        ids = ids_das_filas()
+    except HTTPException as exc:
+        erro = str(exc.detail)
+    query = query_task_sla(desde, ate, ids)
+    total = None
+    try:
+        dados = _get("/api/now/stats/task_sla",
+                     {"sysparm_query": query, "sysparm_count": "true"}, timeout=90)
+        total = int(((dados.get("result") or {}).get("stats") or {}).get("count") or 0)
+    except HTTPException as exc:
+        erro = erro or str(exc.detail)
+    return {
+        "desde": desde, "ate": ate, "linhas_sla": total,
+        "filas_resolvidas": sorted(ids.values()),
+        "por_sys_id": bool(ids), "query": query, "erro": erro,
+    }
 
 
 @router.post("/exportar")

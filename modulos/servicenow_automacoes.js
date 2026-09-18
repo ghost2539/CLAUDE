@@ -507,11 +507,14 @@ async function renderConsulta(c, S) {
                         'style="max-width:190px"></div>' +
                 '</div>' +
                 '<div class="btn-row mt-2">' +
+                    '<button id="cn-d2-testar" class="btn btn-secondary" type="button">' +
+                        'Testar consulta</button>' +
                     (podeExportar
                         ? '<button id="cn-dados2" class="btn btn-primary" type="button">' +
                               'Exportar - DADOS 2</button>'
                         : '<span class="text-muted">Exportar pede a permissão própria.</span>') +
                 '</div>' +
+                '<div id="cn-d2-saida" class="mt-2"></div>' +
             '</div></div>' +
         '<div class="card mb-3"><div class="card-body btn-row">' +
             '<button id="cn-buscar" class="btn btn-primary" type="button">Consultar</button>' +
@@ -976,43 +979,151 @@ async function renderConsulta(c, S) {
     var d2Ate = document.getElementById('cn-d2-ate');
     if (d2Ate && !d2Ate.value) d2Ate.value = new Date().toISOString().slice(0, 10);
 
+    function d2Periodo() {
+        var desde = document.getElementById('cn-d2-desde').value;
+        var ate = document.getElementById('cn-d2-ate').value;
+        if (!desde || !ate) { S.toast('Informe o período.', 'warning'); return null; }
+        return { desde: desde, ate: ate };
+    }
+
+    /* O erro vai para a TELA, não só para um toast: toast some em 4,5 s, e
+       foi assim que um 504 do proxy passou como "não baixou nada". */
+    function d2Diz(html, tipo) {
+        var alvo = document.getElementById('cn-d2-saida');
+        alvo.innerHTML = '';
+        var cx = S.el('div', { className: 'alert alert-' + (tipo || 'info') });
+        cx.innerHTML = html;
+        alvo.appendChild(cx);
+    }
+
+    document.getElementById('cn-d2-testar').onclick = async function () {
+        var per = d2Periodo();
+        if (!per) return;
+        var b = this, antes = b.textContent;
+        b.disabled = true; b.textContent = 'Testando…';
+        try {
+            var d = await S.api('/sn-consulta/campo-lojas/contagem', {
+                method: 'POST', body: per
+            });
+            if (d.erro) {
+                d2Diz('<b>O ServiceNow recusou a consulta.</b><br>' + e(d.erro), 'danger');
+            } else {
+                d2Diz('<b>' + (d.linhas_sla || 0) + '</b> linha(s) de <code>task_sla</code> ' +
+                      'no período.<br>Filas resolvidas: ' +
+                      (d.filas_resolvidas.length
+                          ? e(d.filas_resolvidas.join(', ')) +
+                            ' — consulta pelo <b>sys_id</b> do grupo (rápida).'
+                          : '<b>nenhuma</b> — a consulta cai para a busca por nome, ' +
+                            'que é bem mais lenta e pode estourar o tempo do proxy.'),
+                      d.linhas_sla ? 'success' : 'warning');
+            }
+        } catch (x) {
+            d2Diz('<b>Falhou:</b> ' + e(x.message), 'danger');
+        } finally {
+            b.textContent = antes; b.disabled = false;
+        }
+    };
+
+    /* A coleta vai MÊS A MÊS. O período inteiro numa requisição só tomava 504
+       do proxy: a consulta demorava mais que o tempo de espera dele, a conexão
+       caía, e o navegador recebia um download vazio — sem erro, porque o erro
+       era do proxy e não do portal. Fatiado, cada chamada termina em segundos
+       e o que já veio não se perde se uma falhar. */
+    function d2Meses(desde, ate) {
+        var fatias = [];
+        var d = new Date(desde + 'T00:00:00Z');
+        var fim = new Date(ate + 'T00:00:00Z');
+        while (d <= fim) {
+            var ini = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+            var ult = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+            fatias.push({
+                desde: (ini < new Date(desde + 'T00:00:00Z') ? desde : ini.toISOString().slice(0, 10)),
+                ate: (ult > fim ? ate : ult.toISOString().slice(0, 10))
+            });
+            d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+        }
+        return fatias;
+    }
+
+    var COLS_D2 = [
+        ['mes', 'Mês'], ['numero', 'Chamado'], ['aberto_em', 'Aberto em'],
+        ['solicitante', 'Solicitante'], ['categoria', 'Categoria'],
+        ['subcategoria', 'Subcategoria'], ['fila', 'Fila'], ['estado', 'Estado']
+    ];
+
+    function d2Csv(linhas) {
+        function celula(v) {
+            var s = String(v == null ? '' : v);
+            return (/[";\n]/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }
+        var fora = [COLS_D2.map(function (c) { return c[1]; }).join(';')];
+        linhas.forEach(function (l) {
+            fora.push(COLS_D2.map(function (c) { return celula(l[c[0]]); }).join(';'));
+        });
+        // Contagem por mês e fila: o recorte do dado histórico.
+        var cont = {};
+        linhas.forEach(function (l) {
+            var k = l.mes + '\u0000' + l.fila;
+            cont[k] = (cont[k] || 0) + 1;
+        });
+        fora.push('', 'RESUMO POR MES E FILA', 'Mes;Fila;Chamados');
+        Object.keys(cont).sort().forEach(function (k) {
+            fora.push(k.split('\u0000').join(';') + ';' + cont[k]);
+        });
+        fora.push('', 'Total de chamados;' + linhas.length);
+        return '\ufeff' + fora.join('\r\n') + '\r\n';
+    }
+
     if (podeExportar) {
         document.getElementById('cn-dados2').onclick = async function () {
+            var per = d2Periodo();
+            if (!per) return;
             var b = this, antes = b.textContent;
-            var desde = document.getElementById('cn-d2-desde').value;
-            var ate = document.getElementById('cn-d2-ate').value;
-            if (!desde || !ate) { S.toast('Informe o período.', 'warning'); return; }
             b.disabled = true;
-            // Sem barra de progresso: o servidor faz as duas passadas e só
-            // então manda o arquivo. O que dá para prometer é dizer que está
-            // trabalhando — e o arquivo avisa, no fim, se parou no meio.
-            b.textContent = 'Buscando chamados…';
-            try {
-                var r = await S.api('/sn-consulta/campo-lojas/chamados', {
-                    method: 'POST', body: { desde: desde, ate: ate }
-                });
-                // O servidor conta e diz no cabeçalho: dá para avisar sem
-                // abrir o arquivo, e zero deixa de passar despercebido.
-                var quantos = Number(r.headers.get('X-Chamados') || 0);
-                var sla = Number(r.headers.get('X-Linhas-SLA') || 0);
-                var blob = await r.blob();
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'campo_lojas_chamados_' + desde + '_a_' + ate + '.csv';
-                a.click();
-                URL.revokeObjectURL(a.href);
-                if (quantos) {
-                    S.toast(quantos + ' chamado(s) no arquivo. Para o tempo em fila, ' +
-                            'cole a coluna Chamado na caixa acima.', 'success');
-                } else {
-                    S.toast('Nenhum chamado montado (' + sla + ' linha(s) de task_sla). ' +
-                            'O arquivo traz o diagnóstico nas últimas linhas.', 'warning');
+            var fatias = d2Meses(per.desde, per.ate);
+            var tudo = [], falhou = [];
+            for (var i = 0; i < fatias.length; i++) {
+                b.textContent = 'Mês ' + (i + 1) + '/' + fatias.length + '…';
+                d2Diz('Buscando ' + fatias[i].desde.slice(0, 7) + ' (' + (i + 1) + ' de ' +
+                      fatias.length + ') · ' + tudo.length + ' chamado(s) até aqui.', 'info');
+                try {
+                    var d = await S.api('/sn-consulta/campo-lojas/chamados', {
+                        method: 'POST', body: fatias[i]
+                    });
+                    tudo = tudo.concat(d.chamados || []);
+                } catch (x) {
+                    // Um mês que falha não derruba os outros: fica anotado e a
+                    // coleta segue. Metade do dado com a lacuna nomeada vale
+                    // mais que nada sem explicação.
+                    falhou.push(fatias[i].desde.slice(0, 7) + ' (' + (x.message || x) + ')');
                 }
-            } catch (x) {
-                S.toast(x.message, 'error');
-            } finally {
-                b.textContent = antes; b.disabled = false;
             }
+            b.textContent = antes; b.disabled = false;
+
+            if (!tudo.length) {
+                d2Diz('<b>Nenhum chamado veio.</b>' +
+                      (falhou.length ? '<br>Meses que falharam:<br>' + e(falhou.join('; '))
+                                     : '<br>A consulta respondeu, mas sem chamados nestas ' +
+                                       'filas no período. Use <b>Testar consulta</b> para ver ' +
+                                       'quantas linhas de task_sla existem.'), 'danger');
+                return;
+            }
+            var blob = new Blob([d2Csv(tudo)], { type: 'text/csv;charset=utf-8' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'campo_lojas_chamados_' + per.desde + '_a_' + per.ate + '.csv';
+            document.body.appendChild(a);   // Firefox não clica em âncora solta
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            d2Diz('<b>' + tudo.length + ' chamado(s)</b> no arquivo.' +
+                  (falhou.length
+                      ? '<br><b>Atenção:</b> estes meses falharam e NÃO estão no arquivo:<br>' +
+                        e(falhou.join('; '))
+                      : '') +
+                  '<br>Para o tempo em fila: cole a coluna <i>Chamado</i> na caixa ' +
+                  '“Chamados a consultar” acima.',
+                  falhou.length ? 'warning' : 'success');
         };
     }
 
