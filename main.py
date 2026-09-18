@@ -276,6 +276,18 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── ServiceNow: consulta de chamados em lote (incidents e RITMs) ────
+    # Só leitura, pela conta de serviço, e sem banco próprio: a tela não
+    # guarda nada, consulta e devolve. Carregamento isolado como os demais.
+    try:
+        from routers.sn_consulta import router as sn_consulta_router
+        app.include_router(sn_consulta_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("sn_consulta").error(
+            "Consulta de chamados do ServiceNow NÃO carregada (portal segue sem ela): %s",
+            exc, exc_info=True,
+        )
+
     # ── EBS Forms (RPA sobre o cliente Oracle Forms) — banco próprio ────
     # Roda em segundo plano numa tela virtual; só a API entra aqui.
     try:

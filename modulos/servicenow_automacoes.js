@@ -18,11 +18,23 @@
 window.SPARE_MODULES = window.SPARE_MODULES || {};
 window.SPARE_MODULES.servicenow_automacoes = {
 
-    render(container) {
+    // Duas telas sob o mesmo item da barra lateral: a rotina que age nos
+    // chamados (Automações) e a consulta em lote, que só lê. Ficam juntas
+    // porque quem cria a regra é quem precisa conferir, na lista, se ela
+    // pegou os chamados certos.
+    render(container, sub) {
         var S = window.SPARE;
+        var ABAS = [
+            ['automacoes', 'Automações'],
+            ['consulta',   'Consulta de chamados']
+        ];
+        sub = sub || 'automacoes';
+        if (!ABAS.some(function (x) { return x[0] === sub; })) sub = 'automacoes';
+        S.tabs(ABAS, sub, 'servicenow_automacoes');
+        var tela = (sub === 'consulta') ? renderConsulta : renderAutomacoes;
         container.innerHTML =
             '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando...</div>';
-        Promise.resolve(renderAutomacoes(container, S)).catch(function (e) {
+        Promise.resolve(tela(container, S)).catch(function (e) {
             container.innerHTML =
                 '<div class="alert alert-danger"><strong>Falha ao carregar.</strong><br>' +
                 S.esc(e.message || e) + '</div>';
@@ -361,4 +373,381 @@ async function renderAutomacoes(c, S) {
     });
 
     loadCfg(); loadRegras(); loadLogs();
+}
+
+
+/* ================================================================
+   Aba: Consulta de chamados (incidents e RITMs)
+
+   O fluxo é o de quem monta uma extração: escolhe a tabela, escolhe as
+   colunas, filtra, confere uma amostra na tela e baixa o arquivo com o
+   resultado inteiro.
+
+   A amostra é de propósito: trazer 5 mil linhas para o navegador trava a
+   aba e não ajuda a conferir nada. O que a tela precisa dizer é QUANTOS
+   chamados a busca pegou — isso vem contado do servidor — para a pessoa
+   decidir se estreita o filtro antes de exportar.
+   ================================================================ */
+async function renderConsulta(c, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var perm = (u.permission_map || {}).automacoes || {};
+    var podeExportar = !!(u.is_admin || perm.can_export);
+
+    var meta = null;        // tabelas e operadores
+    var campos = [];        // campos da tabela escolhida
+    var porNome = {};       // campo -> {rotulo, tipo}
+    var escolhidos = [];    // colunas da visão, na ordem
+    var ultimo = null;      // última resposta do /buscar
+
+    c.innerHTML =
+        '<h1 class="page-title">Consulta de chamados</h1>' +
+        '<p class="text-muted">Lê o ServiceNow pela conta de serviço (só leitura). ' +
+            'Os campos oferecidos são os que essa conta consegue ler de verdade — ' +
+            'campo que a permissão dela barra não entra na lista, para não virar ' +
+            'coluna vazia no arquivo.</p>' +
+        '<div class="card mb-3"><div class="card-header">O que consultar</div>' +
+            '<div class="card-body">' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label for="cn-tabela">Tabela</label>' +
+                        '<select id="cn-tabela" class="form-control"></select></div>' +
+                    '<div class="form-group"><label for="cn-ordem-campo">Ordenar por</label>' +
+                        '<select id="cn-ordem-campo" class="form-control"></select></div>' +
+                    '<div class="form-group"><label for="cn-ordem-dir">Ordem</label>' +
+                        '<select id="cn-ordem-dir" class="form-control">' +
+                            '<option value="desc">Mais recente primeiro</option>' +
+                            '<option value="asc">Mais antigo primeiro</option>' +
+                        '</select></div>' +
+                '</div>' +
+                '<div id="cn-conta" class="text-muted" style="font-size:12px"></div>' +
+            '</div></div>' +
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<span>Colunas da visão</span>' +
+            '<span><input id="cn-busca-campo" class="form-control form-control-inline" ' +
+                'placeholder="Filtrar campos" style="min-width:200px"> ' +
+            '<button id="cn-campos-padrao" class="btn btn-sm btn-secondary" type="button">Padrão</button> ' +
+            '<button id="cn-campos-limpar" class="btn btn-sm btn-secondary" type="button">Limpar</button></span>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<div id="cn-escolhidos" class="mb-3"></div>' +
+                '<div id="cn-campos" style="max-height:260px;overflow:auto;border:1px solid var(--borda);' +
+                    'border-radius:6px;padding:8px"></div>' +
+            '</div></div>' +
+        '<div class="card mb-3"><div class="card-header" ' +
+            'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<span>Filtros</span>' +
+            '<button id="cn-filtro-add" class="btn btn-sm btn-primary" type="button">Novo filtro</button>' +
+            '</div>' +
+            '<div class="card-body"><div id="cn-filtros"></div>' +
+            '<p class="text-muted" style="font-size:12px;margin:10px 0 0">' +
+                'Datas no formato <code>AAAA-MM-DD</code> (hora opcional: ' +
+                '<code>AAAA-MM-DD HH:MM:SS</code>), no fuso do ServiceNow. ' +
+                'Para um período, use dois filtros no mesmo campo: ' +
+                '<b>a partir de</b> e <b>até</b>.</p>' +
+            '</div></div>' +
+        '<div class="card mb-3"><div class="card-body btn-row">' +
+            '<button id="cn-buscar" class="btn btn-primary" type="button">Consultar</button>' +
+            (podeExportar
+                ? '<button id="cn-exportar" class="btn btn-secondary" type="button" disabled>Exportar CSV</button>'
+                : '') +
+            '<span id="cn-resumo" class="text-muted" style="align-self:center"></span>' +
+            '</div></div>' +
+        '<div id="cn-saida"></div>';
+
+    function opcoesDeCampo(sel, vazio) {
+        sel.innerHTML = '';
+        if (vazio) sel.appendChild(S.el('option', { value: '', textContent: vazio }));
+        campos.forEach(function (k) {
+            sel.appendChild(S.el('option', { value: k.campo,
+                textContent: k.rotulo + ' (' + k.campo + ')' }));
+        });
+    }
+
+    /* ── Colunas ──────────────────────────────────────────────── */
+    function desenharEscolhidos() {
+        var host = document.getElementById('cn-escolhidos');
+        host.innerHTML = '';
+        if (!escolhidos.length) {
+            host.appendChild(S.el('span', { className: 'text-muted',
+                textContent: 'Nenhuma coluna marcada — a consulta usa o conjunto padrão da tabela.' }));
+            return;
+        }
+        // A ORDEM das colunas é a de marcação, e é a ordem do arquivo. As
+        // setas existem porque ninguém marca na ordem em que quer ler.
+        escolhidos.forEach(function (nome, i) {
+            var k = porNome[nome] || { rotulo: nome };
+            var chip = S.el('span', { className: 'badge badge-neutral',
+                style: 'margin:0 6px 6px 0;display:inline-flex;align-items:center;gap:6px' });
+            chip.appendChild(S.el('span', { textContent: (i + 1) + '. ' + k.rotulo }));
+            [['↑', -1], ['↓', 1]].forEach(function (mov) {
+                chip.appendChild(S.el('button', {
+                    className: 'btn btn-sm btn-secondary', type: 'button',
+                    style: 'padding:0 5px;line-height:1.2', textContent: mov[0],
+                    onClick: function () {
+                        var j = i + mov[1];
+                        if (j < 0 || j >= escolhidos.length) return;
+                        var tmp = escolhidos[i]; escolhidos[i] = escolhidos[j]; escolhidos[j] = tmp;
+                        desenharEscolhidos();
+                    }
+                }));
+            });
+            chip.appendChild(S.el('button', {
+                className: 'btn btn-sm btn-danger', type: 'button',
+                style: 'padding:0 6px;line-height:1.2', textContent: '×',
+                onClick: function () {
+                    escolhidos = escolhidos.filter(function (x) { return x !== nome; });
+                    desenharEscolhidos(); desenharCampos();
+                }
+            }));
+            host.appendChild(chip);
+        });
+    }
+
+    function desenharCampos() {
+        var filtro = (document.getElementById('cn-busca-campo').value || '').trim().toLowerCase();
+        var host = document.getElementById('cn-campos');
+        host.innerHTML = '';
+        var visiveis = campos.filter(function (k) {
+            return !filtro || k.campo.toLowerCase().indexOf(filtro) !== -1
+                || (k.rotulo || '').toLowerCase().indexOf(filtro) !== -1;
+        });
+        if (!visiveis.length) {
+            host.appendChild(S.el('div', { className: 'text-muted',
+                textContent: 'Nenhum campo com esse texto.' }));
+            return;
+        }
+        var grade = S.el('div', { style: 'display:grid;gap:4px;' +
+            'grid-template-columns:repeat(auto-fill,minmax(260px,1fr))' });
+        visiveis.forEach(function (k) {
+            var id = 'cn-cp-' + k.campo.replace(/[^a-z0-9_]/gi, '_');
+            var linha = S.el('label', { className: 'form-check',
+                style: 'display:flex;gap:6px;align-items:baseline', 'for': id });
+            var cx = S.el('input', { type: 'checkbox', id: id });
+            cx.checked = escolhidos.indexOf(k.campo) !== -1;
+            cx.onchange = function () {
+                if (cx.checked) {
+                    if (escolhidos.indexOf(k.campo) === -1) escolhidos.push(k.campo);
+                } else {
+                    escolhidos = escolhidos.filter(function (x) { return x !== k.campo; });
+                }
+                desenharEscolhidos();
+            };
+            linha.appendChild(cx);
+            var rot = S.el('span');
+            rot.innerHTML = e(k.rotulo) + ' <span class="text-muted" style="font-size:11px">' +
+                e(k.campo) + (k.tipo ? ' · ' + e(k.tipo) : '') + '</span>';
+            linha.appendChild(rot);
+            grade.appendChild(linha);
+        });
+        host.appendChild(grade);
+    }
+
+    /* ── Filtros ──────────────────────────────────────────────── */
+    function linhaFiltro(inicial) {
+        inicial = inicial || {};
+        var linha = S.el('div', { className: 'form-row', style: 'align-items:flex-end' });
+        var selCampo = S.el('select', { className: 'form-control' });
+        opcoesDeCampo(selCampo, '— campo —');
+        if (inicial.campo) selCampo.value = inicial.campo;
+        var selOp = S.el('select', { className: 'form-control' });
+        (meta.operadores || []).forEach(function (o) {
+            selOp.appendChild(S.el('option', { value: o.chave, textContent: o.rotulo }));
+        });
+        if (inicial.operador) selOp.value = inicial.operador;
+        var txt = S.el('input', { className: 'form-control', placeholder: 'valor',
+            value: inicial.valor || '' });
+        // "Está vazio" e "está preenchido" não levam valor. Deixar a caixa
+        // habilitada convida a digitar algo que o servidor vai recusar.
+        function ajustar() {
+            var o = (meta.operadores || []).filter(function (x) { return x.chave === selOp.value; })[0];
+            var precisa = !o || o.precisa_valor;
+            txt.disabled = !precisa;
+            if (!precisa) txt.value = '';
+            txt.placeholder = (selOp.value === 'em' || selOp.value === 'nao_em')
+                ? 'valores separados por vírgula' : 'valor';
+        }
+        selOp.onchange = ajustar; ajustar();
+
+        [['Campo', selCampo], ['Condição', selOp], ['Valor', txt]].forEach(function (x) {
+            var g = S.el('div', { className: 'form-group' });
+            g.appendChild(S.el('label', { textContent: x[0] }));
+            g.appendChild(x[1]);
+            linha.appendChild(g);
+        });
+        var g = S.el('div', { className: 'form-group' });
+        var vazio = S.el('label');
+        vazio.innerHTML = '&nbsp;';
+        g.appendChild(vazio);
+        g.appendChild(S.el('button', { className: 'btn btn-danger', type: 'button',
+            textContent: 'Remover', onClick: function () { linha.remove(); } }));
+        linha.appendChild(g);
+        linha._ler = function () {
+            return { campo: selCampo.value, operador: selOp.value, valor: txt.value };
+        };
+        return linha;
+    }
+
+    function lerFiltros() {
+        return Array.prototype.slice
+            .call(document.getElementById('cn-filtros').children)
+            .map(function (l) { return l._ler(); })
+            .filter(function (f) { return f.campo; });
+    }
+
+    function corpoDaConsulta() {
+        return {
+            tabela: document.getElementById('cn-tabela').value,
+            campos: escolhidos.slice(),
+            filtros: lerFiltros(),
+            ordenar_por: document.getElementById('cn-ordem-campo').value,
+            ordem: document.getElementById('cn-ordem-dir').value,
+            exibir_rotulos: true
+        };
+    }
+
+    /* ── Carga ────────────────────────────────────────────────── */
+    async function carregarCampos(recarregar) {
+        var tabela = document.getElementById('cn-tabela').value;
+        var host = document.getElementById('cn-campos');
+        host.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> ' +
+            'Perguntando ao ServiceNow quais campos a conta de serviço lê…</div>';
+        var d = await S.api('/sn-consulta/campos?tabela=' + encodeURIComponent(tabela) +
+            (recarregar ? '&recarregar=true' : ''));
+        campos = d.campos || [];
+        porNome = {};
+        campos.forEach(function (k) { porNome[k.campo] = k; });
+        // Só o que a conta realmente lê entra como padrão: a lista padrão é
+        // escrita no servidor e pode citar campo que esta instância não tem.
+        escolhidos = (d.campos_padrao || []).filter(function (x) { return porNome[x]; });
+        document.getElementById('cn-conta').textContent =
+            d.total + ' campos legíveis pela conta ' + (d.conta || '(não configurada)') +
+            (d.do_cache ? ' · lista em cache' : '');
+        var ordem = document.getElementById('cn-ordem-campo');
+        opcoesDeCampo(ordem, '— sem ordenação —');
+        ordem.value = porNome.opened_at ? 'opened_at'
+            : (porNome.sys_created_on ? 'sys_created_on' : '');
+        document.getElementById('cn-filtros').innerHTML = '';
+        desenharCampos(); desenharEscolhidos();
+    }
+
+    async function consultar(pagina) {
+        var saida = document.getElementById('cn-saida');
+        var resumo = document.getElementById('cn-resumo');
+        saida.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando…</div>';
+        resumo.textContent = '';
+        var corpo = corpoDaConsulta();
+        corpo.pagina = pagina || 1;
+        corpo.por_pagina = 100;
+        var d;
+        try {
+            d = await S.api('/sn-consulta/buscar', { method: 'POST', body: corpo });
+        } catch (x) {
+            saida.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            if (podeExportar) document.getElementById('cn-exportar').disabled = true;
+            return;
+        }
+        ultimo = d;
+        if (podeExportar) document.getElementById('cn-exportar').disabled = d.total === 0;
+
+        var de = (d.pagina - 1) * d.por_pagina + 1;
+        var ate = Math.min(d.pagina * d.por_pagina, d.total);
+        resumo.textContent = d.total
+            ? ('Mostrando ' + de + '–' + ate + ' de ' + d.total.toLocaleString('pt-BR') + ' chamados.')
+            : 'Nenhum chamado com esses filtros.';
+
+        saida.innerHTML = '';
+        if (d.total > d.teto_exportacao) {
+            saida.appendChild(S.el('div', { className: 'alert alert-warning',
+                textContent: 'A busca pegou ' + d.total.toLocaleString('pt-BR') +
+                    ' chamados e a exportação para em ' + d.teto_exportacao.toLocaleString('pt-BR') +
+                    '. Estreite por período e exporte em partes, senão o arquivo sai incompleto.' }));
+        }
+        if (!d.total) return;
+        var cols = d.campos.map(function (nome) {
+            return { key: nome, label: (d.rotulos || {})[nome] || nome };
+        });
+        saida.appendChild(S.table(cols, d.linhas));
+
+        // Paginação da amostra. Quem vai até a página 40 devia estar
+        // exportando — mas fechar a porta seria pior que deixar aberta.
+        var paginas = Math.ceil(d.total / d.por_pagina);
+        if (paginas > 1) {
+            var nav = S.el('div', { className: 'btn-row mt-3' });
+            // `disabled` sai do objeto de propriedade: S.el() usa
+            // setAttribute, e `disabled="false"` desabilita o botão do mesmo
+            // jeito que `disabled="true"` — o atributo vale pela presença.
+            var btAnt = S.el('button', { className: 'btn btn-sm btn-secondary',
+                type: 'button', textContent: '← Anterior',
+                onClick: function () { consultar(d.pagina - 1); } });
+            btAnt.disabled = d.pagina <= 1;
+            nav.appendChild(btAnt);
+            nav.appendChild(S.el('span', { className: 'text-muted',
+                style: 'align-self:center',
+                textContent: 'Página ' + d.pagina + ' de ' + paginas.toLocaleString('pt-BR') }));
+            var btProx = S.el('button', { className: 'btn btn-sm btn-secondary',
+                type: 'button', textContent: 'Próxima →',
+                onClick: function () { consultar(d.pagina + 1); } });
+            btProx.disabled = d.pagina >= paginas;
+            nav.appendChild(btProx);
+            saida.appendChild(nav);
+        }
+    }
+
+    /* ── Ligações ─────────────────────────────────────────────── */
+    meta = await S.api('/sn-consulta/tabelas');
+    var selTabela = document.getElementById('cn-tabela');
+    (meta.tabelas || []).forEach(function (t) {
+        selTabela.appendChild(S.el('option', { value: t.tabela,
+            textContent: t.rotulo + ' — ' + t.tela }));
+    });
+    selTabela.onchange = function () { carregarCampos(false).catch(function (x) {
+        document.getElementById('cn-campos').innerHTML =
+            '<div class="alert alert-danger">' + e(x.message) + '</div>';
+    }); };
+
+    document.getElementById('cn-busca-campo').addEventListener('input', desenharCampos);
+    document.getElementById('cn-campos-padrao').onclick = function () {
+        var t = (meta.tabelas || []).filter(function (x) {
+            return x.tabela === selTabela.value; })[0] || {};
+        escolhidos = (t.campos_padrao || []).filter(function (x) { return porNome[x]; });
+        desenharEscolhidos(); desenharCampos();
+    };
+    document.getElementById('cn-campos-limpar').onclick = function () {
+        escolhidos = []; desenharEscolhidos(); desenharCampos();
+    };
+    document.getElementById('cn-filtro-add').onclick = function () {
+        document.getElementById('cn-filtros').appendChild(linhaFiltro());
+    };
+    document.getElementById('cn-buscar').onclick = function () { consultar(1); };
+
+    if (podeExportar) {
+        document.getElementById('cn-exportar').onclick = async function () {
+            var b = this;
+            b.disabled = true;
+            var antes = b.textContent;
+            // Não há barra de progresso: o servidor pagina o ServiceNow e só
+            // manda o arquivo. O que dá para prometer é que o botão avisa
+            // que está trabalhando — e que o arquivo diz, na última linha,
+            // se parou no teto.
+            b.textContent = 'Exportando…';
+            try {
+                var r = await S.api('/sn-consulta/exportar', {
+                    method: 'POST', body: corpoDaConsulta()
+                });
+                var blob = await r.blob();
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = (ultimo ? ultimo.tabela : 'chamados') + '.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            } catch (x) {
+                S.toast(x.message, 'error');
+            } finally {
+                b.textContent = antes; b.disabled = false;
+            }
+        };
+    }
+
+    await carregarCampos(false);
 }

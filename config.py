@@ -372,7 +372,9 @@ class Settings:
         "agendamentos_forn": ("view", "create", "edit", "export", "admin"),
         "internalizacao": ("view", "create", "edit", "export", "admin"),
         "ebs_forms": ("view", "create", "admin"),
-        "automacoes": ("view", "admin"),
+        # "export" é a consulta de chamados em lote: quem vê a tela
+        # consulta, mas baixar o arquivo com os chamados é ação à parte.
+        "automacoes": ("view", "export", "admin"),
         "orcamento_manutencao": ("view", "create", "edit", "export", "admin"),
         "trilha": ("view", "admin"),
         "torre": ("view", "admin"),
