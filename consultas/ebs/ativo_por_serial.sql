@@ -1,11 +1,7 @@
 -- Onde o patrimônio aparece depois de capitalizado. É o que a tela
 -- Internalização → Patrimônio consulta para saber se o equipamento já virou
--- ativo fixo no EBS: enquanto não aparece, ele fica esperando.
---
--- A busca é pelo SERIAL porque é o que o portal tem na mão — a plaqueta é
--- atribuída pelo próprio EBS e por isso não serve para procurar. UPPER nos
--- dois lados: serial digitado por pessoa vem em qualquer caixa, e o que
--- está gravado no EBS nem sempre segue a mesma.
+-- ativo fixo. Enquanto não aparece, ele fica esperando.
+
 SELECT fa.asset_number                               AS ativo,
        fa.serial_number                              AS numero_serie,
        fa.tag_number                                 AS plaqueta,
