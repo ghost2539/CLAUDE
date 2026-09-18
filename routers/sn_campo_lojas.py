@@ -90,6 +90,9 @@ COLUNAS = [
 ]
 
 CAMPOS_TASK_SLA = ",".join([
+    # `task` cru além do `task.sys_id`: em algumas versões o dot-walk do
+    # sys_id não volta, e a referência crua traz o sys_id no `value`.
+    "task",
     "task.sys_id", "task.number", "task.opened_at",
     "task.caller_id", "task.opened_by", "task.requested_for",
     "task.category", "task.subcategory",
@@ -108,6 +111,38 @@ def _quando(bruto) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def campo(linha: dict, caminho: str) -> str:
+    """Um campo pontilhado, aceitando as formas em que a API o devolve.
+
+    `sysparm_fields=task.sys_id` pode voltar de três jeitos, conforme a
+    versão da API e o `sysparm_display_value`:
+
+        {"task.sys_id": "abc..."}                  ← chave pontilhada
+        {"task": {"sys_id": "abc..."}}             ← aninhado na referência
+        {"task": {"value": "abc..."}}              ← só a referência
+
+    Ler só a primeira descarta a linha inteira em silêncio nas outras duas —
+    e o efeito não é erro: é zero chamado, arquivo com cabeçalho e nada.
+    """
+    if caminho in linha:
+        return _valor_plano(linha[caminho])
+    if "." not in caminho:
+        return ""
+    raiz, resto = caminho.split(".", 1)
+    valor = linha.get(raiz)
+    if isinstance(valor, dict):
+        if resto in valor:
+            return _valor_plano(valor[resto])
+        # `task.sys_id` pedido e só a referência voltou: o `value` de uma
+        # referência É o sys_id.
+        if resto == "sys_id":
+            return _valor_plano(valor.get("value"))
+        return ""
+    if resto == "sys_id":
+        return _valor_plano(valor)
+    return ""
 
 
 def qual_fila(nome: str) -> str:
@@ -142,30 +177,30 @@ def montar_chamados(linhas_sla: list[dict]) -> list[dict]:
     """
     por_chamado: dict[str, dict] = {}
     for l in linhas_sla:
-        sid = _valor_plano(l.get("task.sys_id"))
+        sid = campo(l, "task.sys_id")
         if not sid or sid in por_chamado:
             continue
-        fila = qual_fila(_valor_plano(l.get(f"task.{CAMPO_FILA}.name")))
+        fila = qual_fila(campo(l, f"task.{CAMPO_FILA}.name"))
         if not fila:
             continue
-        aberto = _quando(l.get("task.opened_at"))
+        aberto = _quando(campo(l, "task.opened_at"))
         por_chamado[sid] = {
             "sys_id": sid,
-            "numero": _valor_plano(l.get("task.number")),
-            "aberto_em": _valor_plano(l.get("task.opened_at")),
+            "numero": campo(l, "task.number"),
+            "aberto_em": campo(l, "task.opened_at"),
             "mes": aberto.strftime("%Y-%m") if aberto else "",
-            "solicitante": (_valor_plano(l.get("task.caller_id"))
-                            or _valor_plano(l.get("task.requested_for"))
-                            or _valor_plano(l.get("task.opened_by"))),
-            "categoria": _valor_plano(l.get("task.category")),
-            "subcategoria": _valor_plano(l.get("task.subcategory")),
+            "solicitante": (campo(l, "task.caller_id")
+                            or campo(l, "task.requested_for")
+                            or campo(l, "task.opened_by")),
+            "categoria": campo(l, "task.category"),
+            "subcategoria": campo(l, "task.subcategory"),
             "fila": fila,
-            "estado": _valor_plano(l.get("task.state")),
+            "estado": campo(l, "task.state"),
             "_aberto": aberto,
             # A RESOLUÇÃO fecha a conta; o encerramento é automático dias
             # depois e inflaria o tempo de todo chamado resolvido na fila.
-            "_resolvido": _quando(l.get("task.resolved_at")),
-            "_encerrado": _quando(l.get("task.closed_at")),
+            "_resolvido": _quando(campo(l, "task.resolved_at")),
+            "_encerrado": _quando(campo(l, "task.closed_at")),
         }
     return list(por_chamado.values())
 
@@ -314,9 +349,35 @@ def exportar(corpo: PeriodoIn, req: Request):
             _log.info("campo-lojas: %d linhas de SLA → %d chamados (%s a %s)",
                       len(sla), len(chamados), desde, ate)
             if not chamados:
+                # Arquivo vazio nao diagnostica nada. As tres causas possiveis
+                # levam a acoes opostas, e so os numeros abaixo as separam:
+                #   - 0 linhas de SLA  -> a consulta nao achou (periodo, nome
+                #     da fila, ou a conta sem leitura em task_sla);
+                #   - linhas de SLA, 0 chamados -> vieram linhas mas os campos
+                #     nao foram lidos, ou o grupo nao casou com as quatro filas.
+                # Por isso saem as CHAVES e um exemplo da primeira linha: e o
+                # que mostra em que formato o dot-walk voltou.
                 escritor.writerow([])
-                escritor.writerow(["Nenhum chamado encontrado no periodo para estas filas."])
-                escritor.writerow(["Filas procuradas:", ", ".join(FILAS)])
+                escritor.writerow(["NENHUM CHAMADO MONTADO - diagnostico:"])
+                escritor.writerow(["linhas de task_sla recebidas", len(sla)])
+                escritor.writerow(["periodo", f"{desde} a {ate}"])
+                escritor.writerow(["filas procuradas", " | ".join(FILAS)])
+                if sla:
+                    primeira = sla[0]
+                    escritor.writerow(["chaves que a API devolveu",
+                                       " | ".join(sorted(primeira.keys()))])
+                    escritor.writerow(["task.sys_id lido", campo(primeira, "task.sys_id") or "(vazio)"])
+                    escritor.writerow(["numero lido", campo(primeira, "task.number") or "(vazio)"])
+                    escritor.writerow([f"task.{CAMPO_FILA}.name lido",
+                                       campo(primeira, f"task.{CAMPO_FILA}.name") or "(vazio)"])
+                    escritor.writerow(["Vieram linhas de SLA mas nenhum chamado foi montado: "
+                                       "ou os campos acima estao vazios (o dot-walk voltou "
+                                       "noutro formato), ou o grupo nao casou com as filas."])
+                else:
+                    escritor.writerow(["A consulta nao devolveu linha nenhuma. Confira o "
+                                       "periodo, o nome das filas, e se a conta de servico "
+                                       "le a tabela task_sla."])
+                    escritor.writerow(["query usada", query_task_sla(desde, ate)])
                 yield buf.getvalue()
                 return
 

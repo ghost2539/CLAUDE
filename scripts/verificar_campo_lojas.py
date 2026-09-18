@@ -47,6 +47,8 @@ def checar(cond, descricao):
 
 
 import scripts.chamados_campo_lojas as cl  # noqa: E402
+# A lógica é do router; o script só a transporta.
+import routers.sn_campo_lojas as regra  # noqa: E402
 
 FILA = "TI_N2_FLD_ENACEL_LOJAS"
 OUTRA_DAS_QUATRO = "TI_N2_FLD_SKY_LOJAS"
@@ -181,6 +183,52 @@ linhas_resumo = [l for l in do_resumo if len(l) == 5 and l[0].startswith("2025-"
 checar(len(linhas_resumo) == 5, f"uma linha por mês e fila ({len(linhas_resumo)})")
 checar(all(l[2] and l[3] for l in linhas_resumo),
        "com a contagem de chamados e as horas somadas")
+
+print("\n[10] O dot-walk volta em três formatos, e os três são lidos")
+# `sysparm_fields=task.sys_id` pode voltar como chave pontilhada, aninhado
+# na referência, ou só a referência crua. Ler um formato só descarta a linha
+# inteira em silêncio nos outros dois — e o efeito não é erro: é arquivo com
+# cabeçalho e nada. Foi o que aconteceu.
+FORMAS = [
+    ({"task.sys_id": "a" * 32}, "chave pontilhada"),
+    ({"task": {"sys_id": "a" * 32}}, "aninhado na referência"),
+    ({"task": {"value": "a" * 32, "display_value": "INC1"}}, "só a referência"),
+]
+for linha, nome in FORMAS:
+    checar(regra.campo(linha, "task.sys_id") == "a" * 32, f"sys_id lido: {nome}")
+checar(regra.campo({"task": {"value": "x"}}, "task.number") == "",
+       "e o que não veio devolve vazio, sem inventar")
+
+# Montagem completa a partir do formato aninhado — o que o código antigo
+# descartava inteiro.
+aninhado = [{"task": {"value": "b" * 32, "display_value": "INC0000099"},
+             "task.number": "INC0000099",
+             "task.opened_at": "2025-02-01 08:00:00",
+             "task.caller_id": "Fulano",
+             "task.assignment_group.name": FILA,
+             "task.state": "7",
+             "task.resolved_at": "2025-02-03 08:00:00",
+             "task.closed_at": "2025-02-10 08:00:00"}]
+montados = regra.montar_chamados(aninhado)
+checar(len(montados) == 1,
+       "contraprova: no formato aninhado o chamado é montado (antes: zero)")
+checar(montados[0]["numero"] == "INC0000099" and montados[0]["fila"] == FILA,
+       "com número e fila certos")
+
+print("\n[11] Zero chamados: o arquivo diz POR QUÊ")
+# As causas levam a ações opostas, e só os números as separam: 0 linhas de
+# SLA é consulta/permissão; linhas de SLA e 0 chamados é campo não lido.
+diag = regra.montar_chamados([])
+checar(diag == [], "sem linhas, nenhum chamado")
+fonte = (RAIZ / "routers" / "sn_campo_lojas.py").read_text(encoding="utf-8")
+checar("NENHUM CHAMADO MONTADO - diagnostico" in fonte,
+       "o arquivo traz um bloco de diagnóstico em vez de sair vazio")
+checar("chaves que a API devolveu" in fonte,
+       "listando as CHAVES da primeira linha — é o que mostra o formato do dot-walk")
+checar("query usada" in fonte,
+       "e a query, quando nem linha de SLA veio")
+checar("le a tabela task_sla" in fonte,
+       "apontando a permissão como uma das causas")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
