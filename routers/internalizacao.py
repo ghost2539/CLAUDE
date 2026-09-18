@@ -204,17 +204,48 @@ def exportar(agendamento_id: int, req: Request):
 
 @router.delete("/{agendamento_id}", status_code=204)
 def excluir(agendamento_id: int, req: Request):
-    """Remove o processo de internalização (só admin do módulo)."""
-    _exigir(req, "admin")
+    """Remove o processo de internalização.
+
+    Some o que foi registrado AQUI — patrimônio, plaquetas, confirmações e os
+    ativos do processo. O agendamento em si e o que já deu entrada no estoque
+    do portal NÃO são tocados: são de outros módulos.
+
+    Não dá para desfazer, então fica no log de acesso com quantos ativos o
+    processo tinha. Na tela o botão é só do admin do portal inteiro."""
+    sd = _exigir(req, "admin")
     db.ensure_db()
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     with db.SessionLocal.begin() as s:
         proc = s.scalar(select(db.Processo).where(
             db.Processo.agendamento_id == agendamento_id))
         if not proc:
             raise HTTPException(404, "Processo não encontrado.")
+        nf = proc.nf or ""
+        ativos = s.scalar(select(func.count(db.Ativo.id)).where(
+            db.Ativo.processo_id == proc.id)) or 0
         s.delete(proc)
+    _registrar_exclusao(sd, req, agendamento_id, nf, ativos)
     return None
+
+
+def _registrar_exclusao(sd: dict, req: Request, agendamento_id: int,
+                        nf: str, ativos: int) -> None:
+    """Grava no log de acesso do PORTAL (não no banco deste módulo, que acabou
+    de perder a linha). Falha aqui nunca desfaz a exclusão já efetivada."""
+    try:
+        from db.portal import AccessLog, SessionLocal as PortalSession
+        with PortalSession.begin() as s:
+            s.add(AccessLog(
+                login=sd.get("username", ""),
+                auth_source=sd.get("auth_source", "LOCAL"),
+                success=True,
+                ip=client_ip(req),
+                detail=(f"Internalização do agendamento {agendamento_id} "
+                        f"(NF {nf}) excluída — {ativos} ativo(s)")[:500],
+            ))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Exclusão da internalização %s não foi registrada: %s",
+                     agendamento_id, exc)
 
 
 # ── Exportação Excel (idêntica ao modelo) ──────────────────────────────────

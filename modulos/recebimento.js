@@ -1060,6 +1060,24 @@ async function renderModelos(c, S) {
                         S.toast(msg, 'success');
                     };
                     w.append(e, a);
+                    // Excluir só para o admin do portal inteiro. A rota já
+                    // existia e ninguém alcançava: a tela não tinha o botão.
+                    if ((S.user() || {}).is_admin) {
+                        var x = S.el('button', { className: 'btn btn-sm btn-danger', textContent: 'Excluir' });
+                        x.onclick = async function () {
+                            if (!window.confirm('Excluir a regra "' + (r.padrao_descricao || '') +
+                                                '"?\n\nOs ativos já classificados por ela NÃO mudam; ' +
+                                                'a regra só deixa de valer para as próximas entradas.')) return;
+                            try {
+                                await S.api('/parametros/classificacoes/' + r.id, { method: 'DELETE' });
+                                S.toast('Regra excluída.', 'success');
+                                load();
+                            } catch (err) {
+                                S.toast(err.message, 'error');
+                            }
+                        };
+                        w.append(x);
+                    }
                     return w;
                 }
             }

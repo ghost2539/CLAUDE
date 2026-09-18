@@ -426,12 +426,25 @@ def classification_apply_all(req: Request):
 
 @router.delete("/classificacoes/{id}")
 def classification_delete(id: int, req: Request):
-    require_permission(req, "parametros", "admin")
+    """Apaga a regra do Cadastro de modelos.
+
+    Os ativos já classificados por ela NÃO mudam: a regra só deixa de valer
+    para as próximas entradas. Fica no log de acesso porque não dá para
+    desfazer — e agora a tela tem o botão, então passa a acontecer."""
+    sd = require_permission(req, "parametros", "admin")
     with SessionLocal.begin() as s:
         x = s.get(Classification, id)
         if not x:
             raise HTTPException(404, "Classificação não encontrada.")
+        descricao = (x.description_pattern or "")[:120]
         s.delete(x)
+        s.add(AccessLog(
+            login=sd["username"],
+            auth_source=sd.get("auth_source", "LOCAL"),
+            success=True,
+            ip=client_ip(req),
+            detail=f"Regra de classificação {id} excluída ({descricao})"[:500],
+        ))
     return {"ok": True}
 
 

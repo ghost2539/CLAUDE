@@ -31,6 +31,9 @@ window.SPARE_MODULES.internalizacao = {
         var pm = (u.permission_map || {}).internalizacao || {};
         var podeEditar = !!(u.is_admin || pm.can_edit);
         var podeExportar = !!(u.is_admin || pm.can_export);
+        // Excluir o processo é só do admin do portal inteiro — não da
+        // permissão do módulo. Apaga o que já foi patrimoniado e lançado.
+        var podeExcluir = !!u.is_admin;
 
         container.innerHTML =
             '<h1 class="page-title">Internalização</h1>' +
@@ -79,6 +82,11 @@ window.SPARE_MODULES.internalizacao = {
                 if (podeExportar && it.total_ativos > 0) {
                     btns += ' <button class="btn btn-secondary btn-sm int-exp" data-id="' + it.agendamento_id + '">Exportar</button>';
                 }
+                if (podeExcluir) {
+                    btns += ' <button class="btn btn-danger btn-sm int-del" data-id="' + it.agendamento_id +
+                            '" data-nf="' + e(it.nf) + '" data-ativos="' + e(it.total_ativos) +
+                            '">Excluir</button>';
+                }
                 return '<tr>' +
                     '<td><b>' + e(it.nf) + '</b></td>' +
                     '<td>' + e(it.fornecedor) + '</td>' +
@@ -101,6 +109,39 @@ window.SPARE_MODULES.internalizacao = {
             Array.prototype.forEach.call(elLista.querySelectorAll('.int-exp'), function (b) {
                 b.onclick = function () { exportar(parseInt(b.dataset.id, 10)); };
             });
+            Array.prototype.forEach.call(elLista.querySelectorAll('.int-del'), function (b) {
+                b.onclick = function () {
+                    excluir(parseInt(b.dataset.id, 10), b.dataset.nf,
+                            parseInt(b.dataset.ativos, 10) || 0);
+                };
+            });
+        }
+
+        /* Apaga o processo de internalização daquele agendamento. O
+           agendamento em si e os ativos já dados entrada no estoque NÃO são
+           tocados — some o que foi registrado AQUI (patrimônio, plaquetas,
+           confirmações). Por isso o aviso é explícito sobre o que se perde. */
+        async function excluir(id, nf, ativos) {
+            // Quem manda é o servidor (a rota exige admin); esta linha existe
+            // para a trava andar junto da chamada, e não só do botão.
+            if (!(S.user() || {}).is_admin) {
+                S.toast('Só o administrador do portal pode excluir.', 'warning');
+                return;
+            }
+            var texto = 'Excluir o processo de internalização da NF ' + nf + '?';
+            if (ativos > 0) {
+                texto += '\n\nEste processo tem ' + ativos + ' ativo(s) lançado(s). ' +
+                         'Os números de patrimônio e as confirmações serão perdidos.';
+            }
+            texto += '\n\nNão dá para desfazer.';
+            if (!window.confirm(texto)) return;
+            try {
+                await S.api('/internalizacao/' + id, { method: 'DELETE' });
+                S.toast('Processo da NF ' + nf + ' excluído.', 'success');
+                carregar();
+            } catch (x) {
+                S.toast(x.message, 'error');
+            }
         }
 
         function exportar(id) {
