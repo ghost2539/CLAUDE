@@ -132,6 +132,22 @@ def cabecalhos_basicos(usuario: str, senha: str, tenant: str, versao: int) -> di
     return cab
 
 
+def cabecalhos_bearer(jwt: str, versao: int) -> dict:
+    """O token do Intelligence apontado para a UEM.
+
+    ATENÇÃO ao que isto é: um teste, não um caminho documentado. As quatro
+    especificações declaram `BasicAuth`, `ApiKeyAuth`, `GroupIdAuth` e
+    `CmsAuth` — **não** há esquema Bearer entre elas. Então, se funcionar,
+    funciona por a instalação aceitar mais do que documenta; se voltar 401,
+    não prova defeito na chave, só que este caminho não existe aqui.
+
+    Vale a tentativa porque é uma requisição só e responde uma pergunta
+    cara: se a UEM aceitar o token, o `aw-tenant-code` deixa de fazer falta.
+    """
+    return {"Authorization": f"Bearer {jwt}",
+            "Accept": f"application/json;version={versao}"}
+
+
 # ── Provas ────────────────────────────────────────────────────────────
 def _tentar(s, metodo: str, url: str, cabecalhos: dict, **kw) -> tuple[int, str]:
     # `raise`, não `assert`: com `python -O` o assert some do bytecode, e a
@@ -162,9 +178,12 @@ def _diz(rotulo: str, codigo: int, corpo: str) -> None:
         print(f"        {corpo[:200].strip()}")
 
 
-def provas_uem(s, base: str, usuario: str, senha: str, tenant: str,
-               serie: str = "") -> int:
+def provas_uem(s, base: str, cabecalho, serie: str = "") -> int:
     """As leituras que provam cada capacidade. Só GET.
+
+    `cabecalho` é uma função `(versao) -> dict`: a mesma bateria de provas
+    serve para Basic e para Bearer, e é justamente comparar as duas que
+    responde qual credencial a instalação aceita.
 
     Os caminhos NÃO são chute: saem de mdmv1..mdmv4.json, que declaram
     `servers: https://as258.awmdm.com/api/mdm`.
@@ -181,8 +200,7 @@ def provas_uem(s, base: str, usuario: str, senha: str, tenant: str,
         provas.append((1, f"/api/mdm/devices?searchby=Serialnumber&id={serie}",
                        f"device pela série {serie}"))
     for versao, caminho, rotulo in provas:
-        cab = cabecalhos_basicos(usuario, senha, tenant, versao)
-        cod, corpo = _tentar(s, "GET", base + caminho, cab)
+        cod, corpo = _tentar(s, "GET", base + caminho, cabecalho(versao))
         _diz(rotulo, cod, corpo)
         if cod in (200, 201, 204, 400, 403):
             autenticou += 1
@@ -231,8 +249,23 @@ def descobrir(s, base_uem: str, cab: dict, saida: Path) -> None:
             print("   ", r_)
 
 
-def intelligence(s, cred: dict) -> None:
-    """O outro produto: relatórios. Token OAuth, host próprio."""
+def token_intelligence(s, cred: dict) -> str:
+    """O JWT, pelo client_credentials do arquivo de service account.
+
+    Imprime `resourceIds` porque é o campo que decide o alcance: um token de
+    client_credentials é emitido PARA um recurso. Se ali só houver o do
+    Intelligence, a UEM vai recusar por mais correta que a chave esteja — e
+    aí o 401 tem explicação, em vez de virar mistério.
+    """
+    print(f"  conta: {cred.get('name', '?')}")
+    print(f"  clientId: {cred.get('clientId', '?')}")
+    recursos = cred.get("resourceIds") or []
+    print(f"  resourceIds: {recursos or '(não informado)'}")
+    if recursos and not any("uem" in str(x).lower() or "awmdm" in str(x).lower()
+                            for x in recursos):
+        print("  ⚠ Nenhum recurso de UEM listado. Se a UEM recusar, é por isto:")
+        print("    a chave foi emitida para o Intelligence, que é análise, e não")
+        print("    para a gestão de dispositivos.")
     endpoint = cred.get("tokenEndpoint") or ""
     if not endpoint:
         raise SystemExit("O arquivo de credencial não tem 'tokenEndpoint'.")
@@ -251,7 +284,12 @@ def intelligence(s, cred: dict) -> None:
     if not jwt:
         raise SystemExit(f"Resposta sem access_token: {str(dados)[:300]}")
     print(f"  token obtido · expira em {dados.get('expires_in', '?')}s")
+    return jwt
 
+
+def intelligence(s, cred: dict, jwt: str) -> None:
+    """O outro produto: relatórios. Token OAuth, host próprio."""
+    endpoint = cred.get("tokenEndpoint") or ""
     cab = {"Authorization": f"Bearer {jwt}", "Accept": "application/json"}
     u = urlparse(endpoint)
     base = f"{u.scheme}://{u.netloc}" if u.netloc else ""
@@ -319,6 +357,11 @@ def main() -> int:
     p.add_argument("--serie", default="", help="série de um coletor para procurar")
     p.add_argument("--credencial", default="",
                    help="JSON de service account do Intelligence (outro produto)")
+    p.add_argument("--bearer", action="store_true",
+                   help="tentar o token do --credencial na API da UEM. Não é "
+                        "caminho documentado (não há esquema Bearer na "
+                        "especificação); é uma requisição para descobrir se a "
+                        "instalação aceita, e assim dispensar o aw-tenant-code.")
     p.add_argument("--descobrir", action="store_true",
                    help="baixa a referência viva da UEM (/api/help/)")
     p.add_argument("--saida", default="uem_api_help.txt")
@@ -326,16 +369,31 @@ def main() -> int:
 
     if not a.basic and not a.credencial:
         p.error("escolha --basic (API da UEM) ou --credencial <arquivo> (Intelligence)")
+    if a.bearer and not a.credencial:
+        p.error("--bearer precisa do --credencial: o token sai de lá")
 
     s = _sessao()
+    host = a.uem or UEM_PADRAO
+    base = host if host.startswith("http") else f"https://{host}"
+    jwt = ""
 
     if a.credencial:
         print("\n[Intelligence] relatórios")
-        intelligence(s, json.loads(Path(a.credencial).read_text(encoding="utf-8")))
+        cred = json.loads(Path(a.credencial).read_text(encoding="utf-8"))
+        jwt = token_intelligence(s, cred)
+        intelligence(s, cred, jwt)
+
+    if a.bearer:
+        print(f"\n[UEM com o token do Intelligence] {base}")
+        print("  Isto NÃO está na especificação: ela declara Basic, ApiKey,")
+        print("  GroupId e Cms, e nenhum Bearer. 401 aqui não condena a chave —")
+        print("  só diz que este caminho não existe nesta instalação.")
+        ok = provas_uem(s, base, lambda v: cabecalhos_bearer(jwt, v), a.serie)
+        print("  → Se alguma prova passou, o aw-tenant-code deixou de fazer falta."
+              if ok else
+              "  → A UEM não aceitou o token. O aw-tenant-code continua necessário.")
 
     if a.basic:
-        host = a.uem or UEM_PADRAO
-        base = host if host.startswith("http") else f"https://{host}"
         print(f"\n[Workspace ONE UEM] {base}")
         if not a.uem:
             print(f"  (host não informado; usando {UEM_PADRAO}, que é o `servers`"
@@ -346,21 +404,24 @@ def main() -> int:
         if not a.tenant_code:
             print("  ⚠ Sem aw-tenant-code. Se vier 401 em tudo, é o primeiro suspeito:")
             print("    a chave sai no console em Groups & Settings > All Settings >")
-            print("    System > Advanced > API > REST API.")
+            print("    System > Advanced > API > REST API. Ela é do organization")
+            print("    group, não de uma pessoa: quem tem o papel de admin lê ali.")
         usuario, senha = credencial_basica(a.usuario)
         if not usuario or not senha:
             raise SystemExit("Sem usuário e senha não dá para testar.")
         print(f"  usuário: {usuario}")
 
-        ok = provas_uem(s, base, usuario, senha, a.tenant_code, a.serie)
+        def cabecalho(versao):
+            return cabecalhos_basicos(usuario, senha, a.tenant_code, versao)
+
+        ok = provas_uem(s, base, cabecalho, a.serie)
         if not ok:
             print("\n  Nenhuma prova passou da autenticação. Ou a credencial não tem")
             print("  acesso de API (é um perfil à parte do acesso ao console), ou")
             print("  falta o aw-tenant-code, ou o host está errado.")
         if a.descobrir:
             print("\n[referência viva da UEM]")
-            descobrir(s, base, cabecalhos_basicos(usuario, senha, a.tenant_code, 1),
-                      Path(a.saida))
+            descobrir(s, base, cabecalho(1), Path(a.saida))
 
     resumo()
     return 0

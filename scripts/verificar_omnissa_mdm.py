@@ -66,7 +66,8 @@ class SessaoFalsa:
 
 
 s = SessaoFalsa()
-sonda.provas_uem(s, "https://as258.awmdm.com", "renner\\fulano", "x", "TENANT",
+sonda.provas_uem(s, "https://as258.awmdm.com",
+                 lambda v: sonda.cabecalhos_basicos("renner\\fulano", "x", "TENANT", v),
                  serie="ABC123")
 checar(len(s.chamadas) >= 5, f"as provas chamaram {len(s.chamadas)} caminhos")
 checar(all(m == "GET" for m, _ in s.chamadas),
@@ -108,16 +109,19 @@ metodos_http = {_nome_do_metodo(n) for n in chamadas_ast} & {
 checar(metodos_http <= {"post"},
        f"nenhum put/delete/patch no arquivo (sobrou: {sorted(metodos_http) or 'nada'})")
 
+# O único POST tolerado é o do token OAuth do Intelligence: outro host,
+# outro produto, e não é escrita em device nenhum.
+PODE_POSTAR = {"token_intelligence"}
 fora_do_intelligence = []
 for n in ast.walk(ARVORE):
-    if isinstance(n, ast.FunctionDef) and n.name != "intelligence":
+    if isinstance(n, ast.FunctionDef) and n.name not in PODE_POSTAR:
         for c in ast.walk(n):
             if isinstance(c, ast.Call) and _nome_do_metodo(c) in (
                     "post", "put", "delete", "patch"):
                 fora_do_intelligence.append(n.name)
 checar(not fora_do_intelligence,
-       "só a função do Intelligence faz POST (o token OAuth); "
-       f"as outras, não {sorted(set(fora_do_intelligence)) or ''}")
+       "só o pedido de token faz POST; as outras funções, não "
+       f"{sorted(set(fora_do_intelligence)) or ''}")
 
 checar(len(sonda.CAMINHOS_PROIBIDOS) >= 4,
        f"a lista do que não se chama está escrita ({len(sonda.CAMINHOS_PROIBIDOS)} itens)")
@@ -180,6 +184,20 @@ checar(cab["Accept"] == "application/json;version=2",
 sem_tenant = sonda.cabecalhos_basicos("a", "b", "", 1)
 checar("aw-tenant-code" not in sem_tenant,
        "sem tenant informado, o cabeçalho não é inventado")
+
+# O caminho Bearer: mesma bateria de provas, outra credencial. Serve para
+# descobrir se a instalação aceita o token do Intelligence — e assim
+# dispensar o aw-tenant-code, que ninguém tem em mãos hoje.
+b = sonda.cabecalhos_bearer("jwt-de-mentira", 1)
+checar(b["Authorization"] == "Bearer jwt-de-mentira", "o cabeçalho Bearer é montado")
+checar("aw-tenant-code" not in b,
+       "no Bearer não entra aw-tenant-code (é justamente o que se quer dispensar)")
+
+sb = SessaoFalsa()
+sonda.provas_uem(sb, "https://as258.awmdm.com",
+                 lambda v: sonda.cabecalhos_bearer("jwt-de-mentira", v))
+checar(all(m == "GET" for m, _ in sb.chamadas) and len(sb.chamadas) >= 4,
+       f"o caminho Bearer também é só leitura ({len(sb.chamadas)} GETs)")
 
 # Contraprova: a senha não pode aparecer em claro em cabeçalho nenhum.
 checar(all("segredo" not in str(v) for k, v in cab.items() if k != "Authorization"),

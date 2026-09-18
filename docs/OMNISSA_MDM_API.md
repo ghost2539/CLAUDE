@@ -54,6 +54,32 @@ A versão da API vai no **Accept**, não no caminho:
 Accept: application/json;version=1
 ```
 
+### A chave do Intelligence serve para descobrir o `aw-tenant-code`?
+
+**Não.** São duas credenciais de dois produtos. A do Intelligence é OAuth
+`client_credentials` (clientId + clientSecret → JWT, com alcance dado pelo
+campo `resourceIds`); o `aw-tenant-code` é uma string configurada no console
+da UEM, por organization group. Não há endpoint que devolva um a partir do
+outro, e o JWT não carrega essa informação.
+
+Duas saídas, que valem mais do que caçar quem tinha a chave:
+
+1. **A chave não é de ninguém.** É do organization group, e fica no console
+   em *Groups & Settings → All Settings → System → Advanced → API → REST
+   API*. Quem tiver o papel de admin lê ali. Se alguma integração da casa já
+   chama esta API, ela também está na configuração dessa integração.
+2. **Talvez nem seja necessária.** Se o token do Intelligence for aceito
+   pela UEM, o `aw-tenant-code` deixa de fazer falta. Isso **não** está na
+   especificação — ela declara Basic, ApiKey, GroupId e Cms, e nenhum
+   Bearer — mas custa uma requisição descobrir:
+   `--credencial cred.json --bearer`. Um 401 ali não condena a chave; diz
+   que este caminho não existe nesta instalação.
+
+O campo que decide o alcance do token é o `resourceIds` do arquivo de
+service account: se ali só constar o recurso do Intelligence, a UEM recusa
+por mais correta que a chave esteja. A sonda imprime esse campo antes de
+tentar, para que o 401 tenha explicação em vez de virar mistério.
+
 ### Qual credencial usar
 
 O portal **já tem uma credencial de serviço do MDM no cofre**
@@ -188,6 +214,9 @@ python3 scripts/testar_omnissa_mdm.py --uem as258.awmdm.com --basic --serie ABC1
 
 # a referência viva da instalação
 python3 scripts/testar_omnissa_mdm.py --uem as258.awmdm.com --basic --descobrir
+
+# sem o aw-tenant-code: o token do Intelligence vale na UEM?
+python3 scripts/testar_omnissa_mdm.py --credencial cred.json --bearer
 ```
 
 A senha **não** é aceita na linha de comando (`ps` mostra o comando inteiro
