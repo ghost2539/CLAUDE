@@ -80,6 +80,35 @@ service account: se ali só constar o recurso do Intelligence, a UEM recusa
 por mais correta que a chave esteja. A sonda imprime esse campo antes de
 tentar, para que o 401 tenha explicação em vez de virar mistério.
 
+### `errorCode 1005` — o que é e o que não é
+
+```json
+{"errorCode":1005,"message":"An error occurred while validating remote
+ service client credentials or user not found : renner\\001200660"}
+```
+
+Primeiro, o que **não** é problema: a barra dupla é só o JSON escapando uma
+barra literal, e o fato de a UEM devolver um erro estruturado com o nome do
+usuário prova que a requisição **chegou na API** — host e caminho certos.
+
+O que é: a recusa do **serviço REST**, que não é o mesmo portão do console.
+Três causas, e a segunda engana mais que as outras duas juntas:
+
+1. **falta o `aw-tenant-code`**;
+2. **a conta é de diretório (AD).** O Basic da API da UEM quer uma conta de
+   admin **do tipo Basic**, criada dentro da UEM. Entrar no console com a
+   conta do AD não implica que ela autentique na API — são caminhos de
+   autenticação diferentes;
+3. a conta existe, mas **não tem papel com acesso de API**.
+
+Nenhuma das três se resolve trocando a senha. O pedido certo ao time que
+administra o MDM é: *"uma conta de serviço do tipo Basic, com papel de API,
+no organization group X"* — e junto vem o `aw-tenant-code`, que é do
+organization group.
+
+Por isso a sonda **para no primeiro 401**: a primeira prova já respondeu, e
+insistir nas outras só soma tentativas de login falhas contra o AD.
+
 ### Qual credencial usar
 
 O portal **já tem uma credencial de serviço do MDM no cofre**

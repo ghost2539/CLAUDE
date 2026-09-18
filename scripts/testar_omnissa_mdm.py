@@ -52,8 +52,13 @@ sys.path.insert(0, str(RAIZ))
 TEMPO = 45
 
 # Host da API deste tenant, conforme o campo `servers` das quatro
-# especificações (mdmv1..mdmv4.json).
-UEM_PADRAO = "as258.awmdm.com"
+# especificações (mdmv1..mdmv4.json). As duas constantes existem separadas
+# de propósito: `UEM_PADRAO` é o que se usa e pode ser trocado enquanto se
+# investiga; `UEM_DA_ESPECIFICACAO` é o que o documento diz, e não muda. Se
+# alguém editar a primeira, a diferença aparece na tela em vez de o script
+# continuar afirmando que o host veio da especificação.
+UEM_DA_ESPECIFICACAO = "as258.awmdm.com"
+UEM_PADRAO = UEM_DA_ESPECIFICACAO
 
 # Caminhos que APAGAM. Estão aqui pelo nome para que a lista exista em
 # algum lugar do código e possa ser conferida — o script nunca os chama, e
@@ -254,6 +259,29 @@ def _diz(rotulo: str, codigo: int, corpo: str) -> None:
     print(f"  [{codigo or '---'}] {rotulo}: {leitura}")
     if codigo not in (200, 201, 204) and corpo:
         print(f"        {corpo[:200].strip()}")
+    for marca, explicacao in ERROS_DA_UEM.items():
+        if marca in corpo:
+            for linha in explicacao:
+                print(f"        {linha}")
+
+
+# O que os códigos de erro da própria UEM querem dizer. Sem isto, um 1005
+# parece "senha errada" e o tempo vai embora trocando senha.
+ERROS_DA_UEM = {
+    '"errorCode":1005': (
+        "→ 1005 é a recusa do serviço REST, não do console. Três causas, e a",
+        "  ordem importa porque a segunda é a que mais engana:",
+        "  1. falta o aw-tenant-code;",
+        "  2. a conta é de DIRETÓRIO (AD). O Basic da API da UEM quer conta de",
+        "     admin do tipo Basic, criada dentro da UEM. Entrar no console com",
+        "     a conta do AD não implica que ela autentique na API;",
+        "  3. a conta existe, mas não tem papel com acesso de API.",
+        "  Nenhuma delas se resolve trocando a senha.",
+    ),
+    '"errorCode":1001': (
+        "→ 1001 costuma ser o aw-tenant-code ausente ou inválido.",
+    ),
+}
 
 
 def provas_uem(s, base: str, cabecalho, serie: str = "") -> int:
@@ -265,6 +293,13 @@ def provas_uem(s, base: str, cabecalho, serie: str = "") -> int:
 
     Os caminhos NÃO são chute: saem de mdmv1..mdmv4.json, que declaram
     `servers: https://as258.awmdm.com/api/mdm`.
+
+    **Para no primeiro 401.** A primeira prova já respondeu se a credencial
+    autentica; insistir nas outras quatro só soma tentativas de login
+    falhas, e com conta de diretório é assim que se bloqueia a conta de
+    alguém. Repetir o mesmo erro quatro vezes não informa mais do que
+    uma — informa quatro vezes menos, porque gasta o orçamento de
+    tentativas que a pessoa tem até o AD travar.
     """
     autenticou = 0
     provas = [
@@ -282,6 +317,12 @@ def provas_uem(s, base: str, cabecalho, serie: str = "") -> int:
         _diz(rotulo, cod, corpo)
         if cod in (200, 201, 204, 400, 403):
             autenticou += 1
+        if cod == 401:
+            print(f"\n  Parei aqui: {len(provas) - 1} prova(s) não foram feitas.")
+            print("  A credencial foi recusada, e as outras seriam recusadas igual —")
+            print("  cada uma somando mais uma tentativa de login falha. Resolva a")
+            print("  credencial primeiro; depois rode de novo e a bateria vai até o fim.")
+            break
     return autenticou
 
 
@@ -480,8 +521,10 @@ def main() -> int:
     if a.basic:
         print(f"\n[Workspace ONE UEM] {base}")
         if not a.uem:
-            print(f"  (host não informado; usando {UEM_PADRAO}, que é o `servers`"
-                  " das especificações)")
+            print(f"  (host não informado; usando {UEM_PADRAO})")
+        if UEM_DA_ESPECIFICACAO not in base:
+            print(f"  ⚠ A especificação diz {UEM_DA_ESPECIFICACAO}; este host é"
+                  " outro. Se ambos responderem igual, o host não é o problema.")
         print("\n  ⚠ Se a senha estiver errada, cada tentativa conta como falha de")
         print("    login no AD. Confira a credencial ANTES de repetir, para não")
         print("    bloquear a conta.")

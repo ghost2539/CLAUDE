@@ -79,6 +79,49 @@ checar("/api/mdm/devices/search" in urls, "a base de coletores é lida por devic
 checar("/api/mdm/tags/search" in urls, "as tags são lidas por tags/search")
 checar("searchby=Serialnumber" in urls, "a busca por série usa searchby=Serialnumber")
 
+# Contraprova que vale caro: com 401, a bateria PARA. Insistir nas outras
+# provas só soma tentativas de login falhas — é assim que se bloqueia a
+# conta de alguém no AD sem descobrir nada de novo.
+class SessaoQueRecusa(SessaoFalsa):
+    def request(self, metodo, url, **kw):
+        super().request(metodo, url, **kw)
+
+        class R:
+            status_code = 401
+            text = ('{"errorCode":1005,"message":"An error occurred while '
+                    'validating remote service client credentials"}')
+        return R()
+
+
+s401 = SessaoQueRecusa()
+sonda.provas_uem(s401, "https://as258.awmdm.com", lambda v: {}, serie="ABC123")
+checar(len(s401.chamadas) == 1,
+       f"contraprova: 401 para a bateria na primeira prova ({len(s401.chamadas)} "
+       "tentativa, não 5)")
+
+# E o 1005 tem de ser explicado, não só ecoado: senão parece senha errada e
+# o tempo vai embora trocando senha.
+import io  # noqa: E402
+import contextlib  # noqa: E402
+
+saida = io.StringIO()
+with contextlib.redirect_stdout(saida):
+    sonda._diz("prova", 401, '{"errorCode":1005,"message":"..."}')
+texto_1005 = saida.getvalue()
+checar("DIRETÓRIO" in texto_1005 or "diretório" in texto_1005.lower(),
+       "o 1005 explica a conta de diretório, que é a causa que mais engana")
+checar("aw-tenant-code" in texto_1005, "o 1005 também cita o aw-tenant-code")
+checar("senha" in texto_1005.lower(),
+       "o 1005 diz que trocar a senha não resolve nenhuma das causas")
+
+# Contraprova: um 200 não pode sair carregando explicação de erro nenhuma.
+saida = io.StringIO()
+with contextlib.redirect_stdout(saida):
+    sonda._diz("prova", 200, '{"ok":true}')
+checar("1005" not in saida.getvalue(),
+       "contraprova: resposta boa não vem com diagnóstico de erro junto")
+
+
 # Contraprova: um POST tem de ser recusado pela própria sonda.
 recusou = False
 try:
