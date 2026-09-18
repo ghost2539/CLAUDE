@@ -33,8 +33,11 @@ O QUE TORNA O NÚMERO ERRADO
 ---------------------------
 *   **O fim do último intervalo.** Um chamado fechado há dois anos, cuja
     última fila foi SPARE, continuaria "na fila" até hoje se o intervalo
-    final fosse fechado em `agora`. Ele fecha em `closed_at`/`resolved_at`
-    quando o chamado está encerrado.
+    final fosse fechado em `agora`. Ele fecha em `resolved_at` — a data em
+    que o chamado foi RESOLVIDO —, e só cai para `closed_at` quando não há
+    resolução (o cancelado é o caso comum). No ServiceNow o encerramento é
+    automático dias depois da resolução, e medir até ele infla o tempo de
+    fila de todo chamado resolvido dentro dela.
 *   **O começo.** Antes da primeira mudança o chamado esteve na fila que é o
     `oldvalue` dessa primeira mudança — não na fila atual.
 *   **Ida e volta.** Somar só a primeira passagem subestima o atendimento de
@@ -305,6 +308,21 @@ except Exception:  # noqa: BLE001 — sem config, o valor padrão do ServiceNow
 _RE_CANCELADO = re.compile(r"cancel", re.I)
 
 
+# Estados em que o chamado ainda corre. Só serve para saber se a falta de
+# data de fim é normal (chamado aberto) ou suspeita (chamado terminado sem
+# carimbo nenhum).
+try:
+    _ESTADOS_ABERTO = {x.strip() for x in
+                       (getattr(_gs(), "SN_STATE_ABERTO", "1,2,3") or "1,2,3").split(",")
+                       if x.strip()}
+except Exception:  # noqa: BLE001
+    _ESTADOS_ABERTO = {"1", "2", "3"}
+
+
+def _ativo(estado_cru: str, estado_rotulo: str) -> bool:
+    return (estado_cru or "").strip() in _ESTADOS_ABERTO
+
+
 def _cancelado(estado_cru: str, estado_rotulo: str) -> bool:
     """Cancelado pelo código do estado ou pelo rótulo.
 
@@ -352,7 +370,19 @@ def medir(tabela: str, chamados: list[dict], fila: str) -> dict[str, dict]:
         estado = _valor_plano(c.get("estado_rotulo")) or _valor_plano(c.get("estado"))
         cancelado = _cancelado(_valor_plano(c.get("estado")), estado)
         abertura = _quando(c.get("opened_at"))
-        fim = _quando(c.get("closed_at")) or _quando(c.get("resolved_at"))
+        # RESOLVIDO primeiro, encerrado depois. No ServiceNow o encerramento
+        # é automático dias depois da resolução: usar `closed_at` estica o
+        # último intervalo por esses dias e infla o tempo de fila de TODO
+        # chamado resolvido dentro dela. Estava ao contrário aqui.
+        #
+        # `closed_at` continua como segunda opção porque há chamado que
+        # encerra sem passar por resolvido — o cancelado é o caso comum, e
+        # nele `resolved_at` vem vazio.
+        fim = _quando(c.get("resolved_at"))
+        origem_fim = "resolvido"
+        if fim is None:
+            fim = _quando(c.get("closed_at"))
+            origem_fim = "encerrado" if fim else ""
         do_chamado = eventos.get(sid) or []
 
         if do_chamado:
@@ -377,11 +407,20 @@ def medir(tabela: str, chamados: list[dict], fila: str) -> dict[str, dict]:
                      "passagens": 1}
             base = "sem troca de fila"
 
+        # Chamado que não está mais ativo e sem data nenhuma de fim: o último
+        # intervalo vai até AGORA, e isso infla o número sem avisar. É raro,
+        # mas quando acontece a linha tem de dizer.
+        sem_fim = fim is None and not _ativo(_valor_plano(c.get("estado")), estado)
         saida[sid] = {
             "medido": True, "segundos": r["segundos"], "horas": r["horas"],
             "passagens": r["passagens"], "legivel": _humano(r["segundos"]),
             "estado": estado, "cancelado": cancelado,
-            "base": "cancelado" if cancelado else base,
+            "base": ("sem data de encerramento" if sem_fim
+                     else ("cancelado" if cancelado else base)),
+            # A data que fechou a conta, e qual campo a deu. É o que permite
+            # conferir o número sem abrir o chamado.
+            "fim": fim.isoformat() if fim else "",
+            "fim_origem": origem_fim,
             "fila_atual": _valor_plano(c.get("fila_atual")),
             "motivo": "",
         }

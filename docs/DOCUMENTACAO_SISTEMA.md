@@ -301,8 +301,17 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
   responde "entrou quando?", e erra o caso que mais acontece: o chamado que
   vai, volta e é atendido de novo. Todas as passagens são somadas, e a tela
   diz quantas foram.
-  - O último intervalo fecha em `closed_at`/`resolved_at` quando o chamado
-    está encerrado. Fechando em *agora*, um chamado encerrado há dois anos
+  - O último intervalo fecha em **`resolved_at`** — a data em que o chamado
+    foi RESOLVIDO —, e só cai para `closed_at` quando não há resolução (o
+    cancelado é o caso comum). No ServiceNow o encerramento é automático dias
+    depois da resolução: medir até ele inflava o tempo de fila de todo
+    chamado resolvido dentro dela, em uma semana inteira nos casos observados.
+    As colunas *Fim da contagem* e *Fim veio de* mostram a data usada e de
+    qual campo veio, para conferir um tempo sem abrir o chamado.
+  - Chamado que já terminou e não tem data nenhuma de fim é marcado
+    `sem data de encerramento`: ali a conta vai até *agora* e infla. Chamado
+    ainda aberto não é marcado — nele a falta de data é o normal.
+  - Fechando em *agora* de qualquer modo, um chamado encerrado há dois anos
     com a última fila em SPARE mostraria dois anos de fila.
   - **Três bases de medição**, e a coluna *Base da medição* diz qual valeu em
     cada chamado: `histórico` (houve troca de fila), `sem troca de fila` (o

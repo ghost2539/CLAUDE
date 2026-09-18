@@ -563,6 +563,12 @@ COLUNAS_TEMPO = [
     # O estado do chamado ao lado do tempo, porque muda a leitura do número:
     # um chamado cancelado com 40 h de fila não é atendimento de 40 h.
     ("estado_chamado", "Estado"),
+    # A data que FECHOU a conta, e de qual campo ela veio. Sem isto não dá
+    # para conferir um tempo sem abrir o chamado — e foi um erro justamente
+    # aqui (medir até o encerramento em vez da resolução) que inflou os
+    # tempos de todo chamado resolvido dentro da fila.
+    ("tempo_fila_fim", "Fim da contagem"),
+    ("tempo_fila_fim_origem", "Fim veio de"),
     ("tempo_fila_base", "Base da medição"),
 ]
 # Para medir é preciso o sys_id (é como o histórico endereça o chamado), os
@@ -618,6 +624,8 @@ def _linhas_com_tempo(tabela: str, brutas: list[dict], fila: str) -> list[dict]:
         linha["tempo_fila_passagens"] = ("" if m.get("passagens") is None
                                          else m["passagens"])
         linha["estado_chamado"] = m.get("estado") or ""
+        linha["tempo_fila_fim"] = (m.get("fim") or "").replace("T", " ")[:19]
+        linha["tempo_fila_fim_origem"] = m.get("fim_origem") or ""
         # "Cancelado" vence as outras bases: é o que mais muda a leitura do
         # número, e quem olha a planilha precisa ver isso na mesma célula.
         linha["tempo_fila_base"] = (

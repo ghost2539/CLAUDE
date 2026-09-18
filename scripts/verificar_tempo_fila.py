@@ -107,6 +107,82 @@ errado = tf.intervalos_da_fila(
 checar(errado["horas"] > r["horas"] * 20,
        f"contraprova: ignorando o encerramento daria {errado['horas']}h")
 
+print("\n[3b] Resolvido X encerrado: a conta fecha na RESOLUÇÃO")
+# No ServiceNow o encerramento é automático DIAS depois da resolução. Medir
+# até `closed_at` estica o último intervalo por esses dias e infla o tempo de
+# fila de todo chamado resolvido dentro dela. Era o que acontecia.
+RESOLVIDO = t(3, 10)          # resolvido no dia 3
+ENCERRADO = t(10, 10)         # encerrado sete dias depois, automaticamente
+por_resolucao = tf.intervalos_da_fila(
+    [ev(t(1, 10), OUTRA, SPARE)], "SPARE",
+    abertura=t(1, 8), fim=RESOLVIDO, agora=t(30, 0))
+por_encerramento = tf.intervalos_da_fila(
+    [ev(t(1, 10), OUTRA, SPARE)], "SPARE",
+    abertura=t(1, 8), fim=ENCERRADO, agora=t(30, 0))
+checar(por_resolucao["horas"] == 48.0,
+       f"pela resolução, 2 dias ({por_resolucao['horas']}h)")
+checar(por_encerramento["horas"] == 216.0,
+       f"contraprova: pelo encerramento seriam {por_encerramento['horas']}h — "
+       "os 7 dias de espera do fechamento automático entram como fila")
+
+# E é `medir` que escolhe entre os dois. Aqui está a regressão de verdade.
+um = [{"sys_id": "1" * 32, "opened_at": "2026-09-01 08:00:00",
+       "resolved_at": "2026-09-03 10:00:00", "closed_at": "2026-09-10 10:00:00",
+       "estado": "7", "estado_rotulo": "Encerrado", "fila_atual": SPARE}]
+antes_get = tf._get
+tf._get = lambda c, p, timeout=60: (
+    {"result": [{"documentkey": "1" * 32, "oldvalue": OUTRA, "newvalue": SPARE,
+                 "sys_created_on": "2026-09-01 10:00:00"}]}
+    if c == "/api/now/table/sys_audit" else {"result": []})
+r3b = tf.medir("incident", um, "SPARE")["1" * 32]
+tf._get = antes_get
+checar(r3b["horas"] == 48.0,
+       f"medir() usa resolved_at, não closed_at ({r3b['horas']}h, não 216)")
+checar(r3b["fim_origem"] == "resolvido",
+       "e a linha diz de qual campo a data de fim veio")
+checar(r3b["fim"].startswith("2026-09-03"),
+       "com a data, para conferir o tempo sem abrir o chamado")
+
+print("\n[3c] Sem resolução, cai para o encerramento")
+# Chamado que encerra sem passar por resolvido — o cancelado é o caso comum,
+# e nele `resolved_at` vem vazio. Sem a segunda opção, ele ficaria sem fim e
+# a conta iria até agora.
+so_encerrado = [{"sys_id": "2" * 32, "opened_at": "2026-09-01 08:00:00",
+                 "resolved_at": "", "closed_at": "2026-09-02 08:00:00",
+                 "estado": "8", "estado_rotulo": "Cancelado", "fila_atual": SPARE}]
+tf._get = lambda c, p, timeout=60: (
+    {"result": [{"documentkey": "2" * 32, "oldvalue": OUTRA, "newvalue": SPARE,
+                 "sys_created_on": "2026-09-01 08:00:00"}]}
+    if c == "/api/now/table/sys_audit" else {"result": []})
+r3c = tf.medir("incident", so_encerrado, "SPARE")["2" * 32]
+tf._get = antes_get
+checar(r3c["horas"] == 24.0, f"usa closed_at quando não há resolução ({r3c['horas']}h)")
+checar(r3c["fim_origem"] == "encerrado", "e diz que foi pelo encerramento")
+
+print("\n[3d] Terminado e sem data nenhuma: a linha avisa")
+# O último intervalo iria até AGORA e inflaria o número sem avisar.
+sem_data = [{"sys_id": "3" * 32, "opened_at": "2026-09-01 08:00:00",
+             "resolved_at": "", "closed_at": "", "estado": "7",
+             "estado_rotulo": "Encerrado", "fila_atual": SPARE}]
+tf._get = lambda c, p, timeout=60: (
+    {"result": [{"documentkey": "3" * 32, "oldvalue": OUTRA, "newvalue": SPARE,
+                 "sys_created_on": "2026-09-01 08:00:00"}]}
+    if c == "/api/now/table/sys_audit" else {"result": []})
+r3d = tf.medir("incident", sem_data, "SPARE")["3" * 32]
+tf._get = antes_get
+checar(r3d["base"] == "sem data de encerramento",
+       "chamado terminado sem carimbo de fim é marcado")
+# Chamado ABERTO sem data de fim é normal, e não pode ser marcado.
+aberto = [dict(sem_data[0], sys_id="4" * 32, estado="2", estado_rotulo="Em andamento")]
+tf._get = lambda c, p, timeout=60: (
+    {"result": [{"documentkey": "4" * 32, "oldvalue": OUTRA, "newvalue": SPARE,
+                 "sys_created_on": "2026-09-01 08:00:00"}]}
+    if c == "/api/now/table/sys_audit" else {"result": []})
+r3e = tf.medir("incident", aberto, "SPARE")["4" * 32]
+tf._get = antes_get
+checar(r3e["base"] == "histórico",
+       "e o chamado ainda ABERTO não é — nele a falta de data é normal")
+
 print("\n[4] Chamado ABERTO na fila: conta até agora")
 r = tf.intervalos_da_fila(
     [ev(t(1, 10), OUTRA, SPARE)], "SPARE",
@@ -156,6 +232,8 @@ sc._cfg.SN_API_USER, sc._cfg.SN_API_PASS = "zabbix", "senha-que-nao-pode-sair"
 ID_SPARE = "9" * 32          # o sys_id da fila do SPARE, para a tradução
 CHAMADOS = {
     # sys_id: (número, abertura, encerramento, estado, fila atual, eventos)
+    # Resolvido no dia 7 e encerrado no 14: o fechamento automático vem dias
+    # depois, e a conta tem de parar na resolução.
     "a" * 32: ("INC0000001", t(1, 8), t(7, 0), "7", OUTRA, [
         (t(1, 10), OUTRA, SPARE), (t(2, 10), SPARE, TERCEIRA),
         (t(4, 10), TERCEIRA, SPARE), (t(6, 10), SPARE, OUTRA)]),
@@ -415,11 +493,15 @@ def _com_chamados(caminho, params, timeout=60):
             # `display_value=all`: cada campo volta como {value, display_value}.
             # É assim que a data sai em UTC e o estado sai com rótulo na mesma
             # resposta, e é o formato que `_valor_cru`/`_valor_plano` esperam.
+            # `resolved_at` é a data real de resolução; `closed_at` vem uma
+            # semana depois, como o fechamento automático do ServiceNow. Se a
+            # conta usar o segundo, o tempo de fila infla em 7 dias.
             crus = {"sys_id": sid, "number": num,
                     "opened_at": ab.strftime("%Y-%m-%d %H:%M:%S"),
-                    "closed_at": fe.strftime("%Y-%m-%d %H:%M:%S") if fe else "",
-                    "resolved_at": "", "state": est,
-                    "assignment_group.name": grupo}
+                    "closed_at": ((fe + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                                  if fe else ""),
+                    "resolved_at": fe.strftime("%Y-%m-%d %H:%M:%S") if fe else "",
+                    "state": est, "assignment_group.name": grupo}
             rotulos = dict(crus, state={"7": "Encerrado", "8": "Cancelado"}.get(est, est))
             linhas.append({c: {"value": crus.get(c, ""),
                                "display_value": rotulos.get(c, "")} for c in pedidos})
@@ -435,7 +517,8 @@ r12 = cliente.post("/api/sn-consulta/exportar", json={
 checar(r12.status_code == 200, f"HTTP 200 ({r12.status_code})")
 linhas12 = [l for l in r12.text.splitlines() if l.strip()]
 checar("Horas na fila" in linhas12[0] and "Base da medição" in linhas12[0]
-       and "Estado" in linhas12[0],
+       and "Estado" in linhas12[0] and "Fim da contagem" in linhas12[0]
+       and "Fim veio de" in linhas12[0],
        "o cabeçalho traz as colunas calculadas")
 checar(linhas12[1].endswith("tempo_fila_base"),
        "e a linha técnica também, para quem for cruzar com outro sistema")
@@ -458,6 +541,14 @@ checar(float(por_num["INC0000005"].split(";")[1]) == 24.0,
        "com o tempo saindo assim mesmo")
 checar(float(por_num["INC0000006"].split(";")[1]) == 48.0,
        "e o histórico gravado por sys_id é traduzido antes de comparar")
+# A regressão que motivou esta rodada: com `closed_at` (uma semana depois) o
+# mesmo chamado sairia com 7 dias a mais.
+checar("resolvido" in por_num["INC0000001"],
+       "o arquivo diz que a conta fechou na RESOLUÇÃO")
+checar("2026-09-07" in por_num["INC0000001"],
+       "com a data da resolução, não a do encerramento (2026-09-14)")
+checar("2026-09-14" not in por_num["INC0000001"],
+       "e a data do encerramento automático não entra na conta")
 
 print("\n[12b] O arquivo diz o que aconteceu com a medição")
 # "O arquivo não trouxe os tempos" é indiagnosticável de fora: quem está com
