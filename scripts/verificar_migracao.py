@@ -307,7 +307,11 @@ bloco = bloco[:bloco.index("];")]
 abas = re.findall(r"\['([a-z-]+)',\s*'([^']+)'\]", bloco)
 faltando = sorted(rot for chave, rot in abas if rot not in doc)
 checar(not faltando, f"toda aba de Configuração está no catálogo ({faltando})")
-checar(len(abas) >= 15, f"o catálogo cobre as {len(abas)} abas de Configuração")
+# Guarda da LEITURA, não do número: se o regex deixar de casar, `abas` vem
+# vazio e a conferência acima passaria sem conferir nada. O "15" que estava
+# aqui era a contagem de outra época e falhava sozinho — número de abas é
+# fato que muda, não regra.
+checar(len(abas) >= 10, f"as abas de Configuração foram lidas ({len(abas)} achadas)")
 
 # Documento citado que não existe manda quem lê procurar o que não há.
 citados = set(re.findall(r"`(docs/[A-Z_]+\.md)`", doc))
