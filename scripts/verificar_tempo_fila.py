@@ -177,8 +177,18 @@ CHAMADOS = {
 chamadas: list[dict] = []
 
 
+# O que servidor e proxy fazem com URL grande: 414. Sem isto a verificação
+# passava feliz com uma query de 8,3 KB que estourava em produção — e foi
+# assim que o 414 da exportação escapou daqui.
+LIMITE_URL = 8000
+
+
 def _falso_get(caminho, params, timeout=60):
     chamadas.append({"caminho": caminho, "params": dict(params)})
+    tamanho = sum(len(str(k)) + len(str(v)) + 2 for k, v in params.items())
+    if tamanho > LIMITE_URL:
+        from fastapi import HTTPException as _HE
+        raise _HE(502, f"ServiceNow retornou 414 (URL de {tamanho} bytes).")
     q = params.get("sysparm_query", "")
     if caminho == "/api/now/table/sys_audit":
         querem = set(q.split("documentkeyIN")[1].split("^")[0].split(",")) \
@@ -270,6 +280,34 @@ checar(all(c["params"].get("sysparm_display_value") == "false"
 checar(all("fieldname=assignment_group" in c["params"]["sysparm_query"]
            for c in chamadas if c["caminho"] == "/api/now/table/sys_audit"),
        "e só as trocas de fila, não a auditoria inteira do chamado")
+
+print("\n[8e] Lista longa de chamados: a URL não estoura")
+# O 414 que apareceu na exportação. O lote de 250 foi dimensionado para
+# NÚMEROS de chamado (INC1234567, 11 caracteres) e depois reusado para listas
+# de sys_id, que têm 32: os mesmos 250 itens passaram de 2,7 KB para 8,3 KB.
+# Na tela não aparecia (ela pede 100 por vez); só a exportação chegava lá.
+MUITOS = [{"sys_id": f"{i:032x}", "opened_at": "2026-09-01 08:00:00",
+           "closed_at": "2026-09-05 08:00:00", "estado": "7",
+           "estado_rotulo": "", "fila_atual": SPARE}
+          for i in range(1, 1201)]
+chamadas.clear()
+res_muitos = tf.medir("incident", MUITOS, "SPARE")
+checar(len(res_muitos) == 1200, "1.200 chamados medidos sem estourar a URL")
+consultas = [c for c in chamadas if c["caminho"] == "/api/now/table/sys_audit"]
+checar(len(consultas) >= 6,
+       f"a lista foi partida por TAMANHO, não por contagem ({len(consultas)} blocos)")
+maior = max(len(c["params"]["sysparm_query"]) for c in consultas)
+checar(maior <= sc.TETO_QUERY,
+       f"e a maior query cabe no teto ({maior} de {sc.TETO_QUERY} caracteres)")
+
+# Contraprova: 250 sys_ids por bloco, como era antes, passa do limite.
+fixo = len("tablename=incident^fieldname=assignment_group"
+           "^documentkeyIN^ORDERBYsys_created_on")
+antes = fixo + len(",".join(m["sys_id"] for m in MUITOS[:250]))
+checar(antes > LIMITE_URL,
+       f"contraprova: 250 sys_ids num bloco davam {antes} caracteres — o 414")
+checar(fixo + len(",".join(f"INC{i:07d}" for i in range(250))) < LIMITE_URL,
+       "e com 250 NÚMEROS cabia, que é por isso que o defeito passou despercebido")
 
 print("\n[9] A média não conta quem nunca passou pela fila")
 app = main.app

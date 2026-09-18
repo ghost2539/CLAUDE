@@ -142,7 +142,12 @@ def _audit_por_chamado(sys_ids: list[str], tabela: str) -> dict[str, list[dict]]
     mesmo motivo da lista de chamados: a query viaja na URL.
     """
     saida: dict[str, list[dict]] = {}
-    for bloco in _blocos(sys_ids, LOTE_NUMEROS):
+    # O que a query gasta ANTES dos ids. Sem descontar isto o bloco estoura a
+    # URL: foi daqui que veio um 414 na exportação — 250 `sys_id` de 32
+    # caracteres dão 8,3 KB, contra 2,7 KB dos mesmos 250 números de chamado.
+    fixo = len(f"tablename={tabela}^fieldname={CAMPO_FILA}"
+               "^documentkeyIN^ORDERBYsys_created_on") + 40
+    for bloco in _blocos(sys_ids, LOTE_NUMEROS, reservado=fixo):
         dados = _get("/api/now/table/sys_audit", {
             "sysparm_query": (f"tablename={tabela}^fieldname={CAMPO_FILA}"
                               "^documentkeyIN" + ",".join(bloco)
@@ -181,7 +186,8 @@ def _nomes_dos_grupos(ids: list[str]) -> dict[str, str]:
     """
     faltando = [i for i in dict.fromkeys(ids)
                 if _RE_SYS_ID.match(i) and i not in _cache_grupos]
-    for bloco in _blocos(faltando, LOTE_NUMEROS):
+    # Mesma conta do sys_audit: são sys_id, e sys_id é longo.
+    for bloco in _blocos(faltando, LOTE_NUMEROS, reservado=len("sys_idIN") + 40):
         try:
             dados = _get("/api/now/table/sys_user_group", {
                 "sysparm_query": "sys_idIN" + ",".join(bloco),

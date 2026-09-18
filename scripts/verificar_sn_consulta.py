@@ -467,8 +467,19 @@ checar(len(d20["linhas"]) <= TETO_TELA_ESPERADO,
 tabela = [c for c in chamadas if c["caminho"].startswith("/api/now/table/")]
 checar(len(tabela) >= 22,
        f"a lista foi partida em blocos ({len(tabela)} chamadas ao ServiceNow)")
-checar(all(len(c["params"]["sysparm_query"]) < 8000 for c in tabela),
-       "e nenhum bloco chega perto do limite de tamanho da URL")
+checar(all(len(c["params"]["sysparm_query"]) <= sc.TETO_QUERY for c in tabela),
+       "e nenhum bloco passa do teto de tamanho da query")
+# O corte é por TAMANHO, não por contagem: o mesmo lote de 250 itens dá 2,7 KB
+# com números de chamado e 8,3 KB com sys_id. Contar itens deixou passar um
+# 414 na exportação; medir caracteres não deixa.
+checar(sc.TETO_QUERY < LIMITE_URL,
+       "o teto da query fica abaixo do que o servidor aceita, com folga")
+longos = [f"{i:032x}" for i in range(500)]
+blocos_longos = list(sc._blocos(longos, sc.LOTE_NUMEROS, reservado=100))
+checar(all(len(",".join(b)) + 100 <= sc.TETO_QUERY for b in blocos_longos),
+       "e itens longos (sys_id) geram blocos menores, automaticamente")
+checar(len(blocos_longos) > len(longos) // sc.LOTE_NUMEROS,
+       "mais blocos que a contagem daria — é o tamanho que manda")
 checar(all("numberIN" in c["params"]["sysparm_query"] for c in tabela),
        "cada bloco pergunta pelos números daquele bloco")
 

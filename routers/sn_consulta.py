@@ -109,6 +109,19 @@ TETO_TELA = 1000
 # servidor e proxy costumam aceitar, e mantêm o número de idas ao
 # ServiceNow razoável (5 mil chamados = 20 blocos).
 LOTE_NUMEROS = 250
+# Quanto a `sysparm_query` pode ocupar. Servidor e proxy costumam aceitar ~8
+# KB de URL INTEIRA; 6 KB para a query deixa folga para o resto (os campos
+# pedidos, o limite, o offset) e para o que o proxy acrescenta.
+#
+# Contar POR ITEM não basta, e foi assim que veio um 414: o lote de 250 foi
+# dimensionado para números de chamado (`INC1234567`, 11 caracteres), e
+# depois reusado para listas de `sys_id`, que têm 32. Os mesmos 250 itens
+# passaram de 2,7 KB para 8,3 KB e estouraram. Na tela não aparecia — ela
+# pede 100 por vez; só a exportação, em lotes de 250, chegava lá.
+#
+# Por isso o corte é por TAMANHO, não por contagem: o que cabe numa URL é
+# medido em caracteres.
+TETO_QUERY = 6000
 # Teto da lista colada. Não é "o máximo que dá": é onde paramos para uma
 # colagem errada (a planilha inteira, em vez da coluna) não virar centenas
 # de idas ao ServiceNow.
@@ -643,9 +656,30 @@ def _numeros_pedidos(texto: str) -> list[str]:
     return saida
 
 
-def _blocos(numeros: list[str], tamanho: int = LOTE_NUMEROS):
-    for i in range(0, len(numeros), tamanho):
-        yield numeros[i:i + tamanho]
+def _blocos(valores: list[str], tamanho: int = LOTE_NUMEROS, reservado: int = 0):
+    """Fatia a lista de modo que cada bloco caiba numa URL.
+
+    Dois limites ao mesmo tempo: `tamanho` (quantos itens, para não fazer
+    lotes gigantes de itens curtos) e `TETO_QUERY` (quantos caracteres, que é
+    o que a URL de fato tem). `reservado` é o resto da query — o `campoIN`, os
+    outros filtros, o ORDERBY — que também ocupa lugar.
+
+    O limite por caracteres é o que importa e o que faltava: um item de 32
+    caracteres (`sys_id`) e um de 11 (`INC1234567`) não cabem na mesma
+    quantidade, e tratar os dois pelo mesmo número deu 414 na exportação.
+    """
+    orcamento = max(200, TETO_QUERY - reservado)
+    bloco: list[str] = []
+    usado = 0
+    for v in valores:
+        custo = len(v) + 1  # o item mais a vírgula que o separa
+        if bloco and (len(bloco) >= tamanho or usado + custo > orcamento):
+            yield bloco
+            bloco, usado = [], 0
+        bloco.append(v)
+        usado += custo
+    if bloco:
+        yield bloco
 
 
 def _query_do_bloco(bloco: list[str], base: str) -> str:
@@ -667,7 +701,10 @@ def _percorrer(tabela: str, base: str, numeros: list[str], campos: list[str],
         yield from _paginar_por_sys_id(tabela, base, campos, rotulos, teto)
         return
     trazidos = 0
-    for bloco in _blocos(numeros):
+    # O `numberIN`, o resto dos filtros e o `^ORDERBYsys_id` que a paginação
+    # acrescenta já ocupam lugar; o bloco fica com o que sobra.
+    reservado = len(CAMPO_NUMERO) + 2 + len(base) + len("^ORDERBYsys_id") + 40
+    for bloco in _blocos(numeros, reservado=reservado):
         if trazidos >= teto:
             return
         for linha in _paginar_por_sys_id(tabela, _query_do_bloco(bloco, base),

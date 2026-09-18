@@ -325,10 +325,14 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
     portal responde *não medido*, nunca zero.
   - Isto substitui, para esta pergunta, o `SN_TMA_START_FIELD`
     (`u_data_bouncing`) usado nos Indicadores, que é campo único.
-- **A lista de chamados vai em blocos de 250.** A *encoded query* viaja na
-  URL (`sysparm_query=numberIN INC1,INC2,…`), e 5 mil números dão uns 60 KB —
-  nenhum servidor aceita, e o que volta é 414 ou um 400 sem explicação. A
-  lista é partida, cada bloco vira uma consulta e os resultados se somam.
+- **As listas vão em blocos medidos em CARACTERES, não em itens.** A
+  *encoded query* viaja na URL (`sysparm_query=numberIN INC1,INC2,…`), e 5
+  mil números dão uns 60 KB — nenhum servidor aceita, e o que volta é 414. O
+  corte é por tamanho (`TETO_QUERY`, 6 KB) porque contar itens não basta: os
+  mesmos 250 itens dão 2,7 KB com números de chamado (`INC1234567`) e 8,3 KB
+  com `sys_id` (32 caracteres). Um lote dimensionado para números e reusado
+  para sys_ids foi exatamente o 414 que apareceu na exportação com medição de
+  tempo — e não aparecia na tela, que pede 100 por vez.
 - **Erro no meio da exportação não vira arquivo vazio.** Com
   `StreamingResponse` o HTTP 200 e os cabeçalhos já saíram quando a primeira
   linha é gerada, então uma exceção depois disso dava download truncado —
