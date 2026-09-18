@@ -287,6 +287,10 @@ def create_app() -> FastAPI:
         # cálculo dos intervalos é o que erra, e merece ficar isolado.
         from routers.sn_tempo_fila import router as sn_tempo_fila_router
         app.include_router(sn_tempo_fila_router)
+        # Coleta das filas de técnico de campo (botão "Exportar - DADOS 2").
+        # A mesma lógica que scripts/chamados_campo_lojas.py usa.
+        from routers.sn_campo_lojas import router as sn_campo_lojas_router
+        app.include_router(sn_campo_lojas_router)
     except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
         logging.getLogger("sn_consulta").error(
             "Consulta de chamados do ServiceNow NÃO carregada (portal segue sem ela): %s",

@@ -487,6 +487,30 @@ async function renderConsulta(c, S) {
                 'Para um período, use dois filtros no mesmo campo: ' +
                 '<b>a partir de</b> e <b>até</b>.</p>' +
             '</div></div>' +
+        '<div class="card mb-3"><div class="card-header">Coleta pronta</div>' +
+            '<div class="card-body">' +
+                '<p class="text-muted" style="margin-top:0">Chamados das quatro filas de ' +
+                    '<b>técnico de campo</b> (ENACEL_LOJAS, RNR_VSiT, SKY_LOJAS, ' +
+                    'RNR_LOJAS_REMOTO), pela tabela <code>task_sla</code>, com o tempo que ' +
+                    'cada um ficou na fila dele. Uma linha por chamado, coluna de mês, e ' +
+                    'resumo por mês e fila no fim do arquivo.<br>' +
+                    'Período longo demora: são duas passadas no ServiceNow, a segunda em ' +
+                    'lotes. Comece por um trimestre se quiser conferir antes.</p>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label for="cn-d2-desde">De</label>' +
+                        '<input id="cn-d2-desde" class="form-control" type="date" ' +
+                        'value="2025-01-01" style="max-width:190px"></div>' +
+                    '<div class="form-group"><label for="cn-d2-ate">Até</label>' +
+                        '<input id="cn-d2-ate" class="form-control" type="date" ' +
+                        'style="max-width:190px"></div>' +
+                '</div>' +
+                '<div class="btn-row mt-2">' +
+                    (podeExportar
+                        ? '<button id="cn-dados2" class="btn btn-primary" type="button">' +
+                              'Exportar - DADOS 2</button>'
+                        : '<span class="text-muted">Exportar pede a permissão própria.</span>') +
+                '</div>' +
+            '</div></div>' +
         '<div class="card mb-3"><div class="card-body btn-row">' +
             '<button id="cn-buscar" class="btn btn-primary" type="button">Consultar</button>' +
             (podeExportar
@@ -942,6 +966,44 @@ async function renderConsulta(c, S) {
     };
     contarNumeros();
     document.getElementById('cn-buscar').onclick = function () { consultar(1); };
+
+    /* DADOS 2: a coleta de técnico de campo. Filas, colunas e o cálculo do
+       tempo são do servidor (routers/sn_campo_lojas.py) — a mesma lógica que
+       scripts/chamados_campo_lojas.py usa, para o botão e o script não darem
+       números diferentes para a mesma pergunta. */
+    var d2Ate = document.getElementById('cn-d2-ate');
+    if (d2Ate && !d2Ate.value) d2Ate.value = new Date().toISOString().slice(0, 10);
+
+    if (podeExportar) {
+        document.getElementById('cn-dados2').onclick = async function () {
+            var b = this, antes = b.textContent;
+            var desde = document.getElementById('cn-d2-desde').value;
+            var ate = document.getElementById('cn-d2-ate').value;
+            if (!desde || !ate) { S.toast('Informe o período.', 'warning'); return; }
+            b.disabled = true;
+            // Sem barra de progresso: o servidor faz as duas passadas e só
+            // então manda o arquivo. O que dá para prometer é dizer que está
+            // trabalhando — e o arquivo avisa, no fim, se parou no meio.
+            b.textContent = 'Coletando… pode demorar';
+            try {
+                var r = await S.api('/sn-consulta/campo-lojas/exportar', {
+                    method: 'POST', body: { desde: desde, ate: ate }
+                });
+                var blob = await r.blob();
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'campo_lojas_' + desde + '_a_' + ate + '.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                S.toast('Arquivo gerado. Confira as últimas linhas: elas dizem se a ' +
+                        'coleta terminou inteira.', 'success');
+            } catch (x) {
+                S.toast(x.message, 'error');
+            } finally {
+                b.textContent = antes; b.disabled = false;
+            }
+        };
+    }
 
     if (podeExportar) {
         document.getElementById('cn-exportar').onclick = async function () {

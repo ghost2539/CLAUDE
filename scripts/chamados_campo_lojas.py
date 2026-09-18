@@ -70,114 +70,26 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("PORTAL_SESSION_SECRET", "consulta-avulsa-sem-sessao")
 from routers.sn_tempo_fila import intervalos_da_fila, _humano  # noqa: E402
 
-# ── As quatro filas de técnico de campo ────────────────────────────────
-# Casadas por TRECHO do nome (contém), como pedido: se a instalação tiver
-# sufixo no nome do grupo, a busca por igualdade perderia o chamado.
-FILAS = [
-    "TI_N2_FLD_ENACEL_LOJAS",
-    "TI_N2_FLD_RNR_VSiT",
-    "TI_N2_FLD_SKY_LOJAS",
-    "TI_N2_FLD_RNR_LOJAS_REMOTO",
-]
-
-CAMPO_FILA = "assignment_group"
-LOTE_SYS_ID = 150          # sys_id tem 32 caracteres; a query viaja na URL
-_RE_SYS_ID = re.compile(r"^[0-9a-f]{32}$")
-_FMT = "%Y-%m-%d %H:%M:%S"
-
-COLUNAS = [
-    ("mes", "Mês"),
-    ("numero", "Chamado"),
-    ("aberto_em", "Aberto em"),
-    ("solicitante", "Solicitante"),
-    ("categoria", "Categoria"),
-    ("subcategoria", "Subcategoria"),
-    ("fila", "Fila"),
-    ("horas_na_fila", "Horas na fila"),
-    ("tempo_na_fila", "Tempo na fila"),
-    ("idas_a_fila", "Idas à fila"),
-    ("estado", "Estado"),
-    ("fim_contagem", "Fim da contagem"),
-    ("fim_origem", "Fim veio de"),
-    ("base_medicao", "Base da medição"),
-]
-
-
-def _quando(bruto) -> datetime | None:
-    texto = _v(bruto).strip()
-    if not texto:
-        return None
-    for fmt in (_FMT, "%d/%m/%Y %H:%M:%S", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(texto[:19], fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
-
-
-def _qual_fila(nome: str) -> str:
-    """Qual das quatro filas este grupo é. Vazio se nenhuma."""
-    alto = (nome or "").upper()
-    for f in FILAS:
-        if f.upper() in alto:
-            return f
-    return ""
+# A REGRA é do router; aqui fica só o transporte. Duas cópias da mesma regra
+# divergem, e regra de medição que diverge não dá erro: dá número diferente
+# no botão e no script, para a mesma pergunta.
+from routers.sn_campo_lojas import (  # noqa: E402
+    CAMPOS_TASK_SLA, CAMPO_FILA, COLUNAS, FILAS, LOTE_SYS_ID,
+    aplicar_nomes, evento, linhas_resumo, medir_chamados, montar_chamados,
+    query_task_sla, sys_ids_de_grupo,
+)
 
 
 # ── Fase 1: os chamados, pela task_sla ─────────────────────────────────
 def buscar_chamados(desde: str, ate: str) -> list[dict]:
-    """Um registro por CHAMADO (não por SLA), das quatro filas, no período."""
-    # `^OR` agrupa com a condição anterior; um `^` seguinte começa um novo
-    # grupo em E. Por isso as quatro filas vêm PRIMEIRO, e as datas depois:
-    # (fila1 OU fila2 OU fila3 OU fila4) E (aberto no período).
-    ors = "^OR".join(f"task.{CAMPO_FILA}.nameLIKE{f}" for f in FILAS)
-    query = (f"{ors}"
-             f"^task.opened_at>=javascript:gs.dateGenerate('{desde}','00:00:00')"
-             f"^task.opened_at<=javascript:gs.dateGenerate('{ate}','23:59:59')")
-    campos = ",".join([
-        "task.sys_id", "task.number", "task.opened_at",
-        "task.caller_id", "task.opened_by", "task.requested_for",
-        "task.category", "task.subcategory",
-        f"task.{CAMPO_FILA}.name", "task.state",
-        "task.resolved_at", "task.closed_at",
-    ])
     print(f"  fase 1: lendo task_sla de {desde} a {ate}…")
-    linhas = consultar("task_sla", query, campos, display=True)
+    linhas = consultar("task_sla", query_task_sla(desde, ate),
+                       CAMPOS_TASK_SLA, display=True)
     print(f"          {len(linhas)} linhas de SLA")
-
-    # Uma `task` tem uma linha de `task_sla` por SLA. Sem deduplicar, o mesmo
-    # atendimento entraria várias vezes na contagem do mês.
-    por_chamado: dict[str, dict] = {}
-    for l in linhas:
-        sid = _v(l.get("task.sys_id"))
-        if not sid or sid in por_chamado:
-            continue
-        grupo = _v(l.get(f"task.{CAMPO_FILA}.name"))
-        fila = _qual_fila(grupo)
-        if not fila:
-            continue
-        aberto = _quando(l.get("task.opened_at"))
-        por_chamado[sid] = {
-            "sys_id": sid,
-            "numero": _v(l.get("task.number")),
-            "aberto_em": _v(l.get("task.opened_at")),
-            "mes": aberto.strftime("%Y-%m") if aberto else "",
-            "solicitante": (_v(l.get("task.caller_id"))
-                            or _v(l.get("task.requested_for"))
-                            or _v(l.get("task.opened_by"))),
-            "categoria": _v(l.get("task.category")),
-            "subcategoria": _v(l.get("task.subcategory")),
-            "fila": fila,
-            "estado": _v(l.get("task.state")),
-            "_aberto": aberto,
-            # A RESOLUÇÃO fecha a conta; o encerramento é automático dias
-            # depois e inflaria o tempo.
-            "_resolvido": _quando(l.get("task.resolved_at")),
-            "_encerrado": _quando(l.get("task.closed_at")),
-        }
-    print(f"          {len(por_chamado)} chamados distintos "
-          f"({len(linhas) - len(por_chamado)} linhas eram SLA repetido do mesmo chamado)")
-    return list(por_chamado.values())
+    chamados = montar_chamados(linhas)
+    print(f"          {len(chamados)} chamados distintos "
+          f"({len(linhas) - len(chamados)} linhas eram SLA repetido ou de outra fila)")
+    return chamados
 
 
 # ── Fase 2: o tempo em fila, pelo histórico ────────────────────────────
@@ -188,20 +100,14 @@ def buscar_historico(sys_ids: list[str]) -> dict[str, list[dict]]:
     for i, lote in enumerate(lotes, 1):
         print(f"  fase 2: histórico, lote {i}/{len(lotes)}…", end="\r", flush=True)
         # Sem `tablename=`: o sys_audit guarda a tabela REAL (incident,
-        # sc_req_item), e filtrar por `task` não casaria com nada — o
-        # resultado seria zero para todo mundo, sem erro nenhum.
-        linhas = consultar(
-            "sys_audit",
-            f"fieldname={CAMPO_FILA}^documentkeyIN{','.join(lote)}"
-            "^ORDERBYsys_created_on",
-            "documentkey,oldvalue,newvalue,sys_created_on",
-            display=False, limite=200000)
-        for l in linhas:
-            eventos[_v(l.get("documentkey"))].append({
-                "quando": _quando(l.get("sys_created_on")),
-                "de": _v(l.get("oldvalue")),
-                "para": _v(l.get("newvalue")),
-            })
+        # sc_req_item), e `task` não casaria com nada — zero para todo mundo.
+        for l in consultar(
+                "sys_audit",
+                f"fieldname={CAMPO_FILA}^documentkeyIN{','.join(lote)}"
+                "^ORDERBYsys_created_on",
+                "documentkey,oldvalue,newvalue,sys_created_on",
+                display=False, limite=200000):
+            eventos[_v(l.get("documentkey"))].append(evento(l))
     print(" " * 60, end="\r")
     print(f"  fase 2: {sum(len(v) for v in eventos.values())} trocas de fila "
           f"em {len(eventos)} chamados")
@@ -210,83 +116,31 @@ def buscar_historico(sys_ids: list[str]) -> dict[str, list[dict]]:
 
 def traduzir_filas(eventos: dict[str, list[dict]]) -> int:
     """sys_id de grupo → nome. Sem isto, comparar com o nome dá zero em tudo."""
-    brutos = {v for lista in eventos.values() for e in lista
-              for v in (e["de"], e["para"]) if _RE_SYS_ID.match(v or "")}
-    if not brutos:
+    alvos = sys_ids_de_grupo(eventos)
+    if not alvos:
         return 0
     nomes: dict[str, str] = {}
-    for lote in _lotes(sorted(brutos), LOTE_SYS_ID):
+    for lote in _lotes(alvos, LOTE_SYS_ID):
         for l in consultar("sys_user_group", f"sys_idIN{','.join(lote)}",
                            "sys_id,name", display=False):
             nomes[_v(l.get("sys_id"))] = _v(l.get("name"))
-    trocados = 0
-    for lista in eventos.values():
-        for e in lista:
-            for lado in ("de", "para"):
-                novo = nomes.get(e[lado])
-                if novo and novo != e[lado]:
-                    e[lado] = novo
-                    trocados += 1
+    trocados = aplicar_nomes(eventos, nomes)
     if trocados:
         print(f"  fase 2: {trocados} valores de fila traduzidos de sys_id para nome")
     return trocados
-
-
-def medir(chamados: list[dict], eventos: dict[str, list[dict]]) -> None:
-    """Preenche o tempo de fila de cada chamado, na fila DELE."""
-    agora = datetime.now(timezone.utc)
-    for c in chamados:
-        # A resolução fecha a conta. O encerramento só entra quando não houve
-        # resolução — o cancelado é o caso comum.
-        fim, origem = c["_resolvido"], "resolvido"
-        if fim is None:
-            fim, origem = c["_encerrado"], ("encerrado" if c["_encerrado"] else "")
-        do_chamado = eventos.get(c["sys_id"]) or []
-        if do_chamado:
-            r = intervalos_da_fila(do_chamado, c["fila"], c["_aberto"], fim, agora)
-            base = "histórico"
-        else:
-            # Nunca trocou de fila: esteve a vida inteira na fila em que está,
-            # e ela é a fila procurada (foi assim que ele entrou na lista).
-            fechamento = fim or agora
-            segundos = (max(0.0, (fechamento - c["_aberto"]).total_seconds())
-                        if c["_aberto"] else 0.0)
-            r = {"segundos": round(segundos), "horas": round(segundos / 3600, 2),
-                 "passagens": 1}
-            base = "sem troca de fila"
-        c["horas_na_fila"] = r["horas"]
-        c["tempo_na_fila"] = _humano(r["segundos"])
-        c["idas_a_fila"] = r["passagens"]
-        c["fim_contagem"] = fim.strftime(_FMT) if fim else ""
-        c["fim_origem"] = origem
-        c["base_medicao"] = base if fim or not c["_aberto"] else (
-            base if origem else "sem data de encerramento")
 
 
 # ── Saída ──────────────────────────────────────────────────────────────
 def gravar(chamados: list[dict], saida: Path) -> None:
     chamados.sort(key=lambda c: (c["mes"], c["fila"], c["numero"]))
     with saida.open("w", encoding="utf-8", newline="") as f:
-        f.write("﻿")   # BOM: o Excel em pt-BR abre com as colunas separadas
+        f.write("\ufeff")   # BOM: o Excel em pt-BR abre com as colunas separadas
         w = csv.writer(f, delimiter=";", quoting=csv.QUOTE_MINIMAL)
         w.writerow([rot for _c, rot in COLUNAS])
         for c in chamados:
             w.writerow([c.get(chave, "") for chave, _rot in COLUNAS])
-
-        # Resumo por mês e fila, que é o formato do dado histórico pedido.
-        # Cancelado e chamado sem tempo ficam de fora da média: não são
-        # atendimento, e puxariam o número respondendo outra pergunta.
-        w.writerow([])
-        w.writerow(["RESUMO POR MES E FILA"])
-        w.writerow(["Mes", "Fila", "Chamados", "Horas somadas", "Media (h)"])
-        grupos: dict[tuple, list] = defaultdict(list)
-        for c in chamados:
-            grupos[(c["mes"], c["fila"])].append(c)
-        for (mes, fila), itens in sorted(grupos.items()):
-            com_tempo = [i for i in itens if float(i.get("horas_na_fila") or 0) > 0]
-            total = sum(float(i["horas_na_fila"]) for i in com_tempo)
-            w.writerow([mes, fila, len(itens), round(total, 2),
-                        round(total / len(com_tempo), 2) if com_tempo else ""])
+        for linha in linhas_resumo(chamados):
+            w.writerow(linha)
     print(f"\n  arquivo: {saida}  ({len(chamados)} chamados)")
 
 
@@ -317,7 +171,7 @@ def main() -> int:
         return 1
     eventos = buscar_historico([c["sys_id"] for c in chamados])
     traduzir_filas(eventos)
-    medir(chamados, eventos)
+    medir_chamados(chamados, eventos)
     gravar(chamados, saida)
 
     sem_tempo = sum(1 for c in chamados if not float(c.get("horas_na_fila") or 0))
