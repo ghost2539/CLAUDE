@@ -459,6 +459,52 @@ checar(float(por_num["INC0000005"].split(";")[1]) == 24.0,
 checar(float(por_num["INC0000006"].split(";")[1]) == 48.0,
        "e o histórico gravado por sys_id é traduzido antes de comparar")
 
+print("\n[12b] O arquivo diz o que aconteceu com a medição")
+# "O arquivo não trouxe os tempos" é indiagnosticável de fora: quem está com
+# a planilha na mão não consegue separar "a medição não foi pedida" de "foi
+# pedida e nenhum chamado tinha histórico" de "a fila está escrita errada".
+# O rodapé responde os três.
+rodape = r12.text.strip().splitlines()
+resumo = [l for l in rodape if l.startswith("Medicao de tempo na fila")]
+checar(len(resumo) == 1, "o arquivo traz um resumo da medição no fim")
+checar("'SPARE'" in resumo[0], "dizendo qual fila foi medida")
+checar("apurados:" in resumo[0] and "sem apuracao:" in resumo[0]
+       and "com tempo maior que zero:" in resumo[0],
+       "e as três contagens que separam as causas")
+checar(any(l.strip().startswith("base '") for l in rodape),
+       "com a contagem por base de medição — é o que separa as causas")
+
+
+def _nada_medido(caminho, params, timeout=60):
+    if caminho == "/api/now/table/sys_audit":
+        return {"result": []}
+    if caminho.startswith("/api/now/table/incident"):
+        # Sem histórico E em outra fila: medido, mas zero.
+        d = _com_chamados(caminho, params, timeout)
+        for linha in d.get("result") or []:
+            if "assignment_group.name" in linha:
+                linha["assignment_group.name"] = {"value": OUTRA, "display_value": OUTRA}
+        return d
+    return _com_chamados(caminho, params, timeout)
+
+
+sc._get = _nada_medido
+tf._get = _nada_medido
+r12b = cliente.post("/api/sn-consulta/exportar", json={
+    "tabela": "incident", "campos": ["number"], "tempo_fila": "SPARE",
+})
+# Medido e ZERO não é "não medido": zero é uma medição. O que o arquivo tem
+# de avisar é quando TUDO deu zero, que é o caso que mais parece "a
+# exportação não trouxe os tempos" — a coluna vem, preenchida com zero.
+checar("todos os chamados deram ZERO na fila" in r12b.text,
+       "tudo zerado tem aviso próprio, separado de 'não apurado'")
+checar("o nome da fila" in r12b.text,
+       "apontando a causa mais provável: o nome da fila escrito diferente")
+checar("com tempo maior que zero: 0" in r12b.text,
+       "e o resumo separa apurado de apurado-com-tempo")
+sc._get = _com_chamados
+tf._get = _com_chamados
+
 print("\n[13] Erro no meio da exportação não vira arquivo vazio")
 # Com StreamingResponse o HTTP 200 e os cabeçalhos já saíram quando a
 # primeira linha é gerada. Uma exceção depois disso dava download truncado —

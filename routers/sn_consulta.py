@@ -599,8 +599,16 @@ def _linhas_com_tempo(tabela: str, brutas: list[dict], fila: str) -> list[dict]:
                  "resolved_at": _valor_cru(l.get("resolved_at")),
                  "estado": _valor_cru(l.get("state")),
                  "estado_rotulo": _valor_plano(l.get("state")),
-                 "fila_atual": _valor_plano(l.get("assignment_group.name"))
-                               or _valor_plano(l.get("assignment_group"))}
+                 # O dot-walk pode voltar na chave pontilhada ou aninhado
+                 # dentro de `assignment_group`, conforme a versão da API.
+                 # Aceita as três formas; a errada custaria o tempo do
+                 # chamado que nunca trocou de fila.
+                 "fila_atual": (_valor_plano(l.get("assignment_group.name"))
+                                or _valor_plano(
+                                    (l.get("assignment_group") or {}).get("name")
+                                    if isinstance(l.get("assignment_group"), dict)
+                                    else None)
+                                or _valor_plano(l.get("assignment_group")))}
                 for l in brutas]
     por_id = medir(tabela, chamados, fila)
     for linha in brutas:
@@ -931,6 +939,12 @@ def exportar(corpo: ConsultaIn, req: Request):
 
         contados = 0
         achados: set[str] = set()
+        # Contagem da medição, para o RODAPÉ do arquivo. Sem isto, "o arquivo
+        # não trouxe os tempos" não tem como ser diagnosticado por quem está
+        # com o arquivo na mão: não dá para separar "a medição não foi pedida"
+        # de "foi pedida e nenhum chamado tinha histórico".
+        medicao = {"medidos": 0, "sem_medida": 0, "com_tempo": 0}
+        motivos: dict[str, int] = {}
         # Com lista, o número entra nos campos pedidos mesmo que não esteja
         # entre as colunas escolhidas: é por ele que se sabe quem faltou.
         pedidos = list(dict.fromkeys(
@@ -959,12 +973,54 @@ def exportar(corpo: ConsultaIn, req: Request):
         for registro in medidos():
             if numeros:
                 achados.add(_valor_plano(registro.get(CAMPO_NUMERO)).upper())
+            if fila:
+                base_medida = str(registro.get("tempo_fila_base") or "")
+                horas = registro.get("tempo_fila_horas", "")
+                if str(horas) != "":
+                    medicao["medidos"] += 1
+                    # Medido e ZERO é diferente de medido e com tempo. Se
+                    # TODOS derem zero, a causa provável não é que nenhum
+                    # chamado passou pela fila: é o nome da fila escrito
+                    # diferente do que está no ServiceNow.
+                    if float(horas or 0) > 0:
+                        medicao["com_tempo"] += 1
+                else:
+                    medicao["sem_medida"] += 1
+                motivos[base_medida or "(vazio)"] = motivos.get(base_medida or "(vazio)", 0) + 1
             escritor.writerow([_valor_plano(registro.get(c)) for c in colunas])
             contados += 1
             if buf.tell() > 64 * 1024:
                 yield buf.getvalue()
                 buf.seek(0), buf.truncate(0)
         if buf.tell():
+            yield buf.getvalue()
+            buf.seek(0), buf.truncate(0)
+
+        # O resultado da medição, quando ela foi pedida. Vai no arquivo porque
+        # é lá que a dúvida aparece: quem abre a planilha e não vê os tempos
+        # precisa saber se a medição não rodou, se rodou e não achou
+        # histórico, ou se rodou e o chamado nunca passou pela fila.
+        if fila:
+            escritor.writerow([])
+            escritor.writerow([f"Medicao de tempo na fila {fila!r}:",
+                               f"apurados: {medicao['medidos']}",
+                               f"com tempo maior que zero: {medicao['com_tempo']}",
+                               f"sem apuracao: {medicao['sem_medida']}"])
+            for motivo, quantos in sorted(motivos.items(), key=lambda x: -x[1]):
+                escritor.writerow([f"  base '{motivo}'", quantos])
+            if not medicao["medidos"]:
+                escritor.writerow(["ATENCAO: nenhum chamado teve tempo de fila apurado. "
+                                   "Confira em Conferir se da para medir se a conta de "
+                                   "servico le o historico (sys_audit)."])
+            elif not medicao["com_tempo"]:
+                # O caso que mais parece "a exportacao nao trouxe os tempos":
+                # a coluna vem preenchida, com zero em todas as linhas.
+                escritor.writerow([f"ATENCAO: todos os chamados deram ZERO na fila "
+                                   f"{fila!r}. Se era esperado tempo, o mais provavel e "
+                                   "o nome da fila: ele e comparado com o que esta "
+                                   "gravado no historico do ServiceNow, e basta parte do "
+                                   "nome (ex.: SPARE). Confira o valor de exemplo em "
+                                   "Conferir se da para medir."])
             yield buf.getvalue()
             buf.seek(0), buf.truncate(0)
 
