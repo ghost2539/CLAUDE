@@ -202,17 +202,30 @@ def _valor_plano(v) -> str:
 
 
 # ── Descoberta de campos ───────────────────────────────────────────────
-_cache_campos: dict[str, tuple[float, list[dict]]] = {}
+# (momento, campos, diagnóstico da sonda)
+_cache_campos: dict[str, tuple[float, list[dict], dict]] = {}
 _VALIDADE_CACHE = 30 * 60  # o dicionário do ServiceNow não muda no dia a dia
 
 
 def _hierarquia(tabela: str) -> list[str]:
     """A tabela e as que ela herda, da filha para a mãe.
 
-    `incident` guarda `short_description` na `task`, não nela mesma: sem
-    subir a hierarquia, o dicionário devolve meia dúzia de campos e a tela
-    parece quebrada. A cadeia é perguntada ao `sys_db_object` em vez de
-    ficar escrita aqui, porque instância customizada insere tabela no meio.
+    `incident` guarda `number`, `opened_at` e `short_description` na `task`,
+    não nela mesma. Sem subir a hierarquia o dicionário devolve só os campos
+    próprios da incident, e some da tela justamente o número do chamado e a
+    data de abertura — que é como este defeito apareceu.
+
+    O nome da mãe sai de `super_class.name`, com `display_value=false`.
+    Antes era `super_class` com `display_value=true`, e aí voltava o RÓTULO:
+    `super_class` é referência a `sys_db_object`, cuja coluna de exibição é
+    `label`. Para incident volta "Task" (com T maiúsculo) e a consulta
+    seguinte virava `name=Task` — que só casa se a comparação do banco
+    ignorar maiúscula. Para uma tabela cujo rótulo não é o nome ("Requested
+    Item" para `sc_req_item`), não casa nunca. O dot-walk entrega o `name`
+    direto e acaba com a dependência de sorte.
+
+    A cadeia é perguntada ao ServiceNow em vez de ficar escrita aqui porque
+    instalação customizada insere tabela no meio.
     """
     cadeia, atual, visto = [], tabela, set()
     while atual and atual not in visto and len(cadeia) < 10:
@@ -220,17 +233,25 @@ def _hierarquia(tabela: str) -> list[str]:
         visto.add(atual)
         dados = _get("/api/now/table/sys_db_object", {
             "sysparm_query": f"name={atual}",
-            "sysparm_fields": "super_class",
-            "sysparm_display_value": "true",
+            "sysparm_fields": "super_class.name",
+            "sysparm_display_value": "false",
+            "sysparm_exclude_reference_link": "true",
             "sysparm_limit": "1",
         }, timeout=30)
         linhas = dados.get("result") or []
-        atual = _valor_plano((linhas[0] if linhas else {}).get("super_class")) if linhas else ""
+        primeira = linhas[0] if linhas else {}
+        # O dot-walk pode voltar na chave "super_class.name" ou aninhado em
+        # "super_class", conforme a versão da API. Aceita as duas.
+        bruto = primeira.get("super_class.name")
+        if bruto is None:
+            pai = primeira.get("super_class")
+            bruto = pai.get("name") if isinstance(pai, dict) else None
+        atual = _valor_plano(bruto).strip().lower()
     return cadeia
 
 
-def _campos_do_dicionario(tabela: str) -> list[dict]:
-    nomes = _hierarquia(tabela) or [tabela]
+def _campos_do_dicionario(tabela: str, nomes: list[str] | None = None) -> list[dict]:
+    nomes = nomes or _hierarquia(tabela) or [tabela]
     dados = _get("/api/now/table/sys_dictionary", {
         "sysparm_query": "nameIN" + ",".join(nomes) + "^elementISNOTEMPTY^ORDERBYelement",
         "sysparm_fields": "element,column_label,internal_type,name",
@@ -253,24 +274,38 @@ def _campos_do_dicionario(tabela: str) -> list[dict]:
     return saida
 
 
-def _filtrar_pelo_que_a_conta_le(tabela: str, campos: list[dict]) -> list[dict]:
-    """Descarta o que a ACL nega à conta de serviço.
+def _marcar_o_que_a_conta_le(tabela: str, campos: list[dict]) -> tuple[list[dict], dict]:
+    """Anota em cada campo se a conta de serviço conseguiu lê-lo. Não remove.
 
-    O ServiceNow não erra quando a ACL barra um campo: ele simplesmente não
-    manda a chave. Então pedimos um registro real com TODOS os campos e
-    ficamos com as chaves que voltaram — que é a definição prática de "o que
-    o usuário da integração enxerga".
+    A versão anterior DESCARTAVA o que a sonda não confirmasse. A intenção
+    era boa — campo barrado pela ACL vira coluna vazia no arquivo e parece
+    dado faltando no chamado. O efeito foi pior: um campo sumido da tela é
+    indistinguível de um defeito, e quando a sonda falhou por outro motivo
+    (a hierarquia não subiu, um bloco deu erro) o que se viu foi uma tela
+    sem o número do chamado e sem a data de abertura, sem nenhuma pista do
+    porquê. Esconder não avisa; marcar avisa.
 
-    Sem registro nenhum na tabela não há o que comparar, e aí vale a lista
-    do dicionário inteira: melhor oferecer a mais e o campo vir vazio do que
-    esconder campo que a conta lê.
+    Então agora todo campo do dicionário é oferecido, com `lido` dizendo o
+    que a sonda achou:
+        True  — a conta leu o campo num registro real;
+        False — a conta NÃO leu; provavelmente ACL, e a coluna virá vazia;
+        None  — não deu para saber (a sonda falhou, ou a tabela está vazia).
+
+    A diferença entre False e None é o que faltava: "a permissão barra" e
+    "não consegui perguntar" levam a ações diferentes.
     """
     if not campos:
-        return campos
+        return campos, {"sondou": False, "motivo": "nenhum campo no dicionário"}
     nomes = [c["campo"] for c in campos]
     legiveis: set[str] = set()
+    # Só os campos que a sonda REALMENTE perguntou. É o que separa "a conta
+    # não lê" de "não deu para perguntar".
+    perguntados: set[str] = set()
+    erros: list[str] = []
+    blocos_ok = 0
+    vazia = False
     # Em blocos: a URL tem limite de tamanho, e uma tabela larga passa de
-    # 400 campos. Um bloco que estoure não derruba a descoberta inteira.
+    # 400 campos.
     for i in range(0, len(nomes), 100):
         bloco = nomes[i:i + 100]
         try:
@@ -282,15 +317,53 @@ def _filtrar_pelo_que_a_conta_le(tabela: str, campos: list[dict]) -> list[dict]:
                 "sysparm_limit": "1",
             }, timeout=45)
         except HTTPException as exc:
-            _log.info("sonda de campos falhou em %s (bloco %d): %s", tabela, i, exc.detail)
+            # Antes isto era um `continue` com log em nível info: cem campos
+            # sumiam da tela e não sobrava sinal nenhum. Como a lista vem
+            # ordenada por nome, o bloco perdido é uma faixa alfabética
+            # inteira — `number` e `opened_at` caem no mesmo bloco.
+            erros.append(f"campos {i + 1}–{i + len(bloco)}: {exc.detail}")
+            _log.warning("sonda de campos falhou em %s (bloco %d): %s",
+                         tabela, i, exc.detail)
             continue
         linhas = dados.get("result") or []
         if not linhas:
-            return campos
+            vazia = True
+            break
+        blocos_ok += 1
+        perguntados.update(bloco)
         legiveis.update(linhas[0].keys())
-    if not legiveis:
-        return campos
-    return [c for c in campos if c["campo"] in legiveis]
+
+    if vazia or not blocos_ok:
+        # Sem nada com que comparar, todo campo fica em "não sei" — e a tela
+        # oferece todos. Melhor oferecer a mais e a coluna vir vazia do que
+        # esconder campo que a conta lê.
+        for c in campos:
+            c["lido"] = None
+        return campos, {
+            "sondou": False,
+            "motivo": ("a tabela não tem nenhum registro para comparar" if vazia
+                       else "nenhum bloco da sonda respondeu"),
+            "erros": erros,
+        }
+
+    sem_resposta = 0
+    for c in campos:
+        if c["campo"] in legiveis:
+            c["lido"] = True
+        elif c["campo"] in perguntados:
+            c["lido"] = False
+        else:
+            # Bloco que falhou: dizer "a conta não lê" sobre um campo que nem
+            # chegou a ser perguntado seria inventar diagnóstico.
+            c["lido"] = None
+            sem_resposta += 1
+    return campos, {
+        "sondou": True,
+        "blocos_ok": blocos_ok,
+        "blocos_erro": len(erros),
+        "erros": erros,
+        "sem_resposta": sem_resposta,
+    }
 
 
 @router.get("/tabelas")
@@ -306,25 +379,62 @@ def listar_tabelas(req: Request):
     ]}
 
 
+def _campos_da_tabela(tabela: str, recarregar: bool = False) -> tuple[list[dict], dict, bool]:
+    """Os campos da tabela, do cache ou recém-descobertos.
+
+    Estava duplicado em dois lugares — a tela e a validação da consulta. Duas
+    cópias do mesmo trecho é uma edição de distância de a tela oferecer um
+    campo que a validação recusa.
+    """
+    guardado = _cache_campos.get(tabela)
+    if guardado and not recarregar and time.time() - guardado[0] < _VALIDADE_CACHE:
+        return guardado[1], guardado[2], True
+    cadeia = _hierarquia(tabela) or [tabela]
+    campos, sonda = _marcar_o_que_a_conta_le(
+        tabela, _campos_do_dicionario(tabela, cadeia))
+    sonda["hierarquia"] = cadeia
+
+    # Rede de segurança. As colunas padrão da tabela existem — `number` e
+    # `opened_at` estão na `task`, de onde incident e sc_req_item herdam. Se
+    # a descoberta não as trouxe, o defeito é da descoberta, e a resposta
+    # certa não é a tela ficar sem o número do chamado: é oferecê-las assim
+    # mesmo e DIZER que a descoberta veio incompleta.
+    achados = {c["campo"] for c in campos}
+    faltando = [c for c in TABELAS[tabela]["campos_padrao"] if c not in achados]
+    for nome in faltando:
+        campos.append({"campo": nome, "rotulo": nome, "tipo": "",
+                       "tabela": "", "lido": None, "do_padrao": True})
+        _log.warning("campo padrão %s não veio do dicionário de %s; "
+                     "oferecido assim mesmo", nome, tabela)
+    sonda["padrao_ausentes"] = faltando
+    campos.sort(key=lambda c: c["campo"])
+
+    _cache_campos[tabela] = (time.time(), campos, sonda)
+    return campos, sonda, False
+
+
 @router.get("/campos")
 def listar_campos(req: Request, tabela: str, recarregar: bool = False):
-    """Os campos que a conta de serviço lê nesta tabela."""
+    """Os campos desta tabela, com o que a sonda achou sobre cada um."""
     require_permission(req, MODULO, "view")
     if tabela not in TABELAS:
         raise HTTPException(422, f"Tabela não oferecida: {tabela}")
-    agora = time.time()
-    guardado = _cache_campos.get(tabela)
-    if guardado and not recarregar and agora - guardado[0] < _VALIDADE_CACHE:
-        campos, do_cache = guardado[1], True
-    else:
-        campos = _filtrar_pelo_que_a_conta_le(tabela, _campos_do_dicionario(tabela))
-        _cache_campos[tabela] = (agora, campos)
-        do_cache = False
+    campos, sonda, do_cache = _campos_da_tabela(tabela, recarregar)
+    # A tela precisa saber se um campo do conjunto padrão não veio: é o aviso
+    # que faltou quando `number` e `opened_at` sumiram sem explicação.
+    padrao = list(TABELAS[tabela]["campos_padrao"])
     return {
         "tabela": tabela,
         "total": len(campos),
         "campos": campos,
-        "campos_padrao": TABELAS[tabela]["campos_padrao"],
+        "campos_padrao": padrao,
+        # O que a descoberta não achou e o portal repôs pela rede de
+        # segurança: a tela avisa, em vez de a coluna simplesmente sumir.
+        "padrao_ausentes": sonda.get("padrao_ausentes", []),
+        "nao_lidos": sum(1 for c in campos if c.get("lido") is False),
+        "sem_resposta": sum(1 for c in campos if c.get("lido") is None),
+        "sonda": sonda,
+        "hierarquia": sonda.get("hierarquia", []),
         "do_cache": do_cache,
         "conta": _cfg.SN_API_USER or "",
     }
@@ -355,13 +465,7 @@ class ConsultaIn(BaseModel):
 
 
 def _campos_validos(tabela: str) -> dict[str, dict]:
-    guardado = _cache_campos.get(tabela)
-    if guardado and time.time() - guardado[0] < _VALIDADE_CACHE:
-        campos = guardado[1]
-    else:
-        campos = _filtrar_pelo_que_a_conta_le(tabela, _campos_do_dicionario(tabela))
-        _cache_campos[tabela] = (time.time(), campos)
-    return {c["campo"]: c for c in campos}
+    return {c["campo"]: c for c in _campos_da_tabela(tabela)[0]}
 
 
 def _conferir_campo(nome: str, validos: dict, rotulo: str) -> str:

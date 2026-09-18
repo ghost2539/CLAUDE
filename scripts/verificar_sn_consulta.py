@@ -123,15 +123,27 @@ def _falso_get(caminho, params, timeout=60):
 
     if caminho == "/api/now/table/sys_db_object":
         nome = q.split("name=")[-1]
-        mae = {"incident": "Task", "sc_req_item": "Task", "task": ""}.get(nome, "")
-        return {"result": [{"super_class": mae}]}
+        # Este é o ponto do defeito. `super_class` é referência a
+        # sys_db_object, cuja coluna de EXIBIÇÃO é `label`. Com
+        # display_value=true volta "Task"; o `name` é "task". Só o dot-walk
+        # `super_class.name` entrega o nome. E aqui o `name=` é comparado
+        # com distinção de maiúscula, como num banco case-sensitive — que é
+        # o caso em que o código antigo quebrava de vez.
+        PAI = {"incident": "task", "sc_req_item": "task", "task": ""}
+        if nome not in PAI:
+            return {"result": []}
+        filho = PAI[nome]
+        if params.get("sysparm_fields") == "super_class.name":
+            return {"result": [{"super_class.name": filho}]}
+        return {"result": [{"super_class": (filho.title() if filho else "")}]}
 
     if caminho == "/api/now/table/sys_dictionary":
-        tabelas = q.split("nameIN")[1].split("^")[0].split(",")
-        tabelas = [t.strip().lower() for t in tabelas]
+        # Sem .lower(): a tabela pedida tem de bater exatamente. É assim que
+        # o pedido "nameINincident,Task" (o bug) perde os campos da task.
+        tabelas = [x.strip() for x in q.split("nameIN")[1].split("^")[0].split(",")]
         return {"result": [
             {"element": el, "column_label": rot, "internal_type": tipo, "name": tab}
-            for el, rot, tipo, tab in DICIONARIO if tab.lower() in tabelas
+            for el, rot, tipo, tab in DICIONARIO if tab in tabelas
         ]}
 
     if caminho.startswith("/api/now/stats/"):
@@ -197,27 +209,87 @@ checar(ops["vazio"]["precisa_valor"] is False and ops["contem"]["precisa_valor"]
        "a tela sabe quais operadores não levam valor")
 
 
-print("\n[2] Os campos são os que a conta de serviço LÊ, não os do dicionário")
+print("\n[2] Todo campo é oferecido, e a sonda diz o que achou de cada um")
+# A versão anterior REMOVIA o que a sonda não confirmasse. A intenção era
+# evitar coluna vazia no arquivo; o efeito foi pior — campo sumido é
+# indistinguível de defeito, e foi assim que `number` e `opened_at` sumiram
+# da tela sem nenhuma pista do porquê. Agora nada some: marca-se.
 d2 = cliente.get("/api/sn-consulta/campos?tabela=incident").json()
 nomes = [c["campo"] for c in d2["campos"]]
+por_campo = {c["campo"]: c for c in d2["campos"]}
 checar("short_description" in nomes,
        "campo herdado da task aparece — a hierarquia é percorrida")
+checar("number" in nomes and "opened_at" in nomes,
+       "o número do chamado e a data de abertura estão lá (são campos da task)")
 checar("category" in nomes, "e o campo da própria incident também")
-checar(SEM_ACESSO not in nomes,
-       f"{SEM_ACESSO} está no dicionário e a ACL nega: fica de fora")
-checar(d2["total"] == len(d2["campos"]) and d2["total"] == len(DICIONARIO) - 1,
-       "a contagem bate com o que sobrou")
+checar(d2["hierarquia"] == ["incident", "task"],
+       "a tela mostra a cadeia de herança que foi percorrida")
+checar(SEM_ACESSO in nomes,
+       f"{SEM_ACESSO} continua sendo oferecido, mesmo com a ACL negando")
+checar(por_campo[SEM_ACESSO]["lido"] is False,
+       "mas marcado: a conta não conseguiu lê-lo")
+checar(por_campo["number"]["lido"] is True,
+       "e o que a conta lê é marcado como lido")
+checar(d2["nao_lidos"] == 1, f"a tela conta quantos estão sem leitura ({d2['nao_lidos']})")
+checar(d2["total"] == len(DICIONARIO),
+       "a contagem é a do dicionário inteiro — não se perde campo pelo caminho")
 checar(d2["conta"] == "zabbix", "a tela diz qual conta respondeu por esses campos")
 checar(sc._cfg.SN_API_PASS not in cliente.get("/api/sn-consulta/campos?tabela=incident").text,
        "e a senha da conta não sai em lugar nenhum")
 checar(cliente.get("/api/sn-consulta/campos?tabela=sys_user").status_code == 422,
        "tabela fora da lista é recusada")
 
-# Contraprova da sonda: sem ela, o campo barrado passaria.
-so_dicionario = [c["campo"] for c in sc._campos_do_dicionario("incident")]
-checar(SEM_ACESSO in so_dicionario,
-       "contraprova: sem a sonda, o campo barrado entraria na lista")
+print("\n[2b] Contraprova: a herança subia pelo RÓTULO, e por isso quebrava")
+# `super_class` é referência a sys_db_object, cuja coluna de exibição é
+# `label`. Com display_value=true volta "Task"; o `name` é "task". A consulta
+# seguinte virava `name=Task` e, num banco que distingue maiúscula, não
+# casava — a cadeia parava em ["incident"] e TODOS os campos da task sumiam,
+# entre eles `number` e `opened_at`. Aqui se reproduz o caminho antigo.
+def _hierarquia_pelo_rotulo(tabela):
+    cadeia, atual = [], tabela
+    while atual and atual not in cadeia and len(cadeia) < 10:
+        cadeia.append(atual)
+        dados = _falso_get("/api/now/table/sys_db_object", {
+            "sysparm_query": f"name={atual}",
+            "sysparm_fields": "super_class",          # sem o dot-walk
+            "sysparm_display_value": "true",          # o rótulo, não o nome
+            "sysparm_limit": "1",
+        })
+        linhas = dados.get("result") or []
+        atual = (linhas[0].get("super_class") or "") if linhas else ""
+    return cadeia
 
+antiga = _hierarquia_pelo_rotulo("incident")
+checar(antiga == ["incident", "Task"],
+       f"pelo rótulo, a cadeia sai errada: {antiga}")
+perdidos = [el for el, _r, _t, tab in DICIONARIO if tab == "task"]
+sobravam = [c["campo"] for c in sc._campos_do_dicionario("incident", antiga)]
+checar("number" not in sobravam and "opened_at" not in sobravam,
+       "e com ela o número do chamado e a data de abertura somem — o defeito relatado")
+checar(all(p not in sobravam for p in perdidos),
+       f"junto com os outros {len(perdidos)} campos da task")
+checar(sc._hierarquia("incident") == ["incident", "task"],
+       "pelo dot-walk super_class.name, a cadeia sai certa")
+
+print("\n[2c] Campo do padrão que não vier é REPOSTO, e a tela avisa")
+# Se a descoberta falhar de outro jeito no futuro, a tela não pode voltar a
+# abrir sem o número do chamado. O portal repõe as colunas padrão e diz que
+# repôs — em vez de a coluna simplesmente não existir.
+sc._cache_campos.clear()
+_dicionario_real = sc._campos_do_dicionario
+sc._campos_do_dicionario = lambda tabela, nomes=None: [
+    c for c in _dicionario_real(tabela, nomes) if c["campo"] not in ("number", "opened_at")
+]
+d2c = cliente.get("/api/sn-consulta/campos?tabela=incident&recarregar=true").json()
+nomes2c = {c["campo"]: c for c in d2c["campos"]}
+checar("number" in nomes2c and "opened_at" in nomes2c,
+       "some do dicionário, mas a tela continua oferecendo")
+checar(nomes2c["number"]["lido"] is None and nomes2c["number"].get("do_padrao") is True,
+       "marcado como não conferido e reposto pelo portal")
+checar(set(d2c["padrao_ausentes"]) == {"number", "opened_at"},
+       "e a resposta NOMEIA o que faltou — silêncio aqui foi o defeito original")
+sc._campos_do_dicionario = _dicionario_real
+sc._cache_campos.clear()
 
 print("\n[3] O que a tela manda não vira estrutura de consulta")
 def recusa(filtros, desc, esperado=422):
@@ -233,8 +305,15 @@ recusa([{"campo": "state", "operador": "igual", "valor": "javascript:gs.getUser(
        "valor com javascript: é recusado — o servidor do SN avaliaria isso")
 recusa([{"campo": "nao_existe_esse", "operador": "igual", "valor": "x"}],
        "campo fora da lista lida do dicionário é recusado")
-recusa([{"campo": SEM_ACESSO, "operador": "igual", "valor": "x"}],
-       "nem filtrar por campo que a conta não lê")
+# Filtrar por campo que a conta não lê é PERMITIDO: a marca "sem leitura" é
+# um aviso, não uma proibição — a sonda olha um registro só e pode errar, e
+# recusar por causa dela seria a tela impedindo o que o ServiceNow permite.
+r_marcado = cliente.post("/api/sn-consulta/buscar",
+                         json={"tabela": "incident",
+                               "filtros": [{"campo": SEM_ACESSO, "operador": "igual",
+                                            "valor": "x"}]})
+checar(r_marcado.status_code == 200,
+       f"filtrar por campo marcado 'sem leitura' é permitido, com aviso ({r_marcado.status_code})")
 recusa([{"campo": "state", "operador": "inventado", "valor": "x"}],
        "operador fora da lista fechada é recusado")
 recusa([{"campo": "state", "operador": "igual", "valor": "6,7"}],
@@ -530,6 +609,17 @@ checar("toUpperCase()" in js and "repetido(s) descartado(s)" in js,
 checar("nao_encontrados" in js and "está em outra tabela" in js,
        "a tela explica as três causas de um chamado não vir")
 checar("por_lista" in js, "e separa o resultado por lista do resultado por filtro")
+# O aviso é o que faltou quando os campos sumiram: sem ele, lista incompleta
+# parece defeito da tela, e ninguém sabe onde procurar.
+checar("cn-problemas" in js and "padrao_ausentes" in js,
+       "a tela avisa quando a descoberta de campos veio incompleta")
+checar("sem leitura" in js and "k.lido" in js,
+       "e marca o campo que a conta de serviço não conseguiu ler")
+checar("cn-recarregar" in js and "carregarCampos(true)" in js,
+       "tem botão para refazer a descoberta — a lista fica 30 min em cache, e sem "
+       "isso corrigir permissão no ServiceNow parece não ter efeito")
+checar("hierarquia" in js,
+       "e mostra a cadeia de herança percorrida, que é onde este defeito morava")
 checar("can_export" in js, "o botão de exportar respeita a permissão própria")
 # `S.el` faz setAttribute: `disabled: false` DESABILITA, `innerHTML` não
 # renderiza e `htmlFor` não vira `for`. Já custou tela quebrada antes.

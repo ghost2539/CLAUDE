@@ -420,6 +420,11 @@ async function renderConsulta(c, S) {
                         '</select></div>' +
                 '</div>' +
                 '<div id="cn-conta" class="text-muted" style="font-size:12px"></div>' +
+                '<div id="cn-problemas" class="mt-2"></div>' +
+                '<div class="btn-row mt-2">' +
+                    '<button id="cn-recarregar" class="btn btn-sm btn-secondary" type="button">' +
+                        'Recarregar campos</button>' +
+                '</div>' +
             '</div></div>' +
         '<div class="card mb-3"><div class="card-header" ' +
             'style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
@@ -551,9 +556,23 @@ async function renderConsulta(c, S) {
                 desenharEscolhidos();
             };
             linha.appendChild(cx);
+            /* `lido` é o que a sonda achou: true = a conta leu o campo num
+               registro real; false = não leu (provavelmente ACL, e a coluna
+               virá vazia); null = não deu para saber. A marca existe porque
+               antes o campo era simplesmente removido da lista — e campo
+               sumido é indistinguível de defeito. */
+            var marca = '';
+            if (k.lido === false) {
+                marca = ' <span class="badge badge-warning" title="A conta de ' +
+                    'serviço não conseguiu ler este campo num registro real. ' +
+                    'Provavelmente permissão: a coluna virá vazia.">sem leitura</span>';
+            } else if (k.lido === null || k.lido === undefined) {
+                marca = ' <span class="badge badge-neutral" title="Não deu para ' +
+                    'conferir se a conta lê este campo. Ele é oferecido assim mesmo.">?</span>';
+            }
             var rot = S.el('span');
             rot.innerHTML = e(k.rotulo) + ' <span class="text-muted" style="font-size:11px">' +
-                e(k.campo) + (k.tipo ? ' · ' + e(k.tipo) : '') + '</span>';
+                e(k.campo) + (k.tipo ? ' · ' + e(k.tipo) : '') + '</span>' + marca;
             linha.appendChild(rot);
             grade.appendChild(linha);
         });
@@ -657,12 +676,48 @@ async function renderConsulta(c, S) {
         campos = d.campos || [];
         porNome = {};
         campos.forEach(function (k) { porNome[k.campo] = k; });
-        // Só o que a conta realmente lê entra como padrão: a lista padrão é
-        // escrita no servidor e pode citar campo que esta instância não tem.
+        /* Antes isto descartava o padrão que não estivesse em `porNome` — e
+           como a descoberta podia perder campos, a tela abria sem o número do
+           chamado e sem a data de abertura, calada. Agora o servidor repõe o
+           padrão que faltar (marcado como não conferido) e avisa; o filtro
+           aqui só protege contra campo que a tabela realmente não tem. */
         escolhidos = (d.campos_padrao || []).filter(function (x) { return porNome[x]; });
-        document.getElementById('cn-conta').textContent =
-            d.total + ' campos legíveis pela conta ' + (d.conta || '(não configurada)') +
+        var conta = document.getElementById('cn-conta');
+        conta.textContent = d.total + ' campos em ' + (d.hierarquia || []).join(' → ') +
+            ' · conta ' + (d.conta || '(não configurada)') +
+            (d.nao_lidos ? ' · ' + d.nao_lidos + ' sem leitura' : '') +
+            (d.sem_resposta ? ' · ' + d.sem_resposta + ' não conferidos' : '') +
             (d.do_cache ? ' · lista em cache' : '');
+
+        /* Quando a descoberta vem incompleta, a tela DIZ. Foi o que faltou
+           quando `number` e `opened_at` sumiram: sem aviso, campo ausente
+           parece defeito da tela, e não da consulta ao ServiceNow. */
+        var problemas = document.getElementById('cn-problemas');
+        problemas.innerHTML = '';
+        var sonda = d.sonda || {};
+        if ((d.padrao_ausentes || []).length) {
+            var a1 = S.el('div', { className: 'alert alert-warning mb-2' });
+            a1.innerHTML = '<b>A descoberta de campos veio incompleta.</b> Estes não ' +
+                'vieram do dicionário do ServiceNow e foram repostos pelo portal: <code>' +
+                e(d.padrao_ausentes.join(', ')) + '</code>. Dá para usá-los normalmente; ' +
+                'o que pode faltar são OUTROS campos da tabela-mãe. Use <b>Recarregar ' +
+                'campos</b>; se persistir, é a conta de serviço sem leitura em ' +
+                '<code>sys_db_object</code> ou <code>sys_dictionary</code>.';
+            problemas.appendChild(a1);
+        }
+        if ((sonda.erros || []).length) {
+            var a2 = S.el('div', { className: 'alert alert-warning mb-2' });
+            a2.innerHTML = '<b>Parte da conferência de permissão falhou</b>, então alguns ' +
+                'campos aparecem marcados com “?”. Eles funcionam; só não foi possível ' +
+                'confirmar se a conta os lê.<br><span style="font-size:11px">' +
+                e(sonda.erros.join(' · ')) + '</span>';
+            problemas.appendChild(a2);
+        }
+        if (sonda.sondou === false && sonda.motivo) {
+            problemas.appendChild(S.el('div', { className: 'alert alert-info mb-2',
+                textContent: 'Todos os campos aparecem sem confirmação de leitura: ' +
+                    sonda.motivo + '.' }));
+        }
         var ordem = document.getElementById('cn-ordem-campo');
         opcoesDeCampo(ordem, '— sem ordenação —');
         ordem.value = porNome.opened_at ? 'opened_at'
@@ -794,6 +849,15 @@ async function renderConsulta(c, S) {
             '<div class="alert alert-danger">' + e(x.message) + '</div>';
     }); };
 
+    document.getElementById('cn-recarregar').onclick = function () {
+        // A lista fica meia hora em cache no servidor. Sem um jeito de forçar,
+        // corrigir permissão no ServiceNow e não ver efeito por 30 minutos
+        // parece que a correção não funcionou.
+        carregarCampos(true).catch(function (x) {
+            document.getElementById('cn-campos').innerHTML =
+                '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        });
+    };
     document.getElementById('cn-busca-campo').addEventListener('input', desenharCampos);
     document.getElementById('cn-campos-padrao').onclick = function () {
         var t = (meta.tabelas || []).filter(function (x) {

@@ -268,11 +268,19 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
 - Tabelas: `alm_hardware`, `incident`, `task_sla`, `sc_req_item`, `task`,
   e — só na Consulta de chamados, para descobrir os campos — `sys_dictionary`
   e `sys_db_object`.
-- **Os campos que a Consulta oferece são os que a conta de serviço lê de
-  verdade**: depois de ler o dicionário, o portal pede um registro real com
-  todos aqueles campos. O ServiceNow omite em silêncio o que a ACL nega, e é
-  o que sobra que vira a lista da tela. Sem isso, um campo barrado viraria
-  coluna vazia no arquivo e pareceria dado faltando no chamado.
+- **A Consulta oferece todo campo do dicionário e MARCA o que a conta de
+  serviço não conseguiu ler** (`sem leitura`, ou `?` quando não deu para
+  conferir). A primeira versão *descartava* o não confirmado, para um campo
+  barrado pela ACL não virar coluna vazia no arquivo; o efeito foi pior —
+  campo sumido da tela é indistinguível de defeito. Esconder não avisa.
+- **A herança de tabela é percorrida por `super_class.name`**, com
+  `display_value=false`. `incident` guarda `number`, `opened_at` e
+  `short_description` na `task`, não nela mesma. Com `display_value=true`,
+  `super_class` devolve o **rótulo** (`Task`) e não o nome (`task`) — e a
+  cadeia parava na primeira tabela, levando junto todos os campos da mãe.
+- **Campo do conjunto padrão que não vier do dicionário é reposto pelo
+  portal**, marcado como não conferido, e a tela diz que repôs: a tela nunca
+  abre sem o número do chamado por causa de uma descoberta incompleta.
 - **A exportação pagina por `sys_id`, não por offset.** Chamados continuam
   sendo abertos enquanto a exportação roda; com `sysparm_offset` uma linha
   muda de página e sai duplicada ou some. A verificação tem contraprova
