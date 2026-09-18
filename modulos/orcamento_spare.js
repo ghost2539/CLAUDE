@@ -1,5 +1,5 @@
 /* ================================================================
-   Módulo: CAPEX Spare — Controle de Orçamento do SPARE
+   Módulo: Orçamento Spare — Controle de Orçamento do SPARE
    Aba Projetos: projetos com LINHAS DE ITEM (Item EBS, descrição, NCM,
    qtd, valor unit., % imposto do NCM/TIPI; total = qtd×unit×(1+imposto/100)).
    Aba Itens: Cadastro de itens (Item EBS, descrição, acordo, NCM→alíquota
@@ -62,7 +62,7 @@ window.SPARE_MODULES.orcamento_spare = {
         var padN = 'padding:8px 14px;white-space:nowrap;font-variant-numeric:tabular-nums';
 
         container.innerHTML =
-            '<h1 class="page-title">CAPEX Spare</h1>' +
+            '<h1 class="page-title">Orçamento Spare</h1>' +
             '<div id="os-abas" style="display:flex;gap:6px;border-bottom:1px solid #33415533;margin-bottom:16px">' +
                 '<button class="btn btn-sm os-aba-btn" data-aba="projetos">Projetos</button>' +
                 '<button class="btn btn-sm os-aba-btn" data-aba="itens">Itens</button>' +

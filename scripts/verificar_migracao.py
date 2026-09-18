@@ -204,7 +204,7 @@ for no in ast.walk(arvore):
 
 # A espinha (auth, consulta, recebimento, parâmetros…) não é isolada de
 # propósito: sem ela não existe portal para seguir de pé.
-OPCIONAIS = {"capex_spare_router", "agendamentos_forn_router",
+OPCIONAIS = {"agendamentos_forn_router",
              "internalizacao_router", "cofre_router", "orcamento_spare_router",
              "controle_orcamento_exec_router", "indicadores_router", "cockpit_router"}
 faltando = sorted(OPCIONAIS - dentro_de_try)
@@ -224,7 +224,7 @@ checar(not (rotas - arquivos - {"bemvindo"}),
        f"nenhuma rota sem módulo ({sorted(rotas - arquivos - {'bemvindo'})})")
 checar(not (arquivos - rotas - SOB_DEMANDA),
        f"nenhum módulo órfão ({sorted(arquivos - rotas - SOB_DEMANDA)})")
-for novo in ("capex_spare", "agendamentos_forn", "internalizacao"):
+for novo in ("orcamento_spare", "agendamentos_forn", "internalizacao"):
     checar(novo in rotas and novo in arquivos, f"{novo} está no menu e tem tela")
 
 
@@ -232,7 +232,7 @@ print("\n[8] Permissão declarada para cada módulo com tela própria")
 from config import get_settings  # noqa: E402
 
 acoes = get_settings().MODULE_ACTIONS
-for modulo in ("capex_spare", "agendamentos_forn", "internalizacao"):
+for modulo in ("orcamento_spare", "agendamentos_forn", "internalizacao"):
     checar(modulo in acoes and "view" in acoes[modulo],
            f"{modulo} está em MODULE_ACTIONS com 'view'")
 # O Cofre mora dentro de Parâmetros: a permissão é a de lá.
@@ -242,20 +242,20 @@ for rel in ("routers/cofre.py",):
 
 
 print("\n[9] Banco novo mora em data/db, declarado no config")
-for chave, modulo in (("CAPEX_SPARE_DATABASE_URL", "capex_spare"),
+for chave, modulo in (("ORCAMENTO_SPARE_DATABASE_URL", "orcamento_spare"),
                       ("AGENDAMENTOS_FORN_DATABASE_URL", "agendamentos_forn"),
                       ("INTERNALIZACAO_DATABASE_URL", "internalizacao")):
     checar(re.search(rf'{chave}[^=]*=\s*_env\(\s*\n?\s*"{chave}",\s*_sqlite\("{modulo}"\)',
                      cfg, re.M) is not None,
            f"{chave} declarada com _sqlite('{modulo}')")
-for rel in ("db/capex_spare.py", "db/agendamentos_forn.py", "db/internalizacao.py"):
+for rel in ("db/orcamento_spare.py", "db/agendamentos_forn.py", "db/internalizacao.py"):
     conteudo = texto(rel)
     checar("get_settings()" in conteudo and "sqlite:///" not in conteudo.replace("sqlite:////", ""),
            f"{rel} pega a URL do config, sem caminho escrito no código")
 
 
 print("\n[10] Padrão visual mantido nas telas que vieram")
-for rel in ("modulos/capex_spare.js", "modulos/agendamentos_forn.js",
+for rel in ("modulos/orcamento_spare.js", "modulos/agendamentos_forn.js",
             "modulos/internalizacao.js", "modulos/parametros.js"):
     conteudo = texto(rel)
     hex_fixo = re.findall(r"#[0-9a-fA-F]{3,6}\b", conteudo)

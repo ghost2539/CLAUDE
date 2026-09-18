@@ -50,7 +50,7 @@
         rastreio:       'Correios',
         reparos:        'Central de Reparos',
         orcamento_manutencao: 'Orçamento',
-        capex_spare:    'CAPEX Spare',
+        orcamento_spare: 'Orçamento Spare',
         agendamentos_forn: 'Agendamentos Forn.',
         internalizacao: 'Internalização',
         servicenow_automacoes: 'ServiceNow',

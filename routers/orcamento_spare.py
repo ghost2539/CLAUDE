@@ -1,4 +1,4 @@
-"""CAPEX Spare — Controle de Orçamento do SPARE. API /api/orcamento-spare.
+"""Orçamento Spare — Controle de Orçamento do SPARE. API /api/orcamento-spare.
 
 Mestre-detalhe: projetos com linhas de item (Item EBS, descrição, quantidade,
 valor unitário; o total da linha e o custo do projeto são calculados). Cada
@@ -25,7 +25,7 @@ from core.security import check_rate_limit, client_ip, require_permission
 _log = logging.getLogger("orcamento_spare")
 MODULO = "orcamento_spare"
 
-router = APIRouter(prefix="/api/orcamento-spare", tags=["CAPEX Spare"],
+router = APIRouter(prefix="/api/orcamento-spare", tags=["Orçamento Spare"],
                    include_in_schema=False)
 
 

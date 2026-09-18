@@ -115,22 +115,38 @@ fixa sobrou.
 em `static/controle-orcamento-exec/`) fica fora do padrão de design, por
 decisão de quem pediu a migração.
 
-## Dois nomes parecidos, dois produtos
+## Dois nomes parecidos, dois produtos — resolvido
 
-`migracao` chamava o CAPEX de `orcamento_spare`, que é o nome que esta
-branch já usava para **outro** produto (`routers/orcamento_spare_exec.py`).
-As duas telas disputariam a mesma chave de permissão.
+`migracao` chamava o CAPEX de `orcamento_spare`, que era também o nome de
+**outro** produto. Na `migracao-oficial` isso foi separado dando ao CAPEX
+chave, rota e banco próprios (`capex_spare`, `/api/capex-spare`,
+`capex_spare.db`), e ficou registrado que **decidir se as duas ficam é de
+quem usa**.
 
-Resolvido dando ao CAPEX chave, rota e banco próprios:
+**Decidido (18/09): fica o Orçamento Spare; o CAPEX Spare sai.**
 
-| | Orçamento Spare | CAPEX Spare |
+Na branch `migracao` a separação nunca chegou a existir como módulo:
+`routers/capex_spare.py` e `db/capex_spare.py` não estão aqui. O que havia
+eram **duas entradas de menu quebradas**, e nenhuma delas chegava à tela que
+funciona:
+
+| Entrada do menu | Apontava para | O que acontecia |
 |---|---|---|
-| Permissão | `orcamento_spare` | `capex_spare` |
-| Rota | `/api/orcamento-spare` | `/api/capex-spare` |
-| Banco | `orcamento_spare_exec.db` | `capex_spare.db` |
+| Orçamento Spare | `data-href="/orcamento-spare"` | página inexistente → 404 |
+| CAPEX Spare | `data-route="capex_spare"` | `modulos/capex_spare.js` não existe → "Falha ao carregar módulo" |
 
-As duas telas estão no ar. **Decidir se as duas ficam é de quem usa** —
-elas resolvem problemas parecidos e ninguém aqui pode dizer qual sobra.
+A tela real é `modulos/orcamento_spare.js`, servida por
+`routers/orcamento_spare.py` em `/api/orcamento-spare`, com permissão
+`orcamento_spare`. Ela estava no ar e sem caminho no menu.
+
+O que ficou: **uma** entrada, `data-route="orcamento_spare"`, chamando o
+módulo que existe. O nome interno "CAPEX Spare" (docstring do router, do
+banco e título da tela) virou "Orçamento Spare", para o menu e a tela
+dizerem a mesma coisa.
+
+Sobra no servidor o arquivo `data/db/capex_spare.db`, que nenhum código
+abre mais. Ele não está no repositório (`data/db/` é ignorado); apague à
+mão quando quiser, depois de guardar uma cópia se houver dado que importe.
 
 ## Correção que a migração revelou
 

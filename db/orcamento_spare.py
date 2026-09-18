@@ -1,4 +1,4 @@
-"""Banco ISOLADO do CAPEX Spare (Controle de Orçamento do SPARE).
+"""Banco ISOLADO do Orçamento Spare (Controle de Orçamento do SPARE).
 
 Separado do `/controle-orcamento` e do portal. Modelo mestre-detalhe:
 
