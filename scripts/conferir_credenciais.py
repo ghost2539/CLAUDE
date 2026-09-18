@@ -43,7 +43,6 @@ GRUPOS = {
         ("ORACLE_EBS_USER", True),
         ("ORACLE_EBS_PASS", True),
         ("ORACLE_EBS_DSN", True),
-        ("ORACLE_CLIENT_LIB_DIR", False),
     ),
     "ServiceNow (leitura dos Indicadores)": (
         ("SN_API_USER", False),

@@ -105,13 +105,15 @@ nomes = {c["chave"]: c for c in d["chaves"]}
 checar(set(OBRIGATORIAS) <= set(nomes), "as três chaves obrigatórias aparecem na tela")
 checar(all(not nomes[k]["resolvida"] for k in OBRIGATORIAS),
        "nenhuma resolvida, porque não há valor em lugar nenhum")
-checar(all(nomes[k]["situacao"] == "ausente" for k in OBRIGATORIAS),
-       "a situação é 'ausente', não 'padrão do código'")
 # A regressão que motivou esta verificação: o expurgo do histórico deixou
 # marcadores ("BANCO_REMOVIDO:1521/...") como PADRÃO de usuário e endereço.
 # A tela os exibia como valor e o portal tentava conectar num host inventado.
+# `PADROES` está vazio hoje, então "resolvida" só pode vir do cofre — a
+# distinção entre "ausente" e "padrão do código" deixou de existir.
 checar(all("valor" not in nomes[k] for k in OBRIGATORIAS),
        "nenhum valor de usuário ou endereço é exibido")
+checar(all(set(nomes[k]) == {"chave", "resolvida"} for k in OBRIGATORIAS),
+       "cada chave traz só o nome e se foi localizada")
 checar(not any("REMOVID" in json.dumps(c) for c in d["chaves"]),
        "nenhum marcador de expurgo sobrou fazendo as vezes de valor")
 r = cliente.post("/api/ebs-oracle/testar")
@@ -252,12 +254,15 @@ d = r.json()
 nomes = {c["chave"]: c for c in d["chaves"]}
 checar(all(nomes[k]["resolvida"] for k in OBRIGATORIAS),
        "as três chaves passam a aparecer como resolvidas")
-checar(all(nomes[k]["situacao"] == "cofre" for k in OBRIGATORIAS),
-       "e a situação de cada uma é 'cofre', não 'padrão do código'")
-checar(nomes["ORACLE_EBS_DSN"]["fonte"].startswith("cofre"),
-       "a tela diz de qual cofre o valor veio")
-checar(all(nomes[k]["no_local"] for k in OBRIGATORIAS),
-       "e diz que estão no cofre local, e não no corporativo")
+# A tela dizia também de qual fonte cada chave veio e em qual cofre estava,
+# para flagrar o sombreamento. O cofre corporativo saiu do código (stubs), e
+# estas três chaves são usuário, senha e endereço do banco: dizer onde o
+# usuário está guardado já é dizer onde procurá-lo. Sobrou "localizada".
+checar(all(set(nomes[k]) == {"chave", "resolvida"} for k in OBRIGATORIAS),
+       "e continua sendo só o nome e se foi localizada, mesmo resolvendo")
+for morto in ("fonte", "no_local", "no_corporativo", "situacao"):
+    checar(not any(morto in c for c in d["chaves"]),
+           f"sem {morto} na resposta — origem de credencial não vai para a tela")
 # Gravar pela tela TEM de alimentar a conexão também: `_secret_multi` lê o
 # ambiente e, não achando, o cofre. Sem essa segunda parada a tela dizia
 # "resolvida" e a conexão falhava assim mesmo — a tela procurando num lugar

@@ -401,7 +401,8 @@ async function renderCofre(c, S) {
     c.innerHTML =
         '<h1 class="page-title">Cofre de segredos</h1>' +
         '<p class="text-muted">O que o <b>processo do portal</b> alcança. ' +
-            'Nenhum valor de segredo aparece aqui, só de onde veio e o tamanho.</p>' +
+            'De cada chave aparece apenas se ela foi localizada — nem o valor, ' +
+            'nem o tamanho, nem de onde veio.</p>' +
         '<div class="card mb-3">' +
             '<div class="card-header">Situação</div>' +
             '<div class="card-body" id="cf-situacao">' +
@@ -437,20 +438,14 @@ async function renderCofre(c, S) {
             e(ok ? sim : nao) + '</span>';
     }
 
+    /* Só o nome e se foi localizada. Tamanho, fonte e valor saíram da API
+       inteira — não adiantava tirar da tela, porque o JSON vai para o
+       navegador e aparece nas ferramentas de desenvolvedor. */
     function tabelaChaves(itens) {
         return S.table([
             { key: 'chave', label: 'Chave' },
-            { key: 'resolvida', label: 'Resolveu', html: true,
-              render: function (v) { return selo(v, 'sim', 'não'); } },
-            { key: 'fonte', label: 'De onde veio' },
-            { key: 'tamanho', label: 'Tamanho', render: function (v) { return v || '—'; } },
-            { key: 'sombreado', label: '', html: true, render: function (v) {
-                // Sombreamento é a falha silenciosa clássica: uma fonte
-                // responde antes e a que alguém acabou de configurar nunca
-                // é consultada.
-                return v ? '<span class="badge badge-warning" title="A chave existe em mais de uma fonte; ' +
-                    'vence a primeira da ordem">sombreada</span>' : '';
-            } }
+            { key: 'resolvida', label: 'Localizada', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } }
         ], itens);
     }
 
@@ -703,25 +698,14 @@ async function renderBaseEbs(c, S) {
         });
         alvo.appendChild(topo);
 
+        // Nome e se foi localizada, só. Não há mais coluna "O quê" (a API
+        // devolve o nome da chave), nem "De onde veio" nem o aviso "só no
+        // local": estas três chaves são usuário, senha e endereço do banco,
+        // e dizer onde o usuário está guardado já é dizer onde procurá-lo.
         alvo.appendChild(S.table([
-            // Não há mais coluna "O quê": a API devolve o nome da chave, e
-            // um rótulo à parte só existia para repetir a mesma informação.
             { key: 'chave', label: 'Chave' },
-            { key: 'resolvida', label: 'Resolveu', html: true,
-              render: function (v) { return selo(v, 'sim', 'não'); } },
-            { key: 'fonte', label: 'De onde veio' },
-            // Só chave não-sigilosa traz valor (hoje, o diretório do
-            // Instant Client). Endereço, usuário e senha aparecem como "—":
-            // a tela diz se resolveu e de onde veio, nunca o quê.
-            { key: 'valor', label: 'Valor',
-              render: function (v) { return v || '—'; } },
-            { key: 'no_local', label: '', html: true, render: function (v, linha) {
-                // Sombreamento: o cofre local vence o corporativo, então um
-                // valor velho ali derruba o certo sem ninguém ver.
-                return (v && !linha.no_corporativo)
-                    ? '<span class="badge badge-warning" title="Só o cofre local tem esta chave">só no local</span>'
-                    : '';
-            } }
+            { key: 'resolvida', label: 'Localizada', html: true,
+              render: function (v) { return selo(v, 'sim', 'não'); } }
         ], d.chaves));
 
         if (!d.driver.instalado) {
@@ -732,8 +716,10 @@ async function renderBaseEbs(c, S) {
         // chave. Ler uma chave que não existe dava sempre undefined, e o
         // aviso aparecia até com tudo configurado — ruído que ensina a
         // ignorar aviso.
+        // ORACLE_CLIENT_LIB_DIR saiu da lista de chaves (Instant Client, modo
+        // thick, que esta instalação não usa), então não há mais exceção aqui.
         var faltando = (d.chaves || []).filter(function (k) {
-            return !k.resolvida && k.chave !== 'ORACLE_CLIENT_LIB_DIR';
+            return !k.resolvida;
         }).map(function (k) { return k.chave; });
         if (faltando.length) {
             alvo.appendChild(S.el('div', { className: 'alert alert-info mt-3',

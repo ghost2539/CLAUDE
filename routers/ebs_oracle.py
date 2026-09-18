@@ -27,12 +27,13 @@ router = APIRouter(prefix="/api/ebs-oracle", tags=["EBS Oracle (leitura)"])
 
 # Chaves que a camada de acesso procura no cofre. A senha entra na lista
 # para a tela poder dizer se está resolvida — o valor nunca sai daqui.
-CHAVES = ("ORACLE_EBS_USER", "ORACLE_EBS_PASS", "ORACLE_EBS_DSN",
-          "ORACLE_CLIENT_LIB_DIR")
-# Nenhum destes tem o valor mostrado. A senha é a óbvia, mas endereço,
-# porta, instância e usuário identificam ONDE bater e com QUE conta — quem
-# lê essa tela fica a uma senha de entrar no banco de outra área. Sobra o
-# diretório do Instant Client, que é caminho de arquivo do servidor.
+# Sem ORACLE_CLIENT_LIB_DIR: é do Instant Client (modo thick), que esta
+# instalação não usa. `integracoes/ebs_oracle.py` continua aceitando a
+# variável para quem precisar do thick — ela só não figura mais na tela.
+CHAVES = ("ORACLE_EBS_USER", "ORACLE_EBS_PASS", "ORACLE_EBS_DSN")
+# Nenhuma tem o valor mostrado. A senha é a óbvia, mas endereço, porta,
+# instância e usuário identificam ONDE bater e com QUE conta — quem lê essa
+# tela fica a uma senha de entrar no banco de outra área.
 SIGILOSAS = {"ORACLE_EBS_PASS", "ORACLE_EBS_USER", "ORACLE_EBS_DSN"}
 
 # Padrões que `integracoes/ebs_oracle.py::_config()` usa quando o cofre não
@@ -45,11 +46,10 @@ SIGILOSAS = {"ORACLE_EBS_PASS", "ORACLE_EBS_USER", "ORACLE_EBS_DSN"}
 # tela diz "resolvida" para uma chave que ninguém configurou, mandando o
 # portal tentar um banco que não existe. Sem a chave no cofre a situação é
 # "ausente", e `_config()` recusa a conexão dizendo qual chave falta.
-# Só o diretório do Instant Client tem padrão: é caminho de arquivo do
-# servidor, não credencial.
-PADROES = {
-    "ORACLE_CLIENT_LIB_DIR": "/usr/lib/oracle/21/client64/lib",
-}
+# Vazio de propósito. O único padrão que havia era o caminho do Instant
+# Client, e ele saiu junto com a chave: além de não ser usado, era caminho
+# de arquivo do servidor indo para a tela sem precisar.
+PADROES: dict[str, str] = {}
 
 
 def _sem_credencial(exc: Exception) -> bool:
@@ -70,40 +70,33 @@ def _exigir(req: Request) -> dict:
 
 
 def _situacao_das_chaves() -> list[dict]:
-    """Por chave: se foi resolvida e de qual fonte. Sem revelar o valor."""
+    """Por chave: o nome e se foi LOCALIZADA. Nada além disso.
+
+    A tela trazia também de qual fonte a chave veio e em qual cofre ela
+    está, para flagrar o sombreamento (um valor velho no cofre local
+    vencendo o corporativo em silêncio). Duas coisas mudaram:
+
+    *   O cofre corporativo saiu do código (`cofre.USAR_CORPORATIVO` é
+        False, as funções são stubs). Não há mais duas fontes para uma
+        sombrear a outra — `no_corporativo` seria False sempre, e o aviso
+        "só no local" acenderia em TODA chave. Aviso que acende sempre é
+        aviso que se aprende a ignorar.
+    *   Estas três chaves são todas dado de acesso: usuário, senha e
+        endereço do banco. Dizer de onde o usuário do EBS veio já é contar
+        onde procurar por ele.
+
+    O JSON vai inteiro para o navegador, então o que some some aqui, não no
+    desenho da tela.
+    """
     from core import cofre
     saida = []
     for nome in CHAVES:
         try:
-            valor = cofre.obter(nome, "")
-            origem = cofre.fonte(nome) if valor else ""
+            achou = bool(cofre.obter(nome, ""))
         except Exception as exc:  # noqa: BLE001
-            valor, origem = "", f"erro ao consultar o cofre: {exc}"
-        # Onde cada fonte tem a chave. Sem isto, um valor errado no cofre
-        # local sombra o corporativo em silêncio — foi o que aconteceu: a
-        # tela dizia "do cofre" e ninguém via que era o cofre errado.
-        try:
-            tem_corp = bool(cofre._corporativo(nome))
-            tem_local = bool(cofre._local(nome))
-        except Exception:  # noqa: BLE001
-            tem_corp = tem_local = False
-        padrao = PADROES.get(nome, "")
-        # Três situações diferentes, e a tela precisa separá-las: veio do
-        # cofre, vai usar o padrão do código, ou não há valor nenhum.
-        if valor:
-            situacao = "cofre"
-        elif padrao:
-            situacao, origem = "padrao", "padrão do código"
-        else:
-            situacao = "ausente"
-        item = {"chave": nome, "situacao": situacao,
-                "resolvida": situacao != "ausente", "fonte": origem,
-                "no_corporativo": tem_corp, "no_local": tem_local}
-        # Só o que não é segredo aparece; a senha fica no sim/não.
-        efetivo = valor or padrao
-        if efetivo and nome not in SIGILOSAS:
-            item["valor"] = efetivo
-        saida.append(item)
+            _log.debug("cofre falhou em %s: %s", nome, exc)
+            achou = False
+        saida.append({"chave": nome, "resolvida": achou})
     return saida
 
 

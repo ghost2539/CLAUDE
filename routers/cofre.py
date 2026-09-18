@@ -5,9 +5,10 @@ do serviço tem sudo apenas para mexer no próprio serviço. Rodar o CLI no
 shell responde sobre o SHELL, não sobre o portal — são usuários e ambientes
 diferentes. Só o processo do portal pode responder se ele alcança o cofre.
 
-Nenhum valor de segredo sai daqui. De cada chave se diz apenas se foi
-resolvida, de qual fonte, e o tamanho — o suficiente para distinguir "não
-existe" de "existe e veio vazio", sem revelar nada.
+Nenhum valor sai daqui, e nem informação SOBRE o valor: de cada chave se diz
+apenas se foi LOCALIZADA. Tamanho, fonte e valor saíam antes e foram
+removidos — o JSON vai inteiro para o navegador, então esconder na tela não
+resolveria.
 
 Tudo é `admin`.
 """
@@ -30,8 +31,10 @@ router = APIRouter(prefix="/api/cofre", tags=["Cofre"])
 # resolvem, o caminho até o cofre está de pé.
 GRUPOS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Correios", ("CORREIOS_USUARIO", "CORREIOS_CHAVE", "CORREIOS_CARTOES")),
+    # Sem ORACLE_CLIENT_LIB_DIR: é do Instant Client (modo thick), que esta
+    # instalação não usa. Ficava sempre "ausente" e só fazia ruído.
     ("Base EBS (Oracle)", ("ORACLE_EBS_USER", "ORACLE_EBS_PASS",
-                           "ORACLE_EBS_DSN", "ORACLE_CLIENT_LIB_DIR")),
+                           "ORACLE_EBS_DSN")),
     ("ServiceNow", ("SN_API_USER", "SN_API_PASS")),
     ("MDM", ("MDM_USUARIO", "MDM_SENHA")),
 )
@@ -72,8 +75,23 @@ def _exigir(req: Request) -> dict:
 
 
 def _sondar(nome: str) -> dict:
-    """Uma chave: onde está, se resolveu, e o tamanho. Sem o valor."""
+    """Uma chave: o nome e se foi LOCALIZADA. Nada além disso.
+
+    A tela mostrava, por chave, o tamanho do valor, de quais fontes ela veio
+    e — quando o nome não batia com a lista de segredos — o próprio valor.
+    "USUARIO" e "USER" não estão nessa lista, então `CORREIOS_USUARIO` e
+    `ORACLE_EBS_USER` saíam por extenso. Usuário de banco é dado de acesso
+    como o endereço e a senha.
+
+    E não bastava esconder na tela: o JSON vai inteiro para o navegador, e
+    quem abre as ferramentas de desenvolvedor lê tudo. Por isso o que some
+    some AQUI, na resposta — não no desenho.
+
+    Procura nas três fontes, na mesma ordem de sempre (cofre corporativo →
+    cofre local → ambiente), e responde só se achou.
+    """
     from core import cofre
+    import os
     try:
         corp = cofre._corporativo(nome)
     except Exception as exc:  # noqa: BLE001
@@ -83,66 +101,8 @@ def _sondar(nome: str) -> dict:
         local = cofre._local(nome)
     except Exception:  # noqa: BLE001
         local = ""
-    import os
-    ambiente = os.environ.get(nome, "")
-    valor = corp or local or ambiente
-    # O loader do time resolve cofre -> os.environ -> default. Ou seja: com a
-    # variável definida no arquivo de ambiente, s() devolve valor mesmo com o
-    # cofre inacessível — e contabilizar isso como "veio do cofre" esconde
-    # exatamente o que se quer enxergar. Quando os dois valores são iguais,
-    # não há como distinguir, e a tela precisa dizer isso em vez de escolher.
-    # Se o loader diz que carregou a chave, ela É do cofre — mesmo que o
-    # valor também esteja no os.environ, porque foi o próprio loader que o
-    # exportou para lá. A heurística de comparar valores só vale quando o
-    # loader não sabe se listar.
-    from core import cofre as _cofre
-    try:
-        _nomes_loader, _ = _chaves_do_loader(_cofre._resolver_modulo())
-    except Exception:  # noqa: BLE001
-        _nomes_loader = []
-    if _nomes_loader:
-        do_cofre = nome in _nomes_loader and bool(corp)
-        indistinguivel = False
-    else:
-        indistinguivel = bool(corp and ambiente and corp == ambiente)
-        do_cofre = bool(corp) and not indistinguivel
-    item = {
-        "chave": nome,
-        "resolvida": bool(valor),
-        "fonte": ("cofre corporativo (loader)" if do_cofre and _nomes_loader else
-                  "cofre corporativo" if do_cofre else
-                  "ambiente (pelo loader)" if indistinguivel else
-                  "cofre local" if local else
-                  "ambiente" if ambiente else "não definido"),
-        "no_corporativo": do_cofre,
-        "no_local": bool(local),
-        "no_ambiente": bool(ambiente),
-        "indistinguivel": indistinguivel,
-        "tamanho": len(valor),
-    }
-    # Quem tem a chave, e todos concordam? Comparar não revela nada, e é o
-    # que faltava enxergar quando o cofre local sombreou a credencial certa.
-    # A ordem é corporativo → local → ambiente: o local ganha do ambiente,
-    # então um valor velho esquecido ali derruba a variável nova em silêncio.
-    # Quando foi o próprio loader que exportou a chave para o os.environ, o
-    # "ambiente" não é uma segunda fonte — é a mesma, vista de outro lugar.
-    eco_do_loader = bool(_nomes_loader) and nome in _nomes_loader and ambiente == corp
-    tem = [(rotulo, v) for rotulo, v in
-           (("cofre corporativo", corp if do_cofre else ""),
-            ("cofre local", local),
-            ("ambiente", "" if eco_do_loader else ambiente))
-           if v]
-    item["fontes_com_valor"] = [rotulo for rotulo, _ in tem]
-    item["divergente"] = len({v for _, v in tem}) > 1
-    # Sombreamento: mais de uma fonte tem a chave e a que vence não é a
-    # última a ser configurada. Vale avisar mesmo quando os valores batem —
-    # no dia em que uma mudar, a outra continua mandando.
-    item["sombreado"] = len(tem) > 1
-    # Só o que não é segredo aparece — usuário e DSN ajudam a conferir se o
-    # valor é o esperado; senha e chave, nunca.
-    if valor and not _e_segredo(nome):
-        item["valor"] = valor
-    return item
+    achou = bool(corp or local or os.environ.get(nome, ""))
+    return {"chave": nome, "resolvida": achou}
 
 
 def _chaves_do_loader(mod) -> tuple[list[str], str]:
@@ -405,18 +365,17 @@ def testar_correios(req: Request):
         _log.warning("Teste dos Correios falhou: %s", detalhe)
         return {"ok": False, "etapa": "api", "chaves": chaves,
                 "detalhe": str(detalhe)}
-    # O token é credencial: só o tamanho sai daqui.
+    # Nem o tamanho do token: o que importa é que autenticou.
     return {"ok": True, "etapa": "api", "chaves": chaves,
-            "detalhe": f"Autenticado nos Correios — token de {len(token)} caracteres."}
+            "detalhe": "Autenticado nos Correios."}
 
 
 @router.get("/tudo")
 def tudo(req: Request):
     """Tudo o que o serviço enxerga, das três fontes, em uma lista só.
 
-    Serve para conferir de uma vez o que está disponível — e, principalmente,
-    para achar a chave que existe com um nome que ninguém adivinharia.
-    Nomes sempre; valor só quando o nome não denuncia um segredo.
+    Nomes que o portal procura (mais os apelidos conhecidos do EBS) e, para
+    cada um, se foi localizado. Valor nunca, tamanho nunca, fonte nunca.
     """
     _exigir(req)
     import os
@@ -432,23 +391,25 @@ def tudo(req: Request):
     if erro:
         erros["cofre local"] = erro
     nomes.update(locais)
-    nomes.update(os.environ)
+    # O ambiente do processo NÃO entra em bloco. Listar `os.environ` mandava
+    # para o navegador o nome de toda variável do serviço — proxy, banco,
+    # caminho — e isso é mapa de configuração, não diagnóstico de cofre.
+    # Entram só os nomes que o portal procura, e os apelidos conhecidos.
+    for _, chaves in GRUPOS:
+        nomes.update(chaves)
+    for _, chaves in ALTERNATIVAS:
+        nomes.update(chaves)
 
     itens = []
     for n in sorted(nomes):
         item, erro = _seguro(f"chave {n}", lambda n=n: _sondar(n),
-                             {"chave": n, "resolvida": False, "fonte": "erro",
-                              "tamanho": 0})
+                             {"chave": n, "resolvida": False})
         if erro:
             erros[f"chave {n}"] = erro
         itens.append(item)
     return {
         "total": len(itens),
-        # Quantas vêm de cada fonte: é o número que diz se o cofre respondeu.
-        "por_fonte": {
-            rotulo: sum(1 for i in itens if i["fonte"] == rotulo)
-            for rotulo in ("cofre corporativo", "cofre local", "ambiente")
-        },
+        "resolvidas": sum(1 for i in itens if i["resolvida"]),
         "itens": itens,
         "erros": erros,
     }
