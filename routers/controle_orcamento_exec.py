@@ -46,7 +46,7 @@ from functools import lru_cache
 from typing import Any, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
@@ -58,6 +58,9 @@ from db.orcamento_exec import (
     NIVEIS_MODULO, nivel_do_login, listar_permissoes_modulo,
     definir_permissao_modulo, remover_permissao_modulo,
     OpexItem,
+    ler_cambio,
+    gravar_cambio,
+    MOEDAS_CAMBIO,
 )
 from core.prefixo import com_prefixo, destino, prefixo
 from core.security import (
@@ -630,9 +633,20 @@ def _moeda_empresa(empresa: str) -> Optional[str]:
 
 def _fx_rates() -> dict:
     """Cotação em REAIS por 1 peso: {'ARS': x, 'UYU': y}.
-    Prioriza valores fixados por env; senão tenta ao vivo (cache 1h)."""
+
+    Ordem: taxa informada na TELA (Configurações), depois variável de
+    ambiente, depois cotação ao vivo (cache 1h). A tela vem primeiro porque é
+    a única que quem opera consegue mudar sem deploy — e era o que faltava:
+    com a variável zerada e a URL de cotação fora do alcance da rede interna,
+    nada convertia e o valor ficava no peso."""
     import time
     rates = {"ARS": (EBS_CAPEX_ARS_BRL or None), "UYU": (EBS_CAPEX_UYU_BRL or None)}
+    try:
+        for moeda, dados in ler_cambio().items():
+            if dados.get("valor"):
+                rates[moeda] = float(dados["valor"])
+    except Exception as exc:  # noqa: BLE001 — sem banco, segue com env/ao vivo
+        _log.info("Câmbio informado na tela indisponível: %s", exc)
     if rates["ARS"] and rates["UYU"]:
         return rates
     now = time.time()
@@ -780,6 +794,57 @@ def excluir_permissao(login: str, req: Request):
         raise HTTPException(404, "Liberação não encontrada.")
     registrar_acesso(sd.get("username", ""), client_ip(req), "revogar", login)
     return {"ok": True}
+
+
+# ── Câmbio informado na tela ─────────────────────────────────────────────
+class CambioIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ARS: Optional[float] = None
+    UYU: Optional[float] = None
+
+
+@router.get("/api/controle-orcamento-exec/cambio")
+@_com_banco
+def cambio_ler(req: Request):
+    """O que está gravado, mais a taxa que está VALENDO e de onde ela vem.
+
+    A tela precisa das duas coisas: mostrar o campo preenchido e explicar por
+    que um projeto da Argentina não converteu."""
+    _exigir(req, "view")
+    gravado = ler_cambio()
+    valendo = _fx_rates()
+    ambiente = {"ARS": EBS_CAPEX_ARS_BRL or 0.0, "UYU": EBS_CAPEX_UYU_BRL or 0.0}
+    saida = {}
+    for moeda in MOEDAS_CAMBIO:
+        taxa = valendo.get(moeda)
+        if gravado[moeda]["valor"]:
+            fonte = "tela"
+        elif ambiente[moeda]:
+            fonte = "ambiente"
+        elif taxa:
+            fonte = "cotação ao vivo"
+        else:
+            fonte = "nenhuma"
+        saida[moeda] = {**gravado[moeda], "em_uso": taxa or 0.0, "fonte": fonte}
+    return {"cambio": saida, "moedas": list(MOEDAS_CAMBIO)}
+
+
+@router.put("/api/controle-orcamento-exec/cambio")
+@_com_banco
+def cambio_gravar(body: CambioIn, req: Request):
+    """Grava a taxa em reais por 1 peso. Zero ou vazio APAGA a taxa da moeda,
+    que é como se pede para voltar ao ambiente / à cotação ao vivo."""
+    sd = _exigir(req, "admin", "cambio", "taxa de câmbio informada na tela")
+    dados = body.model_dump(exclude_unset=True)
+    informados = {m: v for m, v in dados.items() if m in MOEDAS_CAMBIO}
+    if not informados:
+        raise HTTPException(422, "Informe ARS e/ou UYU.")
+    for moeda, valor in informados.items():
+        if valor is not None and float(valor) > 1000:
+            # 1 peso valendo mais de mil reais é dígito trocado, não cotação.
+            raise HTTPException(422, f"Taxa de {moeda} fora do esperado: {valor}.")
+    gravar_cambio(informados, sd.get("username", ""))
+    return cambio_ler(req)
 
 
 # ── OPEX (incluído manualmente, sem EBS; cada país na sua moeda) ─────────
@@ -955,6 +1020,258 @@ def opex_excluir(item_id: int, req: Request):
             raise HTTPException(404, "Linha não encontrada.")
         s.delete(it)
     return {"ok": True}
+
+
+# ── OPEX: planilha modelo e importação ───────────────────────────────────
+MESES_ABREV = ("JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
+               "JUL", "AGO", "SET", "OUT", "NOV", "DEZ")
+
+
+def _sem_acento(texto: str) -> str:
+    """Sem acento e sem caixa: o cabeçalho digitado varia ("PAÍS", "Pais")."""
+    import unicodedata
+    base = unicodedata.normalize("NFD", str(texto or ""))
+    return "".join(c for c in base if unicodedata.category(c) != "Mn")
+
+# (chave no modelo, rótulo na planilha, obrigatória?)
+COLUNAS_OPEX = (
+    ("pais", "País", True),
+    ("ano", "Ano", True),
+    ("bu", "BU", False),
+    ("fornecedor", "Fornecedor", False),
+    ("conta_contabil", "Conta contábil", False),
+    ("conta_descricao", "Descrição da conta", False),
+    ("tipo_despesa", "Tipo de despesa", False),
+)
+
+
+def _rotulos_meses() -> list[tuple[str, str]]:
+    """[(chave, rótulo)] das 24 colunas mensais: orçado e realizado."""
+    fora = []
+    for i, m in enumerate(MESES_ABREV, start=1):
+        fora.append((f"orcado_{i}", f"ORÇADO {m}"))
+    for i, m in enumerate(MESES_ABREV, start=1):
+        fora.append((f"realizado_{i}", f"REALIZADO {m}"))
+    return fora
+
+
+def _chave_coluna(texto: str) -> str:
+    """Rótulo da planilha -> chave interna, tolerante a acento, caixa e ao
+    asterisco de obrigatória. O modelo escreve "País *" no cabeçalho; sem
+    tirar o asterisco aqui, a planilha que o próprio portal gerou voltava
+    recusada por "falta a coluna País"."""
+    bruto = _sem_acento(str(texto or "")).strip().lower()
+    bruto = re.sub(r"\s*\*+\s*$", "", bruto)
+    bruto = re.sub(r"\s+", " ", bruto)
+    for chave, rotulo, _ in COLUNAS_OPEX:
+        if bruto in (_sem_acento(rotulo).lower(), chave):
+            return chave
+    for chave, rotulo in _rotulos_meses():
+        if bruto in (_sem_acento(rotulo).lower(), chave.replace("_", " ")):
+            return chave
+    return ""
+
+
+@router.get("/api/controle-orcamento-exec/opex/modelo")
+def opex_modelo(req: Request):
+    """Planilha modelo do OPEX: uma linha por gasto, 12 meses de orçado e 12
+    de realizado. É o mesmo formato que a importação espera de volta."""
+    _exigir(req, "view")
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from fastapi.responses import StreamingResponse
+    import io as _io
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OPEX"
+    cabecalho = Font(bold=True, color="FFFFFF")
+    fundo = PatternFill("solid", fgColor="1F4E79")
+    fundo_mes = PatternFill("solid", fgColor="2E75B6")
+
+    colunas = [(c, r, o) for c, r, o in COLUNAS_OPEX]
+    colunas += [(c, r, False) for c, r in _rotulos_meses()]
+    for col, (_chave, rotulo, obrig) in enumerate(colunas, start=1):
+        cel = ws.cell(row=1, column=col, value=rotulo + (" *" if obrig else ""))
+        cel.font = cabecalho
+        cel.fill = fundo if col <= len(COLUNAS_OPEX) else fundo_mes
+        cel.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[cel.column_letter].width = max(13, len(cel.value) + 3)
+
+    # Duas linhas de exemplo: uma do Brasil e uma da LATAM, que usam colunas
+    # diferentes — é a dúvida que mais aparece.
+    ws.cell(row=2, column=1, value="BR")
+    ws.cell(row=2, column=2, value=date.today().year)
+    ws.cell(row=2, column=3, value="Infra")
+    ws.cell(row=2, column=4, value="Fornecedor Exemplo Ltda")
+    ws.cell(row=2, column=7, value="Manutenção")
+    ws.cell(row=2, column=8, value=1500)
+    ws.cell(row=2, column=20, value=1480)
+
+    ws.cell(row=3, column=1, value="AR")
+    ws.cell(row=3, column=2, value=date.today().year)
+    ws.cell(row=3, column=3, value="Infra")
+    ws.cell(row=3, column=4, value="Proveedor Ejemplo S.A.")
+    ws.cell(row=3, column=5, value="6110100")
+    ws.cell(row=3, column=6, value="Servicios de TI")
+    ws.cell(row=3, column=8, value=250000)
+    ws.freeze_panes = "A2"
+
+    aba = wb.create_sheet("Instruções")
+    for i, linha in enumerate([
+        "Uma linha por gasto. A primeira linha é o cabeçalho e não deve ser apagada.",
+        "País * aceita BR, AR ou UY. Ano * é o ano do orçamento (ex.: "
+        + str(date.today().year) + ").",
+        "Cada país fica na SUA moeda: BR em reais, AR em pesos argentinos, "
+        "UY em pesos uruguaios. A importação não converte nada.",
+        "Conta contábil e Descrição da conta são usadas por AR e UY.",
+        "Tipo de despesa é usado pelo Brasil.",
+        "ORÇADO JAN..DEZ e REALIZADO JAN..DEZ aceitam só números; vazio conta como zero.",
+        "As linhas 2 e 3 são exemplos: apague-as antes de enviar.",
+        "Ao enviar, o portal mostra uma prévia antes de gravar.",
+    ], start=1):
+        aba.cell(row=i, column=1, value=linha)
+    aba.column_dimensions["A"].width = 95
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="modelo_opex.xlsx"'})
+
+
+def _numero_opex(v) -> float:
+    """Aceita 1234.56, "1.234,56" e "R$ 1.234,56"; vazio vira 0."""
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return round(float(v), 2)
+    texto = re.sub(r"[^\d,.\-]", "", str(v)).strip()
+    if not texto:
+        return 0.0
+    # "1.234,56" (pt-BR) x "1234.56": a vírgula, quando existe, é o decimal.
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    try:
+        return round(float(texto), 2)
+    except ValueError:
+        return 0.0
+
+
+def _ler_planilha_opex(nome: str, conteudo: bytes) -> tuple[list[dict], list[str]]:
+    """Devolve (linhas, avisos). Nunca levanta por causa do conteúdo: erro de
+    linha vira aviso, para a prévia mostrar tudo de uma vez."""
+    from openpyxl import load_workbook
+    import io as _io
+
+    if not nome.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(422, "Envie a planilha em .xlsx (use o modelo).")
+    try:
+        wb = load_workbook(_io.BytesIO(conteudo), data_only=True, read_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(422, f"Não consegui abrir a planilha: {exc}")
+    ws = wb["OPEX"] if "OPEX" in wb.sheetnames else wb[wb.sheetnames[0]]
+
+    linhas_brutas = list(ws.iter_rows(values_only=True))
+    if not linhas_brutas:
+        raise HTTPException(422, "A planilha está vazia.")
+
+    mapa: dict[int, str] = {}
+    for i, valor in enumerate(linhas_brutas[0]):
+        chave = _chave_coluna(valor)
+        if chave:
+            mapa[i] = chave
+    faltando = [r for c, r, o in COLUNAS_OPEX if o and c not in mapa.values()]
+    if faltando:
+        raise HTTPException(
+            422, "A planilha não tem a(s) coluna(s) obrigatória(s): "
+                 + ", ".join(faltando) + ". Baixe o modelo e use o cabeçalho dele.")
+
+    linhas, avisos = [], []
+    for n, bruta in enumerate(linhas_brutas[1:], start=2):
+        dados = {mapa[i]: bruta[i] for i in mapa if i < len(bruta)}
+        if not any(str(v or "").strip() for v in dados.values()):
+            continue   # linha em branco no meio da planilha
+        pais = _sem_acento(str(dados.get("pais") or "")).strip().upper()
+        if pais not in OPEX_PAISES:
+            avisos.append(f"linha {n}: país {dados.get('pais')!r} inválido — ignorada")
+            continue
+        try:
+            ano = int(str(dados.get("ano") or "").strip()[:4])
+        except ValueError:
+            avisos.append(f"linha {n}: ano {dados.get('ano')!r} inválido — ignorada")
+            continue
+        orcado = {str(m): _numero_opex(dados.get(f"orcado_{m}")) for m in range(1, 13)}
+        realizado = {str(m): _numero_opex(dados.get(f"realizado_{m}")) for m in range(1, 13)}
+        linhas.append({
+            "linha": n, "pais": pais, "regiao": OPEX_REGIAO[pais], "ano": ano,
+            "moeda": OPEX_MOEDA[pais],
+            "bu": str(dados.get("bu") or "").strip()[:120],
+            "fornecedor": str(dados.get("fornecedor") or "").strip()[:200],
+            "conta_contabil": str(dados.get("conta_contabil") or "").strip()[:60],
+            "conta_descricao": str(dados.get("conta_descricao") or "").strip()[:200],
+            "tipo_despesa": str(dados.get("tipo_despesa") or "").strip()[:80],
+            "orcado_meses": {k: v for k, v in orcado.items() if v},
+            "realizado_meses": {k: v for k, v in realizado.items() if v},
+            "total_orcado": round(sum(orcado.values()), 2),
+            "total_realizado": round(sum(realizado.values()), 2),
+        })
+    return linhas, avisos
+
+
+@router.post("/api/controle-orcamento-exec/opex/importar")
+@_com_banco
+async def opex_importar(req: Request, arquivo: UploadFile = File(...),
+                        dry_run: bool = True, substituir: bool = False):
+    """Lê a planilha e mostra a prévia; só grava com `dry_run=false`.
+
+    `substituir=true` APAGA as linhas OPEX dos anos/países presentes na
+    planilha antes de incluir — é a forma de reenviar um ano corrigido sem
+    ficar com o antigo e o novo somando juntos."""
+    sd = _exigir(req, "create" if dry_run else "edit")
+    check_rate_limit(req, "api")
+    conteudo = await arquivo.read()
+    if len(conteudo) > 8 * 1024 * 1024:
+        raise HTTPException(413, "Planilha acima de 8 MB.")
+    linhas, avisos = _ler_planilha_opex(arquivo.filename or "", conteudo)
+
+    escopo = sorted({(x["pais"], x["ano"]) for x in linhas})
+    resumo = {
+        "arquivo": arquivo.filename, "lidas": len(linhas), "avisos": avisos,
+        "escopo": [{"pais": p, "ano": a} for p, a in escopo],
+        "total_orcado": round(sum(x["total_orcado"] for x in linhas), 2),
+        "total_realizado": round(sum(x["total_realizado"] for x in linhas), 2),
+    }
+    if dry_run:
+        # A prévia mostra as 50 primeiras: o suficiente para conferir o
+        # cabeçalho e o formato dos números sem devolver a planilha inteira.
+        return {**resumo, "dry_run": True, "previa": linhas[:50],
+                "substituiria": bool(substituir)}
+
+    if not linhas:
+        raise HTTPException(422, "Nenhuma linha válida na planilha. "
+                                 + (avisos[0] if avisos else ""))
+    apagadas = 0
+    with SessionLocal.begin() as s:
+        if substituir and escopo:
+            for pais, ano in escopo:
+                apagadas += s.query(OpexItem).filter(
+                    OpexItem.pais == pais, OpexItem.ano == ano).delete()
+        ordem = (s.scalar(select(func.max(OpexItem.sort_order))) or 0)
+        for x in linhas:
+            ordem += 1
+            s.add(OpexItem(
+                regiao=x["regiao"], pais=x["pais"], ano=x["ano"], bu=x["bu"],
+                fornecedor=x["fornecedor"], conta_contabil=x["conta_contabil"],
+                conta_descricao=x["conta_descricao"], tipo_despesa=x["tipo_despesa"],
+                orcado_meses=json.dumps(x["orcado_meses"]),
+                realizado_meses=json.dumps(x["realizado_meses"]),
+                sort_order=ordem, atualizado_por=sd.get("username", ""),
+            ))
+    registrar_acesso(sd.get("username", ""), client_ip(req), "importar",
+                     f"OPEX: {len(linhas)} linha(s), {apagadas} substituída(s)")
+    return {**resumo, "dry_run": False, "incluidas": len(linhas), "apagadas": apagadas}
 
 
 @router.get("/api/controle-orcamento-exec/projetos")

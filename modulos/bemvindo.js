@@ -37,10 +37,11 @@ window.SPARE_MODULES.bemvindo = {
         // Integration status
         try {
             var d = await S.api('/status');
+            // Mesmos cartões da tela de Status: "SQL" em vez do nome do
+            // produto (o banco muda com o servidor) e sem a Base Local.
             var items = [
-                ['EBS',        d.ebs],
-                ['PostgreSQL', d.postgres],
-                ['Base Local', d.local]
+                ['EBS', d.ebs],
+                ['SQL', d.postgres]
             ];
             document.getElementById('welcome-status').innerHTML = items.map(function (x) {
                 var dotClass = x[1].connected ? 'dot-green' : (x[1].not_applicable ? 'dot-muted' : 'dot-red');

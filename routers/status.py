@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select, func, text
 
 from db.portal import SessionLocal, ReceiptCycle, Repair, LocalAsset, engine
+from core.mascara import sem_dado_de_acesso
 from core.security import get_session
 
 router = APIRouter(prefix="/api", tags=["Status"])
@@ -73,13 +74,17 @@ def api_versao(req: Request):
 def system_status(req: Request):
     sd = get_session(req)
 
-    # PostgreSQL connectivity
+    # Banco do portal. Na tela ele aparece como "SQL", não pelo nome do
+    # produto: é Postgres num servidor e SQLite no outro.
     try:
         with engine.connect() as c:
             c.execute(text("SELECT 1"))
         pg = {"connected": True}
     except Exception as e:
-        pg = {"connected": False, "error": str(e)}
+        # A mensagem do driver traz a string de conexão inteira quando a
+        # conexão falha — host, porta, base e usuário. Isso é dado de acesso
+        # e não vai para a tela.
+        pg = {"connected": False, "error": sem_dado_de_acesso(str(e))}
 
     # Local asset base
     try:

@@ -643,6 +643,56 @@ function OpexView({ podeEditar, onResumo }) {
   const timers = useRef({});
   const campoSerie = serie === "orcado" ? "orcado_meses" : "realizado_meses";
 
+  /* Importação por planilha: a prévia sai do servidor e nada é gravado até
+     o Confirmar. `arquivoRef` só existe para o botão abrir o seletor. */
+  const arquivoRef = useRef(null);
+  const [importacao, setImportacao] = useState(null);
+  const [substituir, setSubstituir] = useState(false);
+  const [impBusy, setImpBusy] = useState(false);
+
+  async function enviarPlanilha(arquivo, gravar) {
+    const corpo = new FormData();
+    corpo.append("arquivo", arquivo);
+    const res = await fetch(
+      _comBarraFinal(API_BASE + "/opex/importar?dry_run=" + (gravar ? "false" : "true")
+                    + "&substituir=" + (substituir ? "true" : "false")),
+      { method: "POST", credentials: "same-origin", body: corpo });
+    // FormData monta o Content-Type sozinho (com o boundary): não use api().
+    if (!res.ok) {
+      let detalhe = `Erro ${res.status}`;
+      try { const b = await res.json(); if (typeof b.detail === "string") detalhe = b.detail; } catch (_) {}
+      throw new Error(detalhe);
+    }
+    return res.json();
+  }
+
+  async function previaImportacao(arquivo) {
+    setErro(""); setImpBusy(true);
+    try {
+      const d = await enviarPlanilha(arquivo, false);
+      setImportacao({ ...d, arquivoObj: arquivo });
+      setSubstituir(false);
+    } catch (e) {
+      setImportacao(null);
+      setErro("Não li a planilha: " + e.message);
+    } finally { setImpBusy(false); }
+  }
+
+  async function confirmarImportacao() {
+    if (!importacao || !importacao.arquivoObj) return;
+    setImpBusy(true);
+    try {
+      const d = await enviarPlanilha(importacao.arquivoObj, true);
+      setImportacao(null);
+      setErro("");
+      carregar(ano);
+      window.alert(`Importação concluída: ${d.incluidas} linha(s) incluída(s)`
+                   + (d.apagadas ? `, ${d.apagadas} substituída(s).` : "."));
+    } catch (e) {
+      setErro("Não importei: " + e.message);
+    } finally { setImpBusy(false); }
+  }
+
   const carregar = useCallback(async (a) => {
     setCarregando(true); setErro("");
     try {
@@ -736,13 +786,92 @@ function OpexView({ podeEditar, onResumo }) {
           ))}
         </div>
         <span className="text-[11px] text-gray-500">Editando o <b>{serie === "orcado" ? "orçado" : "realizado"}</b> de cada mês.</span>
+        <a href={_comBarraFinal(API_BASE + "/opex/modelo")} download
+           className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+          Baixar planilha modelo
+        </a>
         {podeEditar && (
-          <button onClick={() => incluir(aba === "BR" ? "BR" : "AR")}
-                  className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5">
-            {Icon.plus} Nova linha
-          </button>
+          <>
+            <button onClick={() => arquivoRef.current && arquivoRef.current.click()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+              Importar planilha
+            </button>
+            <input ref={arquivoRef} type="file" accept=".xlsx,.xlsm" className="hidden"
+                   onChange={(e) => {
+                     const f = e.target.files && e.target.files[0];
+                     e.target.value = "";          // permite reenviar o mesmo arquivo
+                     if (f) previaImportacao(f);
+                   }} />
+            <button onClick={() => incluir(aba === "BR" ? "BR" : "AR")}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5">
+              {Icon.plus} Nova linha
+            </button>
+          </>
         )}
       </div>
+
+      {/* Prévia da importação: nada é gravado antes de confirmar aqui. */}
+      {importacao && (
+        <section className="mb-3 bg-white rounded-lg border border-blue-200 shadow-sm p-4">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <h3 className="text-sm font-semibold text-gray-800">
+              Prévia de {importacao.arquivo}
+            </h3>
+            <span className="text-[11px] text-gray-500">
+              {importacao.lidas} linha(s) · {importacao.escopo.map((e) => e.pais + "/" + e.ano).join(", ") || "—"}
+            </span>
+          </div>
+          {importacao.avisos.length > 0 && (
+            <ul className="mb-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 list-disc list-inside">
+              {importacao.avisos.slice(0, 8).map((a, i) => <li key={i}>{a}</li>)}
+              {importacao.avisos.length > 8 && <li>… e mais {importacao.avisos.length - 8}.</li>}
+            </ul>
+          )}
+          {importacao.lidas === 0 ? (
+            <p className="text-xs text-gray-600">Nenhuma linha válida — corrija a planilha e envie de novo.</p>
+          ) : (
+            <div className="overflow-x-auto mb-3">
+              <table className="min-w-[700px] w-full text-[11px] border-collapse">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr><th className="th">Linha</th><th className="th">País</th><th className="th">Ano</th>
+                      <th className="th text-left">Fornecedor</th><th className="th text-right">Orçado</th>
+                      <th className="th text-right">Realizado</th></tr>
+                </thead>
+                <tbody>
+                  {importacao.previa.slice(0, 10).map((l) => (
+                    <tr key={l.linha} className="border-t border-gray-100">
+                      <td className="td text-center text-gray-500">{l.linha}</td>
+                      <td className="td text-center">{l.pais}</td>
+                      <td className="td text-center">{l.ano}</td>
+                      <td className="td">{l.fornecedor || "—"}</td>
+                      <td className="td text-right">{fmtMoeda(l.total_orcado, l.moeda)}</td>
+                      <td className="td text-right">{fmtMoeda(l.total_realizado, l.moeda)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {importacao.lidas > 10 && (
+                <p className="text-[11px] text-gray-500 mt-1">Mostrando 10 de {importacao.lidas}.</p>
+              )}
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-[11px] text-gray-700 mb-3">
+            <input type="checkbox" checked={substituir} onChange={(e) => setSubstituir(e.target.checked)} />
+            Apagar as linhas que já existem para {importacao.escopo.map((e) => e.pais + "/" + e.ano).join(", ") || "estes países/anos"} antes de incluir
+            <span className="text-gray-500">(use ao reenviar um ano corrigido, para não somar em dobro)</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <button onClick={confirmarImportacao} disabled={impBusy || importacao.lidas === 0}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+              {impBusy ? "Importando…" : "Confirmar importação"}
+            </button>
+            <button onClick={() => setImportacao(null)} disabled={impBusy}
+                    className="text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-3 py-1.5">
+              Cancelar
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
         <table className="min-w-[1100px] w-full text-[12px] border-collapse">
@@ -872,6 +1001,11 @@ export default function App() {
   const [acBusy, setAcBusy] = useState(false);
   const [acMsg, setAcMsg] = useState("");
 
+  /* Câmbio informado na tela: o que está gravado e o que está sendo digitado */
+  const [cambio, setCambio] = useState(null);
+  const [cambioEdit, setCambioEdit] = useState({ ARS: "", UYU: "" });
+  const [cambioBusy, setCambioBusy] = useState(false);
+
   /* Barra de inclusão de projetos (Número puxa do EBS) */
   const [inc, setInc] = useState({ numero: "", tipo: "CAPEX", projeto_demanda: "", categoria: "", area: "" });
   const [incBusy, setIncBusy] = useState(false);
@@ -904,6 +1038,48 @@ export default function App() {
   useEffect(() => {
     if (adminModulo && view === "config") carregarPermissoes();
   }, [adminModulo, view, carregarPermissoes]);
+
+  /* ── Câmbio (Configurações) ─────────────────────────────────────── */
+  const carregarCambio = useCallback(async () => {
+    try {
+      const d = await api(API_BASE + "/cambio");
+      setCambio(d.cambio || {});
+      // O campo mostra o que está GRAVADO, não o que está em uso: taxa que
+      // veio do ambiente ou da cotação ao vivo não é editável aqui.
+      setCambioEdit({
+        ARS: (d.cambio?.ARS?.valor || "") === 0 ? "" : String(d.cambio?.ARS?.valor || ""),
+        UYU: (d.cambio?.UYU?.valor || "") === 0 ? "" : String(d.cambio?.UYU?.valor || ""),
+      });
+    } catch { /* sem permissão de ver: o card não aparece preenchido */ }
+  }, []);
+  useEffect(() => { if (view === "config") carregarCambio(); }, [view, carregarCambio]);
+
+  async function salvarCambio() {
+    setCambioBusy(true);
+    try {
+      const corpo = {};
+      for (const m of ["ARS", "UYU"]) {
+        const bruto = String(cambioEdit[m] ?? "").trim().replace(",", ".");
+        corpo[m] = bruto === "" ? 0 : Number(bruto);
+        if (Number.isNaN(corpo[m])) throw new Error(`Taxa de ${m} inválida.`);
+      }
+      const d = await api(API_BASE + "/cambio", { method: "PUT", body: JSON.stringify(corpo) });
+      setCambio(d.cambio || {});
+      setErro("");
+      setAcMsg("Câmbio salvo. Vale a partir do próximo Atualizar (EBS).");
+    } catch (e) {
+      setErro("Não salvei o câmbio: " + e.message);
+    } finally {
+      setCambioBusy(false);
+    }
+  }
+
+  /* Taxa é número pequeno (0,0055): a formatação padrão arredondaria para 0. */
+  function formatarTaxa(v) {
+    const n = Number(v || 0);
+    if (!n) return "—";
+    return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  }
 
   const salvarAcesso = async (login, nivel, nome) => {
     setAcBusy(true); setAcMsg("");
@@ -1741,6 +1917,53 @@ export default function App() {
                 A liberação de acessos deste módulo é feita pelo administrador do módulo (definido em Parâmetros).
               </section>
             )}
+
+            {/* Câmbio informado à mão. Sem isto, projeto de AR/UY ficava com o
+                valor no peso: a variável de ambiente está zerada no servidor e
+                a URL de cotação ao vivo não é alcançável da rede interna. */}
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-sm font-semibold text-gray-800">Câmbio</h2>
+                <span className="text-[11px] text-gray-500">
+                  Quantos reais vale 1 peso. Usado ao puxar do EBS projetos da Argentina e do Uruguai.
+                </span>
+              </div>
+              {cambio ? (
+                <>
+                  <div className="flex flex-wrap items-end gap-3 mb-3">
+                    {["ARS", "UYU"].map((m) => (
+                      <label key={m} className="block">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">
+                          {m === "ARS" ? "Peso argentino (ARS)" : "Peso uruguaio (UYU)"}
+                        </span>
+                        <input type="number" step="0.000001" min="0" disabled={!adminModulo}
+                               value={cambioEdit[m] ?? ""}
+                               onChange={(e) => setCambioEdit({ ...cambioEdit, [m]: e.target.value })}
+                               placeholder="ex.: 0,0055"
+                               className="w-[160px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50" />
+                        <span className="block text-[10px] text-gray-500 mt-0.5">
+                          em uso: {(cambio[m] || {}).em_uso ? formatarTaxa((cambio[m] || {}).em_uso) : "—"}
+                          {" "}· fonte: {(cambio[m] || {}).fonte || "—"}
+                        </span>
+                      </label>
+                    ))}
+                    {adminModulo && (
+                      <button onClick={salvarCambio} disabled={cambioBusy}
+                              className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md px-3 py-1.5 disabled:opacity-50">
+                        {cambioBusy ? "Salvando…" : "Salvar câmbio"}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    Vale a partir do próximo <b>Atualizar (EBS)</b>: o valor já gravado nos projetos não muda sozinho.
+                    Deixe <b>0</b> (ou vazio) para voltar a usar a cotação do ambiente/ao vivo.
+                    {!adminModulo && " Só o administrador do módulo altera."}
+                  </p>
+                </>
+              ) : (
+                <span className="text-xs text-gray-500">Carregando câmbio…</span>
+              )}
+            </section>
 
             <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-3">

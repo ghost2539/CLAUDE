@@ -24,6 +24,17 @@ import re
 _CHAVES_ENDERECO = ("ORACLE_EBS_DSN", "EBS_ORACLE_DSN")
 _CHAVES_USUARIO = ("ORACLE_EBS_USER", "EBS_ORACLE_USER")
 
+# URL de conexão de banco, em qualquer formato: o erro do libpq devolve a
+# string inteira ("could not connect to server ... postgresql://u:senha@h/b"),
+# e a do portal não passa pelo cofre — vem de DATABASE_URL. Só esquemas de
+# banco entram aqui; http/https de integração não são dado de acesso e
+# mascará-los deixaria a mensagem inútil para quem lê.
+_ESQUEMAS_BANCO = ("postgresql", "postgres", "sqlite", "mysql", "mariadb",
+                   "oracle", "mssql", "db2", "cockroachdb")
+_RE_URL_BANCO = re.compile(
+    r"\b(?:" + "|".join(_ESQUEMAS_BANCO) + r")(?:\+[a-z0-9_]+)?://[^\s'\"<>,;)]*",
+    re.IGNORECASE)
+
 # Pedaço curto demais não se mascara: "1", "db" ou "ab" apareceriam no meio
 # de qualquer palavra e a mensagem viraria uma fileira de <omitido>.
 _MINIMO = 4
@@ -42,9 +53,32 @@ def _valores(chaves: tuple[str, ...]) -> list[str]:
     return achados
 
 
+def _url_do_portal() -> str:
+    """DATABASE_URL como o processo a enxerga. Não vem do cofre: é config."""
+    try:
+        from config import get_settings
+        return (get_settings().DATABASE_URL or "").strip()
+    except Exception:  # noqa: BLE001 — sem config, não há o que mascarar
+        return ""
+
+
 def sem_dado_de_acesso(texto: str) -> str:
     """Devolve o texto com endereço, partes do endereço e usuário trocados."""
     saida = str(texto)
+    # Qualquer URL de banco que apareça na mensagem, venha de onde vier.
+    saida = _RE_URL_BANCO.sub("<endereço do banco>", saida)
+    # E as PARTES da URL do portal: o libpq às vezes cita host e porta soltos,
+    # fora da URL ("connection to server at \"10.0.0.9\", port 5432 failed").
+    url = _url_do_portal()
+    if url:
+        saida = saida.replace(url, "<endereço do banco>")
+        for pedaco in re.split(r"[/:@,()= ?&]+", url):
+            if len(pedaco) < _MINIMO or pedaco.lower() in _ESQUEMAS_BANCO:
+                continue
+            # Só o pedaço INTEIRO. Sem isto, um caminho com ".../data/db/"
+            # fazia "database" virar "<omitido>base" e a mensagem ficava
+            # ilegível justamente para quem está tentando entender a falha.
+            saida = re.sub(rf"\b{re.escape(pedaco)}\b", "<omitido>", saida)
     for dsn in _valores(_CHAVES_ENDERECO):
         saida = saida.replace(dsn, "<endereço do banco>")
         # DPY-6003 não repete o DSN inteiro: ele cita host, porta e instância

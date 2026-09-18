@@ -274,6 +274,73 @@ class OpexItem(Base):
         }
 
 
+class Cambio(Base):
+    """Cotação informada à mão: quantos REAIS vale 1 unidade da moeda.
+
+    O módulo já sabia converter ARS/UYU→BRL, mas a taxa só vinha de variável
+    de ambiente (`EBS_CAPEX_ARS_BRL`) ou de uma URL de cotação ao vivo. No
+    servidor as duas faltam — a variável está zerada e a URL não é alcançável
+    da rede interna —, então a conversão simplesmente não acontecia e o valor
+    ficava no peso, sem ninguém entender por quê.
+
+    Aqui a taxa fica no banco, editável na tela, e tem prioridade sobre as
+    outras duas fontes: quem opera consegue arrumar sem depender de deploy
+    nem de liberação de rede.
+    """
+    __tablename__ = "orc_cambio"
+    moeda: Mapped[str] = mapped_column(String(4), primary_key=True)   # ARS | UYU
+    valor: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=0)
+    atualizado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, onupdate=utcnow)
+    atualizado_por: Mapped[str] = mapped_column(String(120), default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "moeda": self.moeda,
+            "valor": float(self.valor or 0),
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None,
+            "atualizado_por": self.atualizado_por or "",
+        }
+
+
+MOEDAS_CAMBIO = ("ARS", "UYU")
+
+
+def ler_cambio() -> dict:
+    """{'ARS': {...}, 'UYU': {...}} com o que estiver gravado. Taxa 0 ou
+    ausente significa "não informada" — quem chama decide o que fazer."""
+    ensure_db()
+    with SessionLocal() as s:
+        gravadas = {c.moeda: c.to_dict() for c in s.scalars(select(Cambio)).all()}
+    return {m: gravadas.get(m, {"moeda": m, "valor": 0.0,
+                                "atualizado_em": None, "atualizado_por": ""})
+            for m in MOEDAS_CAMBIO}
+
+
+def gravar_cambio(valores: dict, usuario: str) -> dict:
+    """Grava as taxas informadas. Valor <= 0 APAGA a taxa daquela moeda, que
+    é como se diz "volte a usar o câmbio ao vivo / a variável de ambiente"."""
+    ensure_db()
+    with SessionLocal.begin() as s:
+        for moeda in MOEDAS_CAMBIO:
+            if moeda not in valores:
+                continue
+            try:
+                valor = float(valores[moeda] or 0)
+            except (TypeError, ValueError):
+                continue
+            atual = s.get(Cambio, moeda)
+            if valor <= 0:
+                if atual is not None:
+                    s.delete(atual)
+                continue
+            if atual is None:
+                atual = Cambio(moeda=moeda)
+                s.add(atual)
+            atual.valor = Decimal(str(round(valor, 6)))
+            atual.atualizado_por = usuario or ""
+    return ler_cambio()
+
+
 class BudgetPermissao(Base):
     """Liberação de acesso PRÓPRIA do módulo (não é a permissão do portal).
 
