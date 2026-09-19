@@ -1,21 +1,3 @@
-"""Prefixo do portal quando ele é servido num subcaminho do proxy.
-
-Servido em `suporte.lojasrenner.com.br/portal-spare`, o navegador precisa
-buscar `/portal-spare/static/...` e `/portal-spare/api/...`. Sem o prefixo
-ele bate na raiz do domínio e recebe 404 — a tela abre sem estilo.
-
-De onde sai o prefixo, nesta ordem:
-
-1. `root_path` da requisição — é o que o `--root-path /portal-spare` do
-   uvicorn coloca no ASGI. Não precisa de variável de ambiente nenhuma:
-   quem já roda com `--root-path` está pronto.
-2. `APP_BASE_PATH`, quando alguém preferir declarar explicitamente (ou
-   quando o serviço não usa `--root-path`).
-3. Vazio — o portal está na raiz do domínio e nada muda.
-
-Assim o mesmo código serve a produção (na raiz) e a migração (atrás do
-proxy), sem depender de quem edita a unit do systemd.
-"""
 from __future__ import annotations
 
 import re as _re
