@@ -22,16 +22,6 @@ ARQ_COFRE = DIR / "cofre.json"
 _REF = re.compile(r"@cofre:([A-Za-z0-9_.-]{1,64})@")
 MARCADOR = "@cofre:"
 
-
-# ── Cofre corporativo REMOVIDO ──────────────────────────────────────────
-# O loader externo (vcreports_secrets / /etc/vcreports/.secrets.env) foi
-# removido do código. Ele ficava inacessível neste servidor (Permission
-# denied) e só gerava ruído no log sem entregar nada. Os segredos passam a
-# vir do cofre LOCAL e do os.environ.
-#
-# As funções abaixo são stubs inertes: existem apenas para as telas/rotas de
-# diagnóstico (routers/cofre.py) e scripts continuarem importando sem quebrar.
-# Nenhuma delas importa `vcreports_secrets` nem lê `/etc/vcreports/.secrets.env`.
 USAR_CORPORATIVO = False
 _MSG_REMOVIDO = ("cofre corporativo removido do código — os segredos vêm do "
                  "os.environ e do cofre local")
