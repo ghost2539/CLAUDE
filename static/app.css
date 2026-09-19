@@ -908,8 +908,17 @@ select.form-control-sm { padding-right: 22px; }
 /* ── Bloco de marca ──────────────────────────────────────────────── */
 .lg-meio {
     position: relative;
-    display: flex; flex-direction: column; align-items: flex-start;
+    /* `flex: 1` faz este bloco ocupar todo o espaço que sobra entre o topo
+       do painel e o ciclo lá embaixo; o `justify-content: center` então
+       centra a marca DENTRO desse espaço. Sem o flex, o space-between do
+       painel empurrava a marca para o topo e sobrava um vazio enorme. */
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
     gap: 22px; max-width: 600px;
+    /* Centrado também na horizontal, já que a coluna tem largura máxima. */
+    margin: 0 auto;
 }
 /* Véu do bloco: ver o comentário no HTML. Fica ATRÁS do texto (z-index
    negativo) e por isso não intercepta clique nem seleção. */
@@ -926,7 +935,7 @@ select.form-control-sm { padding-right: 22px; }
     text-indent: .34em;
 }
 .lg-lockup {
-    margin: 0; display: flex; align-items: baseline;
+    margin: 0; display: flex; align-items: baseline; justify-content: center;
     font: bold clamp(46px, 6.4vw, 70px)/1 var(--sp-sans);
     letter-spacing: .1em; text-indent: .05em;
     white-space: nowrap; color: var(--sp-white);
@@ -943,17 +952,20 @@ select.form-control-sm { padding-right: 22px; }
     font: bold 11px/1 var(--sp-sans); letter-spacing: .22em;
     text-transform: uppercase; color: #8C8C8C;
 }
-.lg-renner { display: flex; flex-direction: column; gap: 15px; padding-top: 8px; }
+.lg-renner {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 15px; padding-top: 8px;
+}
 .lg-renner-filete {
     width: 130px; height: 1px;
     background: linear-gradient(90deg, transparent, #242424, transparent);
 }
 .lg-renner-marca {
     display: block; width: 180px; height: 15px;
-    object-fit: contain; object-position: left center; opacity: .85;
+    object-fit: contain; object-position: center; opacity: .85;
 }
 .lg-selo {
-    display: inline-flex; align-items: center; gap: 9px; align-self: flex-start;
+    display: inline-flex; align-items: center; gap: 9px; align-self: center;
     padding: 7px 13px; border: 1px solid #AB480780; background: #AB48071F;
     font: 500 10px/1 var(--sp-label); letter-spacing: .16em; text-transform: uppercase; color: var(--sp-sand);
 }
