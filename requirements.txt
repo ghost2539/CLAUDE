@@ -20,3 +20,7 @@ bcrypt==4.0.1
 slowapi>=0.1.9
 # Leitura de PDF (extração de campos da NF em Agendamentos Forn.)
 pypdf>=4.0
+# mTLS com o certificado A1 (.pfx) na consulta da NF-e à SEFAZ (integracoes/nfe_sefaz.py); exige cryptography>=42.
+requests-pkcs12>=1.25
+# DANFE em PDF a partir do XML da NF-e (integracoes/nfe_sefaz.py::danfe_pdf).
+brazilfiscalreport>=1.0

@@ -22,3 +22,6 @@ data/db/
 data/uploads/
 data/*.db*
 frontend/**/node_modules/
+
+# arquivos temporários do fluxo (planilhas, notas), retenção de 5 dias
+data/tmp/

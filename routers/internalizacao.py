@@ -23,15 +23,19 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 import db.internalizacao as db
 import db.agendamentos_forn as agf_db
-from core.security import check_rate_limit, client_ip, require_permission
+from core.security import check_rate_limit, client_ip, get_session, require_permission
+from config import get_settings as _get_settings
 
 _log = logging.getLogger("internalizacao")
 MODULO = "internalizacao"
+_cfg = _get_settings()
+AREA_TMP = "lancamentos"
+AREA_TMP_NOTAS = "recebimento_forn"
 
 router = APIRouter(prefix="/api/internalizacao", tags=["Internalização"])
 
@@ -39,7 +43,6 @@ _XLSX_MIME = ("application/vnd.openxmlformats-officedocument."
               "spreadsheetml.sheet")
 
 
-# ── Entrada validada ──────────────────────────────────────────────────────
 class AtivoIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: int | None = None
@@ -181,20 +184,27 @@ def _devolver_etiqueta(s, ativo) -> None:
         etq.ativo_id = None
 
 
-# ── Rotas ─────────────────────────────────────────────────────────────────
+def _limpar_expirados() -> None:
+    try:
+        from core import arquivos_temporarios
+        arquivos_temporarios.limpar_expirados(area=AREA_TMP)
+        arquivos_temporarios.limpar_expirados(area=AREA_TMP_NOTAS)
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("limpeza dos temporários não rodou: %s", exc)
+
+
 @router.get("")
 @router.get("/")
 def listar(req: Request, status: str = "", busca: str = ""):
     """Lista os agendamentos recebidos e o andamento da internalização de cada."""
     _exigir(req, "view")
+    _limpar_expirados()
     from sqlalchemy import select
     agf_db.ensure_db()
     db.ensure_db()
-    # processos já existentes, por agendamento
     with db.SessionLocal() as s:
         procs = {p.agendamento_id: p.to_dict(com_ativos=False)
                  for p in s.scalars(select(db.Processo)).all()}
-    # agendamentos recebidos (a origem da fila)
     with agf_db.SessionLocal() as sa:
         recs = sa.scalars(
             select(agf_db.Agendamento)
@@ -236,22 +246,21 @@ def obter(agendamento_id: int, req: Request):
     devolve os ativos já lançados + os equipamentos esperados (para semear)."""
     sd = _exigir(req, "view")
     db.ensure_db()
-    # Conferência feita no Recebimento e processo ainda sem ativos: o
-    # segundo passo daquela rota não completou. Completa aqui, com a mesma
-    # função — idempotente, então abrir a tela duas vezes não duplica.
     agf_db.ensure_db()
     with agf_db.SessionLocal() as sa:
         ag = sa.get(agf_db.Agendamento, agendamento_id)
         ag_dado = ag.to_dict() if ag else None
         rec_dado = ag.recebimento.to_dict() if ag and ag.recebimento else None
         esperados = [e.to_dict() for e in ag.equipamentos] if ag else []
-        notas = [n.to_dict() for n in ag.notas] if ag else []
+    notas = _dados_do_agendamento(agendamento_id)[1] if ag_dado else []
+    for n in notas:
+        n.pop("pdf_arquivo", None)
+        n.pop("xml_arquivo", None)
     if ag_dado and rec_dado:
         abrir_processo_do_recebimento(ag_dado, rec_dado, sd.get("username", ""))
     with db.SessionLocal.begin() as s:
         proc = _garantir_processo(s, agendamento_id)
         dado = proc.to_dict()
-    # equipamentos esperados (do agendamento) para orientar o lançamento
     dado["equipamentos_esperados"] = esperados
     dado["recebimento"] = rec_dado
     dado["notas"] = notas
@@ -268,16 +277,11 @@ def salvar(agendamento_id: int, body: SalvarIn, req: Request):
         proc = _garantir_processo(s, agendamento_id)
         if proc.lancado_em:
             raise HTTPException(409, "Este lançamento já foi enviado; os ativos não mudam mais aqui.")
-        # Linha que veio com `id` é uma que o recebimento criou: o que muda
-        # é o que a pessoa digita (item, descrição, serial). A etiqueta, a
-        # PO e a NF ficam — vieram do estoque e do pedido, não do teclado.
-        # Linha sem `id` é acréscimo manual; linha que não voltou saiu, e a
-        # etiqueta dela volta ao estoque.
         atuais = {a.id: a for a in proc.ativos}
         vistos = set()
         for a in body.ativos:
             if not (a.ebs_item or a.descricao or a.plaqueta or a.numero_serie):
-                continue   # linha em branco: ignora
+                continue
             existente = atuais.get(a.id) if a.id else None
             if existente is not None:
                 existente.ebs_item, existente.descricao = a.ebs_item, a.descricao
@@ -347,8 +351,6 @@ def excluir(agendamento_id: int, req: Request):
         nf = proc.nf or ""
         ativos = s.scalar(select(func.count(db.Ativo.id)).where(
             db.Ativo.processo_id == proc.id)) or 0
-        # As etiquetas consumidas por este processo voltam ao estoque:
-        # apagar o processo é dizer que nada disso foi colado.
         for a in proc.ativos:
             _devolver_etiqueta(s, a)
         s.delete(proc)
@@ -376,7 +378,6 @@ def _registrar_exclusao(sd: dict, req: Request, agendamento_id: int,
                      agendamento_id, exc)
 
 
-# ── Exportação Excel (idêntica ao modelo) ──────────────────────────────────
 def _montar_xlsx(nf: str, linhas: list[dict]) -> bytes:
     """Monta a planilha no MESMO desenho do modelo: aba 'Placa Patrimonial',
     faixa vermelha (C00000) com texto branco, cabeçalho NF | Descrição do item
@@ -396,12 +397,10 @@ def _montar_xlsx(nf: str, linhas: list[dict]) -> bytes:
     fina = Side(style="thin")
     borda = Border(left=fina, right=fina, top=fina, bottom=fina)
 
-    # larguras (iguais ao modelo)
     for col, larg in {"A": 7.57, "B": 123.29, "C": 14.14,
                       "D": 22.14, "E": 8.14, "F": 13.0}.items():
         ws.column_dimensions[col].width = larg
 
-    # faixa título (A5:D5 mesclada)
     ws.merge_cells("A5:D5")
     c = ws["A5"]
     c.value = "Placa Patrimonial (N° do bem)"
@@ -414,7 +413,6 @@ def _montar_xlsx(nf: str, linhas: list[dict]) -> bytes:
         cc.border = borda
     ws.row_dimensions[5].height = 15.75
 
-    # cabeçalho (linha 6)
     cabec = ["NF", "Descrição do item", "Plaqueta", "Número de série", "Item"]
     for i, titulo in enumerate(cabec):
         cell = ws.cell(row=6, column=i + 1, value=titulo)
@@ -424,7 +422,6 @@ def _montar_xlsx(nf: str, linhas: list[dict]) -> bytes:
         cell.border = borda
     ws.row_dimensions[6].height = 15.75
 
-    # dados (a partir da linha 7)
     r = 7
     for it in linhas:
         valores = [
@@ -448,22 +445,6 @@ def _montar_xlsx(nf: str, linhas: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  Depois do lançamento: Patrimônio e Entrada de Equipamento
-#
-#  O lançamento (acima) diz QUAL ativo é cada serial. Daí em diante o
-#  equipamento percorre duas etapas, uma tela cada:
-#
-#  1. Patrimônio — espera o serial aparecer no EBS. Renner e Camicado têm o
-#     patrimônio criado lá, então a consulta responde sozinha; Youcom compra
-#     por fora, não há o que consultar, e alguém confirma no botão.
-#  2. Entrada de Equipamento — o técnico de gestão de ativos informa o
-#     espaço e corredor, sobe o ativo no ServiceNow e o equipamento entra no
-#     estoque do portal.
-#
-#  A etapa é de CADA equipamento, não da remessa: numa nota com dez
-#  desktops, se sete aparecerem no EBS e três não, os sete seguem.
-# ══════════════════════════════════════════════════════════════════════════
 
 
 def _linha_ativo(a, proc) -> dict:
@@ -479,8 +460,6 @@ def _linha_ativo(a, proc) -> dict:
         "estoque_destino_rotulo": proc.estoque_destino_rotulo or "",
         "data_recebimento": (proc.data_recebimento.isoformat()
                              if proc.data_recebimento else ""),
-        # Youcom não tem consulta ao EBS: a tela mostra o botão em vez de
-        # "aguardando", que seria uma espera que nunca termina.
         "tem_ebs": (proc.bu or "") in db.BUS_COM_EBS,
     })
     return d
@@ -491,7 +470,7 @@ def _ativos_na_etapa(s, etapa: str) -> list[dict]:
     saida = []
     for proc in s.scalars(select(db.Processo)).all():
         if proc.status != "CONCLUIDA":
-            continue   # ainda em lançamento: não entrou no fluxo
+            continue
         for a in proc.ativos:
             if (a.etapa or db.ETAPA_PATRIMONIO) == etapa:
                 saida.append(_linha_ativo(a, proc))
@@ -547,8 +526,6 @@ def patrimonio_consultar(req: Request):
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == "EbsOracleSemCredencial":
                 raise HTTPException(503, str(exc)) from exc
-            # Um serial que falha não pode derrubar a varredura inteira: os
-            # outros seguem, e o erro é contado para a tela dizer quantos.
             _log.warning("consulta do serial %s falhou: %s", item["numero_serie"], exc)
             erros.append(item["numero_serie"])
             continue
@@ -566,12 +543,10 @@ def patrimonio_consultar(req: Request):
         for ativo_id, linha in achados.items():
             a = s.get(db.Ativo, ativo_id)
             if not a or a.etapa != db.ETAPA_PATRIMONIO:
-                continue   # alguém mexeu entre a consulta e a gravação
+                continue
             a.ebs_ativo = str(linha.get("ativo") or "")[:60]
             a.ebs_descricao = str(linha.get("descricao") or "")[:200]
             a.ebs_encontrado_em = agora
-            # A plaqueta do EBS é a oficial: se o lançamento ficou sem ela,
-            # é aqui que ela chega.
             if not a.plaqueta and linha.get("plaqueta"):
                 a.plaqueta = str(linha["plaqueta"])[:60]
             a.etapa = db.ETAPA_ENTRADA
@@ -602,9 +577,6 @@ def patrimonio_confirmar(body: ConfirmarIn, req: Request):
             if not a or a.etapa != db.ETAPA_PATRIMONIO:
                 recusados.append(ativo_id)
                 continue
-            # Renner e Camicado têm patrimônio no EBS: confirmar à mão aqui
-            # seria pular a conferência que existe justamente para pegar
-            # serial trocado. Quem tem EBS espera o EBS.
             if (a.processo.bu or "") in db.BUS_COM_EBS:
                 recusados.append(ativo_id)
                 continue
@@ -670,7 +642,6 @@ def entrada_concluir(body: EntradaIn, req: Request):
         raise HTTPException(422, "Escolha ao menos um equipamento.")
 
     usuario = sd.get("username", "")
-    # 1. Junta o que vai subir, conferindo a etapa de cada um.
     with db.SessionLocal() as s:
         alvos, recusados = [], []
         for ativo_id in body.ids[:200]:
@@ -684,10 +655,6 @@ def entrada_concluir(body: EntradaIn, req: Request):
             422, "Nada a concluir: os equipamentos escolhidos não estão na "
                  "etapa de entrada.")
 
-    # 2. Estoque do portal. Vem ANTES do ServiceNow porque é o que o portal
-    #    controla: se o ServiceNow estiver fora, o equipamento ainda entra no
-    #    estoque e a tela diz que a marcação lá ficou pendente — o contrário
-    #    deixaria o equipamento fisicamente na prateleira e invisível aqui.
     from datetime import date as _date
     from sqlalchemy import func, select as _select
     from db.portal import (SessionLocal as PortalSession, Asset, ReceiptCycle,
@@ -725,8 +692,6 @@ def entrada_concluir(body: EntradaIn, req: Request):
                             username=usuario))
             criados.append({"ativo_id": item["id"], "asset_id": ativo.id})
 
-    # 3. ServiceNow. Falha aqui NÃO desfaz o estoque: fica registrado como
-    #    pendente e a pessoa repete a marcação depois.
     itens_sn = [{
         "etiqueta": x.get("plaqueta") or "",
         "numero_serie": x.get("numero_serie") or "",
@@ -742,7 +707,6 @@ def entrada_concluir(body: EntradaIn, req: Request):
         _log.error("ServiceNow: %s equipamento(s) entraram sem marcação: %s",
                    len(itens_sn), exc)
 
-    # 4. Fecha a etapa no fluxo.
     agora = db.utcnow()
     por_ativo = {c["ativo_id"]: c["asset_id"] for c in criados}
     with db.SessionLocal.begin() as s:
@@ -765,8 +729,6 @@ def entrada_concluir(body: EntradaIn, req: Request):
                      if resumo_sn.get("falhas") else ""}
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  Cadastros que o lançamento consome
 
 import re as _re
 
@@ -1095,3 +1057,252 @@ def codigos_imobilizados(s) -> set[str]:
     from sqlalchemy import select
     return {db.normalizar_item_ebs(c) for (c,) in s.execute(
         select(db.ItemImobilizado.item_ebs)).all() if c}
+
+
+XLSX_MIME = _XLSX_MIME
+
+
+def _dados_do_agendamento(agendamento_id: int) -> tuple[dict, list[dict], dict]:
+    agf_db.ensure_db()
+    with agf_db.SessionLocal() as sa:
+        ag = sa.get(agf_db.Agendamento, agendamento_id)
+        if not ag:
+            raise HTTPException(404, "Agendamento não encontrado.")
+        dado = ag.to_dict()
+        notas = [n.to_dict() | {"pdf_arquivo": n.pdf_arquivo or "", "xml_arquivo": n.xml_arquivo or ""} for n in ag.notas]
+    po_da_nf: dict[str, list[str]] = {}
+    for p in dado.get("pedidos", []):
+        if p.get("nf"):
+            po_da_nf.setdefault(p["nf"], []).append(p["po"])
+    for nf in po_da_nf:
+        if not any(n["nf"] == nf for n in notas):
+            notas.append({"nf": nf, "chave": "", "vencimento": "", "origem": "", "origem_rotulo": "",
+                          "tem_xml": False, "tem_pdf": False, "itens": [], "emitente": "", "cstat": "",
+                          "erro": "", "pdf_arquivo": "", "xml_arquivo": ""})
+    for n in notas:
+        n["po"] = " / ".join(po_da_nf.get(n["nf"], [])) or dado.get("po", "")
+    return dado, notas, po_da_nf
+
+
+def _planilha(proc, notas: list[dict]) -> tuple[str, bytes]:
+    from core import planilha_cadastro_ativos as plan
+    linhas = [{"item": a.ebs_item or "", "descricao": a.descricao or "", "plaqueta": a.plaqueta or "",
+               "numero_serie": a.numero_serie or "", "nf": a.nf or proc.nf or ""} for a in proc.ativos]
+    nfs = sorted({l["nf"] for l in linhas if l["nf"]}) or [proc.nf or str(proc.agendamento_id)]
+    return plan.nome_arquivo(nfs), plan.montar(linhas)
+
+
+def _sessao_sn(req: Request):
+    sd = get_session(req)
+    cookies = sd.get("sn_cookies")
+    if not cookies:
+        raise HTTPException(409, "Sessão ServiceNow não ativa. Saia e entre de novo no portal (Logon AD).")
+    from integracoes import http as http_saida
+    from integracoes.sn_catalogo import CatalogoServiceNow
+    from routers import servicenow as sn
+    s = http_saida.sessao("servicenow", proxy=sn.SN_PROXY or None)
+    s.cookies.update(cookies)
+    return CatalogoServiceNow(s, sn.SERVICENOW_BASE)
+
+
+def _abrir_chamado(req: Request, agendamento: dict, notas: list[dict], planilha_nome: str,
+                   planilha_bytes: bytes) -> dict:
+    from integracoes.sn_catalogo import montar_variaveis_lancamento_nf
+    from core import arquivos_temporarios
+    cat = _sessao_sn(req)
+    eu = cat.usuario_atual()
+    impacto = cat.procurar_usuario(_cfg.SN_CATALOGO_LANCAMENTO_NF_IMPACTO) or {}
+    item = cat.descrever_item(_cfg.SN_CATALOGO_LANCAMENTO_NF_ITEM)
+    dados = {
+        "requested_for_sys_id": eu.get("sys_id", ""),
+        "impact_employee_sys_id": impacto.get("sys_id", ""),
+        "telefone": _cfg.SN_CATALOGO_LANCAMENTO_NF_TELEFONE,
+        "bu": agendamento.get("bu", ""),
+        "fornecedor": agendamento.get("fornecedor", ""),
+        "notas": [{"po": n["po"], "nf": n["nf"], "vencimento": n.get("vencimento", "")} for n in notas],
+    }
+    variaveis, faltantes = montar_variaveis_lancamento_nf(item, dados)
+    pedido = cat.enviar_pedido(item["sys_id"], variaveis)
+    ritm = cat.ritm_do_pedido(pedido["request_sys_id"]) or {}
+    tabela, alvo = ("sc_req_item", ritm["sys_id"]) if ritm.get("sys_id") else ("sc_request", pedido["request_sys_id"])
+    anexos, sem_pdf = [], []
+    cat.anexar(tabela, alvo, planilha_nome, planilha_bytes, XLSX_MIME)
+    anexos.append(planilha_nome)
+    for n in notas:
+        caminho = arquivos_temporarios.caminho(AREA_TMP_NOTAS, agendamento["id"], n.get("pdf_arquivo") or "") if n.get("pdf_arquivo") else None
+        if not caminho:
+            sem_pdf.append(n["nf"])
+            continue
+        cat.anexar(tabela, alvo, caminho.name, caminho.read_bytes(), "application/pdf")
+        anexos.append(caminho.name)
+    return {"request_sys_id": pedido["request_sys_id"], "request_number": pedido["request_number"],
+            "ritm_sys_id": ritm.get("sys_id", ""), "ritm_number": ritm.get("number", ""),
+            "faltantes": faltantes, "anexos": anexos, "sem_pdf": sem_pdf,
+            "aviso": (f"NF sem PDF anexado: {', '.join(sem_pdf)}. " if sem_pdf else "")
+                     + (f"Variáveis que o item não tem: {', '.join(faltantes)}." if faltantes else "")}
+
+
+def _lancar(agendamento_id: int, req: Request, reenvio: bool) -> dict:
+    sd = _exigir(req, "edit")
+    check_rate_limit(req, "api")
+    db.ensure_db()
+    from sqlalchemy import select
+    from core import arquivos_temporarios
+    usuario = sd.get("username", "")
+    agendamento, notas, _ = _dados_do_agendamento(agendamento_id)
+    with db.SessionLocal.begin() as s:
+        proc = s.scalar(select(db.Processo).where(db.Processo.agendamento_id == agendamento_id))
+        if not proc or not proc.ativos:
+            raise HTTPException(422, "Nada lançado para este agendamento.")
+        if reenvio and not proc.lancado_em:
+            raise HTTPException(409, "Este lançamento ainda não foi enviado; use o OK.")
+        if reenvio and proc.sn_request_sys_id:
+            raise HTTPException(409, f"O chamado {proc.sn_request_number} já foi aberto.")
+        if not reenvio and proc.lancado_em:
+            raise HTTPException(409, "Este lançamento já foi enviado.")
+        faltando = [a.numero_serie or a.plaqueta or f"linha {i + 1}" for i, a in enumerate(proc.ativos)
+                    if not (a.plaqueta and a.numero_serie)]
+        if faltando:
+            raise HTTPException(422, "Toda linha precisa de plaqueta e número de série: " + ", ".join(faltando[:10]))
+        nome, conteudo = _planilha(proc, notas)
+        caminho = arquivos_temporarios.gravar(AREA_TMP, agendamento_id, nome, conteudo)
+        agora = db.utcnow()
+        proc.planilha_arquivo, proc.planilha_em = caminho.name, agora
+        if not reenvio:
+            proc.lancado_por, proc.lancado_em = usuario, agora
+            proc.status = "CONCLUIDA"
+            proc.atualizado_em = agora
+        s.flush()
+    chamado, erro = None, ""
+    try:
+        chamado = _abrir_chamado(req, agendamento, notas, nome, conteudo)
+    except HTTPException as exc:
+        erro = str(exc.detail)
+    except Exception as exc:  # noqa: BLE001
+        erro = str(exc)[:300]
+        _log.error("chamado do lançamento %s falhou: %s", agendamento_id, exc, exc_info=True)
+    with db.SessionLocal.begin() as s:
+        proc = s.scalar(select(db.Processo).where(db.Processo.agendamento_id == agendamento_id))
+        if chamado:
+            proc.sn_request_number = chamado["request_number"][:40]
+            proc.sn_request_sys_id = chamado["request_sys_id"][:64]
+            proc.sn_ritm_number = chamado["ritm_number"][:40]
+            proc.sn_ritm_sys_id = chamado["ritm_sys_id"][:64]
+            proc.sn_enviado_em = db.utcnow()
+            proc.sn_erro = ""
+        else:
+            proc.sn_erro = erro[:300]
+        dado = proc.to_dict()
+    _log.info("lançamento %s agendamento=%s planilha=%s chamado=%s erro=%r por=%s ip=%s",
+              "reenviado" if reenvio else "enviado", agendamento_id, nome,
+              (chamado or {}).get("request_number", ""), erro, usuario, client_ip(req))
+    dado["chamado"] = chamado
+    dado["aviso"] = (chamado or {}).get("aviso", "") or (
+        f"Planilha gerada; o chamado no ServiceNow não foi aberto: {erro}" if erro else "")
+    return dado
+
+
+@router.post("/{agendamento_id}/lancar")
+def lancar(agendamento_id: int, req: Request):
+    return _lancar(agendamento_id, req, reenvio=False)
+
+
+@router.post("/{agendamento_id}/lancar/reenviar")
+def lancar_reenviar(agendamento_id: int, req: Request):
+    return _lancar(agendamento_id, req, reenvio=True)
+
+
+@router.get("/{agendamento_id}/planilha")
+def baixar_planilha(agendamento_id: int, req: Request):
+    _exigir(req, "view")
+    db.ensure_db()
+    from sqlalchemy import select
+    from core import arquivos_temporarios
+    with db.SessionLocal() as s:
+        proc = s.scalar(select(db.Processo).where(db.Processo.agendamento_id == agendamento_id))
+        nome = proc.planilha_arquivo if proc else ""
+    caminho = arquivos_temporarios.caminho(AREA_TMP, agendamento_id, nome) if nome else None
+    if not caminho:
+        raise HTTPException(404, "Planilha não encontrada (pode ter passado dos cinco dias).")
+    return FileResponse(str(caminho), filename=caminho.name, media_type=XLSX_MIME)
+
+
+@router.get("/{agendamento_id}/nota/{nf}/pdf")
+def baixar_pdf_nota(agendamento_id: int, nf: str, req: Request):
+    _exigir(req, "view")
+    from core import arquivos_temporarios
+    _, notas, _ = _dados_do_agendamento(agendamento_id)
+    nota = next((n for n in notas if n["nf"] == nf), None)
+    caminho = arquivos_temporarios.caminho(AREA_TMP_NOTAS, agendamento_id, nota["pdf_arquivo"]) if nota and nota.get("pdf_arquivo") else None
+    if not caminho:
+        raise HTTPException(404, "PDF da nota não encontrado (pode ter passado dos cinco dias).")
+    return FileResponse(str(caminho), filename=caminho.name, media_type="application/pdf")
+
+
+class NotaVencimentoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    vencimento: str = ""
+
+    @field_validator("vencimento")
+    @classmethod
+    def _venc(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v:
+            date.fromisoformat(v)
+        return v
+
+
+@router.patch("/{agendamento_id}/nota/{nf}")
+def nota_vencimento(agendamento_id: int, nf: str, body: NotaVencimentoIn, req: Request):
+    sd = _exigir(req, "edit")
+    from routers import agendamentos_forn as agf
+    agf_db.ensure_db()
+    with agf_db.SessionLocal.begin() as sa:
+        ag = sa.get(agf_db.Agendamento, agendamento_id)
+        if not ag:
+            raise HTTPException(404, "Agendamento não encontrado.")
+        nota = agf.registrar_nota(sa, ag, nf, sd.get("username", ""),
+                                  vencimento=date.fromisoformat(body.vencimento) if body.vencimento else None)
+        return nota.to_dict()
+
+
+@router.get("/catalogo-sn/conferir")
+def conferir_catalogo(req: Request):
+    _exigir(req, "edit")
+    check_rate_limit(req, "api")
+    from integracoes.sn_catalogo import montar_variaveis_lancamento_nf, ErroServiceNow
+    try:
+        cat = _sessao_sn(req)
+        eu = cat.usuario_atual()
+        item = cat.descrever_item(_cfg.SN_CATALOGO_LANCAMENTO_NF_ITEM)
+        impacto = cat.procurar_usuario(_cfg.SN_CATALOGO_LANCAMENTO_NF_IMPACTO) or {}
+    except ErroServiceNow as exc:
+        raise HTTPException(502, str(exc)) from exc
+    exemplo = {"requested_for_sys_id": eu.get("sys_id", ""), "impact_employee_sys_id": impacto.get("sys_id", ""),
+               "telefone": _cfg.SN_CATALOGO_LANCAMENTO_NF_TELEFONE, "bu": "Renner", "fornecedor": "EXEMPLO",
+               "notas": [{"po": "0000000", "nf": "0", "vencimento": "2026-01-01"}]}
+    try:
+        variaveis, faltantes = montar_variaveis_lancamento_nf(item, exemplo)
+        erro = ""
+    except (KeyError, ValueError) as exc:
+        variaveis, faltantes, erro = {}, [], str(exc)
+    return {"usuario": eu, "impacto": impacto, "item": item, "exemplo": variaveis,
+            "faltantes": faltantes, "erro": erro}
+
+
+@router.get("/nfe/certificados")
+def certificados_nfe(req: Request):
+    _exigir(req, "view")
+    saida = []
+    for bu in ("Renner", "Camicado", "Youcom"):
+        linha = {"bu": bu, "configurado": False, "cnpj": "", "valido_ate": "", "vencido": False, "erro": ""}
+        try:
+            from integracoes import nfe_sefaz
+            cert = nfe_sefaz.certificado_da_bu(bu)
+            if cert:
+                linha.update({"configurado": True, "cnpj": cert.cnpj, "valido_ate": cert.valido_ate.isoformat(),
+                              "vencido": cert.vencido})
+        except Exception as exc:  # noqa: BLE001
+            linha["erro"] = str(exc)[:200]
+        saida.append(linha)
+    return {"certificados": saida}

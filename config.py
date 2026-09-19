@@ -258,6 +258,18 @@ class Settings:
         _sqlite("internalizacao"),
     )
 
+    # Certificado A1 da NF-e: chaves exclusivas, no data/environment (docs/NFE_CERTIFICADO.md).
+    NFE_CERT_RENNER_PFX: str = _env("NFE_CERT_RENNER_PFX", "")
+    NFE_CERT_RENNER_SENHA: str = _env("NFE_CERT_RENNER_SENHA", "")
+    NFE_CERT_CAMICADO_PFX: str = _env("NFE_CERT_CAMICADO_PFX", "")
+    NFE_CERT_CAMICADO_SENHA: str = _env("NFE_CERT_CAMICADO_SENHA", "")
+    NFE_AMBIENTE: str = _env("NFE_AMBIENTE", "producao").strip().lower()
+    NFE_TIMEOUT: int = int(_env("NFE_TIMEOUT", "40") or 40)
+    NFE_PROXY: str = _proxy("NFE_PROXY", "https_proxy", "HTTPS_PROXY")
+    SN_CATALOGO_LANCAMENTO_NF_ITEM: str = _env("SN_CATALOGO_LANCAMENTO_NF_ITEM", "66831e771b37b5901e870e9fe54bcb11")
+    SN_CATALOGO_LANCAMENTO_NF_IMPACTO: str = _env("SN_CATALOGO_LANCAMENTO_NF_IMPACTO", "lucas.gonzaga@lojasrenner.com.br")
+    SN_CATALOGO_LANCAMENTO_NF_TELEFONE: str = _env("SN_CATALOGO_LANCAMENTO_NF_TELEFONE", "+55 (11) 93098-4829")
+
     # ── Obsolescência do parque de coletores (/obsolescencia) ───────────
     # Banco PRÓPRIO; contrato em docs/MDM_OBSOLESCENCIA.md.
     OBSOLESCENCIA_DATABASE_URL: str = os.getenv(

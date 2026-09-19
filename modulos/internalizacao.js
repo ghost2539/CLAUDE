@@ -43,8 +43,11 @@ window.SPARE_MODULES.internalizacao = {
 
         container.innerHTML =
             '<h1 class="page-title">Internalização</h1>' +
-            '<div class="card mb-3"><div class="card-header">Recebidos para internalizar</div>' +
-            '<div class="card-body">' +
+            '<div class="card mb-3"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+                '<span>Recebidos para internalizar</span>' +
+                (podeEditar ? '<button id="int-conferir-sn" class="btn btn-secondary btn-sm" type="button">Conferir formulário do ServiceNow</button>' : '') +
+            '</div><div class="card-body">' +
+            '<div id="int-certs" class="text-muted mb-2"></div>' +
                 '<div class="filter-grid">' +
                     '<div class="form-group"><label for="int-f-status">Status</label>' +
                         '<select id="int-f-status" class="form-control">' +
@@ -83,6 +86,9 @@ window.SPARE_MODULES.internalizacao = {
                 var badge = it.status === 'CONCLUIDA'
                     ? '<span class="badge badge-success">Concluída</span>'
                     : '<span class="badge badge-warning">Pendente</span>';
+                if (it.entrega_parcial) badge += ' <span class="badge badge-warning">Entrega parcial</span>';
+                if (it.sn_request_number) badge += ' <span class="badge badge-info">' + e(it.sn_request_number) + '</span>';
+                else if (it.sn_pendente) badge += ' <span class="badge badge-danger">Chamado pendente</span>';
                 var btns = '<button class="btn btn-primary btn-sm int-abrir" data-id="' + it.agendamento_id + '">' +
                            (podeEditar ? 'Internalizar' : 'Ver') + '</button>';
                 if (podeExportar && it.total_ativos > 0) {
@@ -170,31 +176,61 @@ window.SPARE_MODULES.internalizacao = {
 
             document.getElementById('int-form-titulo').textContent =
                 'Internalizar — NF ' + (d.nf || '') + ' · ' + (d.fornecedor || '');
+            var enviado = !!d.lancado_em;
+            var editavel = podeEditar && !enviado;
+            var rec = d.recebimento || null;
+            var notas = d.notas || [];
 
             host.innerHTML =
                 '<div class="form-grid cols-3" style="margin-bottom:12px">' +
                     info('NF', d.nf) + info('Fornecedor', d.fornecedor) +
                     info('BU', d.bu) + info('Destino', d.estoque_destino_rotulo) +
                     info('Recebido em', d.data_recebimento || '—') +
-                    info('Situação', (d.status_rotulo || '')) +
+                    info('Situação', (d.status_rotulo || '') + (rec && rec.entrega_parcial ? ' · entrega parcial' : '')) +
                 '</div>' +
-                '<p class="text-muted" style="margin:.2em 0 .8em">Uma linha por equipamento físico recebido. ' +
-                'A NF é a mesma da nota. Preencha item do EBS, plaqueta e número de série.</p>' +
+                (d.sn_request_number ? '<div class="alert alert-success">Chamado <b>' + e(d.sn_request_number) + '</b>' + (d.sn_ritm_number ? ' · ' + e(d.sn_ritm_number) : '') + ' aberto em ' + e(fmtDataHora(d.sn_enviado_em)) + '.</div>' : '') +
+                (d.sn_pendente ? '<div class="alert alert-danger">Chamado no ServiceNow pendente: ' + e(d.sn_erro || 'não enviado') + '</div>' : '') +
+                (notas.length ? '<h3>Notas fiscais</h3><div id="int-notas"></div>' : '') +
+                '<p class="text-muted" style="margin:.2em 0 .8em">Uma linha por equipamento recebido, com a etiqueta consumida do estoque. ' +
+                'Confira o serial; ao dar OK a planilha do CSC Lançamentos é gerada e o chamado aberto no ServiceNow com o seu usuário.</p>' +
                 '<div class="table-responsive"><table class="table table-sm" id="int-tab">' +
-                    '<thead><tr><th style="width:120px">Item EBS</th><th>Descrição do item</th>' +
-                    '<th style="width:140px">Plaqueta</th><th style="width:180px">Número de série</th>' +
-                    (podeEditar ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
+                    '<thead><tr><th style="width:110px">Item EBS</th><th>Descrição do item</th>' +
+                    '<th style="width:120px">Plaqueta</th><th style="width:130px">Local da etiqueta</th>' +
+                    '<th style="width:170px">Número de série</th><th style="width:110px">PO / linha</th><th style="width:90px">NF</th>' +
+                    (editavel ? '<th style="width:40px"></th>' : '') + '</tr></thead>' +
                     '<tbody id="int-linhas"></tbody>' +
                 '</table></div>' +
-                (podeEditar ? '<div class="btn-row mt-2"><button type="button" id="int-add" class="btn btn-secondary btn-sm">+ Adicionar linha</button></div>' : '') +
+                (editavel ? '<div class="btn-row mt-2"><button type="button" id="int-add" class="btn btn-secondary btn-sm">+ Adicionar linha</button></div>' : '') +
                 '<div class="btn-row mt-3">' +
-                    (podeEditar ? '<button type="button" id="int-salvar" class="btn btn-primary btn-sm">Salvar</button> ' +
-                                  '<button type="button" id="int-concluir" class="btn btn-success btn-sm">Salvar e concluir</button> ' : '') +
-                    (podeExportar ? '<button type="button" id="int-exportar" class="btn btn-secondary btn-sm">Exportar planilha</button> ' : '') +
+                    (editavel ? '<button type="button" id="int-salvar" class="btn btn-secondary btn-sm">Salvar</button> ' +
+                                '<button type="button" id="int-lancar" class="btn btn-primary btn-sm">OK — gerar planilha e abrir chamado</button> ' : '') +
+                    (podeEditar && d.sn_pendente ? '<button type="button" id="int-reenviar" class="btn btn-primary btn-sm">Reenviar ao ServiceNow</button> ' : '') +
+                    (d.planilha_arquivo ? '<button type="button" id="int-planilha" class="btn btn-secondary btn-sm">Baixar planilha</button> ' : '') +
+                    (podeExportar ? '<button type="button" id="int-exportar" class="btn btn-secondary btn-sm">Exportar (antiga)</button> ' : '') +
                     '<button type="button" id="int-cancelar" class="btn btn-secondary btn-sm">Fechar</button>' +
                 '</div>' +
                 '<div id="int-erro" class="alert alert-danger mt-2" hidden></div>' +
                 '<div id="int-msg" class="text-muted mt-2"></div>';
+
+            if (notas.length) {
+                var hn = document.getElementById('int-notas');
+                notas.forEach(function (n) {
+                    var linha = document.createElement('div');
+                    linha.className = 'filter-grid mb-2';
+                    linha.innerHTML =
+                        '<div class="form-group"><label>NF</label><div style="padding:6px 0"><b>' + e(n.nf) + '</b>' +
+                            (n.tem_pdf ? ' · <a href="' + S.apiUrl('/internalizacao/' + id + '/nota/' + encodeURIComponent(n.nf) + '/pdf') + '" target="_blank">PDF</a>' : ' · <span class="text-muted">sem PDF</span>') + '</div></div>' +
+                        '<div class="form-group"><label>Vencimento</label><input type="date" class="form-control int-venc" value="' + e(n.vencimento || '') + '"' + (podeEditar ? '' : ' disabled') + '></div>' +
+                        '<div class="form-group"><label>Origem</label><div style="padding:6px 0">' + e(n.origem_rotulo || '—') + (n.erro ? ' <span class="text-muted">· ' + e(n.erro) + '</span>' : '') + '</div></div>';
+                    hn.appendChild(linha);
+                    if (podeEditar) linha.querySelector('.int-venc').onchange = async function () {
+                        try {
+                            await S.api('/internalizacao/' + id + '/nota/' + encodeURIComponent(n.nf), { method: 'PATCH', body: { vencimento: this.value } });
+                            S.toast('Vencimento da NF ' + n.nf + ' gravado.', 'success');
+                        } catch (x) { S.toast(x.message, 'error'); }
+                    };
+                });
+            }
 
             // popular linhas: ativos salvos, ou semear pelos equipamentos esperados
             var salvos = d.ativos || [];
@@ -208,11 +244,15 @@ window.SPARE_MODULES.internalizacao = {
                 if (!(d.equipamentos_esperados || []).length) addLinha();
             }
 
-            if (podeEditar) {
+            if (editavel) {
                 document.getElementById('int-add').onclick = function () { addLinha(); };
                 document.getElementById('int-salvar').onclick = function () { salvar(id, false); };
-                document.getElementById('int-concluir').onclick = function () { salvar(id, true); };
+                document.getElementById('int-lancar').onclick = function () { lancar(id, false); };
             }
+            if (document.getElementById('int-reenviar')) document.getElementById('int-reenviar').onclick = function () { lancar(id, true); };
+            if (document.getElementById('int-planilha')) document.getElementById('int-planilha').onclick = function () {
+                window.open(S.apiUrl('/internalizacao/' + id + '/planilha'), '_blank');
+            };
             if (podeExportar) document.getElementById('int-exportar').onclick = function () { exportar(id); };
             document.getElementById('int-cancelar').onclick = function () {
                 card.style.display = 'none'; host.innerHTML = '';
@@ -230,21 +270,54 @@ window.SPARE_MODULES.internalizacao = {
             var tb = document.getElementById('int-linhas');
             var tr = document.createElement('tr');
             tr.className = 'int-linha';
-            var ro = podeEditar ? '' : ' readonly';
+            if (a.id) tr.dataset.id = a.id;
+            var enviadoJa = !!(document.getElementById('int-reenviar') || document.getElementById('int-planilha')) && !document.getElementById('int-lancar');
+            var ro = (podeEditar && !enviadoJa) ? '' : ' readonly';
+            var plaqRo = (a.etiqueta_id || ro) ? ' readonly' : '';
             tr.innerHTML =
                 '<td><input class="form-control int-ebs" value="' + e(a.ebs_item || '') + '"' + ro + '></td>' +
                 '<td><input class="form-control int-desc" value="' + e(a.descricao || '') + '"' + ro + '></td>' +
-                '<td><input class="form-control int-plaq" value="' + e(a.plaqueta || '') + '"' + ro + '></td>' +
+                '<td><input class="form-control int-plaq" value="' + e(a.plaqueta || '') + '"' + plaqRo + '></td>' +
+                '<td class="text-muted">' + e(a.etiqueta_local || '—') + '</td>' +
                 '<td><input class="form-control int-serie" value="' + e(a.numero_serie || '') + '"' + ro + '></td>' +
-                (podeEditar ? '<td><button type="button" class="btn btn-secondary btn-sm int-rem" title="Remover">&times;</button></td>' : '');
-            if (podeEditar) tr.querySelector('.int-rem').onclick = function () { tr.remove(); };
+                '<td class="text-muted">' + e(a.po || '—') + (a.linha != null ? ' / ' + e(String(a.linha)) : '') + '</td>' +
+                '<td class="text-muted">' + e(a.nf || '—') + '</td>' +
+                (!ro ? '<td><button type="button" class="btn btn-secondary btn-sm int-rem" title="Remover">&times;</button></td>' : '');
+            if (!ro) tr.querySelector('.int-rem').onclick = function () { tr.remove(); };
             tb.appendChild(tr);
+        }
+
+        async function lancar(id, reenvio) {
+            var erro = document.getElementById('int-erro');
+            var msg = document.getElementById('int-msg');
+            erro.hidden = true; msg.textContent = '';
+            if (!reenvio) {
+                var ativos = coletar();
+                if (ativos.some(function (a) { return !a.plaqueta || !a.numero_serie; })) {
+                    erro.hidden = false; erro.textContent = 'Toda linha precisa de plaqueta e número de série antes do OK.'; return;
+                }
+                if (!confirm('Gerar a planilha Cadastro de Ativos e abrir o chamado no ServiceNow com o seu usuário?\n\nDepois do OK os ativos não mudam mais aqui.')) return;
+            }
+            var b = document.getElementById(reenvio ? 'int-reenviar' : 'int-lancar');
+            b.disabled = true;
+            try {
+                if (!reenvio) await S.api('/internalizacao/' + id, { method: 'PUT', body: JSON.stringify({ ativos: coletar(), concluir: false }) });
+                var d = await S.api('/internalizacao/' + id + '/lancar' + (reenvio ? '/reenviar' : ''), { method: 'POST' });
+                S.toast(d.sn_request_number ? 'Chamado ' + d.sn_request_number + ' aberto.' : 'Planilha gerada; chamado pendente.', d.sn_request_number ? 'success' : 'warning');
+                carregar();
+                abrir(id);
+                if (d.aviso) S.toast(d.aviso, 'warning');
+            } catch (x) {
+                erro.hidden = false; erro.textContent = x.message;
+                b.disabled = false;
+            }
         }
 
         function coletar() {
             var ativos = [];
             Array.prototype.forEach.call(document.querySelectorAll('.int-linha'), function (tr) {
                 var o = {
+                    id: tr.dataset.id ? parseInt(tr.dataset.id, 10) : null,
                     ebs_item: tr.querySelector('.int-ebs').value.trim(),
                     descricao: tr.querySelector('.int-desc').value.trim(),
                     plaqueta: tr.querySelector('.int-plaq').value.trim(),
@@ -260,10 +333,6 @@ window.SPARE_MODULES.internalizacao = {
             var msg = document.getElementById('int-msg');
             erro.hidden = true; msg.textContent = '';
             var ativos = coletar();
-            if (concluir) {
-                var faltando = ativos.some(function (a) { return !a.plaqueta || !a.numero_serie; });
-                if (faltando && !confirm('Há ativos sem plaqueta ou número de série. Concluir mesmo assim?')) return;
-            }
             try {
                 var d = await S.api('/internalizacao/' + id, {
                     method: 'PUT',
@@ -277,7 +346,37 @@ window.SPARE_MODULES.internalizacao = {
             }
         }
 
-        // ── Eventos da lista ──────────────────────────────────────────
+        async function conferirSn() {
+            var b = document.getElementById('int-conferir-sn');
+            b.disabled = true;
+            try {
+                var d = await S.api('/internalizacao/catalogo-sn/conferir');
+                var corpo = S.el('div');
+                var h = '<p><b>' + e(d.item.name || d.item.sys_id) + '</b> · usuário: ' + e(d.usuario.user_name) + ' · impactado: ' + e(d.impacto.email || 'NÃO ENCONTRADO') + '</p>';
+                if (d.faltantes.length) h += '<div class="alert alert-warning">Variáveis que o item não tem: ' + e(d.faltantes.join(', ')) + '</div>';
+                if (d.erro) h += '<div class="alert alert-danger">' + e(d.erro) + '</div>';
+                h += '<div class="table-wrapper"><table class="data-table"><thead><tr><th>Variável</th><th>Rótulo</th><th>Tipo</th><th>Obrig.</th><th>Opções</th><th>Enviaríamos</th></tr></thead><tbody>';
+                function linha(v, pref) {
+                    h += '<tr><td>' + e(pref + v.name) + '</td><td>' + e(v.label) + '</td><td>' + e(v.type) + (v.read_only ? ' (só leitura)' : '') + '</td><td>' + (v.mandatory ? 'sim' : '') + '</td><td>' +
+                        e((v.choices || []).map(function (c) { return c.label; }).join(', ')) + '</td><td>' + e(d.exemplo[v.name] != null ? String(d.exemplo[v.name]) : '') + '</td></tr>';
+                    (v.children || []).forEach(function (f) { linha(f, pref + v.name + '.'); });
+                }
+                d.item.variables.forEach(function (v) { linha(v, ''); });
+                h += '</tbody></table></div>';
+                corpo.innerHTML = h;
+                S.openModal('Formulário do ServiceNow', corpo, [S.el('button', { className: 'btn btn-secondary', textContent: 'Fechar', onClick: S.closeModal })]);
+            } catch (x) { S.toast(x.message, 'error'); }
+            finally { b.disabled = false; }
+        }
+        if (podeEditar) document.getElementById('int-conferir-sn').onclick = conferirSn;
+        S.api('/internalizacao/nfe/certificados').then(function (d) {
+            document.getElementById('int-certs').innerHTML = 'Certificados NF-e: ' + d.certificados.map(function (c) {
+                if (c.bu === 'Youcom') return 'Youcom (NF por arquivo)';
+                if (!c.configurado) return e(c.bu) + ' <span class="badge badge-warning">não configurado</span>';
+                return e(c.bu) + ' <span class="badge badge-' + (c.vencido ? 'danger' : 'success') + '">' + (c.vencido ? 'vencido' : 'vence ' + e(fmtDataHora(c.valido_ate).split(',')[0])) + '</span>';
+            }).join(' · ');
+        }).catch(function () {});
+
         document.getElementById('int-f-status').onchange = carregar;
         document.getElementById('int-f-busca').addEventListener('keydown', function (ev) {
             if (ev.key === 'Enter') carregar();

@@ -137,7 +137,7 @@ agrupadas pela etapa do ciclo do ativo. A rota entre crases é a que o menu usa
 ### Internalização
 | Módulo | Rota | O que faz |
 |---|---|---|
-| **Lançamento** | `#internalizacao/lancamento` | Abre o processo a partir do agendamento recebido. |
+| **Lançamento** | `#internalizacao/lancamento` | Linhas já preenchidas pelo Recebimento → Fornecedores (etiqueta consumida, local, serial, item, PO/linha, NF). O **OK** gera a planilha *Cadastro de Ativos* no formato do CSC Lançamentos (`core/planilha_cadastro_ativos.py`, guardada 5 dias em `data/tmp/lancamentos/`) e abre o chamado no ServiceNow **como o usuário logado**, anexando planilha e PDF da NF (`docs/SERVICENOW_CATALOGO_NF.md`). Falha no chamado não desfaz o lançamento: fica pendente com o botão *Reenviar*. *Conferir formulário do ServiceNow* descreve o item de catálogo antes do primeiro envio. Mostra o estado dos certificados NF-e (`docs/NFE_CERTIFICADO.md`). |
 | **Patrimônio** | `#internalizacao/patrimonio` | Varredura no EBS pela série (só pelo botão) e confirmação do número de patrimônio. BU que não tem EBS não passa por aqui. |
 | **Entrada de Equipamento** | `#internalizacao/entrada` | Dá entrada no estoque. Grava no portal **antes** do ServiceNow: queda de lá não perde a entrada. |
 | **Cadastro de Etiquetas** | `#internalizacao/etiquetas` | Estoque de etiquetas de patrimônio, cadastradas antes de o equipamento chegar (lista colada ou faixa numerada), com o local em que cada lote está guardado. O lançamento consome daqui, na ordem de cadastro. Perdida ou danificada se **cancela** (fica registrada); só disponível se apaga, e só o admin. |
