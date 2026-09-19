@@ -220,9 +220,19 @@ principal = (RAIZ / "main.py").read_text(encoding="utf-8")
 checar("avisar_se_multiprocesso" in principal, "o aviso sai antes de subir o servidor")
 # É a causa de 'expirou' que não tem nada a ver com relógio: com dois
 # workers a sessão some de forma intermitente, que é o pior jeito de falhar.
-for unidade in ("deploy/portal_spare.service", "deploy/portal_spare.user.service"):
-    texto = (RAIZ / unidade).read_text(encoding="utf-8")
-    checar("--workers 1" in texto, f"{unidade} sobe com um worker só")
+#
+# A lista das units é DESCOBERTA, não escrita à mão. Com os nomes fixos,
+# apagar uma delas derrubava esta verificação com FileNotFoundError — que
+# não é "a regra foi violada", é "o teste quebrou", e some no meio de um
+# traceback. E uma unit NOVA passava despercebida, que é o erro mais caro
+# dos dois: o arquivo que ninguém confere é justamente o que sobe com
+# --workers 4.
+unidades = sorted((RAIZ / "deploy").glob("*.service"))
+checar(bool(unidades), "há ao menos uma unit de systemd em deploy/ para conferir")
+for unidade in unidades:
+    texto = unidade.read_text(encoding="utf-8")
+    checar("--workers 1" in texto,
+           f"deploy/{unidade.name} sobe com um worker só")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
