@@ -166,6 +166,15 @@ ou `period_counter_fully_retired`), o local atribuído vigente
 (`FA_DISTRIBUTION_HISTORY` + `FA_LOCATIONS`) e PO/NF (`FA_ASSET_INVOICES`).
 Cada lote de até 100 termos vai numa única ida à base.
 
+A baixa sai de `FA_BOOKS.period_counter_fully_retired` — **`FA_BOOKS` não
+tem `date_retired`**, a data da baixa está em `FA_RETIREMENTS`. Os pedaços
+que dependem de tabela ou coluna que pode não existir (ou não estar
+concedida) ficam entre `--<opcional OBJETO>` e `--</opcional>` no arquivo:
+o portal lê o catálogo da base uma vez por processo e troca por `NULL` o
+que a conta não enxerga, em vez de derrubar a consulta inteira com
+ORA-00904/ORA-00942. Catálogo que não devolve nem a tabela principal (ou
+nenhuma coluna) não é levado em conta: aí vale o SQL inteiro.
+
 ## 5. Convenções úteis do EBS
 
 - **Sufixo `_ALL`** → tabela multi-org, filtrada por `ORG_ID`. Se precisar filtrar

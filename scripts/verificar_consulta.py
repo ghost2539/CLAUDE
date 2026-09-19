@@ -29,7 +29,13 @@ BASE = [
      "local_atribuido": "SP.SAO.CD324", "po": None, "nf": None},
 ]
 COLS = list(BASE[0].keys())
-REG = {"conexoes": 0, "binds": [], "sql": [], "connect_kwargs": None, "falha": None}
+OPCIONAIS = ("baixado", "data_baixa", "local_atribuido", "po", "nf")
+CATALOGO = {"FA_ADDITIONS_B", "FA_BOOKS", "FA_BOOK_CONTROLS", "FA_RETIREMENTS",
+            "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES",
+            "FA_ADDITIONS_B.MANUFACTURER_NAME", "FA_ADDITIONS_B.MODEL_NUMBER",
+            "FA_BOOKS.COST", "FA_BOOKS.DATE_PLACED_IN_SERVICE",
+            "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"}
+REG = {"conexoes": 0, "binds": [], "sql": [], "catalogo": 0, "connect_kwargs": None, "falha": None}
 
 
 class _LOB:
@@ -37,11 +43,11 @@ class _LOB:
 
 
 class _Cursor:
-    description = [(c.upper(),) for c in COLS]
     arraysize = 100
 
     def __init__(self):
         self._rows = []
+        self.description = [(c.upper(),) for c in COLS]
 
     def __enter__(self):
         return self
@@ -52,11 +58,27 @@ class _Cursor:
     def execute(self, sql, binds=None):
         if sql.strip().upper().startswith("SET TRANSACTION"):
             return
+        # O catálogo (ALL_OBJECTS/ALL_TAB_COLUMNS) responde só o que esta conta
+        # "enxerga": é assim que o portal descobre coluna e tabela que faltam.
+        if "FROM ALL_OBJECTS" in sql.upper():
+            REG["catalogo"] += 1
+            self.description = [("NOME",)]
+            self._rows = [(n,) for n in sorted(CATALOGO)]
+            return
         REG["sql"].append(sql)
         REG["binds"].append(dict(binds or {}))
+        self.description = [(c.upper(),) for c in COLS]
         termos = {str(v) for v in (binds or {}).values()}
-        self._rows = [tuple(r[c] for c in COLS) for r in BASE
-                      if r["imobilizado"] in termos or r["etiqueta"] in termos or r["numero_serie"] in termos]
+        linhas = []
+        for r in BASE:
+            if not (r["imobilizado"] in termos or r["etiqueta"] in termos or r["numero_serie"] in termos):
+                continue
+            d = dict(r)
+            for campo in OPCIONAIS:
+                if f"NULL AS {campo}" in sql:
+                    d[campo] = None
+            linhas.append(tuple(d[c] for c in COLS))
+        self._rows = linhas
 
     def fetchmany(self, n):
         return self._rows[:n]
@@ -113,7 +135,8 @@ COLUNAS = ["empresa", "imobilizado", "etiqueta", "numero_serie", "descricao", "c
            "local_atribuido", "baixado", "po", "nf", "erro"]
 
 print("\n[1] Busca por número de série, etiqueta ou imobilizado, numa única ida à base por lote")
-REG.update(conexoes=0, binds=[], sql=[])
+c.post("/api/consulta", json={"identificadores": ["aquece-o-catalogo"]})
+REG.update(conexoes=0, binds=[], sql=[], catalogo=0)
 r = c.post("/api/consulta", json={"identificadores": ["sn-abc-1", "CM000777", "300400", "NAOEXISTE1"]})
 checar(r.status_code == 200, f"POST /api/consulta → 200 (veio {r.status_code})")
 d = r.json()
@@ -142,6 +165,7 @@ checar(set(REG["binds"][0].values()) == {"sn-abc-1", "SN-ABC-1", "CM000777", "30
 checar(REG["connect_kwargs"] == {"user": "leitor_spare", "password": "segredo-teste",
                                  "dsn": "ebsdb.interno.local:1521/EBSPRD"},
        "conexão com a credencial do ambiente do serviço (os.environ)")
+checar(REG["catalogo"] == 0, "o catálogo da base é lido uma vez por processo, não a cada consulta")
 REG.update(conexoes=0, binds=[], sql=[])
 muitos = [f"SN-{n:04d}" for n in range(120)] + ["SN-ABC-1"]
 d = c.post("/api/consulta", json={"identificadores": muitos}).json()
@@ -150,6 +174,42 @@ checar(len(d["resultados"]) == 121 and d["encontrados"] == 1 and REG["conexoes"]
 r = c.get("/api/consulta/single", params={"identificador": "RN000123"})
 checar(r.status_code == 200 and r.json()["imobilizado"] == "100200" and "ciclo" in r.json(),
        "GET /api/consulta/single acha pela etiqueta")
+
+print("\n[1b] A consulta se adapta ao que a conta enxerga na base")
+import integracoes.ebs_ativos as ea  # noqa: E402
+sql_cheio = ea.montar_sql(":t0", set(CATALOGO))
+checar("fb.date_retired" not in sql_cheio.lower() and "period_counter_fully_retired" in sql_cheio,
+       "a baixa sai de period_counter_fully_retired; FA_BOOKS.date_retired não existe e não é consultada")
+checar("APPS.FA_RETIREMENTS" in sql_cheio and "ret.date_retired" in sql_cheio,
+       "a data da baixa vem de FA_RETIREMENTS")
+sem = set(CATALOGO) - {"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"}
+sql_curto = ea.montar_sql(":t0", sem)
+checar("APPS.FA_RETIREMENTS" not in sql_curto and "APPS.FA_ASSET_INVOICES" not in sql_curto
+       and "period_counter_fully_retired" not in sql_curto,
+       "tabela ou coluna que a conta não enxerga sai do SQL")
+for campo in ("baixado", "data_baixa", "po", "nf"):
+    checar(f"NULL AS {campo}" in sql_curto, f"{campo} vira NULL em vez de derrubar a consulta")
+checar(ea.montar_sql(":t0", set()).count("NULL AS") == 0,
+       "catálogo que não enxerga nem FA_ADDITIONS_B não serve: vale o SQL inteiro")
+so_tabelas = {n for n in CATALOGO if "." not in n}
+checar(ea.montar_sql(":t0", so_tabelas).count("NULL AS") == 0,
+       "catálogo que não devolveu coluna nenhuma não descarta coluna")
+sem_loc = ea.montar_sql(":t0", set(CATALOGO) - {"FA_LOCATIONS"})
+checar("NULL AS local_atribuido" in sem_loc and "APPS.FA_LOCATIONS" not in sem_loc,
+       "bloco que precisa de duas tabelas sai quando falta qualquer uma delas")
+CATALOGO.difference_update({"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"})
+ea._disponiveis = None
+REG.update(conexoes=0, sql=[], catalogo=0)
+d = c.post("/api/consulta", json={"identificadores": ["SN-ABC-1"]}).json()
+linha = d["resultados"][0]
+checar(REG["catalogo"] == 1 and linha["encontrado"], "sem FA_RETIREMENTS nem FA_ASSET_INVOICES, a consulta responde")
+checar(linha["baixado"] == "" and linha["po"] == "" and linha["nf"] == "",
+       "o que a conta não enxerga vem em branco, sem erro")
+checar(linha["local_atribuido"] == "RS.POA.LOJA101" and linha["descricao"] == "COLETOR TC21",
+       "o resto da linha continua vindo da base")
+CATALOGO.update({"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"})
+ea._disponiveis = None
+c.post("/api/consulta", json={"identificadores": ["aquece"]})
 
 print("\n[2] Categoria do cadastro e PO/NF do recebimento quando a base não traz")
 with SessionLocal.begin() as s:
