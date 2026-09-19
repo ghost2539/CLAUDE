@@ -499,7 +499,10 @@ A tela Consulta do portal e a `/consulta-times` usam o mesmo caminho:
 | Erro | Motivo de não ter achado, ou por que a base não respondeu |
 
 A busca aceita **número de série, etiqueta ou imobilizado** no mesmo campo:
-os três entram na consulta como bind, cada termo também em maiúsculas.
+os três entram na consulta como bind, cada termo também em maiúsculas, num
+`UNION` de buscas indexadas. O SQL é montado a partir das colunas que a conta
+enxerga na base (ver `docs/EBS_ORACLE_BASE.md`): coluna que não existe nesta
+instalação deixa o campo em branco, não derruba a consulta.
 O erro da base chega à tela por `core/mascara.py`, sem endereço, instância
 nem usuário. O acesso à `/consulta-times` é livre; o ServiceNow do espaço
 abre no portal, com login e permissão.

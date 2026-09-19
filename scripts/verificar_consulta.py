@@ -29,12 +29,24 @@ BASE = [
      "local_atribuido": "SP.SAO.CD324", "po": None, "nf": None},
 ]
 COLS = list(BASE[0].keys())
-OPCIONAIS = ("baixado", "data_baixa", "local_atribuido", "po", "nf")
-CATALOGO = {"FA_ADDITIONS_B", "FA_BOOKS", "FA_BOOK_CONTROLS", "FA_RETIREMENTS",
-            "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES",
-            "FA_ADDITIONS_B.MANUFACTURER_NAME", "FA_ADDITIONS_B.MODEL_NUMBER",
-            "FA_BOOKS.COST", "FA_BOOKS.DATE_PLACED_IN_SERVICE",
-            "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"}
+CLASSICO = {
+    "FA_ADDITIONS_B": {"ASSET_ID", "ASSET_NUMBER", "TAG_NUMBER", "SERIAL_NUMBER", "DESCRIPTION",
+                       "MANUFACTURER_NAME", "MODEL_NUMBER"},
+    "FA_BOOKS": {"ASSET_ID", "BOOK_TYPE_CODE", "COST", "DATE_PLACED_IN_SERVICE", "DATE_INEFFECTIVE",
+                 "PERIOD_COUNTER_FULLY_RETIRED"},
+    "FA_BOOK_CONTROLS": {"BOOK_TYPE_CODE", "BOOK_CLASS"},
+    "FA_RETIREMENTS": {"ASSET_ID", "BOOK_TYPE_CODE", "DATE_RETIRED", "STATUS"},
+    "FA_DISTRIBUTION_HISTORY": {"ASSET_ID", "LOCATION_ID", "DATE_INEFFECTIVE"},
+    "FA_LOCATIONS": {"LOCATION_ID", "SEGMENT1", "SEGMENT2", "SEGMENT3", "SEGMENT4", "SEGMENT5",
+                     "SEGMENT6", "SEGMENT7"},
+    "FA_ASSET_INVOICES": {"ASSET_ID", "PO_NUMBER", "INVOICE_NUMBER", "DATE_INEFFECTIVE"},
+}
+# A instalação de verdade do cliente: R12, descrição na tabela traduzida e
+# FA_BOOKS sem date_retired.
+R12 = {t: set(c) for t, c in CLASSICO.items()}
+R12["FA_ADDITIONS_B"].discard("DESCRIPTION")
+R12["FA_ADDITIONS_TL"] = {"ASSET_ID", "DESCRIPTION", "LANGUAGE"}
+CATALOGO = {t: set(c) for t, c in CLASSICO.items()}
 REG = {"conexoes": 0, "binds": [], "sql": [], "catalogo": 0, "connect_kwargs": None, "falha": None}
 
 
@@ -58,12 +70,12 @@ class _Cursor:
     def execute(self, sql, binds=None):
         if sql.strip().upper().startswith("SET TRANSACTION"):
             return
-        # O catálogo (ALL_OBJECTS/ALL_TAB_COLUMNS) responde só o que esta conta
-        # "enxerga": é assim que o portal descobre coluna e tabela que faltam.
-        if "FROM ALL_OBJECTS" in sql.upper():
+        # O catálogo responde só o que ESTA conta enxerga: é assim que o portal
+        # descobre coluna e tabela que faltam nesta instalação.
+        if "ALL_TAB_COLUMNS" in sql.upper():
             REG["catalogo"] += 1
-            self.description = [("NOME",)]
-            self._rows = [(n,) for n in sorted(CATALOGO)]
+            self.description = [("TABELA",), ("COLUNA",)]
+            self._rows = [(tab, col) for tab, cols in sorted(CATALOGO.items()) for col in sorted(cols)]
             return
         REG["sql"].append(sql)
         REG["binds"].append(dict(binds or {}))
@@ -74,7 +86,7 @@ class _Cursor:
             if not (r["imobilizado"] in termos or r["etiqueta"] in termos or r["numero_serie"] in termos):
                 continue
             d = dict(r)
-            for campo in OPCIONAIS:
+            for campo in COLS:
                 if f"NULL AS {campo}" in sql:
                     d[campo] = None
             linhas.append(tuple(d[c] for c in COLS))
@@ -175,40 +187,51 @@ r = c.get("/api/consulta/single", params={"identificador": "RN000123"})
 checar(r.status_code == 200 and r.json()["imobilizado"] == "100200" and "ciclo" in r.json(),
        "GET /api/consulta/single acha pela etiqueta")
 
-print("\n[1b] A consulta se adapta ao que a conta enxerga na base")
+print("\n[1b] A consulta é montada com as colunas que a conta enxerga")
 import integracoes.ebs_ativos as ea  # noqa: E402
-sql_cheio = ea.montar_sql(":t0", set(CATALOGO))
-checar("fb.date_retired" not in sql_cheio.lower() and "period_counter_fully_retired" in sql_cheio,
-       "a baixa sai de period_counter_fully_retired; FA_BOOKS.date_retired não existe e não é consultada")
-checar("APPS.FA_RETIREMENTS" in sql_cheio and "ret.date_retired" in sql_cheio,
-       "a data da baixa vem de FA_RETIREMENTS")
-sem = set(CATALOGO) - {"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"}
-sql_curto = ea.montar_sql(":t0", sem)
-checar("APPS.FA_RETIREMENTS" not in sql_curto and "APPS.FA_ASSET_INVOICES" not in sql_curto
-       and "period_counter_fully_retired" not in sql_curto,
-       "tabela ou coluna que a conta não enxerga sai do SQL")
-for campo in ("baixado", "data_baixa", "po", "nf"):
-    checar(f"NULL AS {campo}" in sql_curto, f"{campo} vira NULL em vez de derrubar a consulta")
-checar(ea.montar_sql(":t0", set()).count("NULL AS") == 0,
-       "catálogo que não enxerga nem FA_ADDITIONS_B não serve: vale o SQL inteiro")
-so_tabelas = {n for n in CATALOGO if "." not in n}
-checar(ea.montar_sql(":t0", so_tabelas).count("NULL AS") == 0,
-       "catálogo que não devolveu coluna nenhuma não descarta coluna")
-sem_loc = ea.montar_sql(":t0", set(CATALOGO) - {"FA_LOCATIONS"})
-checar("NULL AS local_atribuido" in sem_loc and "APPS.FA_LOCATIONS" not in sem_loc,
+sql_classico = ea.montar_sql(":t0", CLASSICO)
+checar("fb.date_retired" not in sql_classico and "period_counter_fully_retired" in sql_classico,
+       "FA_BOOKS não tem date_retired: a baixa sai de period_counter_fully_retired")
+checar("fa.description" in sql_classico and "FA_ADDITIONS_TL" not in sql_classico,
+       "instalação com descrição na tabela base continua lendo de lá")
+busca = sql_classico[sql_classico.index("WITH alvos"):sql_classico.index(")\nSELECT")]
+checar(busca.count("SELECT fa0.asset_id") == 3 and busca.count("UNION") == 2 and " OR " not in busca,
+       "busca por UNION de três colunas indexadas, sem OR (era o que deixava a consulta lenta)")
+sql_r12 = ea.montar_sql(":t0", R12)
+checar("fa.description" not in sql_r12 and "tl.description" in sql_r12
+       and "LEFT JOIN APPS.FA_ADDITIONS_TL" in sql_r12 and "USERENV('LANG')" in sql_r12,
+       "R12 sem DESCRIPTION na tabela base: a descrição vem da tabela traduzida")
+sem_nota = {t_: set(c) for t_, c in R12.items() if t_ != "FA_ASSET_INVOICES"}
+sql_curto = ea.montar_sql(":t0", sem_nota)
+checar("APPS.FA_ASSET_INVOICES" not in sql_curto and "NULL AS po" in sql_curto and "NULL AS nf" in sql_curto,
+       "tabela que a conta não enxerga sai do SQL, e o campo vira NULL")
+sem_loc = {t_: set(c) for t_, c in R12.items() if t_ != "FA_LOCATIONS"}
+checar("NULL AS local_atribuido" in ea.montar_sql(":t0", sem_loc),
        "bloco que precisa de duas tabelas sai quando falta qualquer uma delas")
-CATALOGO.difference_update({"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"})
-ea._disponiveis = None
+sql_cego = ea.montar_sql(":t0", {})
+checar("fa.description" in sql_cego and "APPS.FA_ASSET_INVOICES" in sql_cego
+       and "NULL AS" not in sql_cego and "FA_ADDITIONS_TL" not in sql_cego,
+       "catálogo que não diz nada não descarta nada: vale a consulta inteira")
+checar(ea.mapa(R12)["DESCRICAO"] == "tl.description" and ea.mapa(CLASSICO)["DESCRICAO"] == "fa.description",
+       "o mapa de campos diz de qual coluna cada campo veio")
+
+CATALOGO.clear(); CATALOGO.update({t_: set(c) for t_, c in R12.items()})
+CATALOGO.pop("FA_ASSET_INVOICES")
+ea._catalogo = None
 REG.update(conexoes=0, sql=[], catalogo=0)
 d = c.post("/api/consulta", json={"identificadores": ["SN-ABC-1"]}).json()
 linha = d["resultados"][0]
-checar(REG["catalogo"] == 1 and linha["encontrado"], "sem FA_RETIREMENTS nem FA_ASSET_INVOICES, a consulta responde")
-checar(linha["baixado"] == "" and linha["po"] == "" and linha["nf"] == "",
-       "o que a conta não enxerga vem em branco, sem erro")
-checar(linha["local_atribuido"] == "RS.POA.LOJA101" and linha["descricao"] == "COLETOR TC21",
-       "o resto da linha continua vindo da base")
-CATALOGO.update({"FA_RETIREMENTS", "FA_ASSET_INVOICES", "FA_BOOKS.PERIOD_COUNTER_FULLY_RETIRED"})
-ea._disponiveis = None
+checar(REG["catalogo"] == 1 and linha["encontrado"], "na instalação do cliente, a consulta responde")
+checar(linha["po"] == "" and linha["nf"] == "" and linha["descricao"] == "COLETOR TC21",
+       "o que a conta não enxerga vem em branco; o resto continua vindo da base")
+r = c.get("/api/ebs-oracle/consulta-de-ativos")
+diag = r.json()
+checar(r.status_code == 200 and diag["campos"]["DESCRICAO"] == "tl.description"
+       and "FA_ADDITIONS_TL" in diag["tabelas"],
+       "a tela de diagnóstico mostra a coluna escolhida para cada campo")
+checar("NULL AS po" in diag["sql"], "o diagnóstico mostra o SQL realmente montado")
+CATALOGO.clear(); CATALOGO.update({t_: set(c) for t_, c in CLASSICO.items()})
+ea._catalogo = None
 c.post("/api/consulta", json={"identificadores": ["aquece"]})
 
 print("\n[2] Categoria do cadastro e PO/NF do recebimento quando a base não traz")

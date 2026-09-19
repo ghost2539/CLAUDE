@@ -293,6 +293,24 @@ def _consultas_nomeadas() -> tuple[dict, dict]:
     return queries, binds
 
 
+@router.get("/consulta-de-ativos")
+def consulta_de_ativos(req: Request):
+    """O que a tela Consulta encontrou na base: colunas, campos e o SQL montado."""
+    _exigir(req)
+    check_rate_limit(req, "api")
+    from integracoes import ebs_ativos
+    try:
+        cat = ebs_ativos.catalogo(recarregar=True)
+    except ImportError as exc:
+        raise HTTPException(503, f"Driver Oracle ausente neste servidor: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, "Falha ao ler o catálogo da base: "
+                         + sem_dado_de_acesso(str(exc))) from exc
+    return {"tabelas": {tab: sorted(cols) for tab, cols in sorted(cat.items())},
+            "campos": ebs_ativos.mapa(cat),
+            "sql": ebs_ativos.montar_sql(":termo", cat)}
+
+
 @router.get("/consultas")
 def consultas(req: Request):
     """As consultas nomeadas (as mesmas do módulo Gestão de Compras) e seus binds.

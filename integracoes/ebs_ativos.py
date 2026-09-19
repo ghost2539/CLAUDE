@@ -1,19 +1,23 @@
 """Consulta de ativos direto na base do EBS: por número de série, etiqueta ou imobilizado."""
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 CONSULTA = Path(__file__).resolve().parent.parent / "consultas" / "ebs" / "ativo_consulta.sql"
 LIMITE = 100
 EMPRESAS = ("RENNER", "YOUCOM", "CAMICADO")
-OBJETOS = ("FA_ADDITIONS_B", "FA_BOOKS", "FA_BOOK_CONTROLS", "FA_RETIREMENTS",
-           "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES")
+DONO = "APPS"
+TABELAS = ("FA_ADDITIONS_B", "FA_ADDITIONS_TL", "FA_BOOKS", "FA_BOOK_CONTROLS",
+           "FA_RETIREMENTS", "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES")
+BUSCA = (("IMOBILIZADO", "ASSET_NUMBER"), ("ETIQUETA", "TAG_NUMBER"), ("SERIE", "SERIAL_NUMBER"))
 
-_RE_BLOCO = re.compile(r"[ \t]*--<opcional ([A-Z_.+]+)>[ \t]*\n(.*?)[ \t]*--</opcional>[ \t]*\n", re.S)
+_RE_BLOCO = re.compile(r"[ \t]*--<opcional ([A-Z0-9_.+]+)>[ \t]*\n(.*?)[ \t]*--</opcional>[ \t]*\n", re.S)
 _RE_APELIDO = re.compile(r"\bAS\s+([a-z_][a-z0-9_]*)\s*(,?)[ \t]*$", re.I | re.M)
 
-_disponiveis: set[str] | None = None
+_log = logging.getLogger("ebs_ativos")
+_catalogo: dict[str, set[str]] | None = None
 
 
 def empresa_do_livro(livro: str) -> str:
@@ -87,71 +91,148 @@ def limpar(identificadores) -> list[str]:
     return saida
 
 
-def disponiveis(recarregar: bool = False) -> set[str]:
-    """Tabelas e colunas que ESTA conta enxerga, entre as que a consulta usa.
+def catalogo(recarregar: bool = False) -> dict[str, set[str]]:
+    """Colunas que ESTA conta enxerga nas tabelas da consulta.
 
-    Instalação que não concede FA_RETIREMENTS, ou versão em que uma coluna não
-    existe, derrubava a consulta inteira com ORA-00904/00942. Aqui o que falta
-    é descoberto uma vez por processo e o pedaço correspondente sai do SQL.
+    Instalação difere: em R12 a descrição do ativo está em FA_ADDITIONS_TL, e
+    FA_BOOKS não tem date_retired. Perguntar à base o que existe evita derrubar
+    a consulta inteira com ORA-00904/ORA-00942 uma coluna por vez.
     """
-    global _disponiveis
-    if _disponiveis is not None and not recarregar:
-        return _disponiveis
+    global _catalogo
+    if _catalogo is not None and not recarregar:
+        return _catalogo
     from integracoes import ebs_oracle
-    binds = {f"o{n}": v for n, v in enumerate(OBJETOS)}
+    binds = {f"o{n}": v for n, v in enumerate(TABELAS)}
     lista = ", ".join(f":{k}" for k in binds)
-    # Sem filtro de dono de propósito: no EBS a tabela é do esquema do produto
-    # e o APPS entra por sinônimo. Filtrar por APPS traria zero linha e faria o
-    # portal descartar coluna que existe.
-    sql = (
-        "SELECT object_name AS nome FROM all_objects "
-        f" WHERE object_type IN ('TABLE','VIEW','SYNONYM') AND object_name IN ({lista}) "
-        "UNION ALL "
-        "SELECT table_name || '.' || column_name AS nome FROM all_tab_columns "
-        f" WHERE table_name IN ({lista})"
+    # Dono restrito aos esquemas que o sinônimo aponta: varrer ALL_TAB_COLUMNS
+    # inteiro numa base de EBS é lento.
+    alvo = (
+        "SELECT c.table_name AS tabela, c.column_name AS coluna "
+        "  FROM all_tab_columns c "
+        f" WHERE c.table_name IN ({lista}) "
+        "   AND c.owner IN (SELECT s.table_owner FROM all_synonyms s "
+        f"                   WHERE s.synonym_name IN ({lista}) "
+        "                     AND s.owner IN (:dono, 'PUBLIC') "
+        "                   UNION ALL SELECT :dono FROM dual)"
     )
-    linhas = ebs_oracle.query(sql, binds, max_rows=20000)
-    _disponiveis = {str(r.get("nome") or "").strip().upper() for r in linhas if r.get("nome")}
-    return _disponiveis
+    largo = ("SELECT c.table_name AS tabela, c.column_name AS coluna "
+             "  FROM all_tab_columns c "
+             f" WHERE c.table_name IN ({lista})")
+    linhas = ebs_oracle.query(alvo, {**binds, "dono": DONO}, max_rows=20000)
+    if not linhas:
+        linhas = ebs_oracle.query(largo, binds, max_rows=20000)
+    achado: dict[str, set[str]] = {}
+    for r in linhas:
+        tabela = str(r.get("tabela") or "").strip().upper()
+        coluna = str(r.get("coluna") or "").strip().upper()
+        if tabela and coluna:
+            achado.setdefault(tabela, set()).add(coluna)
+    _catalogo = achado
+    _log.info("catálogo do EBS: %s", {t: len(c) for t, c in sorted(achado.items())})
+    return _catalogo
+
+
+def _coluna(cat, tabela: str, nomes) -> str:
+    existentes = cat.get(tabela) if cat else None
+    if existentes is None:
+        return nomes[0]
+    for nome in nomes:
+        if nome in existentes:
+            return nome
+    return ""
+
+
+def _parecida(cat, tabela: str, parte: str) -> str:
+    existentes = sorted(cat.get(tabela) or []) if cat else []
+    for nome in existentes:
+        if parte in nome:
+            return nome
+    return ""
+
+
+def mapa(cat=None) -> dict:
+    """Qual coluna da base alimenta cada campo da tela."""
+    if cat is None:
+        try:
+            cat = catalogo()
+        except Exception:  # noqa: BLE001
+            cat = None
+    cat = cat or None
+    if cat is not None and not cat.get("FA_ADDITIONS_B"):
+        cat = None
+    m: dict[str, str] = {}
+    for campo, coluna in BUSCA:
+        achou = _coluna(cat, "FA_ADDITIONS_B", (coluna,))
+        m[campo] = f"fa.{achou.lower()}" if achou else ""
+    desc = _coluna(cat, "FA_ADDITIONS_B", ("DESCRIPTION", "ASSET_DESCRIPTION", "ITEM_DESCRIPTION"))
+    if desc:
+        m["DESCRICAO"] = f"fa.{desc.lower()}"
+    else:
+        tl = _coluna(cat, "FA_ADDITIONS_TL", ("DESCRIPTION",)) if cat else ""
+        if tl:
+            m["DESCRICAO"] = f"tl.{tl.lower()}"
+        else:
+            perto = _parecida(cat, "FA_ADDITIONS_B", "DESCRI")
+            m["DESCRICAO"] = f"fa.{perto.lower()}" if perto else ""
+    fab = _coluna(cat, "FA_ADDITIONS_B", ("MANUFACTURER_NAME", "MANUFACTURER"))
+    m["FABRICANTE"] = f"fa.{fab.lower()}" if fab else ""
+    mod = _coluna(cat, "FA_ADDITIONS_B", ("MODEL_NUMBER", "MODEL"))
+    m["MODELO"] = f"fa.{mod.lower()}" if mod else ""
+    custo = _coluna(cat, "FA_BOOKS", ("COST",))
+    m["CUSTO"] = f"fb.{custo.lower()}" if custo else ""
+    dpis = _coluna(cat, "FA_BOOKS", ("DATE_PLACED_IN_SERVICE",))
+    m["DPIS"] = f"fb.{dpis.lower()}" if dpis else ""
+    baixa = _coluna(cat, "FA_BOOKS", ("PERIOD_COUNTER_FULLY_RETIRED", "DATE_RETIRED"))
+    m["BAIXADO"] = (f"CASE WHEN fb.{baixa.lower()} IS NOT NULL THEN 'S' ELSE 'N' END"
+                    if baixa else "")
+    return m
 
 
 def _sem_bloco(corpo: str) -> str:
     apelidos = _RE_APELIDO.findall(corpo)
     if not apelidos:
         return ""
-    linhas = [f"       NULL AS {nome}{virgula}" for nome, virgula in apelidos]
-    return "\n".join(linhas) + "\n"
+    return "\n".join(f"       NULL AS {nome}{virgula}" for nome, virgula in apelidos) + "\n"
 
 
-def montar_sql(lista_binds: str, presentes: set[str] | None = None) -> str:
-    """O SQL do arquivo, sem os blocos que esta conta não consegue ler."""
-    sql = CONSULTA.read_text(encoding="utf-8")
-    if presentes is None:
+def _busca(m: dict, lista_binds: str) -> str:
+    partes = [f"  SELECT fa0.asset_id FROM APPS.FA_ADDITIONS_B fa0"
+              f"\n   WHERE fa0.{m[campo].split('.', 1)[1]} IN ({lista_binds})"
+              for campo, _c in BUSCA if m.get(campo)]
+    return "\n  UNION\n".join(partes)
+
+
+def montar_sql(lista_binds: str, cat=None) -> str:
+    """O SQL do molde preenchido com as colunas que a conta enxerga."""
+    if cat is None:
         try:
-            presentes = disponiveis()
-        except Exception:  # noqa: BLE001 — sem o catálogo, tenta a consulta inteira
-            presentes = None
-    # Catálogo que não enxerga nem a tabela principal não está dizendo que as
-    # outras faltam: está dizendo que não serve. Nesse caso vale o SQL inteiro.
-    if presentes is not None and "FA_ADDITIONS_B" not in presentes:
-        presentes = None
-    if presentes is not None:
-        # Catálogo que não devolveu coluna nenhuma não está dizendo que as
-        # colunas faltam: nesse caso só os blocos de TABELA são decididos.
-        colunas_vistas = any("." in nome for nome in presentes)
+            cat = catalogo()
+        except Exception:  # noqa: BLE001
+            cat = None
+    if cat is not None and not cat.get("FA_ADDITIONS_B"):
+        cat = None
+    m = mapa(cat)
+    if not _busca(m, ":x"):
+        cat, m = None, mapa(None)
+    presentes = None if cat is None else {f"{t}.{c}" for t, cols in cat.items() for c in cols}
+    usa_tl = m.get("DESCRICAO", "").startswith("tl.")
 
-        def manter(nome: str) -> bool:
-            if "." in nome:
-                return not colunas_vistas or nome in presentes
-            return nome in presentes
+    def manter(exigidos: list[str]) -> bool:
+        if exigidos == ["USA_TL"]:
+            return usa_tl
+        return presentes is None or all(x in presentes for x in exigidos)
 
-        def resolver(m):
-            # O bloco pode depender de mais de um objeto (`A+B`): falta um, sai.
-            exigidos = [x for x in m.group(1).upper().split("+") if x]
-            return m.group(2) if all(manter(x) for x in exigidos) else _sem_bloco(m.group(2))
-
-        sql = _RE_BLOCO.sub(resolver, sql)
-    return sql.replace("/*TERMOS*/", lista_binds)
+    sql = CONSULTA.read_text(encoding="utf-8")
+    sql = _RE_BLOCO.sub(
+        lambda b: (b.group(2)
+                   if manter([x for x in b.group(1).upper().split("+") if x])
+                   else _sem_bloco(b.group(2))),
+        sql,
+    )
+    sql = re.sub(r"/\*([A-Z_]+)\*/[ \t]*",
+                 lambda c: ((m.get(c.group(1)) or "NULL") + " ").ljust(46) if c.group(1) in m else c.group(0),
+                 sql)
+    return sql.replace("/*BUSCA*/", _busca(m, lista_binds))
 
 
 def _lote(ids: list[str]) -> list[dict]:

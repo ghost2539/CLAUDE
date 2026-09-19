@@ -159,21 +159,36 @@ da conta com `list_objects`/`describe` antes de assumir acesso a cada um.
 
 **Consulta pronta — `consultas/ebs/ativo_consulta.sql`.** Atende a tela
 Consulta (portal e Times) por `integracoes/ebs_ativos.py`: recebe os termos
-(número de série, etiqueta ou imobilizado, cada um também em maiúsculas)
-como binds `:t0, :t1…` no lugar de `/*TERMOS*/` e devolve, por ativo, o livro
-CORPORATE (`FA_BOOKS` + `FA_BOOK_CONTROLS`), se está baixado (`date_retired`
-ou `period_counter_fully_retired`), o local atribuído vigente
-(`FA_DISTRIBUTION_HISTORY` + `FA_LOCATIONS`) e PO/NF (`FA_ASSET_INVOICES`).
-Cada lote de até 100 termos vai numa única ida à base.
+(número de série, etiqueta ou imobilizado, cada um também em maiúsculas) como
+binds `:t0, :t1…` e devolve, por ativo, o livro CORPORATE, se está baixado, o
+local atribuído vigente e PO/NF. Cada lote de até 100 termos vai numa única
+ida à base.
 
-A baixa sai de `FA_BOOKS.period_counter_fully_retired` — **`FA_BOOKS` não
-tem `date_retired`**, a data da baixa está em `FA_RETIREMENTS`. Os pedaços
-que dependem de tabela ou coluna que pode não existir (ou não estar
-concedida) ficam entre `--<opcional OBJETO>` e `--</opcional>` no arquivo:
-o portal lê o catálogo da base uma vez por processo e troca por `NULL` o
-que a conta não enxerga, em vez de derrubar a consulta inteira com
-ORA-00904/ORA-00942. Catálogo que não devolve nem a tabela principal (ou
-nenhuma coluna) não é levado em conta: aí vale o SQL inteiro.
+A busca é um `UNION` de três SELECTs, um por coluna (`asset_number`,
+`tag_number`, `serial_number`). Com `OR` numa cláusula só, o Oracle varre a
+tabela inteira e a consulta demora; separados, cada um usa o seu índice.
+
+**O arquivo é um molde, não o SQL final.** Instalação de EBS difere: em R12 a
+descrição do ativo está em `FA_ADDITIONS_TL` (a `_B` não tem `DESCRIPTION`), e
+`FA_BOOKS` não tem `date_retired` — a baixa total sai de
+`period_counter_fully_retired` e a data, de `FA_RETIREMENTS`. Por isso o portal
+lê o catálogo da própria base uma vez por processo (`ALL_TAB_COLUMNS`, com o
+dono resolvido por `ALL_SYNONYMS`) e completa o molde:
+
+- cada marcador de campo vira a coluna real ou `NULL`;
+- cada bloco `--<opcional TABELA.COLUNA>` sai inteiro quando aquilo não existe
+  (um bloco pode exigir mais de um objeto, separados por `+`);
+- a descrição cai para `FA_ADDITIONS_TL` quando a tabela base não a tem, e o
+  `LEFT JOIN` dela só entra nesse caso.
+
+Assim, tabela não concedida ou coluna que não existe deixa **aquele campo** em
+branco, em vez de derrubar a consulta inteira com ORA-00904/ORA-00942.
+Catálogo que não devolve nem `FA_ADDITIONS_B` é ignorado: vale o molde inteiro.
+
+Para ver o que o portal encontrou nesta base — colunas por tabela, a coluna
+escolhida para cada campo e o SQL realmente montado — há
+`GET /api/ebs-oracle/consulta-de-ativos` (admin de Parâmetros). É por aí que se
+descobre qual coluna falta antes de mexer no arquivo.
 
 ## 5. Convenções úteis do EBS
 
