@@ -51,9 +51,15 @@ systemctl daemon-reload && systemctl enable --now portal-spare
     `EnvironmentFile=` da unit; o modelo está em
     `deploy/environment.servidor-novo`.
 *   `data/cofre/` — o cofre local cifrado (700), apontado por
-    `PORTAL_COFRE_DIR` na unit. Precisa ser um caminho explícito porque a
-    unit usa `ProtectHome=yes`: com o padrão `~/.config/portal-spare`, o
-    portal subiria sem enxergar segredo nenhum.
+    `PORTAL_COFRE_DIR` **dentro do `data/environment`** (o modelo já traz a
+    linha). Precisa ser um caminho explícito porque a unit usa
+    `ProtectHome=yes`: com o padrão `~/.config/portal-spare`, o portal
+    subiria sem enxergar segredo nenhum.
+
+    A unit **não** define `PORTAL_COFRE_DIR`. Se definisse, venceria o
+    environment em silêncio — o systemd aplica as diretivas na ordem do
+    arquivo — e o portal procuraria segredo numa pasta vazia, sem erro e
+    sem log, com a tela dizendo apenas que não há credencial.
 
 > `/etc/portal_operacoes_spare/` é do **servidor antigo**
 > (`/opt/portal-spare-v2`). No servidor novo esse caminho não existe.
