@@ -140,6 +140,8 @@ agrupadas pela etapa do ciclo do ativo. A rota entre crases é a que o menu usa
 | **Lançamento** | `#internalizacao/lancamento` | Abre o processo a partir do agendamento recebido. |
 | **Patrimônio** | `#internalizacao/patrimonio` | Varredura no EBS pela série (só pelo botão) e confirmação do número de patrimônio. BU que não tem EBS não passa por aqui. |
 | **Entrada de Equipamento** | `#internalizacao/entrada` | Dá entrada no estoque. Grava no portal **antes** do ServiceNow: queda de lá não perde a entrada. |
+| **Cadastro de Etiquetas** | `#internalizacao/etiquetas` | Estoque de etiquetas de patrimônio, cadastradas antes de o equipamento chegar (lista colada ou faixa numerada), com o local em que cada lote está guardado. O lançamento consome daqui, na ordem de cadastro. Perdida ou danificada se **cancela** (fica registrada); só disponível se apaga, e só o admin. |
+| **Itens Imobilizados** | `#internalizacao/imobilizados` | Lista dos itens do EBS que são patrimônio. O que a PO traz e não está aqui (cabo, fonte, acessório) é pago junto, mas não ganha etiqueta nem entra no lançamento. Código guardado sem zeros à esquerda, como a consulta da PO devolve. |
 
 ### Atendimento
 | Módulo | Rota | O que faz |

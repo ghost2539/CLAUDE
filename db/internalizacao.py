@@ -12,7 +12,13 @@ no banco dos Agendamentos.
 
 Tabelas:
 - `int_processo` — um processo por agendamento recebido (com o snapshot);
-- `int_ativo`    — uma linha por ativo internalizado (plaqueta/série únicos).
+- `int_ativo`    — uma linha por ativo internalizado (plaqueta/série únicos);
+- `int_etiqueta` — o estoque de etiquetas de patrimônio: cadastradas antes,
+  com o local em que estão guardadas, e consumidas uma a uma quando um
+  recebimento vira lançamento;
+- `int_item_imobilizado` — a lista do que É imobilizado. Um pedido traz
+  também o que não é (acessório comprado junto com a impressora): esses
+  itens seguem para o pagamento, mas não ganham etiqueta nem lançamento.
 """
 from __future__ import annotations
 
@@ -57,6 +63,19 @@ ETAPAS = {
 # BUs cujo patrimônio nasce no EBS. Youcom compra por fora: lá não há o que
 # consultar, e quem confirma é uma pessoa.
 BUS_COM_EBS = ("Renner", "Camicado")
+
+# Situação de uma etiqueta de patrimônio. Consumida é a que já está colada
+# num equipamento (ou reservada para ele no lançamento); cancelada é a que
+# se perdeu ou estragou — sai do estoque sem nunca ter sido usada, e o
+# número fica registrado para ninguém cadastrá-lo de novo por engano.
+ETIQUETA_DISPONIVEL = "DISPONIVEL"
+ETIQUETA_CONSUMIDA = "CONSUMIDA"
+ETIQUETA_CANCELADA = "CANCELADA"
+ETIQUETA_SITUACOES = {
+    ETIQUETA_DISPONIVEL: "Disponível",
+    ETIQUETA_CONSUMIDA: "Consumida",
+    ETIQUETA_CANCELADA: "Cancelada",
+}
 
 _engine = None
 _factory = None
@@ -210,6 +229,92 @@ class Ativo(Base):
             "entrada_em": self.entrada_em.isoformat() if self.entrada_em else "",
             "asset_id": self.asset_id,
         }
+
+
+class Etiqueta(Base):
+    """Uma etiqueta de patrimônio do estoque físico.
+
+    Cadastrada ANTES de existir equipamento para ela: a área recebe as
+    etiquetas em rolos, guarda em algum lugar, e é esse lugar que a tela
+    de lançamento precisa dizer para quem vai colar. Quando um recebimento
+    vira lançamento, o portal pega as disponíveis na ordem em que foram
+    cadastradas — a primeira que entrou é a primeira que sai, que é como o
+    rolo é usado na prática.
+    """
+
+    __tablename__ = "int_etiqueta"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # O número impresso na etiqueta. Único: a mesma plaqueta em dois
+    # equipamentos é o erro que o patrimônio existe para impedir.
+    codigo: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    local: Mapped[str] = mapped_column(String(120), default="")
+    situacao: Mapped[str] = mapped_column(
+        String(20), default=ETIQUETA_DISPONIVEL, server_default=ETIQUETA_DISPONIVEL,
+        index=True)
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    criado_por: Mapped[str] = mapped_column(String(80), default="")
+    # Onde foi parar: o ativo do lançamento que a consumiu, e quando.
+    consumida_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    ativo_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    cancelada_por: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    cancelada_motivo: Mapped[str] = mapped_column(String(200), default="", server_default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "codigo": self.codigo or "",
+            "local": self.local or "",
+            "situacao": self.situacao or ETIQUETA_DISPONIVEL,
+            "situacao_rotulo": ETIQUETA_SITUACOES.get(
+                self.situacao or ETIQUETA_DISPONIVEL, self.situacao or ""),
+            "criado_em": self.criado_em.isoformat() if self.criado_em else "",
+            "criado_por": self.criado_por or "",
+            "consumida_em": self.consumida_em.isoformat() if self.consumida_em else "",
+            "ativo_id": self.ativo_id,
+            "cancelada_por": self.cancelada_por or "",
+            "cancelada_motivo": self.cancelada_motivo or "",
+        }
+
+
+class ItemImobilizado(Base):
+    """Um item do EBS que vira patrimônio quando chega.
+
+    A lista existe porque o pedido não separa: a impressora e o cabo dela
+    vêm na mesma PO e na mesma nota. O cabo é pago, mas não é imobilizado —
+    não ganha etiqueta, não entra na planilha do CSC Lançamentos. Sem esta
+    lista o portal teria de adivinhar pelo nome, e "adivinhar" é como se
+    etiqueta um cabo.
+
+    A chave é o código do item no EBS (`item_ebs`), que é o que a PO traz.
+    """
+
+    __tablename__ = "int_item_imobilizado"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_ebs: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    descricao: Mapped[str] = mapped_column(String(200), default="")
+    criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    criado_por: Mapped[str] = mapped_column(String(80), default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "item_ebs": self.item_ebs or "",
+            "descricao": self.descricao or "",
+            "criado_em": self.criado_em.isoformat() if self.criado_em else "",
+            "criado_por": self.criado_por or "",
+        }
+
+
+def normalizar_item_ebs(valor: str) -> str:
+    """O código do item como a consulta da PO devolve: sem zeros à esquerda.
+
+    A `po_itens.sql` faz `LTRIM(segment1, '0')`; se o cadastro guardasse
+    "000123" e a PO trouxesse "123", o mesmo item não se encontraria.
+    """
+    v = (valor or "").strip()
+    return v.lstrip("0") or v
 
 
 def init_db() -> None:

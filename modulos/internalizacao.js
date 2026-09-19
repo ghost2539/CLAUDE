@@ -10,18 +10,24 @@ window.SPARE_MODULES.internalizacao = {
 
     // Três etapas, três telas. A etapa é de CADA equipamento: numa nota com
     // dez desktops, se sete aparecerem no EBS e três não, os sete seguem.
+    // Mais dois cadastros que o lançamento consome: o estoque de etiquetas
+    // de patrimônio e a lista do que é imobilizado.
     async render(container, sub) {
         var S = window.SPARE;
         var ABAS = [
-            ['lancamento',  'Lançamento'],
-            ['patrimonio',  'Patrimônio'],
-            ['entrada',     'Entrada de Equipamento']
+            ['lancamento',   'Lançamento'],
+            ['patrimonio',   'Patrimônio'],
+            ['entrada',      'Entrada de Equipamento'],
+            ['etiquetas',    'Cadastro de Etiquetas'],
+            ['imobilizados', 'Itens Imobilizados']
         ];
         sub = sub || 'lancamento';
         if (!ABAS.some(function (x) { return x[0] === sub; })) sub = 'lancamento';
         S.tabs(ABAS, sub, 'internalizacao');
         if (sub === 'patrimonio') return telaPatrimonio(container, S);
         if (sub === 'entrada') return telaEntrada(container, S);
+        if (sub === 'etiquetas') return telaEtiquetas(container, S);
+        if (sub === 'imobilizados') return telaImobilizados(container, S);
         return this._lancamento(container);
     },
 
@@ -489,5 +495,398 @@ async function telaEntrada(c, S) {
         } finally { b.disabled = false; b.textContent = txt; }
     };
 
+    carregar();
+}
+
+
+
+/* Data e hora vindas do servidor em ISO com fuso. O `S.formatDate` do
+   portal é só para data (cola "T00:00:00" no fim), e com um instante
+   completo devolve "Invalid Date". */
+function fmtDataHora(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric',
+                                       hour: '2-digit', minute: '2-digit' });
+}
+
+
+/* ── Cadastro de Etiquetas ──────────────────────────────────────────
+   O estoque físico de plaquetas de patrimônio, cadastrado ANTES de o
+   equipamento chegar, com o local em que cada lote está guardado. Quando
+   um recebimento vira lançamento, o portal consome daqui na ordem de
+   cadastro — a tela precisa dizer quantas há, e onde.
+   ─────────────────────────────────────────────────────────────────── */
+async function telaEtiquetas(c, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var pm = (u.permission_map || {}).internalizacao || {};
+    var podeCriar = !!(u.is_admin || pm.can_create);
+    var podeEditar = !!(u.is_admin || pm.can_edit);
+    var podeExcluir = !!(u.is_admin || pm.can_admin);
+
+    c.innerHTML =
+        '<h1 class="page-title">Cadastro de Etiquetas</h1>' +
+        '<p class="text-muted">As etiquetas de patrimônio que estão em estoque e onde ' +
+            'estão guardadas. O lançamento consome daqui, uma por equipamento, na ' +
+            'ordem em que foram cadastradas.</p>' +
+        '<div id="etq-totais" class="mb-3"></div>' +
+        (podeCriar ?
+        '<div class="card mb-3"><div class="card-header">Cadastrar etiquetas</div>' +
+        '<div class="card-body">' +
+            '<div class="form-grid cols-2">' +
+                '<div class="form-group"><label for="etq-codigos">Lista de etiquetas</label>' +
+                    '<textarea id="etq-codigos" class="form-control" rows="5" ' +
+                    'placeholder="Uma por linha, ou separadas por vírgula"></textarea></div>' +
+                '<div>' +
+                    '<div class="form-group"><label>Ou uma faixa numerada</label>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+                            '<input id="etq-prefixo" class="form-control" placeholder="prefixo (opcional)" style="flex:1;min-width:110px">' +
+                            '<input id="etq-de" class="form-control" placeholder="de: 000100" inputmode="numeric" style="flex:1;min-width:110px">' +
+                            '<input id="etq-ate" class="form-control" placeholder="até: 000250" inputmode="numeric" style="flex:1;min-width:110px">' +
+                        '</div>' +
+                        '<p class="text-muted" style="margin:.4em 0 0">Os zeros à esquerda do número inicial são mantidos: ' +
+                        'de 000100 até 000250 gera 000100, 000101…</p></div>' +
+                    '<div class="form-group"><label for="etq-local">Local de armazenamento *</label>' +
+                        '<input id="etq-local" class="form-control" list="etq-locais" placeholder="ex.: Armário 3, gaveta 2"></div>' +
+                    '<datalist id="etq-locais"></datalist>' +
+                '</div>' +
+            '</div>' +
+            '<div class="btn-row mt-2"><button id="etq-cadastrar" class="btn btn-primary" type="button">Cadastrar</button></div>' +
+            '<div id="etq-resultado" class="mt-2"></div>' +
+        '</div></div>' : '') +
+        '<div class="card"><div class="card-header">Estoque de etiquetas</div><div class="card-body">' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="etq-f-sit">Situação</label>' +
+                    '<select id="etq-f-sit" class="form-control">' +
+                    '<option value="DISPONIVEL">Disponíveis</option>' +
+                    '<option value="CONSUMIDA">Consumidas</option>' +
+                    '<option value="CANCELADA">Canceladas</option>' +
+                    '<option value="">Todas</option></select></div>' +
+                '<div class="form-group"><label for="etq-f-local">Local</label>' +
+                    '<select id="etq-f-local" class="form-control"><option value="">Todos</option></select></div>' +
+                '<div class="form-group"><label for="etq-f-busca">Buscar etiqueta</label>' +
+                    '<input id="etq-f-busca" class="form-control" placeholder="digite e Enter"></div>' +
+            '</div>' +
+            (podeEditar ?
+            '<div class="btn-row mb-2" style="align-items:center;flex-wrap:wrap">' +
+                '<input id="etq-mover-local" class="form-control" list="etq-locais" placeholder="novo local" style="max-width:260px">' +
+                '<button id="etq-mover" class="btn btn-secondary btn-sm" type="button">Mover marcadas</button>' +
+                '<button id="etq-todas" class="btn btn-secondary btn-sm" type="button">Marcar todas</button>' +
+            '</div>' : '') +
+            '<div id="etq-lista"></div>' +
+        '</div></div>';
+
+    function badge(sit) {
+        var cls = sit === 'DISPONIVEL' ? 'success' : sit === 'CONSUMIDA' ? 'info' : 'warning';
+        var rot = sit === 'DISPONIVEL' ? 'Disponível' : sit === 'CONSUMIDA' ? 'Consumida' : 'Cancelada';
+        return '<span class="badge badge-' + cls + '">' + rot + '</span>';
+    }
+
+    function locais(lista) {
+        var dl = document.getElementById('etq-locais');
+        var sel = document.getElementById('etq-f-local');
+        var atual = sel.value;
+        dl.innerHTML = lista.map(function (l) { return '<option value="' + e(l) + '">'; }).join('');
+        sel.innerHTML = '<option value="">Todos</option>' + lista.map(function (l) {
+            return '<option value="' + e(l) + '"' + (l === atual ? ' selected' : '') + '>' + e(l) + '</option>';
+        }).join('');
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('etq-lista');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        var qs = ['situacao=' + encodeURIComponent(document.getElementById('etq-f-sit').value),
+                  'local=' + encodeURIComponent(document.getElementById('etq-f-local').value),
+                  'busca=' + encodeURIComponent(document.getElementById('etq-f-busca').value.trim())];
+        try {
+            var d = await S.api('/internalizacao/cadastro/etiquetas?' + qs.join('&'));
+            var t = d.totais || {};
+            document.getElementById('etq-totais').innerHTML =
+                '<span class="badge badge-success">' + (t.DISPONIVEL || 0) + ' disponíveis</span> ' +
+                '<span class="badge badge-info">' + (t.CONSUMIDA || 0) + ' consumidas</span> ' +
+                '<span class="badge badge-warning">' + (t.CANCELADA || 0) + ' canceladas</span>';
+            locais(d.locais || []);
+            alvo.innerHTML = '';
+            if (!d.total) {
+                alvo.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhuma etiqueta nesta condição.' }));
+                return;
+            }
+            var cols = [];
+            if (podeEditar) cols.push({ key: 'id', label: '', html: true, render: function (v, r) {
+                return r.situacao === 'DISPONIVEL'
+                    ? '<input class="etq-alvo" type="checkbox" value="' + e(String(v)) + '">' : '';
+            } });
+            cols = cols.concat([
+                { key: 'codigo', label: 'Etiqueta' },
+                { key: 'local', label: 'Local' },
+                { key: 'situacao', label: 'Situação', html: true, render: badge },
+                { key: 'criado_em', label: 'Cadastrada em', render: function (v, r) {
+                    return (v ? fmtDataHora(v) : '—') + (r.criado_por ? ' · ' + r.criado_por : '');
+                } },
+                { key: 'consumida_em', label: 'Consumida em', render: function (v, r) {
+                    if (r.situacao === 'CANCELADA') return r.cancelada_motivo ? 'cancelada: ' + r.cancelada_motivo : 'cancelada';
+                    return v ? fmtDataHora(v) : '—';
+                } }
+            ]);
+            if (podeEditar || podeExcluir) cols.push({ key: 'id', label: '', html: true, render: function (v, r) {
+                if (r.situacao !== 'DISPONIVEL') return '';
+                var h = '';
+                if (podeEditar) h += '<button class="btn btn-secondary btn-sm etq-cancelar" data-id="' + e(String(v)) + '" data-cod="' + e(r.codigo) + '">Cancelar</button> ';
+                if (podeExcluir) h += '<button class="btn btn-danger btn-sm etq-excluir" data-id="' + e(String(v)) + '" data-cod="' + e(r.codigo) + '">Excluir</button>';
+                return h;
+            } });
+            alvo.appendChild(S.table(cols, d.itens));
+            alvo.querySelectorAll('.etq-cancelar').forEach(function (b) {
+                b.onclick = function () { cancelar(b.dataset.id, b.dataset.cod); };
+            });
+            alvo.querySelectorAll('.etq-excluir').forEach(function (b) {
+                b.onclick = function () { excluir(b.dataset.id, b.dataset.cod); };
+            });
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    async function cancelar(id, cod) {
+        var motivo = window.prompt('Cancelar a etiqueta ' + cod + '.\n\nPor quê? (perdida, danificada…)');
+        if (motivo === null) return;
+        try {
+            await S.api('/internalizacao/cadastro/etiquetas/' + id + '/cancelar',
+                        { method: 'POST', body: { motivo: motivo } });
+            S.toast('Etiqueta ' + cod + ' cancelada.', 'success');
+            carregar();
+        } catch (x) { S.toast(x.message, 'error'); }
+    }
+
+    async function excluir(id, cod) {
+        if (!window.confirm('Apagar a etiqueta ' + cod + ' do cadastro?\n\nUse só para engano de digitação. Etiqueta perdida ou danificada se cancela, não se apaga.')) return;
+        try {
+            await S.api('/internalizacao/cadastro/etiquetas/' + id, { method: 'DELETE' });
+            S.toast('Etiqueta ' + cod + ' apagada.', 'success');
+            carregar();
+        } catch (x) { S.toast(x.message, 'error'); }
+    }
+
+    if (podeCriar) {
+        document.getElementById('etq-cadastrar').onclick = async function () {
+            var b = this, txt = b.textContent;
+            var res = document.getElementById('etq-resultado');
+            var corpo = {
+                codigos: document.getElementById('etq-codigos').value,
+                prefixo: document.getElementById('etq-prefixo').value.trim(),
+                de: document.getElementById('etq-de').value.trim(),
+                ate: document.getElementById('etq-ate').value.trim(),
+                local: document.getElementById('etq-local').value.trim()
+            };
+            if (!corpo.local) {
+                document.getElementById('etq-local').focus();
+                return S.toast('Informe o local em que as etiquetas estão guardadas.', 'warning');
+            }
+            if (!corpo.codigos.trim() && !corpo.de && !corpo.ate) {
+                return S.toast('Cole a lista de etiquetas ou preencha a faixa.', 'warning');
+            }
+            b.disabled = true; b.textContent = 'Cadastrando…';
+            try {
+                var d = await S.api('/internalizacao/cadastro/etiquetas', { method: 'POST', body: corpo });
+                var partes = [d.criadas + ' etiqueta(s) cadastrada(s) em "' + e(d.local) + '"'];
+                if (d.repetidas.length) partes.push(d.repetidas.length + ' já existiam: ' + e(d.repetidas.slice(0, 20).join(', ')) + (d.repetidas.length > 20 ? '…' : ''));
+                if (d.invalidas.length) partes.push(d.invalidas.length + ' inválida(s): ' + e(d.invalidas.slice(0, 20).join(', ')) + (d.invalidas.length > 20 ? '…' : ''));
+                res.innerHTML = '<div class="alert alert-' + (d.criadas ? 'success' : 'warning') + '">' + partes.join('<br>') + '</div>';
+                if (d.criadas) {
+                    document.getElementById('etq-codigos').value = '';
+                    document.getElementById('etq-de').value = '';
+                    document.getElementById('etq-ate').value = '';
+                    S.toast(d.criadas + ' etiqueta(s) cadastrada(s).', 'success');
+                }
+                carregar();
+            } catch (x) {
+                res.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            } finally { b.disabled = false; b.textContent = txt; }
+        };
+    }
+    if (podeEditar) {
+        document.getElementById('etq-todas').onclick = function () {
+            var todas = c.querySelectorAll('.etq-alvo');
+            var marcar = Array.prototype.some.call(todas, function (x) { return !x.checked; });
+            todas.forEach(function (x) { x.checked = marcar; });
+        };
+        document.getElementById('etq-mover').onclick = async function () {
+            var local = document.getElementById('etq-mover-local').value.trim();
+            var ids = [];
+            c.querySelectorAll('.etq-alvo:checked').forEach(function (ch) { ids.push(parseInt(ch.value, 10)); });
+            if (!local) return S.toast('Informe o novo local.', 'warning');
+            if (!ids.length) return S.toast('Marque as etiquetas que mudaram de lugar.', 'warning');
+            try {
+                var d = await S.api('/internalizacao/cadastro/etiquetas/mover',
+                                    { method: 'POST', body: { ids: ids, local: local } });
+                S.toast(d.movidas + ' etiqueta(s) agora em "' + local + '".', 'success');
+                carregar();
+            } catch (x) { S.toast(x.message, 'error'); }
+        };
+    }
+    document.getElementById('etq-f-sit').onchange = carregar;
+    document.getElementById('etq-f-local').onchange = carregar;
+    document.getElementById('etq-f-busca').onkeydown = function (ev) { if (ev.key === 'Enter') carregar(); };
+    carregar();
+}
+
+
+/* ── Itens Imobilizados ─────────────────────────────────────────────
+   A lista do que é patrimônio. Um pedido traz também o que não é — o cabo
+   comprado junto com a impressora — e esses itens são pagos, mas não
+   ganham etiqueta nem entram no lançamento. O recebimento só conta, e só
+   consome etiqueta, para os itens que estão aqui.
+   ─────────────────────────────────────────────────────────────────── */
+async function telaImobilizados(c, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var pm = (u.permission_map || {}).internalizacao || {};
+    var podeCriar = !!(u.is_admin || pm.can_create);
+    var podeEditar = !!(u.is_admin || pm.can_edit);
+    var podeExcluir = !!(u.is_admin || pm.can_admin);
+
+    c.innerHTML =
+        '<h1 class="page-title">Itens Imobilizados</h1>' +
+        '<p class="text-muted">Os itens do EBS que viram patrimônio quando chegam. O que não ' +
+            'está nesta lista (cabo, fonte, acessório) é pago junto com a nota, mas não ' +
+            'ganha etiqueta nem vai para o lançamento.</p>' +
+        (podeCriar ?
+        '<div class="card mb-3"><div class="card-header">Incluir na lista</div><div class="card-body">' +
+            '<div class="form-grid cols-2">' +
+                '<div>' +
+                    '<div class="form-group"><label for="imb-item">Item do EBS *</label>' +
+                        '<input id="imb-item" class="form-control" placeholder="código do item, como na PO"></div>' +
+                    '<div class="form-group"><label for="imb-desc">Descrição</label>' +
+                        '<input id="imb-desc" class="form-control" placeholder="como aparece no pedido"></div>' +
+                    '<div class="btn-row"><button id="imb-add" class="btn btn-primary btn-sm" type="button">Incluir</button></div>' +
+                '</div>' +
+                '<div class="form-group"><label for="imb-texto">Ou cole vários: código e descrição por linha</label>' +
+                    '<textarea id="imb-texto" class="form-control" rows="5" placeholder="347191 ZEBRA IMPRESSORA INDUSTRIAL ZT231\n412000 DESKTOP POSITIVO MASTER"></textarea>' +
+                    '<div class="btn-row mt-2"><button id="imb-colar" class="btn btn-secondary btn-sm" type="button">Incluir a lista</button></div>' +
+                '</div>' +
+            '</div>' +
+            '<div id="imb-resultado" class="mt-2"></div>' +
+        '</div></div>' : '') +
+        '<div class="card"><div class="card-header">Lista</div><div class="card-body">' +
+            '<div class="filter-grid"><div class="form-group"><label for="imb-busca">Buscar</label>' +
+                '<input id="imb-busca" class="form-control" placeholder="item ou descrição, e Enter"></div></div>' +
+            '<div id="imb-lista"></div>' +
+        '</div></div>';
+
+    async function carregar() {
+        var alvo = document.getElementById('imb-lista');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        try {
+            var d = await S.api('/internalizacao/cadastro/itens-imobilizados?busca=' +
+                                encodeURIComponent(document.getElementById('imb-busca').value.trim()));
+            alvo.innerHTML = '';
+            if (!d.total) {
+                alvo.appendChild(S.el('p', { className: 'text-muted',
+                    textContent: 'Nenhum item na lista. Enquanto ela estiver vazia, nenhum recebimento de fornecedor consegue seguir para o lançamento.' }));
+                return;
+            }
+            var cols = [
+                { key: 'item_ebs', label: 'Item EBS' },
+                { key: 'descricao', label: 'Descrição', render: function (v) { return v || '—'; } },
+                { key: 'criado_em', label: 'Incluído em', render: function (v, r) {
+                    return (v ? fmtDataHora(v) : '—') + (r.criado_por ? ' · ' + r.criado_por : '');
+                } }
+            ];
+            if (podeEditar || podeExcluir) cols.push({ key: 'id', label: '', html: true, render: function (v, r) {
+                var h = '';
+                if (podeEditar) h += '<button class="btn btn-secondary btn-sm imb-editar" data-id="' + e(String(v)) + '">Editar</button> ';
+                if (podeExcluir) h += '<button class="btn btn-danger btn-sm imb-excluir" data-id="' + e(String(v)) + '" data-item="' + e(r.item_ebs) + '">Remover</button>';
+                return h;
+            } });
+            alvo.appendChild(S.table(cols, d.itens));
+            var porId = {};
+            d.itens.forEach(function (i) { porId[i.id] = i; });
+            alvo.querySelectorAll('.imb-editar').forEach(function (b) {
+                b.onclick = function () { editar(porId[b.dataset.id]); };
+            });
+            alvo.querySelectorAll('.imb-excluir').forEach(function (b) {
+                b.onclick = function () { excluir(b.dataset.id, b.dataset.item); };
+            });
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    async function incluir(corpo) {
+        var res = document.getElementById('imb-resultado');
+        try {
+            var d = await S.api('/internalizacao/cadastro/itens-imobilizados', { method: 'POST', body: corpo });
+            res.innerHTML = '<div class="alert alert-success">' + d.criados + ' incluído(s)' +
+                (d.atualizados ? ', ' + d.atualizados + ' com a descrição atualizada' : '') + '.</div>';
+            S.toast(d.criados + ' item(ns) incluído(s).', 'success');
+            carregar();
+            return true;
+        } catch (x) {
+            res.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+            return false;
+        }
+    }
+
+    function editar(item) {
+        if (!item) return;
+        var corpo = S.el('div', { className: 'form-grid' });
+        corpo.innerHTML =
+            '<div class="form-group"><label for="imb-e-item">Item do EBS</label>' +
+                '<input id="imb-e-item" class="form-control" value="' + e(item.item_ebs) + '"></div>' +
+            '<div class="form-group"><label for="imb-e-desc">Descrição</label>' +
+                '<input id="imb-e-desc" class="form-control" value="' + e(item.descricao) + '"></div>';
+        var salvar = S.el('button', { className: 'btn btn-primary', textContent: 'Salvar' });
+        var fechar = S.el('button', { className: 'btn btn-secondary', textContent: 'Cancelar', onClick: S.closeModal });
+        salvar.onclick = async function () {
+            try {
+                await S.api('/internalizacao/cadastro/itens-imobilizados/' + item.id, {
+                    method: 'PATCH',
+                    body: { item_ebs: document.getElementById('imb-e-item').value,
+                            descricao: document.getElementById('imb-e-desc').value }
+                });
+                S.closeModal();
+                S.toast('Item atualizado.', 'success');
+                carregar();
+            } catch (x) { S.toast(x.message, 'error'); }
+        };
+        S.openModal('Editar item imobilizado', corpo, [fechar, salvar]);
+    }
+
+    async function excluir(id, item) {
+        if (!window.confirm('Remover o item ' + item + ' da lista?\n\nA partir daqui ele chega como acessório: sem etiqueta e sem lançamento.')) return;
+        try {
+            await S.api('/internalizacao/cadastro/itens-imobilizados/' + id, { method: 'DELETE' });
+            S.toast('Item ' + item + ' removido da lista.', 'success');
+            carregar();
+        } catch (x) { S.toast(x.message, 'error'); }
+    }
+
+    if (podeCriar) {
+        document.getElementById('imb-add').onclick = async function () {
+            var item = document.getElementById('imb-item').value.trim();
+            if (!item) { document.getElementById('imb-item').focus(); return S.toast('Informe o item do EBS.', 'warning'); }
+            var ok = await incluir({ itens: [{ item_ebs: item, descricao: document.getElementById('imb-desc').value.trim() }] });
+            if (ok) {
+                document.getElementById('imb-item').value = '';
+                document.getElementById('imb-desc').value = '';
+                document.getElementById('imb-item').focus();
+            }
+        };
+        document.getElementById('imb-colar').onclick = async function () {
+            var texto = document.getElementById('imb-texto').value;
+            if (!texto.trim()) return S.toast('Cole ao menos uma linha.', 'warning');
+            var ok = await incluir({ texto: texto });
+            if (ok) document.getElementById('imb-texto').value = '';
+        };
+        ['imb-item', 'imb-desc'].forEach(function (id) {
+            document.getElementById(id).onkeydown = function (ev) {
+                if (ev.key === 'Enter') document.getElementById('imb-add').click();
+            };
+        });
+    }
+    document.getElementById('imb-busca').onkeydown = function (ev) { if (ev.key === 'Enter') carregar(); };
     carregar();
 }

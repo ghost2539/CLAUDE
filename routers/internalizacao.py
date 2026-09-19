@@ -9,6 +9,10 @@ layout do modelo oficial.
 Lê o banco dos Agendamentos apenas para LISTAR os recebidos e tirar o
 snapshot do processo; nunca escreve nele.
 
+Mantém também dois cadastros que o lançamento consome (`/cadastro/...`):
+o estoque de etiquetas de patrimônio, com o local de cada lote, e a lista
+dos itens do EBS que são imobilizados.
+
 Permissão pelo módulo "internalizacao": view lê, create/edit lançam e salvam,
 export exporta, admin exclui.
 """
@@ -635,3 +639,411 @@ def entrada_concluir(body: EntradaIn, req: Request):
             "aviso": ("O ServiceNow não confirmou a marcação; o equipamento já "
                       "está no estoque do portal. Repita a marcação depois.")
                      if resumo_sn.get("falhas") else ""}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Cadastros que o lançamento consome
+#
+#  Duas listas mantidas pela área, antes de qualquer recebimento:
+#
+#  - Etiquetas de patrimônio: o estoque físico de plaquetas, com o local em
+#    que cada lote está guardado. Quando um recebimento vira lançamento, o
+#    portal pega as disponíveis na ordem de cadastro, uma por equipamento.
+#  - Itens imobilizados: o que, dentro de um pedido, É patrimônio. O resto
+#    da PO (cabo, fonte, acessório) é pago junto, mas não ganha etiqueta.
+#
+#  Caminhos de dois segmentos (`/cadastro/...`) de propósito: `/{id}` acima
+#  captura qualquer caminho de um segmento só, e `/etiquetas` viraria um
+#  422 de "id inválido" antes de chegar aqui.
+# ══════════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+# Uma etiqueta é número, letra, hífen ou ponto. Espaço e vírgula separam
+# etiquetas na colagem em massa, então não podem fazer parte de uma.
+_ETIQUETA_RE = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,59}$")
+_MAX_ETIQUETAS_POR_VEZ = 5000
+
+
+def _separar_codigos(texto: str) -> list[str]:
+    """Códigos colados um por linha, ou separados por vírgula/ponto-e-vírgula/espaço."""
+    return [c.strip() for c in _re.split(r"[\s,;]+", texto or "") if c.strip()]
+
+
+def _faixa(prefixo: str, de: str, ate: str) -> list[str]:
+    """Etiquetas em sequência: prefixo + números de `de` até `ate`.
+
+    A largura do número segue a digitação: de "000100" até "000250" gera
+    "000100", "000101"… — a etiqueta impressa tem os zeros, e a lista tem de
+    bater com o que está no rolo.
+    """
+    de, ate = (de or "").strip(), (ate or "").strip()
+    if not (de.isdigit() and ate.isdigit()):
+        raise HTTPException(422, "Faixa: informe o número inicial e o final, só dígitos.")
+    ini, fim = int(de), int(ate)
+    if fim < ini:
+        raise HTTPException(422, "Faixa: o número final é menor que o inicial.")
+    if fim - ini + 1 > _MAX_ETIQUETAS_POR_VEZ:
+        raise HTTPException(422, f"Faixa grande demais: máximo de {_MAX_ETIQUETAS_POR_VEZ} etiquetas por vez.")
+    largura = len(de)
+    return [f"{prefixo.upper()}{n:0{largura}d}" for n in range(ini, fim + 1)]
+
+
+class EtiquetasIn(BaseModel):
+    """Cadastro em massa: uma lista colada, uma faixa, ou os dois."""
+    model_config = ConfigDict(extra="ignore")
+    codigos: str = ""
+    prefixo: str = ""
+    de: str = ""
+    ate: str = ""
+    local: str = ""
+
+    @field_validator("local")
+    @classmethod
+    def _local(cls, v: str) -> str:
+        v = " ".join((v or "").split())[:120]
+        if not v:
+            raise ValueError("Informe o local em que as etiquetas estão guardadas.")
+        return v
+
+    @field_validator("prefixo")
+    @classmethod
+    def _prefixo(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not _re.fullmatch(r"[A-Za-z0-9.\-]{1,20}", v):
+            raise ValueError("Prefixo da faixa inválido (letras, números, ponto ou hífen).")
+        return v
+
+
+@router.get("/cadastro/etiquetas")
+def etiquetas_listar(req: Request, situacao: str = "", busca: str = "", local: str = ""):
+    """O estoque de etiquetas, mais recentes primeiro, com os totais por situação."""
+    _exigir(req, "view")
+    db.ensure_db()
+    from sqlalchemy import func, select
+    sit = (situacao or "").strip().upper()
+    termo = (busca or "").strip().lower()
+    loc = (local or "").strip().lower()
+    with db.SessionLocal() as s:
+        totais = {k: 0 for k in db.ETIQUETA_SITUACOES}
+        for k, n in s.execute(select(db.Etiqueta.situacao, func.count(db.Etiqueta.id))
+                              .group_by(db.Etiqueta.situacao)).all():
+            totais[k or db.ETIQUETA_DISPONIVEL] = int(n or 0)
+        q = select(db.Etiqueta).order_by(db.Etiqueta.id.desc())
+        if sit in db.ETIQUETA_SITUACOES:
+            q = q.where(db.Etiqueta.situacao == sit)
+        linhas = [e.to_dict() for e in s.scalars(q.limit(_MAX_ETIQUETAS_POR_VEZ)).all()]
+        # Os locais distintos alimentam o filtro da tela: quem procura "onde
+        # estão as etiquetas do armário 3" não deveria ter de digitar isso.
+        locais = sorted({(l or "") for (l,) in s.execute(
+            select(db.Etiqueta.local).distinct()).all() if l})
+    if termo:
+        linhas = [l for l in linhas if termo in l["codigo"].lower()]
+    if loc:
+        linhas = [l for l in linhas if l["local"].lower() == loc]
+    return {"total": len(linhas), "totais": totais, "locais": locais, "itens": linhas}
+
+
+@router.post("/cadastro/etiquetas", status_code=201)
+def etiquetas_cadastrar(body: EtiquetasIn, req: Request):
+    """Cadastra etiquetas em massa. Diz o que entrou e o que ficou de fora.
+
+    Repetida não é erro do lote inteiro: o rolo pode ter sido cadastrado
+    pela metade ontem. As novas entram; as que já existiam e as inválidas
+    voltam nomeadas para a pessoa conferir.
+    """
+    sd = _exigir(req, "create")
+    db.ensure_db()
+    codigos = _separar_codigos(body.codigos)
+    if body.de or body.ate:
+        codigos += _faixa(body.prefixo, body.de, body.ate)
+    if not codigos:
+        raise HTTPException(422, "Nenhuma etiqueta informada: cole a lista ou preencha a faixa.")
+    if len(codigos) > _MAX_ETIQUETAS_POR_VEZ:
+        raise HTTPException(422, f"Máximo de {_MAX_ETIQUETAS_POR_VEZ} etiquetas por vez.")
+
+    invalidas = [c for c in codigos if not _ETIQUETA_RE.match(c)]
+    # Guardada em maiúsculas: é como está impressa, e é o que faz "a-103" e
+    # "A-103" serem a mesma plaqueta no banco, não só na comparação.
+    validas: list[str] = []
+    vistos: set[str] = set()
+    for c in codigos:
+        chave = c.upper()
+        if c in invalidas or chave in vistos:
+            continue
+        vistos.add(chave)
+        validas.append(chave)
+
+    from sqlalchemy import func, select
+    usuario = sd.get("username", "")
+    with db.SessionLocal.begin() as s:
+        existentes = {
+            (cod or "").upper() for (cod,) in s.execute(
+                select(db.Etiqueta.codigo).where(
+                    func.upper(db.Etiqueta.codigo).in_([v.upper() for v in validas]))).all()
+        } if validas else set()
+        repetidas = [v for v in validas if v.upper() in existentes]
+        novas = [v for v in validas if v.upper() not in existentes]
+        for cod in novas:
+            s.add(db.Etiqueta(codigo=cod, local=body.local, criado_por=usuario))
+    _log.info("etiquetas cadastradas: %s novas, %s repetidas, %s inválidas, local=%r por=%s ip=%s",
+              len(novas), len(repetidas), len(invalidas), body.local, usuario, client_ip(req))
+    return {"criadas": len(novas), "repetidas": repetidas[:200], "invalidas": invalidas[:200],
+            "local": body.local}
+
+
+class EtiquetaEditIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    local: str = ""
+
+    @field_validator("local")
+    @classmethod
+    def _local(cls, v: str) -> str:
+        v = " ".join((v or "").split())[:120]
+        if not v:
+            raise ValueError("Informe o local.")
+        return v
+
+
+@router.patch("/cadastro/etiquetas/{etiqueta_id}")
+def etiqueta_editar(etiqueta_id: int, body: EtiquetaEditIn, req: Request):
+    """Muda o local de uma etiqueta que ainda está no estoque."""
+    _exigir(req, "edit")
+    db.ensure_db()
+    with db.SessionLocal.begin() as s:
+        e = s.get(db.Etiqueta, etiqueta_id)
+        if not e:
+            raise HTTPException(404, "Etiqueta não encontrada.")
+        if e.situacao != db.ETIQUETA_DISPONIVEL:
+            raise HTTPException(409, "Só etiqueta disponível muda de local.")
+        e.local = body.local
+        return e.to_dict()
+
+
+class EtiquetaMoverIn(BaseModel):
+    """Mudança de local em lote: o rolo inteiro foi para outro armário."""
+    model_config = ConfigDict(extra="ignore")
+    ids: list[int] = []
+    local: str = ""
+
+    @field_validator("local")
+    @classmethod
+    def _local(cls, v: str) -> str:
+        v = " ".join((v or "").split())[:120]
+        if not v:
+            raise ValueError("Informe o local.")
+        return v
+
+
+@router.post("/cadastro/etiquetas/mover")
+def etiquetas_mover(body: EtiquetaMoverIn, req: Request):
+    _exigir(req, "edit")
+    db.ensure_db()
+    if not body.ids:
+        raise HTTPException(422, "Escolha ao menos uma etiqueta.")
+    movidas = 0
+    with db.SessionLocal.begin() as s:
+        for eid in body.ids[:_MAX_ETIQUETAS_POR_VEZ]:
+            e = s.get(db.Etiqueta, eid)
+            if e and e.situacao == db.ETIQUETA_DISPONIVEL:
+                e.local = body.local
+                movidas += 1
+    return {"movidas": movidas, "local": body.local}
+
+
+class EtiquetaCancelarIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    motivo: str = ""
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo(cls, v: str) -> str:
+        v = " ".join((v or "").split())[:200]
+        if not v:
+            raise ValueError("Diga por que a etiqueta sai do estoque (perdida, danificada…).")
+        return v
+
+
+@router.post("/cadastro/etiquetas/{etiqueta_id}/cancelar")
+def etiqueta_cancelar(etiqueta_id: int, body: EtiquetaCancelarIn, req: Request):
+    """Tira do estoque uma etiqueta que se perdeu ou estragou.
+
+    Não apaga: o número fica registrado como cancelado, para ninguém
+    cadastrá-lo de novo achando que está no rolo.
+    """
+    sd = _exigir(req, "edit")
+    db.ensure_db()
+    with db.SessionLocal.begin() as s:
+        e = s.get(db.Etiqueta, etiqueta_id)
+        if not e:
+            raise HTTPException(404, "Etiqueta não encontrada.")
+        if e.situacao != db.ETIQUETA_DISPONIVEL:
+            raise HTTPException(409, "Só etiqueta disponível pode ser cancelada.")
+        e.situacao = db.ETIQUETA_CANCELADA
+        e.cancelada_por = sd.get("username", "")
+        e.cancelada_motivo = body.motivo
+        dado = e.to_dict()
+    _log.info("etiqueta %s cancelada (%s) por=%s ip=%s",
+              dado["codigo"], body.motivo, sd.get("username", ""), client_ip(req))
+    return dado
+
+
+@router.delete("/cadastro/etiquetas/{etiqueta_id}", status_code=204)
+def etiqueta_excluir(etiqueta_id: int, req: Request):
+    """Apaga uma etiqueta cadastrada por engano. Só disponível, só admin."""
+    _exigir(req, "admin")
+    db.ensure_db()
+    with db.SessionLocal.begin() as s:
+        e = s.get(db.Etiqueta, etiqueta_id)
+        if not e:
+            raise HTTPException(404, "Etiqueta não encontrada.")
+        if e.situacao != db.ETIQUETA_DISPONIVEL:
+            raise HTTPException(409, "Etiqueta já usada ou cancelada não se apaga: o histórico é dela.")
+        s.delete(e)
+    return None
+
+
+def etiquetas_disponiveis(s, quantidade: int) -> list:
+    """As próximas `quantidade` etiquetas do estoque, na ordem de cadastro.
+
+    É a função que o recebimento chama para consumir. Devolve os OBJETOS
+    (dentro da sessão de quem chamou), para o consumo e a gravação do ativo
+    acontecerem na mesma transação — reservar numa e gravar noutra é como
+    se perde etiqueta quando a segunda falha.
+    """
+    from sqlalchemy import select
+    if quantidade <= 0:
+        return []
+    return list(s.scalars(
+        select(db.Etiqueta)
+        .where(db.Etiqueta.situacao == db.ETIQUETA_DISPONIVEL)
+        .order_by(db.Etiqueta.id.asc())
+        .limit(quantidade)).all())
+
+
+# ── Itens imobilizados ────────────────────────────────────────────────────
+class ItemImobilizadoIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    item_ebs: str = ""
+    descricao: str = ""
+
+    @field_validator("item_ebs")
+    @classmethod
+    def _item(cls, v: str) -> str:
+        v = db.normalizar_item_ebs(v)
+        if not v or not _re.fullmatch(r"[A-Za-z0-9.\-/]{1,60}", v):
+            raise ValueError("Código do item do EBS inválido.")
+        return v
+
+    @field_validator("descricao")
+    @classmethod
+    def _desc(cls, v: str) -> str:
+        return " ".join((v or "").split())[:200]
+
+
+class ItensImobilizadosIn(BaseModel):
+    """Vários de uma vez: a lista estruturada, ou texto colado com
+    "código descrição" por linha (o código é o primeiro token)."""
+    model_config = ConfigDict(extra="ignore")
+    itens: list[ItemImobilizadoIn] = []
+    texto: str = ""
+
+
+def _itens_do_texto(texto: str) -> list[ItemImobilizadoIn]:
+    saida = []
+    for linha in (texto or "").splitlines():
+        linha = linha.strip()
+        if not linha:
+            continue
+        partes = _re.split(r"[\s;\t]+", linha, maxsplit=1)
+        codigo = partes[0].strip(" ;,")
+        desc = partes[1].strip() if len(partes) > 1 else ""
+        try:
+            saida.append(ItemImobilizadoIn(item_ebs=codigo, descricao=desc))
+        except ValueError:
+            raise HTTPException(422, f"Linha inválida no texto colado: {linha[:80]!r}")
+    return saida
+
+
+@router.get("/cadastro/itens-imobilizados")
+def imobilizados_listar(req: Request, busca: str = ""):
+    _exigir(req, "view")
+    db.ensure_db()
+    from sqlalchemy import select
+    termo = (busca or "").strip().lower()
+    with db.SessionLocal() as s:
+        linhas = [i.to_dict() for i in s.scalars(
+            select(db.ItemImobilizado).order_by(db.ItemImobilizado.item_ebs)).all()]
+    if termo:
+        linhas = [l for l in linhas
+                  if termo in l["item_ebs"].lower() or termo in l["descricao"].lower()]
+    return {"total": len(linhas), "itens": linhas}
+
+
+@router.post("/cadastro/itens-imobilizados", status_code=201)
+def imobilizados_cadastrar(body: ItensImobilizadosIn, req: Request):
+    """Inclui itens na lista. Repetido atualiza a descrição, não duplica."""
+    sd = _exigir(req, "create")
+    db.ensure_db()
+    itens = list(body.itens) + _itens_do_texto(body.texto)
+    if not itens:
+        raise HTTPException(422, "Nenhum item informado.")
+    if len(itens) > 2000:
+        raise HTTPException(422, "Máximo de 2000 itens por vez.")
+    from sqlalchemy import select
+    usuario = sd.get("username", "")
+    criados, atualizados = 0, 0
+    with db.SessionLocal.begin() as s:
+        for it in itens:
+            atual = s.scalar(select(db.ItemImobilizado)
+                             .where(db.ItemImobilizado.item_ebs == it.item_ebs))
+            if atual:
+                if it.descricao and it.descricao != atual.descricao:
+                    atual.descricao = it.descricao
+                    atualizados += 1
+                continue
+            s.add(db.ItemImobilizado(item_ebs=it.item_ebs, descricao=it.descricao,
+                                     criado_por=usuario))
+            criados += 1
+    _log.info("itens imobilizados: %s criados, %s atualizados por=%s ip=%s",
+              criados, atualizados, usuario, client_ip(req))
+    return {"criados": criados, "atualizados": atualizados}
+
+
+@router.patch("/cadastro/itens-imobilizados/{item_id}")
+def imobilizado_editar(item_id: int, body: ItemImobilizadoIn, req: Request):
+    _exigir(req, "edit")
+    db.ensure_db()
+    from sqlalchemy import select
+    with db.SessionLocal.begin() as s:
+        i = s.get(db.ItemImobilizado, item_id)
+        if not i:
+            raise HTTPException(404, "Item não encontrado.")
+        outro = s.scalar(select(db.ItemImobilizado).where(
+            db.ItemImobilizado.item_ebs == body.item_ebs, db.ItemImobilizado.id != item_id))
+        if outro:
+            raise HTTPException(409, f"O item {body.item_ebs} já está na lista.")
+        i.item_ebs, i.descricao = body.item_ebs, body.descricao
+        return i.to_dict()
+
+
+@router.delete("/cadastro/itens-imobilizados/{item_id}", status_code=204)
+def imobilizado_excluir(item_id: int, req: Request):
+    """Tira um item da lista: a partir daqui ele chega como acessório."""
+    sd = _exigir(req, "admin")
+    db.ensure_db()
+    with db.SessionLocal.begin() as s:
+        i = s.get(db.ItemImobilizado, item_id)
+        if not i:
+            raise HTTPException(404, "Item não encontrado.")
+        codigo = i.item_ebs
+        s.delete(i)
+    _log.info("item imobilizado %s removido por=%s ip=%s", codigo, sd.get("username", ""), client_ip(req))
+    return None
+
+
+def codigos_imobilizados(s) -> set[str]:
+    """Os códigos da lista, normalizados como a PO os traz. Para o recebimento."""
+    from sqlalchemy import select
+    return {db.normalizar_item_ebs(c) for (c,) in s.execute(
+        select(db.ItemImobilizado.item_ebs)).all() if c}
