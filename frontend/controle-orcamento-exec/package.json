@@ -2,7 +2,7 @@
   "name": "spare-controle-orcamento-exec",
   "private": true,
   "version": "1.0.0",
-  "description": "Dashboard de Execução de CAPEX (/controle-orcamento) — clone com integração à API de CAPEX do EBS",
+  "description": "Dashboard de Execução de CAPEX (/controle-orcamento)",
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch"
