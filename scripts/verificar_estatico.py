@@ -233,6 +233,47 @@ checar(limpar_arquivo(RAIZ / "static" / "nao-existe.js") is None,
        "limpar_arquivo devolve None no que não dá para ler (o chamador entrega o original)")
 
 
+# ── <script> inline: a CSP do portal proíbe, e o sintoma engana ────────
+#
+# `script-src 'self'` bloqueia todo <script> inline, e o navegador não
+# mostra nada na tela — só uma linha no console, que ninguém vê. O sintoma
+# é o pior possível: `style-src` PERMITE inline, então o CSS aplica e a
+# página abre bonita, com fundo, tipografia e título no lugar, e só o que
+# o JavaScript montaria fica faltando. Parece falta de dados; é política.
+#
+# Foi exatamente assim que o Hub subiu quebrado: testado como arquivo
+# (file://, sem CSP) passou; servido pelo portal, veio a tela vazia.
+import re as _re  # noqa: E402
+
+print("\n[CSP] Nada servido pelo portal usa <script> inline")
+
+_POLITICA = (RAIZ / "core" / "security.py").read_text(encoding="utf-8")
+checar("script-src 'self'" in _POLITICA,
+       "a CSP do portal declara script-src 'self' (é o que torna isto obrigatório)")
+
+for _pagina in sorted((RAIZ / "static").rglob("*.html")):
+    _texto = _pagina.read_text(encoding="utf-8")
+    # <script> COM corpo. <script src="..."></script> é o jeito certo e passa.
+    _inline = [m for m in _re.findall(r"<script(?![^>]*\ssrc=)[^>]*>(.*?)</script>",
+                                      _texto, _re.S) if m.strip()]
+    _nome = _pagina.relative_to(RAIZ)
+    checar(not _inline,
+           f"{_nome} sem <script> inline"
+           + (f" — {len(_inline)} bloco(s) seriam bloqueados" if _inline else ""))
+
+    # E o que ela referencia tem de existir: um src errado dá 404 silencioso,
+    # com a mesma tela vazia de novo.
+    for _src in _re.findall(r'<script[^>]*\ssrc="([^"]+)"', _texto):
+        if _src.startswith(("http://", "https://", "//")):
+            checar(False, f"{_nome} busca script de fora ({_src}) — a CSP barra")
+            continue
+        # Fora a query: `?v=20260905` é quebra de cache e `?v={{v}}` é
+        # marcador que a rota substitui — nenhum dos dois é parte do caminho.
+        _caminho = _src.split("?", 1)[0]
+        _alvo = RAIZ / _caminho.lstrip("/")
+        checar(_alvo.is_file(), f"{_nome} -> {_caminho} existe no disco")
+
+
 print(f"\n{TOTAL - len(FALHAS)} de {TOTAL} verificações passaram.")
 if FALHAS:
     print("Falhas:")
