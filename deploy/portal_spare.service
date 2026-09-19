@@ -19,14 +19,20 @@ Group=portalspare
 WorkingDirectory=/var/www/vcreports/portal-spare
 
 # Só configuração aqui. NENHUM segredo: usuário e senha ficam no cofre
-# (veja Environment=PORTAL_COFRE_DIR abaixo). Permissão 640 root:portalspare.
-EnvironmentFile=/etc/portal_operacoes_spare/environment
+# (veja Environment=PORTAL_COFRE_DIR abaixo). Permissão 600.
+#
+# É `data/environment`, dentro da pasta da aplicação. O /etc/portal_operacoes_spare
+# era o SERVIDOR ANTIGO (/opt/portal-spare-v2) e não existe aqui — apontar
+# para lá não dá erro claro: o serviço sobe sem DATABASE_URL e falha depois,
+# longe da causa. Pior, o ReadWritePaths para um caminho inexistente faz o
+# systemd recusar o namespace e a unit nem inicia.
+EnvironmentFile=/var/www/vcreports/portal-spare/data/environment
 
-# Onde mora o cofre local cifrado. Fora do diretório da aplicação (git,
-# pacote de deploy e cópia da pasta não levam o cofre junto) e fora de
-# /home, porque ProtectHome=yes esconde /home do serviço — com o padrão
-# ~/.config/portal-spare o portal subiria sem enxergar segredo nenhum.
-Environment=PORTAL_COFRE_DIR=/etc/portal_operacoes_spare/cofre
+# Onde mora o cofre local cifrado. Fora de /home, porque ProtectHome=yes
+# esconde /home do serviço — com o padrão ~/.config/portal-spare o portal
+# subiria sem enxergar segredo nenhum. Em data/, o mesmo lugar do
+# environment, e coberto pelo ReadWritePaths abaixo.
+Environment=PORTAL_COFRE_DIR=/var/www/vcreports/portal-spare/data/cofre
 
 ExecStart=/var/www/vcreports/portal-spare/venv/bin/python -m uvicorn main:app \
     --host 0.0.0.0 --port 8901 --workers 1
@@ -39,10 +45,10 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 UMask=0027
-# Únicos caminhos graváveis: os dados do portal (bancos SQLite, uploads,
-# capturas) e o cofre, que o CLI regrava ao definir um segredo.
+# Único caminho gravável: os dados do portal — bancos SQLite, uploads,
+# capturas, e o cofre (que o CLI regrava ao definir um segredo), todos
+# dentro de data/.
 ReadWritePaths=/var/www/vcreports/portal-spare/data
-ReadWritePaths=/etc/portal_operacoes_spare/cofre
 
 [Install]
 WantedBy=multi-user.target

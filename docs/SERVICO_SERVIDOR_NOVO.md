@@ -41,24 +41,22 @@ A unit versionada é `deploy/portal_spare.service`. Ela roda sob a conta de
 serviço `portalspare` (sem shell de login), não sob a conta de quem opera:
 
 ```bash
-useradd -r -s /usr/sbin/nologin portalspare
-chown -R portalspare:portalspare /var/www/vcreports/portal-spare
-
-install -d -m 750 -o root -g portalspare /etc/portal_operacoes_spare
-install -d -m 700 -o portalspare -g portalspare /etc/portal_operacoes_spare/cofre
-
 cp deploy/portal_spare.service /etc/systemd/system/portal-spare.service
 systemctl daemon-reload && systemctl enable --now portal-spare
 ```
 
-Dois caminhos fora da pasta da aplicação, e é de propósito:
+**Nada é criado fora da pasta da aplicação.** A unit lê tudo de dentro dela:
 
-*   `/etc/portal_operacoes_spare/environment` — só configuração, **nenhum
-    segredo** (640 root:portalspare). É o `EnvironmentFile=` da unit.
-*   `/etc/portal_operacoes_spare/cofre` — o cofre local cifrado (700). Fica
-    fora da pasta da aplicação para que git, pacote de deploy e cópia da
-    pasta não levem o cofre junto; e fora de `/home` porque a unit usa
-    `ProtectHome=yes`, que esconderia o cofre do próprio serviço.
+*   `data/environment` — só configuração, **nenhum segredo** (600). É o
+    `EnvironmentFile=` da unit; o modelo está em
+    `deploy/environment.servidor-novo`.
+*   `data/cofre/` — o cofre local cifrado (700), apontado por
+    `PORTAL_COFRE_DIR` na unit. Precisa ser um caminho explícito porque a
+    unit usa `ProtectHome=yes`: com o padrão `~/.config/portal-spare`, o
+    portal subiria sem enxergar segredo nenhum.
+
+> `/etc/portal_operacoes_spare/` é do **servidor antigo**
+> (`/opt/portal-spare-v2`). No servidor novo esse caminho não existe.
 
 O restart no dia a dia (`systemctl restart portal-spare`) pede root ou uma
 regra de sudo para a equipe do portal.
@@ -124,13 +122,10 @@ O TLS fica no proxy; o portal atende em HTTP na rede interna.
 ## O que a equipe do portal faz depois
 
 1. Clonar o código na pasta e criar o venv com `--system-site-packages`.
-2. Preencher `/etc/portal_operacoes_spare/environment` — só configuração,
-   nenhum segredo; o modelo está em `deploy/environment.servidor-novo`.
-   Esse arquivo é 640 root:portalspare, então esta etapa pede root ou a
-   regra de sudo.
-3. Gravar os segredos: `python3 scripts/cofre.py definir NOME`. Escreve em
-   `/etc/portal_operacoes_spare/cofre`, que é de `portalspare` — rode com
-   essa conta (`sudo -u portalspare`).
+2. Escrever `data/environment` (só configuração — o modelo está em
+   `deploy/environment.servidor-novo`) em modo 600, e criar `data/cofre/`
+   em modo 700.
+3. Gravar os segredos: `python3 scripts/cofre.py definir NOME`.
 4. Conferir: `python3 scripts/cofre.py conferir` — inclusive que a cifra em
    uso é `fernet`, e não a de contingência.
 5. Restaurar os dados do servidor antigo e validar as telas.
