@@ -13,27 +13,97 @@
 <!-- ── Tela de login (Login SPARE v2: sempre escura) ───────────── -->
 <div id="login-screen" class="lg">
     <section class="lg-marca-painel">
-        <div class="lg-grade" aria-hidden="true"></div>
-        <div class="lg-halo" aria-hidden="true"></div>
-
-        <div class="lg-topo lg-anima">
-            <svg class="lg-monograma" viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
-                <path d="M6 6 L40 6 L47 10 L40 14 L14 14 L14 20 L42 20 L42 42 L8 42 L1 38 L8 34 L34 34 L34 28 L6 28 Z" fill="currentColor"></path>
-            </svg>
-            <div class="lg-marca">
-                <span class="lg-marca-nome">SPARE</span>
-                <span class="lg-marca-sub">Operações de TI CSC</span>
-            </div>
-            <span class="lg-divisor" aria-hidden="true"></span>
-            <span class="lg-empresa">Lojas Renner S.A.</span>
-        </div>
+        <svg class="lg-malha" viewBox="0 0 1280 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <g class="lg-arestas">
+            <line x1="96" y1="128" x2="252" y2="64"/>
+            <line x1="252" y1="64" x2="396" y2="160"/>
+            <line x1="96" y1="128" x2="180" y2="268"/>
+            <line x1="396" y1="160" x2="336" y2="320"/>
+            <line x1="180" y1="268" x2="336" y2="320"/>
+            <line x1="336" y1="320" x2="504" y2="256"/>
+            <line x1="396" y1="160" x2="504" y2="256"/>
+            <line x1="180" y1="268" x2="72" y2="408"/>
+            <line x1="336" y1="320" x2="240" y2="460"/>
+            <line x1="72" y1="408" x2="240" y2="460"/>
+            <line x1="240" y1="460" x2="420" y2="448"/>
+            <line x1="504" y1="256" x2="576" y2="384"/>
+            <line x1="420" y1="448" x2="576" y2="384"/>
+            <line x1="72" y1="408" x2="144" y2="576"/>
+            <line x1="240" y1="460" x2="324" y2="620"/>
+            <line x1="144" y1="576" x2="324" y2="620"/>
+            <line x1="420" y1="448" x2="480" y2="566"/>
+            <line x1="324" y1="620" x2="480" y2="566"/>
+            <line x1="576" y1="384" x2="636" y2="500"/>
+            <line x1="480" y1="566" x2="636" y2="500"/>
+            <line x1="144" y1="576" x2="216" y2="740"/>
+            <line x1="324" y1="620" x2="396" y2="736"/>
+            <line x1="216" y1="740" x2="396" y2="736"/>
+            <line x1="480" y1="566" x2="564" y2="686"/>
+            <line x1="396" y1="736" x2="564" y2="686"/>
+            <line x1="636" y1="500" x2="720" y2="600"/>
+            <line x1="564" y1="686" x2="720" y2="600"/>
+          </g>
+          <g class="lg-pulsos">
+            <line x1="96" y1="128" x2="180" y2="268" style="animation-duration:3.4s;animation-delay:0s"/>
+            <line x1="336" y1="320" x2="504" y2="256" style="animation-duration:4.2s;animation-delay:0.6s"/>
+            <line x1="240" y1="460" x2="420" y2="448" style="animation-duration:3.8s;animation-delay:1.4s"/>
+            <line x1="144" y1="576" x2="324" y2="620" style="animation-duration:4.6s;animation-delay:0.3s"/>
+            <line x1="480" y1="566" x2="636" y2="500" style="animation-duration:3.2s;animation-delay:2s"/>
+            <line x1="396" y1="736" x2="564" y2="686" style="animation-duration:5s;animation-delay:1s"/>
+          </g>
+          <g class="lg-nos">
+            <circle cx="252" cy="64" r="2.4" style="animation-duration:4s;animation-delay:0.2s"/>
+            <circle cx="396" cy="160" r="2.4" style="animation-duration:5s;animation-delay:1.1s"/>
+            <circle cx="72" cy="408" r="2.4" style="animation-duration:4.4s;animation-delay:0.7s"/>
+            <circle cx="420" cy="448" r="2.4" style="animation-duration:5.4s;animation-delay:1.9s"/>
+            <circle cx="216" cy="740" r="2.4" style="animation-duration:4.8s;animation-delay:0.4s"/>
+            <circle cx="396" cy="736" r="2.4" style="animation-duration:5.2s;animation-delay:2.3s"/>
+            <circle cx="720" cy="600" r="2.4" style="animation-duration:4.6s;animation-delay:1.5s"/>
+            <circle cx="564" cy="686" r="2.4" style="animation-duration:5.6s;animation-delay:0.9s"/>
+          </g>
+          <g class="lg-hubs">
+            <circle cx="96" cy="128" r="4"/>
+            <circle cx="336" cy="320" r="4.6"/>
+            <circle cx="240" cy="460" r="4"/>
+            <circle cx="144" cy="576" r="4"/>
+            <circle cx="504" cy="256" r="4"/>
+            <circle cx="480" cy="566" r="4.6"/>
+            <circle cx="636" cy="500" r="4"/>
+            <circle cx="180" cy="268" r="4.6"/>
+            <circle cx="576" cy="384" r="4"/>
+            <circle cx="324" cy="620" r="4"/>
+          </g>
+        </svg>
+        <div class="lg-brilho" aria-hidden="true"></div>
+        <div class="lg-lavagem" aria-hidden="true"></div>
 
         <div class="lg-meio lg-anima">
+            <!-- Véu: a malha é recortada em `slice`, então a posição dos nós
+                 muda com a largura da janela e um deles pode cair em cima do
+                 texto. O véu garante a leitura em qualquer resolução. -->
+            <div class="lg-veu" aria-hidden="true"></div>
+
             <div class="lg-selo">
                 <span class="lg-selo-ponto" aria-hidden="true"></span>
                 <span>Sistema interno · acesso restrito</span>
             </div>
-            <h1 class="lg-titulo">Portal de Operações Spare</h1>
+
+            <span class="lg-kicker">Portal de Operações</span>
+            <!-- O S é o próprio monograma. O viewBox recortado (1 6 46 36)
+                 faz a base do símbolo coincidir com a linha de base do texto,
+                 que é o que alinha os dois em qualquer tamanho de fonte. -->
+            <h1 class="lg-lockup" aria-label="Portal de Operações SPARE">
+                <svg class="lg-lockup-s" viewBox="1 6 46 36" aria-hidden="true">
+                    <path d="M6 6 L40 6 L47 10 L40 14 L14 14 L14 20 L42 20 L42 42 L8 42 L1 38 L8 34 L34 34 L34 28 L6 28 Z"></path>
+                </svg><span>PARE</span>
+            </h1>
+            <span class="lg-sublinha">Operações de TI · CSC</span>
+
+            <div class="lg-renner">
+                <span class="lg-renner-filete" aria-hidden="true"></span>
+                <img class="lg-renner-marca" src="/static/img/renner-branco.png"
+                     alt="Lojas Renner S.A." width="180" height="15">
+            </div>
         </div>
 
         <div class="lg-ciclo lg-anima">

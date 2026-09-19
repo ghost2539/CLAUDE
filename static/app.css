@@ -850,6 +850,7 @@ select.form-control-sm { padding-right: 22px; }
 @keyframes lgRise  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes lgPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @keyframes lgGlow  { 0%, 100% { opacity: .35; } 50% { opacity: .7; } }
+@keyframes lgDash  { to { stroke-dashoffset: -420; } }
 
 /* painel da marca */
 .lg-marca-painel {
@@ -864,40 +865,99 @@ select.form-control-sm { padding-right: 22px; }
     padding: 48px 56px;
     color: var(--sp-white);
 }
-.lg-grade {
-    position: absolute; inset: 0;
-    background-image: linear-gradient(#FFFFFF0A 1px, transparent 1px), linear-gradient(90deg, #FFFFFF0A 1px, transparent 1px);
-    background-size: 56px 56px;
-    -webkit-mask-image: radial-gradient(130% 95% at 16% 6%, #000 0%, transparent 70%);
-    mask-image: radial-gradient(130% 95% at 16% 6%, #000 0%, transparent 70%);
+/* ── Fundo "malha viva" (handoff Login SPARE v3) ─────────────────────
+   Três camadas, do fundo para a frente: malha SVG → brilho + lavagem →
+   conteúdo. Tudo em CSS: nenhuma animação aqui depende de JavaScript, o
+   que também as mantém fora do alcance da CSP.                        */
+.lg-malha {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    /* `slice` faz a malha cobrir qualquer proporção sem distorcer — em
+       troca, recorta. É por isso que o bloco de marca tem véu próprio. */
 }
-.lg-halo {
-    position: absolute; top: -220px; left: -160px;
-    width: 680px; height: 680px; border-radius: 50%;
-    background: radial-gradient(circle, #AB480745 0%, transparent 66%);
-    filter: blur(26px);
+.lg-malha .lg-arestas line { stroke: #242424; stroke-width: 1; }
+.lg-malha .lg-pulsos line {
+    stroke: #C05B12; stroke-width: 2; stroke-linecap: round;
+    /* Traço curto num vão longo: o que se vê é um pacote correndo a
+       aresta, não uma linha tracejada. A duração vem no style de cada
+       linha, porque cada uma corre no seu ritmo. */
+    stroke-dasharray: 16 420;
+    animation: lgDash linear infinite;
+}
+.lg-malha .lg-nos circle { fill: #4A4A4A; animation: lgPulse ease-in-out infinite; }
+.lg-malha .lg-hubs circle { fill: #C79105; }
+
+.lg-brilho {
+    position: absolute; top: -180px; left: 60px;
+    width: 640px; height: 640px; border-radius: 50%;
+    background: radial-gradient(circle, #AB48073D 0%, transparent 64%);
+    filter: blur(30px);
     animation: lgGlow 11s ease-in-out infinite;
+    pointer-events: none;
+}
+/* Lavagem DIRECIONAL, a 100°: apaga a malha só do lado do formulário e
+   deixa a rede viva do lado da marca. Vinheta radial no lugar disto mata
+   a rede inteira e a tela perde o que a torna diferente. */
+.lg-lavagem {
+    position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(100deg, transparent 0%, transparent 40%, #000000D9 62%, #000000 100%);
 }
 .lg-anima { position: relative; animation: lgRise .7s cubic-bezier(.2, .7, .2, 1) both; }
 .lg-meio.lg-anima  { animation-duration: .8s; animation-delay: .08s; }
 .lg-ciclo.lg-anima { animation-duration: .9s; animation-delay: .16s; }
 
-.lg-topo { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.lg-monograma { color: var(--sp-accent); display: block; flex: none; }
-.lg-marca { display: flex; flex-direction: column; gap: 5px; }
-.lg-marca-nome { font: bold 19px/1 var(--sp-sans); letter-spacing: .26em; color: var(--sp-white); }
-.lg-marca-sub  { font: 500 10px/1 var(--sp-label); letter-spacing: .2em; text-transform: uppercase; color: #8C8C8C; }
-.lg-divisor { width: 1px; height: 34px; background: #2B2B2B; }
-.lg-empresa { font: bold 11px/1.4 var(--sp-sans); letter-spacing: .16em; text-transform: uppercase; color: #BDBDBD; }
-
-.lg-meio { display: flex; flex-direction: column; gap: 22px; max-width: 600px; }
+/* ── Bloco de marca ──────────────────────────────────────────────── */
+.lg-meio {
+    position: relative;
+    display: flex; flex-direction: column; align-items: flex-start;
+    gap: 22px; max-width: 600px;
+}
+/* Véu do bloco: ver o comentário no HTML. Fica ATRÁS do texto (z-index
+   negativo) e por isso não intercepta clique nem seleção. */
+.lg-veu {
+    position: absolute; left: -14%; top: -14%; width: 128%; height: 128%;
+    z-index: -1; pointer-events: none;
+    background: radial-gradient(58% 52% at 50% 50%, #000000F5 0%, #000000D6 52%, #00000073 78%, transparent 100%);
+}
+.lg-kicker {
+    font: bold 12px/1 var(--sp-sans); letter-spacing: .34em;
+    text-transform: uppercase; color: var(--sp-sand);
+    /* O letter-spacing também é aplicado DEPOIS da última letra; o indent
+       devolve esse espaço à esquerda e o bloco volta a alinhar com o resto. */
+    text-indent: .34em;
+}
+.lg-lockup {
+    margin: 0; display: flex; align-items: baseline;
+    font: bold clamp(46px, 6.4vw, 70px)/1 var(--sp-sans);
+    letter-spacing: .1em; text-indent: .05em;
+    white-space: nowrap; color: var(--sp-white);
+}
+/* Dimensionado em `em`: o símbolo cresce junto com a fonte do clamp, sem
+   media query e sem um segundo número para manter em sincronia. .72em é a
+   altura de caixa-alta do Arial bold — é o que faz o S ter o mesmo tamanho
+   visual das letras ao lado. */
+.lg-lockup-s {
+    display: inline-block; height: .72em; width: .92em;
+    margin-right: .05em; fill: var(--sp-accent); flex: none;
+}
+.lg-sublinha {
+    font: bold 11px/1 var(--sp-sans); letter-spacing: .22em;
+    text-transform: uppercase; color: #8C8C8C;
+}
+.lg-renner { display: flex; flex-direction: column; gap: 15px; padding-top: 8px; }
+.lg-renner-filete {
+    width: 130px; height: 1px;
+    background: linear-gradient(90deg, transparent, #242424, transparent);
+}
+.lg-renner-marca {
+    display: block; width: 180px; height: 15px;
+    object-fit: contain; object-position: left center; opacity: .85;
+}
 .lg-selo {
     display: inline-flex; align-items: center; gap: 9px; align-self: flex-start;
     padding: 7px 13px; border: 1px solid #AB480780; background: #AB48071F;
     font: 500 10px/1 var(--sp-label); letter-spacing: .16em; text-transform: uppercase; color: var(--sp-sand);
 }
 .lg-selo-ponto { width: 6px; height: 6px; border-radius: 50%; background: var(--sp-accent-hi); animation: lgPulse 2.4s ease-in-out infinite; }
-.lg-titulo { margin: 0; font: bold 54px/1.04 var(--sp-sans); letter-spacing: -.03em; color: var(--sp-white); text-wrap: pretty; }
 
 .lg-ciclo { display: flex; flex-direction: column; gap: 18px; }
 .lg-ciclo-label { font: 500 10px/1.4 var(--sp-label); letter-spacing: .18em; text-transform: uppercase; color: #8C8C8C; }
@@ -972,11 +1032,13 @@ select.form-control-sm { padding-right: 22px; }
 }
 @media (max-width: 640px) {
     .lg-marca-painel, .lg-form-painel { padding: 32px 22px; }
-    .lg-titulo { font-size: clamp(34px, 9vw, 44px); }
     .lg-form-painel { gap: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .lg-anima, .lg-halo, .lg-selo-ponto { animation: none; }
+    .lg-anima, .lg-brilho, .lg-selo-ponto,
+    .lg-malha .lg-pulsos line, .lg-malha .lg-nos circle { animation: none; }
+    /* A entrada vira fade puro: o deslocamento é o que incomoda. */
+    .lg-anima { opacity: 1; transform: none; }
     .lg-campo input, .lg-entrar { transition: none; }
     .lg-entrar:active { transform: none; }
 }
