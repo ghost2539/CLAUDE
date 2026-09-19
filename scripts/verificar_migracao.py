@@ -213,7 +213,7 @@ checar(len(todos) >= len(OPCIONAIS), f"main.py registra {len(todos)} routers")
 
 
 print("\n[7] Toda tela do menu tem arquivo, e todo arquivo tem tela")
-app_js = texto("static/app.js")
+app_js = texto("js/app.js")
 bloco = app_js[app_js.index("var ROUTES = {"):]
 bloco = bloco[:bloco.index("};")]
 rotas = set(re.findall(r"^\s*'?([a-z_]+)'?\s*:", bloco, re.M))

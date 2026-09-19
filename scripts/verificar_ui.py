@@ -77,7 +77,7 @@ checar("box-shadow" not in bloco(".card "), "cartão sem sombra")
 
 print("\n[4] Toggle de tema")
 html = ler("static/index.html")
-js = ler("static/app.js")
+js = ler("js/app.js")
 checar('id="tema-toggle"' in html and 'role="switch"' in html, "toggle com role=switch")
 checar('aria-label="Alternar tema escuro"' in html, "toggle tem rótulo acessível")
 checar("tema-seg" not in html and "tema-seg" not in css, "o par de botões saiu")

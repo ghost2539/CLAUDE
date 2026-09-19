@@ -15,6 +15,7 @@ from core.security import (
     SecurityHeadersMiddleware,
     BotProtectionMiddleware,
     MaxBodyMiddleware,
+    get_session,
 )
 
 _cfg = get_settings()
@@ -77,9 +78,23 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
-        # O prefixo sai do --root-path do uvicorn ou do APP_BASE_PATH; na
-        # raiz do domínio é vazio e a página vai como está.
-        html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
+        """Login ou portal — quem decide é a sessão, no SERVIDOR.
+
+        Antes as duas telas eram o mesmo arquivo, e o navegador escondia uma
+        delas. Escondida não é ausente: `GET /` devolvia 19 KB com os 35
+        itens do menu para qualquer visitante, à vista em "ver código-fonte",
+        sem precisar de devtools. Agora quem não tem sessão recebe só o
+        login — o portal não é escondido, ele não é enviado.
+
+        O prefixo sai do --root-path do uvicorn ou do APP_BASE_PATH; na raiz
+        do domínio é vazio e a página vai como está.
+        """
+        try:
+            get_session(request)
+            pagina = "index.html"
+        except Exception:  # noqa: BLE001 — sem sessão, e sem sessão é o normal aqui
+            pagina = "login.html"
+        html = (_cfg.STATIC / pagina).read_text(encoding="utf-8")
         return com_prefixo(html, prefixo(request))
 
     @app.get("/hub-infraCSC", response_class=HTMLResponse)

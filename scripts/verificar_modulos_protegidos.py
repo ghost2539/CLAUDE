@@ -173,7 +173,7 @@ checar("cookie" in (r.headers.get("vary") or "").lower(),
 
 
 print("\n[7] O carregador da tela aponta para a rota, não para /static")
-app_js = (RAIZ / "static" / "app.js").read_text(encoding="utf-8")
+app_js = (RAIZ / "js" / "app.js").read_text(encoding="utf-8")
 checar("'/modulos/'" in app_js and "'/modulos-times/'" in app_js,
        "app.js carrega pelo caminho novo")
 checar("/static/modules" not in app_js, "e não sobrou o caminho antigo")

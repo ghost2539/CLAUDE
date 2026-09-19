@@ -61,7 +61,7 @@ def checar(cond: bool, desc: str) -> None:
 
 
 html = (RAIZ / "static" / "index.html").read_text(encoding="utf-8")
-app_js = (RAIZ / "static" / "app.js").read_text(encoding="utf-8")
+app_js = (RAIZ / "js" / "app.js").read_text(encoding="utf-8")
 
 # Um item do menu é <a ...> com data-route ou data-href; pego o bloco inteiro
 # para ler junto o data-perm e o rótulo.
@@ -128,7 +128,7 @@ for it in ITENS:
 checar(not sem_rotulo, f"toda rota do menu tem rótulo no shell ({sem_rotulo or 'nenhuma'})")
 
 print("\n[5] O CAPEX Spare saiu inteiro")
-for rel in ("static/index.html", "static/app.js", "modulos/orcamento_spare.js",
+for rel in ("static/index.html", "js/app.js", "modulos/orcamento_spare.js",
             "routers/orcamento_spare.py", "db/orcamento_spare.py"):
     conteudo = (RAIZ / rel).read_text(encoding="utf-8")
     checar("capex_spare" not in conteudo.lower() and "capex spare" not in conteudo.lower(),

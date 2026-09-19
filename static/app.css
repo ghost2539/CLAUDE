@@ -855,6 +855,9 @@ select.form-control-sm { padding-right: 22px; }
 /* painel da marca */
 .lg-marca-painel {
     position: relative;
+    /* Declara o painel como contêiner de consulta: é o que permite o
+       lockup medir 9% da LARGURA DELE (`cqw`) em vez da janela inteira. */
+    container-type: inline-size;
     flex: 1.3 1 560px;
     min-width: 0;
     overflow: hidden;
@@ -928,7 +931,7 @@ select.form-control-sm { padding-right: 22px; }
     background: radial-gradient(58% 52% at 50% 50%, #000000F5 0%, #000000D6 52%, #00000073 78%, transparent 100%);
 }
 .lg-kicker {
-    font: bold 12px/1 var(--sp-sans); letter-spacing: .34em;
+    font: bold clamp(12px, 1.5cqw, 17px)/1 var(--sp-sans); letter-spacing: .34em;
     text-transform: uppercase; color: var(--sp-sand);
     /* O letter-spacing também é aplicado DEPOIS da última letra; o indent
        devolve esse espaço à esquerda e o bloco volta a alinhar com o resto. */
@@ -936,7 +939,11 @@ select.form-control-sm { padding-right: 22px; }
 }
 .lg-lockup {
     margin: 0; display: flex; align-items: baseline; justify-content: center;
-    font: bold clamp(46px, 6.4vw, 70px)/1 var(--sp-sans);
+    /* Cresce com a LARGURA DO PAINEL, não com a da janela: `vw` num painel
+       que ocupa metade da tela dá uma marca pequena numa tela grande, que
+       era o que acontecia. O piso subiu de 46 para 54 e o teto de 70 para
+       104 — em tela cheia a marca agora ocupa o espaço que tem. */
+    font: bold clamp(54px, 14cqw, 104px)/1 var(--sp-sans);
     letter-spacing: .1em; text-indent: .05em;
     white-space: nowrap; color: var(--sp-white);
 }
@@ -949,7 +956,7 @@ select.form-control-sm { padding-right: 22px; }
     margin-right: .05em; fill: var(--sp-accent); flex: none;
 }
 .lg-sublinha {
-    font: bold 11px/1 var(--sp-sans); letter-spacing: .22em;
+    font: bold clamp(11px, 1.35cqw, 15px)/1 var(--sp-sans); letter-spacing: .22em;
     text-transform: uppercase; color: #8C8C8C;
 }
 .lg-renner {
@@ -961,7 +968,7 @@ select.form-control-sm { padding-right: 22px; }
     background: linear-gradient(90deg, transparent, #242424, transparent);
 }
 .lg-renner-marca {
-    display: block; width: 180px; height: 15px;
+    display: block; width: clamp(180px, 20cqw, 260px); height: auto;
     object-fit: contain; object-position: center; opacity: .85;
 }
 .lg-selo {
@@ -1038,9 +1045,25 @@ select.form-control-sm { padding-right: 22px; }
 .lg-aviso { font: 400 11px/1.5 var(--sp-label); color: #8F8F8F; text-wrap: pretty; }
 
 /* fluido: os painéis empilham por flex-wrap; abaixo disso só reduzem respiro */
-@media (max-width: 939px) {
-    .lg-form-painel { max-width: none; }
-    .lg-marca-painel { min-height: auto; gap: 36px; }
+/* Quando os painéis empilham, o de baixo tem de ocupar a LARGURA INTEIRA.
+   Preso no max-width de 580px, ele deixava o preto do fundo aparecer ao
+   lado do branco na mesma faixa — que é o que se via ao encostar a janela
+   em metade da tela. O limite de 939px não servia: a quebra acontece pelas
+   bases do flex (560 + 440), ou seja, já por volta de 1000px. */
+@media (max-width: 1023px) {
+    .lg-form-painel {
+        max-width: none;
+        flex-basis: 100%;
+        /* O conteúdo fica legível sem esticar numa faixa larga demais. */
+        align-items: stretch;
+    }
+    .lg-form-painel > * { max-width: 580px; width: 100%; margin-inline: auto; }
+    .lg-marca-painel { flex-basis: 100%; min-height: auto; gap: 36px; }
+    /* Empilhado, o painel passa a ser a janela inteira — e o `cqw` do
+       lockup, que mede a largura DELE, dispara. Sem este teto a marca ficava
+       MAIOR em 1000px do que em 1280px: encolhia quando a janela crescia,
+       no exato ponto em que os painéis voltam a ficar lado a lado. */
+    .lg-lockup { font-size: clamp(48px, 10vw, 88px); }
 }
 @media (max-width: 640px) {
     .lg-marca-painel, .lg-form-painel { padding: 32px 22px; }

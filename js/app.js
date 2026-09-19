@@ -282,12 +282,12 @@
 
     // ── Login / App visibility ─────────────────────────────────────
     function showLogin() {
-        // O login é sempre escuro por conta própria: o tema escolhido pelo
-        // usuário só vale dentro do portal.
-        delete document.documentElement.dataset.tema;
-        $('#login-screen').hidden = false;
-        $('#app-wrapper').hidden = true;
-        carregarVersao();
+        // O login é OUTRA página desde que o portal parou de vir junto para
+        // quem não entrou. Sem sessão não há o que esconder aqui: o servidor
+        // é quem entrega o login, e esta página nem deveria existir no
+        // navegador. `replace` para o botão voltar não trazer o portal de
+        // volta de dentro do cache.
+        window.location.replace(API.replace(/\/api$/, '') + '/');
     }
 
     // Versão e ambiente vêm de /api/versao (público, só o essencial), uma
@@ -308,10 +308,8 @@
     }
     function aplicarVersao(v) {
         var rotulo = rotuloAmbiente(v);
-        var selo = $('#login-ambiente-texto');
-        if (selo) selo.textContent = rotulo + ' · rede interna';
-        var ver = $('#login-versao');
-        if (ver && v.commit_curto) ver.textContent = 'Portal de Operações · ' + v.commit_curto;
+        // O selo e a versão do LOGIN ficaram na página de login, com o
+        // login.js. Aqui sobrou o rodapé da barra lateral.
         var lateral = $('#sidebar-versao');
         if (lateral) lateral.textContent = (v.commit_curto || 'Portal de Operações') + ' · ' + rotulo.toLowerCase();
     }
@@ -385,7 +383,8 @@
 
     function showApp() {
         aplicarTema(state.user.tema || temaGuardado(), false);
-        $('#login-screen').hidden = true;
+        // Só o wrapper: a tela de login não vem mais nesta página, e mandar
+        // esconder um elemento que não existe custava um erro de null.
         $('#app-wrapper').hidden = false;
         startSnKeepAlive();
         carregarVersao();
@@ -804,33 +803,8 @@
 
     // ── Init ───────────────────────────────────────────────────────
     function init() {
-        // Login form
-        var form = $('#login-form');
-        form.onsubmit = async function (e) {
-            e.preventDefault();
-            var username = $('#login-username').value.trim();
-            var password = $('#login-password').value;
-            // Entrada única pelo Logon AD desde que o login local saiu. O
-            // seletor de um item só foi removido: controle sem escolha ocupa
-            // espaço, e estilizado como botão competia com o "Entrar".
-            var authType = 'SSO';
-            try {
-                loading(true);
-                state.user = await api('/auth/login', {
-                    method: 'POST',
-                    body: { username: username, password: password, auth_type: authType }
-                });
-                state.permissions = state.user.permissions || [];
-                state.permission_map = state.user.permission_map || {};
-                applyVisual(state.user.visual_config);
-                showApp();
-            } catch (x) {
-                $('#login-error').hidden = false;
-                $('#login-error-text').textContent = x.message;
-            } finally {
-                loading(false);
-            }
-        };
+        // O formulário de login vive em static/js/login.js, na página
+        // dele. Este arquivo só é entregue a quem já tem sessão.
 
         // Login type selector
 

@@ -145,6 +145,28 @@ def modulo_portal(nome: str, req: Request):
     return _entregar(req, caminho)
 
 
+@router.get("/js/app.js")
+def app_do_portal(req: Request):
+    """O JavaScript do portal. Exige sessão — e é o motivo de ele ter saído
+    de `static/`.
+
+    Enquanto morava lá, `GET /static/app.js` devolvia 27 KB a qualquer
+    visitante: rotas dos módulos e nomes das permissões, de graça. Junto com
+    o index.html, que vinha com os 35 itens do menu, um anônimo conhecia o
+    portal inteiro sem digitar senha.
+
+    Aqui basta estar logado: quem recebe este arquivo já provou quem é, e o
+    que cada um PODE fazer continua sendo decidido no servidor, a cada
+    chamada. O menu que este arquivo monta é conveniência de tela, não
+    controle de acesso.
+    """
+    get_session(req)
+    caminho = RAIZ / "js" / "app.js"
+    if not caminho.is_file():
+        raise HTTPException(404, "app.js não encontrado.")
+    return _entregar(req, caminho)
+
+
 @router.get("/modulos-times/{nome}.js")
 def modulo_times(nome: str, req: Request):
     """Espaço Times: a liberação é por login, e o servidor já conferiu isso

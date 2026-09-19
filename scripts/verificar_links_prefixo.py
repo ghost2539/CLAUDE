@@ -11,7 +11,7 @@ o botão de exportar a base de Recebimentos — ele abria a tela de API do
 `suporte.lojas...`, não a do portal.
 
 Por que aconteceu, e é isto que esta verificação impede de voltar: o helper
-que põe o prefixo (`apiUrl`) existia em `static/app.js` mas **não era
+que põe o prefixo (`apiUrl`) existia em `js/app.js` (antes em static/) mas **não era
 exportado** em `window.SPARE`. Quem escrevia módulo não tinha como acertar,
 e escrevia o caminho absoluto. Um dos módulos chegou a tentar
 (`var base = (S.base || '')`) com um `S.base` que também não existia — o
@@ -43,7 +43,7 @@ def checar(cond, descricao):
 
 
 print("[1] O helper do prefixo está ao alcance de quem escreve módulo")
-app = (RAIZ / "static" / "app.js").read_text(encoding="utf-8")
+app = (RAIZ / "js" / "app.js").read_text(encoding="utf-8")
 for nome in ("apiUrl: apiUrl", "base: APP_BASE", "baixar: baixar",
              "urlDoPortal: urlDoPortal"):
     checar(nome in app, f"window.SPARE exporta {nome.split(':')[0]}")
@@ -60,7 +60,7 @@ PADROES = (
     re.compile(r"""href\s*=\s*\\?['"]/(?!/)"""),
 )
 # `//outro.dominio` é URL absoluta de outro serviço, não caminho do portal.
-arquivos = sorted((RAIZ / "modulos").glob("*.js")) + [RAIZ / "static" / "app.js"]
+arquivos = sorted((RAIZ / "modulos").glob("*.js")) + [RAIZ / "js" / "app.js"]
 
 
 def _sem_comentario(texto: str) -> list[str]:

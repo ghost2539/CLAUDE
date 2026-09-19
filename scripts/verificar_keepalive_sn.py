@@ -195,7 +195,7 @@ checar("http_saida.sessao(" in trecho,
        "e a sessão HTTP vem de onde o TLS é decidido num lugar só")
 
 print("\n[8] A tela mostra os três estados e pede a reconexão")
-js = (RAIZ / "static" / "app.js").read_text(encoding="utf-8")
+js = (RAIZ / "js" / "app.js").read_text(encoding="utf-8")
 checar("desconhecida: 'orange'" in js or "desconhecida" in js,
        "o selo tem um estado para 'não consegui perguntar'")
 checar("dot-orange" in js or "'orange'" in js,

@@ -98,7 +98,7 @@ checar("'/consulta-times/gestao-ativos'" in snt and "/servicenow/gestao-ativos/c
 checar("/servicenow/gestao-ativos/config" in (portal_dir / "servicenow.js").read_text(),
        "…e as do portal leem a do portal")
 checar("SPARE - CD324" not in snt, "nenhum estoque do SPARE embutido no espaço")
-app_js = (RAIZ / "static/app.js").read_text()
+app_js = (RAIZ / "js/app.js").read_text()
 checar("'/modulos-times/'" in app_js, "o carregador aponta para a pasta do espaço")
 
 # ── 3b. Acesso Consulta Times: quatro blocos, montados de uma vez ──

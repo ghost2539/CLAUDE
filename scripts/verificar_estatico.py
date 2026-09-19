@@ -143,8 +143,9 @@ print("\n[4] O vazamento fechou: o comentário some do que sai")
 # Trechos que existem no fonte e não podem chegar ao navegador.
 MARCAS = {
     "static/app.css": "Padrão de UI SPARE (handoff CSC TI)",
-    "static/app.js": "Alguns proxies acrescentam a barra no fim por REDIRECIONAMENTO",
-    "static/index.html": "Tela de login",
+    "js/app.js": "Alguns proxies acrescentam a barra no fim por REDIRECIONAMENTO",
+    "static/index.html": "Coluna de conteúdo",
+    "static/login.html": "Tela de login",
 }
 for rel, marca in MARCAS.items():
     p = RAIZ / rel
@@ -167,20 +168,39 @@ checar("Padrão de UI SPARE (handoff CSC TI)" not in r_css.text,
        "o cabeçalho comentado da folha não é entregue")
 checar("--sp-black: #000000;" in r_css.text, "e o estilo em si continua lá")
 
+# O app.js SAIU de static/. A afirmação inverteu de propósito: o que antes
+# se exigia que respondesse 200 agora tem de responder 404, porque enquanto
+# ele estivesse ali qualquer visitante levava as rotas dos módulos e os
+# nomes das permissões sem digitar senha.
 r_js = cliente.get("/static/app.js")
-checar(r_js.status_code == 200, f"GET /static/app.js responde 200 ({r_js.status_code})")
-checar("Modular SPA with lazy-loaded modules" not in r_js.text,
-       "o cabeçalho comentado do app.js não é entregue")
-checar("Alguns proxies acrescentam a barra" not in r_js.text,
-       "o comentário sobre o contorno do proxy não é entregue")
+checar(r_js.status_code == 404,
+       f"GET /static/app.js NÃO existe mais no mount público ({r_js.status_code})")
+r_prot = cliente.get("/js/app.js")
+checar(r_prot.status_code == 401,
+       f"GET /js/app.js exige sessão ({r_prot.status_code})")
+
+# O login.js é o único JavaScript público, e por isso não pode carregar o
+# que era o problema: rota de módulo, permissão, estrutura de menu.
+r_login = cliente.get("/static/js/login.js")
+checar(r_login.status_code == 200, "o login.js é público (a tela de login precisa dele)")
+for proibido in ("sidebar-label", "permission_map", "/modulos/", "buildMenu"):
+    checar(proibido not in r_login.text,
+           f"o login.js não carrega `{proibido}`")
 # `//` ainda aparece em `https://` dentro de string; o que não pode é linha
 # de comentário — `//` depois de código ou abrindo a linha.
 import re as _re  # noqa: E402
 
-sobrou = [ln for ln in r_js.text.splitlines()
+# O app.js não é mais alcançável sem sessão, então a limpeza dele é
+# conferida no arquivo do disco passando pela MESMA função que a rota usa.
+# Conferir na resposta exigiria uma sessão só para isso, e o que se quer
+# provar aqui é a limpeza, não a autorização — essa já foi provada acima.
+limpo_js = (limpar_arquivo(RAIZ / "js" / "app.js") or b"").decode("utf-8")
+sobrou = [ln for ln in limpo_js.splitlines()
           if _re.match(r"^\s*//", ln) or _re.search(r";\s*//\s", ln)]
-checar(not sobrou, f"nenhuma linha de comentário `//` sobrou ({sobrou[:1]})")
-checar("'use strict'" in r_js.text, "e o código em si continua lá")
+checar(not sobrou, f"nenhuma linha de comentário `//` sobrou do app.js ({sobrou[:1]})")
+checar("'use strict'" in limpo_js, "e o código em si continua lá")
+checar("Alguns proxies acrescentam a barra" not in limpo_js,
+       "o comentário sobre o contorno do proxy não é entregue")
 
 r_pag = cliente.get("/")
 checar(r_pag.status_code == 200, f"GET / responde 200 ({r_pag.status_code})")
