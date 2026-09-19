@@ -1,34 +1,5 @@
 #!/usr/bin/env bash
-# ============================================================================
-#  Ambiente de TESTES do Portal SPARE, ao lado da produção, no mesmo servidor.
-#
-#    sudo bash deploy/instalar_testes.sh            # como root (produção via systemd)
-#    bash deploy/instalar_testes.sh                 # sem root (produção do usuário)
-#
-#  O que faz, nesta ordem:
-#    1. clona (ou atualiza) o código do branch de testes em TEST_DIR;
-#    2. cria o venv e instala as dependências;
-#    3. COPIA os bancos da produção para o ambiente de testes:
-#         - Postgres: pg_dump | pg_restore para um banco novo "<nome>_testes";
-#         - SQLite (data/db/*.db): cópia consistente com sqlite3 .backup;
-#         - uploads, branding e referências;
-#    4. gera o arquivo de ambiente do teste a partir do de produção, trocando
-#       porta, bancos e ligando AMBIENTE=testes (e-mails de alerta desligados);
-#    5. cria o serviço "portal-spare-testes" e sobe na porta 8999.
-#
-#  Nada é escrito nos bancos nem nos arquivos da produção: a produção só é
-#  LIDA (dump e cópia). Rodar de novo atualiza o código; os bancos só são
-#  recopiados com --recopiar-bancos.
-#
-#  Variáveis (todas opcionais):
-#    PROD_DIR      pasta da produção            (padrão: /opt/portal-spare-v2, ou a pasta deste repo)
-#    PROD_ENVFILE  ambiente da produção         (padrão: /etc/portal_operacoes_spare/environment ou ~/.config/portal-spare/environment)
-#    TEST_DIR      pasta do teste               (padrão: /opt/portal-spare-testes com root; ~/portal-spare-testes sem root)
-#    TEST_PORT     porta do teste               (padrão: 8999)
-#    TEST_BRANCH   branch a testar              (padrão: desenvolvimento)
-#    TEST_REPO     URL do git                   (padrão: o remoto "origin" da produção)
-#    TEST_ENVDIR   pasta do arquivo de ambiente (padrão: /etc/portal_operacoes_spare_testes ou ~/.config/portal-spare-testes)
-# ============================================================================
+
 set -uo pipefail
 
 RECOPIAR=0
