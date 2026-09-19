@@ -16,33 +16,27 @@ import db.monitoramento as db
 _cfg = _config_mod.get_settings()
 _log = logging.getLogger("notificador")
 
-# Chaves usadas no cofre (quando disponível) para a senha do relay SMTP.
+
 COFRE_SMTP_USER_KEY = "SMTP_USUARIO"
 COFRE_SMTP_PASS_KEY = "SMTP_SENHA"
 
 
-# ── Cofre / criptografia local ──────────────────────────────────────────
+# ── Cofre ──────────────────────────────────────────
 def _secret(nome: str, default: str = "") -> str:
-    """Segredo pelo caminho único do projeto (`core.cofre`): cofre
-    corporativo, cofre local cifrado e, por último, variável de ambiente."""
+    
     from core.cofre import obter
     return obter(nome, default)
 
 
 def _fernet():
-    """Fernet quando a lib estiver sã; None quando faltar ou estiver quebrada.
-
-    O import de `cryptography` pode falhar com PanicException (binding Rust),
-    que não é `Exception` — por isso a captura é ampla, preservando apenas
-    interrupção e término do processo.
-    """
+    
     try:
         from cryptography.fernet import Fernet  # type: ignore
         key = base64.urlsafe_b64encode(hashlib.sha256(_cfg.SESSION_SECRET.encode()).digest())
         return Fernet(key)
     except (KeyboardInterrupt, SystemExit):
         raise
-    except BaseException:  # noqa: BLE001 — sem cripto, cai no XOR local
+    except BaseException: 
         return None
 
 
@@ -81,7 +75,7 @@ def decifrar(algo: str, blob: str) -> str:
 
 # ── Configuração efetiva ────────────────────────────────────────────────
 def config() -> dict:
-    """Config do banco, com o ambiente preenchendo o que estiver vazio."""
+    
     c = db.obter_config(db.CFG_ALERTAS)
     c["host"] = c.get("host") or getattr(_cfg, "SMTP_HOST", "")
     c["porta"] = int(c.get("porta") or getattr(_cfg, "SMTP_PORT", 25) or 25)
@@ -93,9 +87,9 @@ def config() -> dict:
 
 
 def config_publica() -> dict:
-    """Config para a tela — sem qualquer material de senha."""
+    
     c = config()
-    _u, senha, fonte = credenciais(c)   # antes de remover o material de senha
+    _u, senha, fonte = credenciais(c)  
     c.pop("senha_cifrada", None)
     algo = c.pop("senha_algo", "")
     c["senha_definida"] = bool(senha)
@@ -107,7 +101,7 @@ def config_publica() -> dict:
 
 
 def credenciais(c: dict | None = None) -> tuple[str, str, str]:
-    """(usuário, senha, fonte). O cofre tem prioridade sobre o store cifrado."""
+    
     c = c if c is not None else config()
     do_cofre = _secret(COFRE_SMTP_PASS_KEY)
     if do_cofre:
@@ -212,7 +206,7 @@ def enviar(assunto: str, texto: str, html: str = "", chave: str = "",
 
 
 def enviar_async(assunto: str, texto: str, html: str = "", chave: str = "") -> None:
-    """Dispara o envio em segundo plano (para uso dentro de requisições)."""
+    
     def _run():
         ok, detalhe = enviar(assunto, texto, html, chave=chave)
         if not ok and "desativado" not in detalhe:
