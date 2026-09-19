@@ -49,16 +49,12 @@ sudo nano /etc/portal_operacoes_spare/environment
 # Ajustar:
 #   DATABASE_URL (mesma base do v1 — compatível)
 #   INITIAL_ADMIN_LOGIN
-#   EBS_LOGIN_URL e EBS_SEARCH_URL (URLs reais)
 ```
 
-### 3. Configurar credenciais EBS
-```bash
-# Criar arquivos de credencial protegidos
-echo "USUARIO_EBS" | sudo tee /etc/portal_operacoes_spare/credentials/ebs_public_username
-echo "SENHA_EBS" | sudo tee /etc/portal_operacoes_spare/credentials/ebs_public_password
-sudo chmod 600 /etc/portal_operacoes_spare/credentials/*
-```
+### 3. Acesso à base do EBS
+A consulta de ativos lê direto a base Oracle. As chaves `ORACLE_EBS_DSN`,
+`ORACLE_EBS_USER` e `ORACLE_EBS_PASS` ficam no arquivo de ambiente que o
+serviço carrega (ver `docs/EBS_ORACLE_BASE.md`); nada em arquivo de credencial.
 
 ### 4. (Opcional) HTTPS com certificado autoassinado
 ```bash

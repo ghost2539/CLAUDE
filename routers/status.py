@@ -147,16 +147,16 @@ def _ebs(sd: dict) -> dict:
         return {"connected": True, "not_applicable": False,
                 "modo": "sessão do usuário"}
     try:
-        from routers.public_assets import _auth as _ebs_auth
-        ok = bool(_ebs_auth())
-        saida = {"connected": ok, "not_applicable": False,
-                 "modo": "conta de serviço"}
+        from integracoes import ebs_oracle
+        ok = bool(ebs_oracle.check_access())
+        saida = {"connected": ok, "not_applicable": False, "modo": "base Oracle"}
         if not ok:
-            saida["error"] = "conta de serviço não autenticou"
+            saida["error"] = "a base não respondeu"
         return saida
     except Exception as exc:  # noqa: BLE001
+        from core.mascara import sem_dado_de_acesso
         return {"connected": False, "not_applicable": False,
-                "modo": "conta de serviço", "error": str(exc)[:300]}
+                "modo": "base Oracle", "error": sem_dado_de_acesso(str(exc))[:300]}
 
 
 def _saude_servidor() -> dict | None:

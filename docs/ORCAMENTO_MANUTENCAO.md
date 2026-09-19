@@ -138,9 +138,8 @@ Orçamento · Validando Orçamento.
 
 ### 3.4 Valor de compra — de onde vem, nesta ordem
 
-1. **EBS**, pela série: `integracoes.ebs_service.search_one(auth, serie)` com
-   `auth = routers.public_assets._auth()`. Campo `custo_asset`; empresa vem
-   de `empresa`. Gravar `valor_compra_fonte = "EBS"` e `ebs_consultado_em`.
+1. **EBS**, pela série: `integracoes.ebs_ativos.consultar_um(serie)`, direto
+   na base Oracle. Campo `custo_asset`; empresa vem de `empresa`. Gravar `valor_compra_fonte = "EBS"` e `ebs_consultado_em`.
    Falhou ou não achou: gravar `ebs_erro` e seguir para o próximo passo —
    **nunca** deixar a inclusão falhar por causa do EBS.
 2. **Planilha**, na importação: a coluna `60% Orçamento` é a razão

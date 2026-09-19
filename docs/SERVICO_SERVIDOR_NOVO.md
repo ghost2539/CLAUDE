@@ -88,7 +88,9 @@ python3 scripts/conferir_credenciais.py
 
 Só uma porta. A tela "Consulta de Ativos — Times", que no sistema antigo
 atendia na 8502, agora é um endereço do próprio portal
-(`/consulta-times`) — não há segundo serviço nem segunda porta.
+(`/consulta-times`) — não há segundo serviço nem segunda porta. A consulta
+dessa tela é livre, sem login; as telas do ServiceNow que ela oferece abrem
+no portal e continuam exigindo login e permissão.
 
 A 8901 está acima de 1024, então o serviço a abre sem privilégio.
 

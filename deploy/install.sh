@@ -35,12 +35,9 @@ if [ ! -f "$CONFIG_DIR/environment" ]; then
 DATABASE_URL=postgresql+psycopg://portal_spare_app:ALTERAR@127.0.0.1:5432/portal_operacoes_spare_db
 PORTAL_SESSION_SECRET=${SESSION_SECRET}
 SESSION_TTL_MINUTES=480
-EBS_LOGIN_URL=https://suporte.lojasrenner.com.br/ebs/api/auth/login
-EBS_SEARCH_URL=https://suporte.lojasrenner.com.br/ebs/api/estoque/busca-imobilizado
 VERIFY_SSL=false
 TIMEOUT_SECONDS=15
 MAX_WORKERS=10
-CREDENTIALS_DIRECTORY=/run/credentials/portal_spare.service
 HOST=0.0.0.0
 PORT=${PORT}
 WORKERS=1

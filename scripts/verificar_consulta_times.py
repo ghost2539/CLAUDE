@@ -18,8 +18,6 @@ _T = tempfile.mkdtemp(prefix="ct-verif-")
 for v in sorted(set(re.findall(r"([A-Z_]*DATABASE_URL)", (RAIZ / "config.py").read_text()))):
     os.environ[v] = f"sqlite:///{_T}/{v.lower()}.db"
 os.environ["PORTAL_SESSION_SECRET"] = "verificacao-local"
-os.environ.setdefault("EBS_LOGIN_URL", "http://x")
-os.environ.setdefault("EBS_SEARCH_URL", "http://x")
 
 import db.consulta_times as dbct          # noqa: E402
 import routers.consulta_times as rct      # noqa: E402

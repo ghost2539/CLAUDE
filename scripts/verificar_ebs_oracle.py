@@ -201,7 +201,10 @@ nomes = {q["nome"]: q for q in d["consultas"]}
 # é acrescentar linha aqui — de graça, e obriga a olhar o conjunto.
 checar(set(nomes) == {"acordos", "ativo_por_serial", "busca_po", "catalogo",
                       "po", "po_itens", "rc", "saldo", "vendor_items",
-                      "vendor_lookup",
+                      "vendor_lookup", "bem_x_ordem", "bem_x_ordem_conferir",
+                      # Tela Consulta (portal e Times): ativo por série,
+                      # etiqueta ou imobilizado, um lote por ida à base.
+                      "ativo_consulta",
                       # Controle de Orçamento: POs de um projeto e seus itens,
                       # com a NF atrelada; mais a que descobre em qual coluna
                       # esta instalação guarda a chave da NF.

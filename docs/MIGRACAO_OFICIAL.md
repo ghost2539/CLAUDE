@@ -228,8 +228,7 @@ migração, e por isso ficaram de fora desta conferência:
    `scripts/verificar_seguranca.py` espera o contrário já na primeira
    conferência — como ele sai no primeiro erro, **a suíte de segurança
    inteira não roda desde então**. O padrão também vale para
-   `routers/indicadores.py` e `integracoes/ebs_service.py`, que leem
-   `VERIFY_SSL` direto.
+   `routers/indicadores.py`, que lê `VERIFY_SSL` direto.
 
 Virar o padrão é uma linha em `config.py`, mas muda o comportamento de
 saída do EBS e dos indicadores. Com proxy que intercepta o TLS isso só

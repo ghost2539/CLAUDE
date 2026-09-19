@@ -10,6 +10,7 @@ from core.security import get_session, require_permission
 from routers.helpers import (
     apply_class, find_asset, local_search_one, xlsx_response,
 )
+from integracoes import ebs_ativos
 
 router = APIRouter(prefix="/api", tags=["Consulta"])
 
@@ -37,18 +38,66 @@ class QueryIn(BaseModel):
 
 # ── Internal helpers ──────────────────────────────────────────────
 
+def _erro_ebs(exc: Exception) -> str:
+    if isinstance(exc, ImportError):
+        return "O driver Oracle não está instalado neste servidor (pip install oracledb)."
+    if type(exc).__name__ == "EbsOracleSemCredencial":
+        return str(exc)
+    from core.mascara import sem_dado_de_acesso
+    return "A base do EBS recusou a consulta: " + sem_dado_de_acesso(str(exc))[:300]
+
+
+def _complementar_com_portal(s, r: dict) -> dict:
+    r.setdefault("baixado", "")
+    r.setdefault("local_atribuido", "")
+    r.setdefault("po", "")
+    r.setdefault("nf", "")
+    r.setdefault("erro", "")
+    if r.get("po") and r.get("nf"):
+        return r
+    a = find_asset(s, r)
+    if not a:
+        return r
+    c = s.scalar(select(ReceiptCycle).where(ReceiptCycle.asset_id == a.id)
+                 .order_by(ReceiptCycle.id.desc()))
+    if c:
+        r["po"] = r.get("po") or (c.po or "")
+        r["nf"] = r.get("nf") or (c.nf or "")
+    return r
+
+
+def consultar_ativos(s, ids: list[str]) -> list[dict]:
+    ids = ebs_ativos.limpar(ids)
+    if not ids:
+        return []
+    erro_ebs = ""
+    try:
+        linhas = ebs_ativos.consultar(ids)
+    except Exception as exc:  # noqa: BLE001
+        linhas, erro_ebs = [], _erro_ebs(exc)
+    por_id = {linha["pesquisado"]: linha for linha in linhas}
+    saida = []
+    for i in ids:
+        r = por_id.get(i)
+        if not r or not r.get("encontrado"):
+            local = local_search_one(s, i)
+            if local.get("encontrado"):
+                r = local
+                r["erro"] = "Não está no EBS; dados da base local." if not erro_ebs else erro_ebs
+            elif r is None:
+                r = ebs_ativos.nao_encontrado(i, erro_ebs or "Não encontrado")
+        r = apply_class(s, r)
+        saida.append(_complementar_com_portal(s, r))
+    return saida
+
+
 def _query_assets(body: QueryIn, req: Request) -> dict:
-    """Shared logic for POST /consulta and POST /consulta/export."""
-    sd = require_permission(req, "consulta", "view")
+    require_permission(req, "consulta", "view")
     qs = body.identificadores
     if not qs:
         return {"resultados": [], "encontrados": 0, "nao_encontrados": 0}
-
     with SessionLocal() as s:
-        from integracoes.ebs_logged import search_for_user
-        rows = search_for_user(sd, qs, s, local_search_one)
-        rows = [apply_class(s, r) for r in rows]
-
+        rows = consultar_ativos(s, qs)
     return {
         "resultados": rows,
         "encontrados": sum(bool(x.get("encontrado")) for x in rows),
@@ -103,10 +152,10 @@ def export_query(body: QueryIn, req: Request):
 # A visão padrão é da área (Configuração); cada pessoa pode reduzir ou
 # reordenar a sua. Guardado em Setting, chave por login.
 COLUNAS_CONSULTA = [
-    ("empresa", "Empresa"), ("imobilizado", "Imobilizado"), ("etiqueta", "Etiqueta"),
-    ("numero_serie", "Nº Série"), ("descricao", "Descrição"), ("categoria", "Categoria"),
-    ("modelo", "Modelo"), ("fonte", "Fonte"), ("erro", "Erro"),
-    ("local_atribuido", "Local Atribuído"),
+    ("empresa", "Empresa (BU)"), ("imobilizado", "Imobilizado"), ("etiqueta", "Etiqueta do Ativo"),
+    ("numero_serie", "Nº de Série"), ("descricao", "Descrição do ativo"), ("categoria", "Categoria"),
+    ("local_atribuido", "Local atribuído"), ("baixado", "Baixado?"), ("po", "PO"), ("nf", "NF"),
+    ("erro", "Erro"),
 ]
 _CHAVES = {c for c, _ in COLUNAS_CONSULTA}
 

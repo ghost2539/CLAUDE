@@ -20,8 +20,6 @@ _TEMP = tempfile.mkdtemp(prefix="rec-tri-verif-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEMP}/portal.db")
 os.environ.setdefault("PORTAL_SESSION_SECRET", "verificacao-local")
 os.environ["TRILHA_DATABASE_URL"] = f"sqlite:///{_TEMP}/trilha.db"
-os.environ.setdefault("EBS_LOGIN_URL", "http://x")
-os.environ.setdefault("EBS_SEARCH_URL", "http://x")
 
 from fastapi import HTTPException     # noqa: E402
 from sqlalchemy import select         # noqa: E402

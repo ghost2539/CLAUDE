@@ -78,11 +78,6 @@ function renderConfigModulos(c, S) {
         '</div>' +
 
         '<div class="card mb-3">' +
-            '<div class="card-header">EBS — API de consulta</div>' +
-            '<div class="card-body" id="cm-ebs"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
-        '</div>' +
-
-        '<div class="card mb-3">' +
             '<div class="card-header">Recebimento — famílias e prefixos</div>' +
             '<div class="card-body" id="cm-familias"><div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div></div>' +
         '</div>' +
@@ -107,7 +102,6 @@ function renderConfigModulos(c, S) {
     _renderConsultaColunas(S);
     _renderGestaoAtivos(S);
     _renderFamilias(S);
-    _renderEbs(S);
 
     document.getElementById('cm-hist-form').onsubmit = async function (e) {
         e.preventDefault();
@@ -143,32 +137,6 @@ function renderConfigModulos(c, S) {
         } finally {
             S.loading(false);
         }
-    };
-}
-
-/* EBS: URLs da API de consulta. Aplicado na próxima consulta, sem reiniciar. */
-async function _renderEbs(S) {
-    var host = document.getElementById('cm-ebs');
-    if (!host) return;
-    var d;
-    try { d = await S.api('/parametros/ebs'); } catch (e) { host.innerHTML = '<div class="alert alert-danger">' + S.esc(e.message) + '</div>'; return; }
-    var a = d.api || {};
-    function campo(id, rotulo, val) {
-        return '<div class="form-group"><label for="' + id + '">' + rotulo + '</label>' +
-            '<input id="' + id + '" class="form-control" value="' + S.esc(val || '') + '" placeholder="https://…"></div>';
-    }
-    host.innerHTML =
-        '<div class="form-grid cols-2">' +
-            campo('ebs-login', 'API — URL de login', a.login_url) +
-            campo('ebs-search', 'API — URL de busca', a.search_url) +
-        '</div>' +
-        '<div class="btn-row mt-2"><button id="ebs-salvar" class="btn btn-primary">Salvar</button></div>';
-    var v = function (id) { return document.getElementById(id).value.trim(); };
-    document.getElementById('ebs-salvar').onclick = async function () {
-        try {
-            await S.api('/parametros/ebs', { method: 'PUT', body: { login_url: v('ebs-login'), search_url: v('ebs-search') } });
-            S.toast('EBS reconfigurado. Vale na próxima consulta.', 'success'); _renderEbs(S);
-        } catch (e) { S.toast(e.message, 'error'); }
     };
 }
 

@@ -26,7 +26,6 @@ os.environ["INITIAL_ADMIN_LOGIN"] = "admin.teste"
 os.environ["AMBIENTE"] = "testes"
 os.environ["SN_INDIC_REFRESH_MIN"] = "0"
 os.environ["PUBLIC_ASSETS_TOKEN"] = "token-de-teste-123"
-os.environ["CREDENTIALS_DIRECTORY"] = f"{T}/sem-credencial"
 for nome in ("INDICADORES", "AUTOMACOES", "MONITORAMENTO", "ORCAMENTO_SPARE",
              "ORCAMENTO_MANUTENCAO", "OBSOLESCENCIA", "TRILHA", "SEPARACAO", "PROJETOS",
              "REVERSA", "INVENTARIO", "VENDA", "REGULARIZACAO", "PLANEJAMENTO",

@@ -22,8 +22,6 @@ os.environ["AMBIENTE"] = "testes"
 for _modulo in ("TRILHA", "OBSOLESCENCIA", "REVERSA", "AGENDAMENTOS_FORN",
                 "INTERNALIZACAO"):
     os.environ[f"{_modulo}_DATABASE_URL"] = f"sqlite:///{_TEMP}/{_modulo.lower()}.db"
-os.environ.setdefault("EBS_LOGIN_URL", "http://x")
-os.environ.setdefault("EBS_SEARCH_URL", "http://x")
 
 from fastapi.testclient import TestClient            # noqa: E402
 

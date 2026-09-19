@@ -612,22 +612,7 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
     r = None
     ultimo_erro = None
 
-    # 1) MESMA autenticação do consulta-times: login no EBS (cookies/token) e
-    #    reuso da sessão. Re-autentica uma vez se a sessão expirou (401/403).
-    try:
-        from routers.public_assets import _auth as _ct_auth
-        import integracoes.ebs_service as ebs_service
-        auth = _ct_auth()
-        r = _get(ebs_service._build_session(auth))
-        if r.status_code in (401, 403):
-            r = _get(ebs_service._build_session(_ct_auth(force=True)))
-    except Exception as exc:  # noqa: BLE001 — segue para credencial própria/fallback
-        ultimo_erro = exc
-        r = None
-
-    # 2) Fallback: credencial própria da API (Basic ou token), se configurada,
-    #    ou requisição simples.
-    if r is None or r.status_code in (401, 403):
+    if r is None:
         try:
             with _req.Session() as session:
                 headers = dict(base_headers)
@@ -651,7 +636,7 @@ def _ebs_capex(numeros: list[str]) -> dict[str, dict]:
         raise ValueError(
             f"API de CAPEX retornou HTTP {r.status_code} (não autorizado)."
             + (f" Esquema exigido: {www}." if www else "")
-            + " Confirme se as credenciais de acesso ao EBS (as mesmas do consulta-times) estão configuradas."
+            + " Confirme as credenciais da API de CAPEX (EBS_CAPEX_USER/PASS ou EBS_CAPEX_TOKEN)."
         )
     if r.status_code != 200:
         raise ValueError(f"API de CAPEX retornou HTTP {r.status_code}.")

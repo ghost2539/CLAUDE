@@ -456,7 +456,7 @@ pre{
       <h2 class="sec"><span class="num">05</span> Integrações externas</h2>
 
       <h3 class="sub">EBS — Oracle E-Business Suite</h3>
-      <p>Login AD e consulta de ativos no ERP corporativo (<code>ebs_service.py</code>). Toda configuração vem de <code>config.py</code>. Fallback: base local de ativos (<code>local_assets</code>) quando o EBS não responde.</p>
+      <p>Consulta de ativos direto na base Oracle do EBS (<code>ebs_ativos.py</code> sobre <code>ebs_oracle.py</code>, consulta <code>consultas/ebs/ativo_consulta.sql</code>), por número de série, etiqueta ou imobilizado. Credencial do ambiente do serviço. Fallback: base local de ativos (<code>local_assets</code>) quando o EBS não responde.</p>
 
       <h3 class="sub">ServiceNow — renner.service-now.com</h3>
       <ul>

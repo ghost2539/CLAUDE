@@ -136,19 +136,6 @@ def _get_perms(s, u: User) -> dict:
 
 # ── Storage Locations ─────────────────────────────────────────────
 
-class EbsIn(BaseModel):
-    login_url: str = ""
-    search_url: str = ""
-
-    @field_validator("login_url", "search_url")
-    @classmethod
-    def _so_https_ou_vazio(cls, v: str) -> str:
-        v = (v or "").strip()
-        if v and not v.lower().startswith("https://"):
-            raise ValueError("A URL da API do EBS precisa começar com https://.")
-        return v
-
-
 def favicon_atual() -> Path | None:
     """O arquivo enviado pelo admin geral, se houver."""
     if not FAVICON_DIR.exists():
@@ -1005,27 +992,6 @@ def base_local_upload(
         "validos": len(valid),
         "rejeitados": len(df) - len(valid),
     }
-
-
-# ── EBS: API de consulta e banco Oracle, configuráveis sem reiniciar ──
-@router.get("/ebs")
-def ebs_ler(req: Request):
-    require_permission(req, "parametros", "admin")
-    import db.monitoramento as _mon
-    api = _mon.obter_config("ebs_api") or {}
-    return {"api": {"login_url": api.get("login_url") or _cfg.EBS_LOGIN_URL,
-                    "search_url": api.get("search_url") or _cfg.EBS_SEARCH_URL}}
-
-
-@router.put("/ebs")
-def ebs_gravar(body: EbsIn, req: Request):
-    sd = require_permission(req, "parametros", "admin")
-    check_rate_limit(req)
-    import db.monitoramento as _mon
-    _mon.salvar_config({"login_url": body.login_url, "search_url": body.search_url}, "ebs_api")
-    import logging as _lg
-    _lg.getLogger("parametros").info("URLs da API do EBS reconfiguradas por %s", sd.get("username", "?"))
-    return ebs_ler(req)
 
 
 @router.get("/favicon")

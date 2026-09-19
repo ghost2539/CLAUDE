@@ -50,7 +50,7 @@ Navegador
  ├── /obsolescencia          parque de coletores (MDM)          → banco próprio
  ├── /controle-orcamento     Orçamento Infra CSC (React)        → banco próprio
  ├── /indicadores            Indicadores RMR                    → banco próprio
- ├── /consulta-times         espaço Times (liberação por login) → banco próprio
+ ├── /consulta-times         espaço Times (consulta livre; ServiceNow com login) → banco próprio
  ├── /cockpit-spare, /dash-* painéis de parede                  → banco PORTAL
  └── /api/...                API REST
         ├── EBS (Oracle E-Business Suite) — ativos, login, CAPEX
@@ -125,7 +125,7 @@ agrupadas pela etapa do ciclo do ativo. A rota entre crases é a que o menu usa
 | Módulo | Rota | O que faz |
 |---|---|---|
 | **Torre de Controle** | `#torre` | Painel de acompanhamento do ciclo: onde está cada lote e o que está parado. |
-| **Consulta** | `#consulta` | Busca de ativos (imobilizado/ativo/etiqueta/série), em lote e individual; cruza base local + EBS + classificação; exporta **.xlsx**. |
+| **Consulta** | `#consulta` | Busca de ativos **direto na base do EBS** por número de série, etiqueta ou imobilizado — qualquer um dos três no mesmo campo. Em lote (100 termos por ida à base, 50 por chamada da tela, com barra de progresso) e individual. Mostra Empresa (BU), Imobilizado, Etiqueta, Nº de Série, Descrição, Categoria (do cadastro do portal), Local atribuído, Baixado?, PO, NF e Erro; cai para a base local quando o EBS não responde; exporta **.xlsx**. |
 
 ### Entrada
 | Módulo | Rota | O que faz |
@@ -240,7 +240,7 @@ absoluto, com contraprova.
 | `/obsolescencia` | Parque de coletores pelo MDM. Doc: `docs/MDM_OBSOLESCENCIA.md`. |
 | `/controle-orcamento` | Orçamento Infra CSC (React). Também em `/controle-orcamento-InfraCSC`. |
 | `/indicadores` | Indicadores RMR — ver 5.1. |
-| `/consulta-times` | Espaço Times: consulta liberada por login, fora do menu do portal. |
+| `/consulta-times` | Espaço Times: consulta de ativos livre, sem login; as telas do ServiceNow exigem login e permissão do portal. |
 | `/cockpit-spare` · `/dash-recebimento` · `/dash-centralreparos` · `/dash-estoques` | Painéis de parede. |
 
 ### 5.1 `/indicadores` — Indicadores RMR
@@ -262,12 +262,17 @@ status/localidade/BU/subcategoria e as séries de SLED e coletores.
 ## 6. Integrações externas
 
 **EBS (Oracle E-Business Suite)**
-- `integracoes/ebs_service.py`: login e consulta de ativos. Sem resposta, a
-  consulta cai para a base local (`local_assets`).
+- `integracoes/ebs_ativos.py`: consulta de ativos por número de série,
+  etiqueta ou imobilizado, direto na base Oracle
+  (`consultas/ebs/ativo_consulta.sql`, um lote por ida à base). Traz
+  empresa, imobilizado, etiqueta, série, descrição, local atribuído,
+  baixado, PO e NF; a categoria vem do cadastro do portal. Sem resposta,
+  a linha traz o motivo na coluna Erro e a consulta cai para a base local
+  (`local_assets`).
 - `integracoes/ebs_oracle.py`: acesso **só-leitura** direto ao Oracle, com
   `SET TRANSACTION READ ONLY`, timeout e teto de linhas. **SQL não vem da
   tela**: são consultas **nomeadas** com bind variables, versionadas no
-  código. Credenciais no cofre (`ORACLE_EBS_USER/PASS/DSN`).
+  código. Credencial do ambiente do serviço (`ORACLE_EBS_DSN/USER/PASS`).
 - Erro do driver traz o endereço dentro da mensagem; `core/mascara.py` apaga
   endereço, partes do endereço e usuário antes de a mensagem chegar à tela.
 
@@ -476,6 +481,28 @@ ambiente** (`core.cofre.obter`):
 (`EBS_CAPEX_FX_URL`). É a única fonte que quem opera muda sem deploy.
 
 ---
+
+### Consulta de ativos — de onde vem cada coluna
+
+A tela Consulta do portal e a `/consulta-times` usam o mesmo caminho:
+`routers/consulta.py::consultar_ativos` → `integracoes/ebs_ativos.py` →
+`integracoes/ebs_oracle.py` (credencial do ambiente do serviço).
+
+| Coluna | Origem |
+|---|---|
+| Empresa (BU) | Livro CORPORATE do ativo no EBS (`FA_BOOKS`) |
+| Imobilizado, Etiqueta, Nº de Série, Descrição | `FA_ADDITIONS_B` |
+| Categoria | Cadastro de modelos do portal (o mesmo do recebimento) |
+| Local atribuído | Distribuição vigente (`FA_DISTRIBUTION_HISTORY` + `FA_LOCATIONS`) |
+| Baixado? | `date_retired`/`period_counter_fully_retired` do livro |
+| PO, NF | `FA_ASSET_INVOICES`; sem isso, o último ciclo de recebimento do portal |
+| Erro | Motivo de não ter achado, ou por que a base não respondeu |
+
+A busca aceita **número de série, etiqueta ou imobilizado** no mesmo campo:
+os três entram na consulta como bind, cada termo também em maiúsculas.
+O erro da base chega à tela por `core/mascara.py`, sem endereço, instância
+nem usuário. O acesso à `/consulta-times` é livre; o ServiceNow do espaço
+abre no portal, com login e permissão.
 
 ## 9. Mapa de rotas
 

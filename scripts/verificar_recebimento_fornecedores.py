@@ -18,8 +18,6 @@ os.environ["INITIAL_ADMIN_LOGIN"] = "admin.teste"
 os.environ["AMBIENTE"] = "testes"
 for _m in ("TRILHA", "OBSOLESCENCIA", "REVERSA", "AGENDAMENTOS_FORN", "INTERNALIZACAO"):
     os.environ[f"{_m}_DATABASE_URL"] = f"sqlite:///{_TEMP}/{_m.lower()}.db"
-os.environ.setdefault("EBS_LOGIN_URL", "http://x")
-os.environ.setdefault("EBS_SEARCH_URL", "http://x")
 os.environ["PORTAL_COFRE_DIR"] = f"{_TEMP}/cofre"
 
 import config as _config  # noqa: E402

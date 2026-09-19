@@ -205,8 +205,8 @@ for rota in ("internalizacao/lancamento", "internalizacao/patrimonio",
     checar(f'data-route="{rota}"' in html, f"o menu tem {rota}")
 js = (RAIZ / "modulos" / "internalizacao.js").read_text(encoding="utf-8")
 checar("telaPatrimonio" in js and "telaEntrada" in js, "as duas telas existem no módulo")
-sql = (RAIZ / "integracoes" / "ebs_oracle.py").read_text(encoding="utf-8")
-checar('"ativo_por_serial"' in sql and "FA_ADDITIONS_B" in sql,
+sql = (RAIZ / "consultas" / "ebs" / "ativo_por_serial.sql").read_text(encoding="utf-8")
+checar(":numero_serie" in sql and "FA_ADDITIONS_B" in sql,
        "a consulta do serial no EBS está registrada")
 
 

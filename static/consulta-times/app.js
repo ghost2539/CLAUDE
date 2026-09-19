@@ -157,7 +157,7 @@
 
         container.innerHTML =
             '<h1 class="page-title">Consulta de Ativos</h1>' +
-            '<p class="text-muted mb-3">Conversão para o padrão ServiceNow usando a base local</p>' +
+            '<p class="text-muted mb-3">Consulta direta na base do EBS, sem login.</p>' +
             '<div class="card mb-3">' +
                 '<div class="card-header">Identificadores</div>' +
                 '<div class="card-body">' +
@@ -165,32 +165,30 @@
                     '<textarea id="q-input" class="form-control" rows="6" ' +
                         'placeholder="Um identificador por linha"></textarea>' +
                     '<div class="btn-row mt-2">' +
-                        '<button id="q-run" class="btn btn-primary">Consultar e converter</button>' +
+                        '<button id="q-run" class="btn btn-primary">Consultar</button>' +
                         '<button id="q-clear" class="btn btn-outline">Limpar</button>' +
-                        '<button id="q-export" class="btn btn-secondary" disabled>Exportar SN</button>' +
+                        '<button id="q-export" class="btn btn-secondary" disabled>Exportar Excel</button>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
             '<div id="q-results"></div>';
 
         var columns = [
-            { key: 'pesquisado',    label: 'Pesquisado' },
-            { key: 'numero_serie',  label: 'Serial Number' },
-            { key: 'modelo',        label: 'Model' },
-            { key: 'etiqueta',      label: 'Asset Tag' },
-            { key: 'categoria',     label: 'Model Category', html: true, render: function (v) {
-                if (!v || v === 'NÃO CLASSIFICADA') {
-                    return '<span style="color:#F27980">' + esc(v || 'NÃO CLASSIFICADA') + '</span>';
-                }
+            { key: 'empresa',         label: 'Empresa (BU)' },
+            { key: 'imobilizado',     label: 'Imobilizado', render: function (v, r) { return r.ativo || v || ''; } },
+            { key: 'etiqueta',        label: 'Etiqueta do Ativo' },
+            { key: 'numero_serie',    label: 'Nº de Série' },
+            { key: 'descricao',       label: 'Descrição do ativo' },
+            { key: 'categoria',       label: 'Categoria', html: true, render: function (v, r) {
+                if (!r.encontrado) return '';
+                if (!v || v === 'NÃO CLASSIFICADA') return '<span class="text-muted">' + esc(v || 'NÃO CLASSIFICADA') + '</span>';
                 return esc(v);
             }},
-            { key: 'stockroom',     label: 'Stockroom', render: function () { return 'SPARE - CD324'; } },
-            { key: 'state',         label: 'State',     render: function () { return 'In stock'; } },
-            { key: 'substate',      label: 'Substate',  render: function () { return 'Available'; } },
-            { key: 'empresa',       label: 'Company' },
-            { key: 'dpis',          label: 'Purchased' },
-            { key: 'local_atribuido', label: 'Local Atribuído' },
-            { key: 'erro',          label: 'Erro' }
+            { key: 'local_atribuido', label: 'Local atribuído' },
+            { key: 'baixado',         label: 'Baixado?' },
+            { key: 'po',              label: 'PO' },
+            { key: 'nf',              label: 'NF' },
+            { key: 'erro',            label: 'Erro' }
         ];
 
         function setProgresso(out, feito, total) {
@@ -217,7 +215,7 @@
             runBtn.disabled = true;
             setProgresso(out, 0, lastIds.length);
 
-            var LOTE = 25;
+            var LOTE = 50;
             var acumulado = [];
             var encontrados = 0, naoEncontrados = 0;
             try {
@@ -274,6 +272,14 @@
 
     // ── Init ───────────────────────────────────────────────────────
     function init() {
+        var sn = document.querySelector('.sidebar-item[data-route="servicenow"]');
+        if (sn) {
+            sn.classList.remove('disabled');
+            sn.style.opacity = '';
+            sn.style.pointerEvents = '';
+            sn.href = BASE + '/#gestao_ativos/entrada';
+            sn.title = 'Abre o portal: exige login e permissão';
+        }
         renderConsulta($('#page-content'));
     }
 

@@ -101,8 +101,6 @@ class Settings:
     SESSION_SECRET: str = _env_obrigatorio("PORTAL_SESSION_SECRET")
     SESSION_TTL: int = int(_env("SESSION_TTL_MINUTES", "480")) * 60
 
-    EBS_LOGIN_URL: str = _env("EBS_LOGIN_URL", "")
-    EBS_SEARCH_URL: str = _env("EBS_SEARCH_URL", "")
     VERIFY_SSL: bool = _env("VERIFY_SSL", "false").lower() == "true"
     # PEM com a CA corporativa, para quando o proxy intercepta o TLS: a cadeia
     # apresentada é a dele, e sem esta CA a verificação falha em toda chamada.
@@ -112,7 +110,6 @@ class Settings:
     CA_BUNDLE: str = _env("PORTAL_CA_BUNDLE", _env("REQUESTS_CA_BUNDLE", ""))
     TIMEOUT: int = int(_env("TIMEOUT_SECONDS", "15"))
     MAX_WORKERS: int = int(_env("MAX_WORKERS", "40"))
-    CREDENTIALS_DIRECTORY: str = _env("CREDENTIALS_DIRECTORY", "")
 
     HOST: str = _env("HOST", "0.0.0.0")
     PORT: int = int(_env("PORT", "8901"))

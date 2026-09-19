@@ -18,11 +18,11 @@ from pydantic import BaseModel, field_validator
 
 from config import get_settings
 from core.prefixo import com_prefixo, prefixo
-from core.security import check_rate_limit, client_ip, get_session, require_permission
+from core.security import check_rate_limit, client_ip, get_session
 
 import db.consulta_times as dbct
 from db.portal import SessionLocal
-from routers.helpers import apply_class, xlsx_response
+from routers.helpers import xlsx_response
 
 _cfg = get_settings()
 _log = logging.getLogger("consulta_times")
@@ -117,12 +117,9 @@ def _consultar(ids: list[str]) -> dict:
     if not ids:
         return {"resultados": [], "encontrados": 0, "nao_encontrados": 0}
 
-    from routers.public_assets import _auth
-    import integracoes.ebs_service as ebs_service
-
-    linhas = ebs_service.search_many(_auth(), ids)
+    from routers.consulta import consultar_ativos
     with SessionLocal() as s:
-        linhas = [apply_class(s, r) for r in linhas]
+        linhas = consultar_ativos(s, ids)
     return {
         "resultados": linhas,
         "encontrados": sum(bool(x.get("encontrado")) for x in linhas),

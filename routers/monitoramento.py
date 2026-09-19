@@ -271,12 +271,13 @@ def checar(req: Request):
     # EBS
     t0 = time.time()
     try:
-        from routers.public_assets import _auth as _ebs_auth
-        ok = bool(_ebs_auth())
-        _add("EBS (autenticação)", ok, "autenticou" if ok else "sem autenticação",
+        from integracoes import ebs_oracle
+        ok = bool(ebs_oracle.check_access())
+        _add("EBS (base Oracle)", ok, "conectou" if ok else "sem resposta",
              int((time.time() - t0) * 1000))
     except Exception as exc:  # noqa: BLE001
-        _add("EBS (autenticação)", False, str(exc)[:300], int((time.time() - t0) * 1000))
+        from core.mascara import sem_dado_de_acesso
+        _add("EBS (base Oracle)", False, sem_dado_de_acesso(str(exc))[:300], int((time.time() - t0) * 1000))
 
     # Correios
     t0 = time.time()

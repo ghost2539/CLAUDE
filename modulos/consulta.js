@@ -14,7 +14,7 @@ window.SPARE_MODULES.consulta = {
                 '<div class="card-header">Identificadores</div>' +
                 '<div class="card-body">' +
                     '<textarea id="q-bg-input" class="form-control" rows="6" ' +
-                        'placeholder="Um identificador por linha"></textarea>' +
+                        'placeholder="Número de série, etiqueta ou imobilizado — um por linha"></textarea>' +
                     '<div class="btn-row mt-2">' +
                         '<button id="q-bg-run" class="btn btn-primary">Consultar</button>' +
                         '<button id="q-bg-clear" class="btn btn-outline">Limpar</button>' +
@@ -25,16 +25,17 @@ window.SPARE_MODULES.consulta = {
             '<div id="q-bg-results"></div>';
 
         var TODAS = [
-            { key: 'empresa',       label: 'Empresa' },
-            { key: 'imobilizado',   label: 'Imobilizado',  render: function (v, r) { return r.ativo || v || ''; } },
-            { key: 'etiqueta',      label: 'Etiqueta' },
-            { key: 'numero_serie',  label: 'Nº Série' },
-            { key: 'descricao',     label: 'Descrição' },
-            { key: 'categoria',     label: 'Categoria' },
-            { key: 'modelo',        label: 'Modelo' },
-            { key: 'fonte',         label: 'Fonte' },
-            { key: 'erro',          label: 'Erro' },
-            { key: 'local_atribuido', label: 'Local Atribuído' }
+            { key: 'empresa',         label: 'Empresa (BU)' },
+            { key: 'imobilizado',     label: 'Imobilizado',  render: function (v, r) { return r.ativo || v || ''; } },
+            { key: 'etiqueta',        label: 'Etiqueta do Ativo' },
+            { key: 'numero_serie',    label: 'Nº de Série' },
+            { key: 'descricao',       label: 'Descrição do ativo' },
+            { key: 'categoria',       label: 'Categoria' },
+            { key: 'local_atribuido', label: 'Local atribuído' },
+            { key: 'baixado',         label: 'Baixado?' },
+            { key: 'po',              label: 'PO' },
+            { key: 'nf',              label: 'NF' },
+            { key: 'erro',            label: 'Erro' }
         ];
         var columns = TODAS.slice();
         var pref = null;
@@ -111,7 +112,7 @@ window.SPARE_MODULES.consulta = {
             out.appendChild(prog.el);
             prog.set(0, lastIds.length);
 
-            var LOTE = 25;
+            var LOTE = 50;
             var acumulado = [];
             var encontrados = 0, naoEncontrados = 0;
             try {

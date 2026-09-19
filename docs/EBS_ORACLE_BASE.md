@@ -157,6 +157,15 @@ da conta com `list_objects`/`describe` antes de assumir acesso a cada um.
 
 ---
 
+**Consulta pronta — `consultas/ebs/ativo_consulta.sql`.** Atende a tela
+Consulta (portal e Times) por `integracoes/ebs_ativos.py`: recebe os termos
+(número de série, etiqueta ou imobilizado, cada um também em maiúsculas)
+como binds `:t0, :t1…` no lugar de `/*TERMOS*/` e devolve, por ativo, o livro
+CORPORATE (`FA_BOOKS` + `FA_BOOK_CONTROLS`), se está baixado (`date_retired`
+ou `period_counter_fully_retired`), o local atribuído vigente
+(`FA_DISTRIBUTION_HISTORY` + `FA_LOCATIONS`) e PO/NF (`FA_ASSET_INVOICES`).
+Cada lote de até 100 termos vai numa única ida à base.
+
 ## 5. Convenções úteis do EBS
 
 - **Sufixo `_ALL`** → tabela multi-org, filtrada por `ORG_ID`. Se precisar filtrar

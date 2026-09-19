@@ -429,14 +429,8 @@ def _valor_compra_para(r, config: dict, ebs_custo: Optional[float] = None,
 # ── EBS ─────────────────────────────────────────────────────────────────
 def _ebs_buscar(serie: str) -> dict:
     """Chamada crua ao EBS (isolada para poder ser substituída em testes)."""
-    from integracoes.ebs_service import search_one
-    from routers.public_assets import _auth
-    try:
-        res = search_one(_auth(), serie)
-    except PermissionError:
-        res = {"encontrado": False, "erro": "Sessão EBS expirada"}
-    if "expirad" in _sem_acento(res.get("erro") if isinstance(res, dict) else ""):
-        res = search_one(_auth(True), serie)
+    from integracoes import ebs_ativos
+    res = ebs_ativos.consultar_um(serie)
     return res if isinstance(res, dict) else {"encontrado": False, "erro": "resposta inválida do EBS"}
 
 

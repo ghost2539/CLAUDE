@@ -39,9 +39,8 @@ routers/                 As APIs do portal — uma por área funcional
   consulta_times · cockpit (telas de TV) · ebs_forms (RPA)
 
 integracoes/             Clientes de sistemas externos (sem rota, sem banco)
-  ebs_service.py         API REST do EBS
   ebs_oracle.py          Consultas diretas na base Oracle do EBS
-  ebs_logged.py          Raspagem autenticada do EBS
+  ebs_ativos.py          Consulta de ativos (série, etiqueta ou imobilizado) sobre o ebs_oracle
   ebs_forms.py           RPA sobre o cliente Oracle Forms do EBS (SSO → jnlp → JVM)
   ebs_forms_java/        LancadorForms.java — JVM própria que substitui o Java Web Start
 

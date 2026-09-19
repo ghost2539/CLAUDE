@@ -1,10 +1,7 @@
-"""Public assets router — EBS lookup without user auth (uses service credentials)."""
+"""Public assets router — consulta na base do EBS convertida para o padrão ServiceNow."""
 from __future__ import annotations
 
 import io
-import os
-import threading
-import time
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
@@ -13,15 +10,10 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 
-from config import get_settings
 from db.portal import SessionLocal
-from integracoes.ebs_service import login as ebs_login, search_many as ebs_search_many
+from integracoes import ebs_ativos
 
-_cfg = get_settings()
 router = APIRouter(prefix="/api/public-assets", tags=["Consulta pública EBS"])
-
-_auth_lock = threading.Lock()
-_auth_cache: dict = {"value": None, "expires": 0.0}
 
 
 # ── Pydantic models ───────────────────────────────────────────────
@@ -45,54 +37,6 @@ class PublicQueryIn(BaseModel):
 
 
 # ── Internal helpers ──────────────────────────────────────────────
-
-# A conta de leitura do EBS vinha de arquivo em disco, entregue pelo
-# LoadCredentialEncrypted da unit. Passou a sair do cofre, que é o caminho
-# único dos segredos do portal: um segredo com dois caminhos é um segredo
-# que alguém vai gravar no lugar errado e só descobrir quando a tela der
-# 500. O diretório antigo continua sendo lido para não quebrar instalação
-# que ainda dependa dele.
-_CHAVES_COFRE = {
-    "ebs_public_username": ("EBS_PUBLIC_USER", "EBS_PUBLIC_USERNAME"),
-    "ebs_public_password": ("EBS_PUBLIC_PASS", "EBS_PUBLIC_PASSWORD"),
-}
-
-
-def _credential(name: str) -> str:
-    from core.cofre import obter
-    for chave in _CHAVES_COFRE.get(name, (name.upper(),)):
-        valor = obter(chave, "")
-        if valor:
-            return valor
-
-    directory = _cfg.CREDENTIALS_DIRECTORY
-    path = os.path.join(directory, name) if directory else ""
-    if path and os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as handle:
-            value = handle.read().strip()
-        if value:
-            return value
-
-    chaves = " ou ".join(_CHAVES_COFRE.get(name, (name.upper(),)))
-    raise RuntimeError(
-        f"Credencial do EBS ausente ({name}). Grave no cofre: "
-        f"python3 scripts/cofre.py definir {chaves.split(' ou ')[0]}"
-    )
-
-
-def _auth(force: bool = False):
-    now = time.time()
-    with _auth_lock:
-        if not force and _auth_cache["value"] and _auth_cache["expires"] > now:
-            return _auth_cache["value"]
-        value = ebs_login(
-            _credential("ebs_public_username"),
-            _credential("ebs_public_password"),
-        )
-        _auth_cache["value"] = value
-        _auth_cache["expires"] = now + 600
-        return value
-
 
 def _ip(req: Request) -> str:
     forwarded = req.headers.get("x-forwarded-for", "")
@@ -187,12 +131,7 @@ def _audit(ip: str, ids: list, found: int, missing: int, exported: bool, outcome
 def _execute(ids: list[str], req: Request, exported: bool = False) -> list[dict]:
     ip = _ip(req)
     try:
-        raw = ebs_search_many(_auth(), ids)
-        if raw and all(
-            "Sessão EBS expirada" in str(x.get("erro", ""))
-            for x in raw if isinstance(x, dict)
-        ):
-            raw = ebs_search_many(_auth(True), ids)
+        raw = ebs_ativos.consultar(ids)
 
         with SessionLocal() as db:
             rule_map = _rules(db)
@@ -215,27 +154,17 @@ def _execute(ids: list[str], req: Request, exported: bool = False) -> list[dict]
 
 @router.get("/health")
 def health():
+    saida = {"ok": True, "module": "public-assets", "authentication_required": False,
+             "source": "EBS (base Oracle)", "uses_ebs": True, "read_only": True, "rate_limit": False,
+             "credential_configured": False}
     try:
-        user = _credential("ebs_public_username")
-        return {
-            "ok": True,
-            "module": "public-assets",
-            "authentication_required": False,
-            "source": "EBS",
-            "uses_ebs": True,
-            "stored_as_systemd_encrypted_credential": True,
-            "credential_configured": bool(user),
-            "read_only": True,
-            "rate_limit": False,
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "module": "public-assets",
-            "source": "EBS",
-            "credential_configured": False,
-            "error": str(exc),
-        }
+        from integracoes import ebs_oracle
+        ebs_oracle._config()
+        saida["credential_configured"] = True
+    except Exception as exc:  # noqa: BLE001
+        saida["ok"] = False
+        saida["error"] = str(exc)[:200]
+    return saida
 
 
 @router.post("/convert")
@@ -260,7 +189,7 @@ def convert(body: PublicQueryIn, req: Request):
         "encontrados": found,
         "nao_encontrados": len(body.identificadores) - found,
         "origem": "EBS",
-        "autenticacao": "CREDENCIAL PROTEGIDA DO SERVIÇO",
+        "autenticacao": "CREDENCIAL DO SERVIÇO (base Oracle)",
     }
 
 

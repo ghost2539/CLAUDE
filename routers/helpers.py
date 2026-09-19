@@ -270,7 +270,7 @@ def local_search_one(s: Session, q: str) -> dict:
 _XLSX_COLS = [
     "pesquisado", "encontrado", "empresa", "book_type_code", "categoria",
     "modelo", "descricao", "ativo", "asset_id", "etiqueta", "numero_serie",
-    "custo_asset", "dpis", "local_atribuido", "conta_despesas", "fonte", "erro",
+    "custo_asset", "dpis", "local_atribuido", "baixado", "po", "nf", "conta_despesas", "fonte", "erro",
 ]
 
 
