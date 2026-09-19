@@ -30,27 +30,9 @@ WorkingDirectory=/var/www/vcreports/portal-spare
 EnvironmentFile=/var/www/vcreports/portal-spare/data/environment
 
 # ── AS CREDENCIAIS DO EBS E DOS CORREIOS ────────────────────────────────
-# Elas NÃO passam pelo cofre e NÃO ficam no environment acima. Vêm do cofre
-# corporativo (/etc/vcreports/.secrets.env, mantido por outro time) e
-# chegam ao portal como VARIÁVEL DE AMBIENTE — o código as lê direto do
-# os.environ, e é assim que tem de ser.
-#
-# O ExecStartPre recorta do arquivo do outro time só os prefixos que são
-# nossos e escreve em /run/portal-spare.env. O recorte é o ponto: o
-# .secrets.env tem segredo de muita gente, e o portal não tem por que
-# enxergar o que não é dele.
-#
-# O `+` faz esta linha rodar com privilégio e fora do sandbox — sem ele,
-# ProtectSystem=strict deixa /run somente leitura e o ProtectHome esconde
-# o resto; o recorte falharia e o serviço subiria sem credencial nenhuma.
-#
-# /run é tmpfs: o arquivo nasce a cada start e morre no reboot. Segredo
-# recortado não fica em disco.
-ExecStartPre=+/bin/sh -c 'umask 027; grep -E "^(CORREIOS_|EBS_|ORACLE_EBS_)" /etc/vcreports/.secrets.env > /run/portal-spare.env; chgrp portalspare /run/portal-spare.env; chmod 640 /run/portal-spare.env'
-
-# O `-` é obrigatório: no PRIMEIRO start o systemd lê os EnvironmentFile de
-# cada Exec*, inclusive o do ExecStartPre acima — que é justamente quem
-# ainda vai criar o arquivo. Sem o hífen a unit falha antes de gerá-lo.
+# Chegam ao portal como variável de ambiente por /run/portal-spare.env,
+# mantido fora deste repositório. O código lê direto do os.environ.
+# O `-` é obrigatório: sem o arquivo a unit ainda sobe.
 EnvironmentFile=-/run/portal-spare.env
 
 # PORTAL_COFRE_DIR NÃO É DEFINIDO AQUI, DE PROPÓSITO.

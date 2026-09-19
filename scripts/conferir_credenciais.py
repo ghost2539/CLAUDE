@@ -19,8 +19,7 @@ Por que existe
 As chaves dos Correios e do Oracle EBS são injetadas no ambiente do processo
 antes do portal subir:
 
-    ExecStartPre=... grep -E '^(CORREIOS_|EBS_|ORACLE_EBS_)' \\
-        /etc/vcreports/.secrets.env > /run/portal-spare.env
+    EnvironmentFile=-/run/portal-spare.env
 
 Quando uma tela reclama de credencial, a primeira pergunta é se a variável
 chegou ao PROCESSO — e essa pergunta se responde sem abrir o valor de nada.
@@ -80,7 +79,7 @@ if faltando_obrigatorias:
     print("\nFALTA no ambiente deste processo:")
     for nome in faltando_obrigatorias:
         print("  -", nome)
-    print("\nConfira /etc/vcreports/.secrets.env e reinicie o serviço:")
+    print("\nConfira /run/portal-spare.env e reinicie o serviço:")
     print("    sudo systemctl restart portal_spare")
     sys.exit(1)
 

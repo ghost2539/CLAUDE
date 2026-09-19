@@ -9,8 +9,7 @@ A REGRA
 As credenciais dos Correios (e as do Oracle EBS) são injetadas no ambiente
 do processo pelo próprio serviço, antes do portal subir:
 
-    ExecStartPre=... grep -E '^(CORREIOS_|EBS_|ORACLE_EBS_)' \
-        /etc/vcreports/.secrets.env > /run/portal-spare.env
+        EnvironmentFile=-/run/portal-spare.env
 
 Então o portal lê `os.environ` e ponto. `integracoes/ebs_oracle.py` faz igual.
 

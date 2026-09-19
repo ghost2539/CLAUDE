@@ -77,10 +77,8 @@ def _secret(nome: str, default: str = "") -> str:
     """Credencial dos Correios: DIRETO do ambiente do processo.
 
     Não passa pelo cofre, e isso é decisão de quem mantém o servidor, não
-    descuido. O serviço injeta as chaves no ambiente antes de subir o portal:
-
-        ExecStartPre=... grep -E '^(CORREIOS_|EBS_|ORACLE_EBS_)' \
-            /etc/vcreports/.secrets.env > /run/portal-spare.env
+    descuido. O serviço carrega /run/portal-spare.env no ambiente antes de
+    subir o portal (EnvironmentFile da unit).
 
     `integracoes/ebs_oracle.py` lê do mesmo jeito, pelo mesmo motivo. Pôr o
     cofre na frente aqui não só era indireção à toa: `core.cofre.obter`
@@ -137,9 +135,9 @@ def _correios_request(method: str, url: str, **kwargs):
 
 _MSG_CREDS = (
     "Credenciais dos Correios ausentes no ambiente do serviço "
-    "(CORREIOS_USUARIO, CORREIOS_CHAVE, CORREIOS_CARTOES). Elas são injetadas "
-    "a partir de /etc/vcreports/.secrets.env quando o serviço sobe — confira o "
-    "arquivo e reinicie o portal-spare."
+    "(CORREIOS_USUARIO, CORREIOS_CHAVE, CORREIOS_CARTOES). Elas vêm de "
+    "/run/portal-spare.env quando o serviço sobe — confira o arquivo e "
+    "reinicie o portal-spare."
 )
 
 

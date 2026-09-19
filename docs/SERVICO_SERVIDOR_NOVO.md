@@ -67,23 +67,18 @@ systemctl daemon-reload && systemctl enable --now portal-spare
 O restart no dia a dia (`systemctl restart portal-spare`) pede root ou uma
 regra de sudo para a equipe do portal.
 
-## 4. Acesso ao cofre corporativo
+## 4. Credenciais do EBS e dos Correios
 
-A conta de rede precisa conseguir **ler** `/etc/vcreports/.secrets.env` —
-por participação no grupo dono do arquivo, ou por um comando de leitura
-disponibilizado pelo time que mantém o cofre.
-
-É dali que o portal obtém as credenciais das integrações. Sem esse acesso o
-portal sobe normalmente, mas as integrações que dependem do cofre não
-funcionam. Para conferir, a própria conta roda:
+Chegam ao portal como variáveis de ambiente por `/run/portal-spare.env`,
+carregado pela unit (`EnvironmentFile=-/run/portal-spare.env`). O arquivo
+é mantido fora deste repositório; o portal só lê o `os.environ`. Para
+conferir se as variáveis chegaram ao processo (nome e tamanho, nunca o
+valor):
 
 ```bash
 cd /var/www/vcreports/portal-spare
-python3 scripts/cofre.py acesso
+python3 scripts/conferir_credenciais.py
 ```
-
-A saída diz o dono, o grupo e o modo do arquivo, se aquela conta consegue ler
-e, quando não consegue, o que precisa ser pedido.
 
 ## 5. Portas de entrada (rede interna)
 
