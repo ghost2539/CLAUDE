@@ -10,11 +10,17 @@ LIMITE = 100
 EMPRESAS = ("RENNER", "YOUCOM", "CAMICADO")
 DONO = "APPS"
 TABELAS = ("FA_ADDITIONS_B", "FA_ADDITIONS_TL", "FA_BOOKS", "FA_BOOK_CONTROLS",
-           "FA_RETIREMENTS", "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES")
+           "FA_RETIREMENTS", "FA_DISTRIBUTION_HISTORY", "FA_LOCATIONS", "FA_ASSET_INVOICES",
+           "AP_INVOICE_DISTRIBUTIONS_ALL", "PO_DISTRIBUTIONS_ALL", "PO_RELEASES_ALL")
+# A liberação da PO (o "-32" de 2570313-32) sai da distribuição da fatura.
+CADEIA_LIBERACAO = ("FA_ASSET_INVOICES.PO_NUMBER", "FA_ASSET_INVOICES.INVOICE_DISTRIBUTION_ID",
+                    "AP_INVOICE_DISTRIBUTIONS_ALL.PO_DISTRIBUTION_ID",
+                    "PO_DISTRIBUTIONS_ALL.PO_RELEASE_ID", "PO_RELEASES_ALL.RELEASE_NUM")
 BUSCA = (("IMOBILIZADO", "ASSET_NUMBER"), ("ETIQUETA", "TAG_NUMBER"), ("SERIE", "SERIAL_NUMBER"))
 
 _RE_BLOCO = re.compile(r"[ \t]*--<opcional ([A-Z0-9_.+]+)>[ \t]*\n(.*?)[ \t]*--</opcional>[ \t]*\n", re.S)
 _RE_APELIDO = re.compile(r"\bAS\s+([a-z_][a-z0-9_]*)\s*(,?)[ \t]*$", re.I | re.M)
+_RE_NULO = re.compile(r"^\s*NULL AS ([a-z_][a-z0-9_]*)\s*,?\s*$", re.I)
 
 _log = logging.getLogger("ebs_ativos")
 _catalogo: dict[str, set[str]] | None = None
@@ -195,6 +201,26 @@ def _sem_bloco(corpo: str) -> str:
     return "\n".join(f"       NULL AS {nome}{virgula}" for nome, virgula in apelidos) + "\n"
 
 
+def _sem_duplicados(sql: str) -> str:
+    """Campo com mais de uma variante no molde entra uma vez só."""
+    linhas = sql.split("\n")
+    nulos: dict[str, list[int]] = {}
+    reais: set[str] = set()
+    for n, linha in enumerate(linhas):
+        vazio = _RE_NULO.match(linha)
+        if vazio:
+            nulos.setdefault(vazio.group(1).lower(), []).append(n)
+            continue
+        apelido = _RE_APELIDO.search(linha)
+        if apelido:
+            reais.add(apelido.group(1).lower())
+    fora: set[int] = set()
+    for apelido, posicoes in nulos.items():
+        fora.update(posicoes if apelido in reais else posicoes[:-1])
+    saida = "\n".join(linha for n, linha in enumerate(linhas) if n not in fora)
+    return re.sub(r",\s*\n(FROM APPS\.)", r"\n\1", saida)
+
+
 def _busca(m: dict, lista_binds: str) -> str:
     partes = [f"  SELECT fa0.asset_id FROM APPS.FA_ADDITIONS_B fa0"
               f"\n   WHERE fa0.{m[campo].split('.', 1)[1]} IN ({lista_binds})"
@@ -216,10 +242,16 @@ def montar_sql(lista_binds: str, cat=None) -> str:
         cat, m = None, mapa(None)
     presentes = None if cat is None else {f"{t}.{c}" for t, cols in cat.items() for c in cols}
     usa_tl = m.get("DESCRICAO", "").startswith("tl.")
+    # Só com o catálogo confirmando a cadeia inteira: no escuro vale a PO sem
+    # liberação, que é o que sempre funcionou.
+    com_liberacao = presentes is not None and all(x in presentes for x in CADEIA_LIBERACAO)
+    tem_po = presentes is None or "FA_ASSET_INVOICES.PO_NUMBER" in presentes
+    decisao = {"USA_TL": usa_tl, "PO_LIBERACAO": com_liberacao,
+               "PO_SIMPLES": tem_po and not com_liberacao}
 
     def manter(exigidos: list[str]) -> bool:
-        if exigidos == ["USA_TL"]:
-            return usa_tl
+        if len(exigidos) == 1 and exigidos[0] in decisao:
+            return decisao[exigidos[0]]
         return presentes is None or all(x in presentes for x in exigidos)
 
     sql = CONSULTA.read_text(encoding="utf-8")
@@ -232,7 +264,7 @@ def montar_sql(lista_binds: str, cat=None) -> str:
     sql = re.sub(r"/\*([A-Z_]+)\*/[ \t]*",
                  lambda c: ((m.get(c.group(1)) or "NULL") + " ").ljust(46) if c.group(1) in m else c.group(0),
                  sql)
-    return sql.replace("/*BUSCA*/", _busca(m, lista_binds))
+    return _sem_duplicados(sql.replace("/*BUSCA*/", _busca(m, lista_binds)))
 
 
 def _lote(ids: list[str]) -> list[dict]:

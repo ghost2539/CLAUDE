@@ -38,7 +38,22 @@ SELECT fa.asset_id                                   AS asset_id,
            AND dh.date_ineffective IS NULL
            AND ROWNUM = 1)                           AS local_atribuido,
 --</opcional>
---<opcional FA_ASSET_INVOICES.PO_NUMBER>
+--<opcional PO_LIBERACAO>
+-- Acordo de contrato tem uma raiz de PO e varias liberacoes: 2570313-32 e a
+-- liberacao 32 da PO 2570313. A liberacao vem pela distribuicao da fatura.
+       (SELECT MAX(ai.po_number || CASE WHEN pr.release_num IS NOT NULL
+                                        THEN '-' || pr.release_num END)
+          FROM APPS.FA_ASSET_INVOICES ai
+          LEFT JOIN APPS.AP_INVOICE_DISTRIBUTIONS_ALL aid
+                 ON aid.invoice_distribution_id = ai.invoice_distribution_id
+          LEFT JOIN APPS.PO_DISTRIBUTIONS_ALL pd
+                 ON pd.po_distribution_id = aid.po_distribution_id
+          LEFT JOIN APPS.PO_RELEASES_ALL pr
+                 ON pr.po_release_id = pd.po_release_id
+         WHERE ai.asset_id = fa.asset_id
+           AND ai.date_ineffective IS NULL)          AS po,
+--</opcional>
+--<opcional PO_SIMPLES>
        (SELECT MAX(ai.po_number)
           FROM APPS.FA_ASSET_INVOICES ai
          WHERE ai.asset_id = fa.asset_id

@@ -179,7 +179,13 @@ dono resolvido por `ALL_SYNONYMS`) e completa o molde:
 - cada bloco `--<opcional TABELA.COLUNA>` sai inteiro quando aquilo não existe
   (um bloco pode exigir mais de um objeto, separados por `+`);
 - a descrição cai para `FA_ADDITIONS_TL` quando a tabela base não a tem, e o
-  `LEFT JOIN` dela só entra nesse caso.
+  `LEFT JOIN` dela só entra nesse caso;
+- a **PO sai com a liberação** (`2570313-32`) quando a conta enxerga a cadeia
+  `FA_ASSET_INVOICES` → `AP_INVOICE_DISTRIBUTIONS_ALL` →
+  `PO_DISTRIBUTIONS_ALL` → `PO_RELEASES_ALL`; sem ela, sai só a raiz.
+  Acordo de contrato tem uma raiz de PO e várias liberações — é o número
+  depois do hífen que identifica o pedido, o mesmo formato que o Agendamento
+  de Fornecedores usa.
 
 Assim, tabela não concedida ou coluna que não existe deixa **aquele campo** em
 branco, em vez de derrubar a consulta inteira com ORA-00904/ORA-00942.

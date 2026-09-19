@@ -495,7 +495,7 @@ A tela Consulta do portal e a `/consulta-times` usam o mesmo caminho:
 | Categoria | Cadastro de modelos do portal (o mesmo do recebimento) |
 | Local atribuído | Distribuição vigente (`FA_DISTRIBUTION_HISTORY` + `FA_LOCATIONS`) |
 | Baixado? | `date_retired`/`period_counter_fully_retired` do livro |
-| PO, NF | `FA_ASSET_INVOICES`; sem isso, o último ciclo de recebimento do portal |
+| PO, NF | `FA_ASSET_INVOICES`. Em PO de contrato sai com a liberação (`2570313-32`), pela distribuição da fatura. Sem isso, o último ciclo de recebimento do portal |
 | Erro | Motivo de não ter achado, ou por que a base não respondeu |
 
 A busca aceita **número de série, etiqueta ou imobilizado** no mesmo campo:

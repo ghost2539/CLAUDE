@@ -22,7 +22,7 @@ BASE = [
     {"asset_id": 1001, "imobilizado": "100200", "etiqueta": "RN000123", "numero_serie": "SN-ABC-1",
      "descricao": "COLETOR TC21", "fabricante": "ZEBRA", "modelo_ebs": "TC21", "livro": "RENNER CORP",
      "custo": 3500.5, "dpis": "2024-03-01", "baixado": "N", "data_baixa": None,
-     "local_atribuido": "RS.POA.LOJA101", "po": "PO778899", "nf": "NF445566"},
+     "local_atribuido": "RS.POA.LOJA101", "po": "2570313-32", "nf": "NF445566"},
     {"asset_id": 1002, "imobilizado": "300400", "etiqueta": "CM000777", "numero_serie": "SN-XYZ-9",
      "descricao": "PDV DELL", "fabricante": "DELL", "modelo_ebs": "OPTIPLEX", "livro": "CAMICADO CORP",
      "custo": 5000, "dpis": "2021-01-15", "baixado": "S", "data_baixa": "2025-06-30",
@@ -39,7 +39,11 @@ CLASSICO = {
     "FA_DISTRIBUTION_HISTORY": {"ASSET_ID", "LOCATION_ID", "DATE_INEFFECTIVE"},
     "FA_LOCATIONS": {"LOCATION_ID", "SEGMENT1", "SEGMENT2", "SEGMENT3", "SEGMENT4", "SEGMENT5",
                      "SEGMENT6", "SEGMENT7"},
-    "FA_ASSET_INVOICES": {"ASSET_ID", "PO_NUMBER", "INVOICE_NUMBER", "DATE_INEFFECTIVE"},
+    "FA_ASSET_INVOICES": {"ASSET_ID", "PO_NUMBER", "INVOICE_NUMBER", "DATE_INEFFECTIVE",
+                          "INVOICE_DISTRIBUTION_ID"},
+    "AP_INVOICE_DISTRIBUTIONS_ALL": {"INVOICE_DISTRIBUTION_ID", "PO_DISTRIBUTION_ID"},
+    "PO_DISTRIBUTIONS_ALL": {"PO_DISTRIBUTION_ID", "PO_RELEASE_ID"},
+    "PO_RELEASES_ALL": {"PO_RELEASE_ID", "RELEASE_NUM"},
 }
 # A instalação de verdade do cliente: R12, descrição na tabela traduzida e
 # FA_BOOKS sem date_retired.
@@ -86,6 +90,9 @@ class _Cursor:
             if not (r["imobilizado"] in termos or r["etiqueta"] in termos or r["numero_serie"] in termos):
                 continue
             d = dict(r)
+            # Sem a cadeia da liberação no SQL, a base só teria a raiz da PO.
+            if "PO_RELEASES_ALL" not in sql and "-" in str(d.get("po") or ""):
+                d["po"] = str(d["po"]).split("-")[0]
             for campo in COLS:
                 if f"NULL AS {campo}" in sql:
                     d[campo] = None
@@ -159,8 +166,8 @@ checar(a["encontrado"] and a["imobilizado"] == "100200" and a["etiqueta"] == "RN
        and a["numero_serie"] == "SN-ABC-1", "série digitada em minúsculas acha o ativo")
 checar(a["empresa"] == "RENNER" and a["descricao"] == "COLETOR TC21"
        and a["local_atribuido"] == "RS.POA.LOJA101", "empresa pelo livro, descrição e local atribuído")
-checar(a["baixado"] == "Não" and a["po"] == "PO778899" and a["nf"] == "NF445566" and a["erro"] == "",
-       "Baixado?, PO e NF vindos da base")
+checar(a["baixado"] == "Não" and a["po"] == "2570313-32" and a["nf"] == "NF445566" and a["erro"] == "",
+       "Baixado?, PO (com a liberação) e NF vindos da base")
 b = por["CM000777"]
 checar(b["encontrado"] and b["empresa"] == "CAMICADO" and b["baixado"] == "Sim"
        and b["data_baixa"] == "2025-06-30", "busca pela etiqueta; ativo baixado vem como Sim, com a data")
@@ -215,6 +222,25 @@ checar("fa.description" in sql_cego and "APPS.FA_ASSET_INVOICES" in sql_cego
 checar(ea.mapa(R12)["DESCRICAO"] == "tl.description" and ea.mapa(CLASSICO)["DESCRICAO"] == "fa.description",
        "o mapa de campos diz de qual coluna cada campo veio")
 
+# PO de contrato: a raiz é a mesma e o que muda é a liberação (2570313-32).
+import re as _re  # noqa: E402
+def _quantos_po(sql):
+    return len(_re.findall(r"AS po,?\s*$", sql, _re.M))
+checar("PO_RELEASES_ALL" in sql_classico and "'-' || pr.release_num" in sql_classico
+       and _quantos_po(sql_classico) == 1,
+       "PO sai com a liberação (2570313-32), pela distribuição da fatura")
+sem_release = {t_: set(c) for t_, c in CLASSICO.items() if t_ != "PO_RELEASES_ALL"}
+sql_sem_rel = ea.montar_sql(":t0", sem_release)
+checar("PO_RELEASES_ALL" not in sql_sem_rel and "MAX(ai.po_number)" in sql_sem_rel
+       and _quantos_po(sql_sem_rel) == 1,
+       "sem as tabelas da liberação, a PO ainda vem, só sem o sufixo")
+checar("MAX(ai.po_number)" in sql_cego and "PO_RELEASES_ALL" not in sql_cego
+       and _quantos_po(sql_cego) == 1,
+       "catálogo que não diz nada não arrisca a cadeia da liberação")
+sql_sem_nota = ea.montar_sql(":t0", {t_: set(c) for t_, c in CLASSICO.items() if t_ != "FA_ASSET_INVOICES"})
+checar(sql_sem_nota.count("NULL AS po") == 1 and _quantos_po(sql_sem_nota) == 1,
+       "sem a tabela das faturas, a coluna PO entra uma vez só, vazia")
+
 CATALOGO.clear(); CATALOGO.update({t_: set(c) for t_, c in R12.items()})
 CATALOGO.pop("FA_ASSET_INVOICES")
 ea._catalogo = None
@@ -224,6 +250,17 @@ linha = d["resultados"][0]
 checar(REG["catalogo"] == 1 and linha["encontrado"], "na instalação do cliente, a consulta responde")
 checar(linha["po"] == "" and linha["nf"] == "" and linha["descricao"] == "COLETOR TC21",
        "o que a conta não enxerga vem em branco; o resto continua vindo da base")
+CATALOGO.update({t_: set(c) for t_, c in CLASSICO.items()})
+ea._catalogo = None
+linha = c.post("/api/consulta", json={"identificadores": ["SN-ABC-1"]}).json()["resultados"][0]
+checar(linha["po"] == "2570313-32", "na tela, a PO de contrato aparece com a liberação")
+CATALOGO.pop("PO_RELEASES_ALL")
+ea._catalogo = None
+linha = c.post("/api/consulta", json={"identificadores": ["SN-ABC-1"]}).json()["resultados"][0]
+checar(linha["po"] == "2570313", "sem as tabelas da liberação, ainda aparece a raiz da PO")
+CATALOGO.clear()
+CATALOGO.update({t_: set(c) for t_, c in R12.items() if t_ != "FA_ASSET_INVOICES"})
+ea._catalogo = None
 r = c.get("/api/ebs-oracle/consulta-de-ativos")
 diag = r.json()
 checar(r.status_code == 200 and diag["campos"]["DESCRICAO"] == "tl.description"
@@ -248,7 +285,7 @@ checar(por["SN-XYZ-9"]["categoria"] == "PDV" and por["SN-XYZ-9"]["modelo"] == "O
        "categoria e modelo do cadastro da tela de recebimento")
 checar(por["SN-XYZ-9"]["po"] == "PO112233" and por["SN-XYZ-9"]["nf"] == "NF998877",
        "PO e NF do ciclo de recebimento quando o EBS não tem")
-checar(por["SN-ABC-1"]["po"] == "PO778899" and por["SN-ABC-1"]["nf"] == "NF445566", "PO e NF do EBS prevalecem")
+checar(por["SN-ABC-1"]["po"] == "2570313-32" and por["SN-ABC-1"]["nf"] == "NF445566", "PO e NF do EBS prevalecem")
 checar(por["SN-ABC-1"]["categoria"] == "NÃO CLASSIFICADA", "sem cadastro → NÃO CLASSIFICADA")
 r = c.post("/api/consulta/export", json={"identificadores": ["SN-XYZ-9"]})
 checar(r.status_code == 200 and "spreadsheetml" in r.headers.get("content-type", ""), "exportação em Excel")
