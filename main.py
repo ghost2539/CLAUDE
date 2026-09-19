@@ -82,6 +82,28 @@ def create_app() -> FastAPI:
         html = (_cfg.STATIC / "index.html").read_text(encoding="utf-8")
         return com_prefixo(html, prefixo(request))
 
+    @app.get("/hub-infraCSC", response_class=HTMLResponse)
+    @app.get("/hub-infraCSC/", response_class=HTMLResponse)
+    def hub_infra_csc():
+        """A tela-ponte para os portais do CSC. SEM LOGIN, de propósito.
+
+        É só navegação: o controle de acesso acontece em cada portal de
+        destino, e exigir sessão aqui obrigaria a entrar no Spare para
+        alcançar um sistema que não é o Spare.
+
+        As duas rotas existem porque quem digita o endereço erra a barra
+        final, e um 404 nesse caso parece "a página não existe" — que é
+        justamente a conclusão errada.
+
+        Serve por `limpar_texto` para sair sem os comentários do fonte,
+        igual ao resto de /static. O arquivo não usa caminho relativo
+        nenhum (os destinos são URLs completas e as marcas estão embutidas),
+        então não precisa do tratamento de prefixo de proxy.
+        """
+        from core.estatico import limpar_texto
+        html = (_cfg.STATIC / "hub-infraCSC.html").read_text(encoding="utf-8")
+        return HTMLResponse(limpar_texto(html, ".html"))
+
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
         # O ícone enviado pelo admin geral (Configuração ▸ Visual) vence o
