@@ -6,8 +6,8 @@
 #
 #  Sem systemd: o processo sobe com nohup, o PID fica em
 #  ~/.local/state/portal-spare/portal.pid e o log em portal.log.
-#  Quem tiver `systemctl --user` disponível pode usar a unit em
-#  deploy/portal_spare.user.service, que é mais robusta a queda.
+#  Quem tiver `systemctl --user` disponível pode usar `instalar-servico`,
+#  que gera a unit em ~/.config/systemd/user e é mais robusta a queda.
 # ============================================================================
 set -uo pipefail
 

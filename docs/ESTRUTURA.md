@@ -61,8 +61,8 @@ data/                    TUDO que é gravado em disco (fora do repositório)
 
 deploy/                  Instalação e serviços systemd
   portal_spare.service        serviço de sistema (com root)
-  portal_spare.user.service   serviço de usuário (systemctl --user)
   portal.sh                   controle sem root: start/stop/status/atualizar
+                              e instalar-servico, que gera a unit de usuário
   instalar_usuario.sh         instalação sem root, direto do GitHub
   install.sh · generate-cert.sh
 

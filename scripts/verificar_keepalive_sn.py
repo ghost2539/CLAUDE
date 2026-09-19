@@ -29,6 +29,7 @@ O que estava errado, e é o que esta verificação passa a sustentar:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -233,6 +234,22 @@ for unidade in unidades:
     texto = unidade.read_text(encoding="utf-8")
     checar("--workers 1" in texto,
            f"deploy/{unidade.name} sobe com um worker só")
+
+# Os .service não são as únicas formas de subir o portal: `portal.sh` sobe
+# em nohup e ainda GERA uma unit de usuário, escrevendo o ExecStart na hora.
+# Esses pontos montam `--workers` a partir do ambiente, então conferir só os
+# arquivos .service deixa de fora justamente o caminho que alguém pode
+# apontar para 4 sem trocar nenhum arquivo versionado.
+#
+# O que se exige aqui não é literal 1 — é que o valor do ambiente tenha
+# DEFAULT 1. `${WORKERS:-1}` passa; `${WORKERS}` sem default, ou um número
+# maior escrito à mão, não.
+_WORKERS = re.compile(r"--workers[= ]+(\S+)")
+_ACEITOS = ("1", '"1"', "${WORKERS:-1}", '"${WORKERS:-1}"')
+for script in sorted((RAIZ / "deploy").glob("*.sh")):
+    for valor in _WORKERS.findall(script.read_text(encoding="utf-8")):
+        checar(valor in _ACEITOS,
+               f"deploy/{script.name}: --workers {valor} nasce com um worker só")
 
 print(f"\n{feitos - len(falhas)} de {feitos} verificações passaram.")
 if falhas:
