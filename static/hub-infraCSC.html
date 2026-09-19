@@ -6,7 +6,18 @@
 <title>HUB Infra CSC - TI</title>
 <meta name="description" content="Entrada para os sistemas mantidos pela Infraestrutura do CSC.">
 <meta name="robots" content="noindex, nofollow">
-<link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'&gt;&lt;rect width='48' height='48' fill='%230C0C0C'/&gt;&lt;path d='M6 6 L40 6 L47 10 L40 14 L14 14 L14 20 L42 20 L42 42 L8 42 L1 38 L8 34 L34 34 L34 28 L6 28 Z' fill='%23C79105'/&gt;&lt;/svg&gt;">
+<!-- Ícone PRÓPRIO do Hub: a marca "Malha" (três nós em triângulo), que
+     cria parentesco com a malha da tela de login sem repetir o monograma
+     do Spare. Cada portal tem a sua marca; o hub tem a dele.
+
+     Vale SÓ nesta página. O portal continua com o /favicon.ico da rota
+     dele, que serve o arquivo que o admin enviar — e é por isso que o
+     caminho aqui não é /static/favicon.svg: `com_prefixo` troca ESSE nome
+     exato pela rota do portal, e o ícone do hub viraria o do Spare. -->
+<link rel="icon" href="/static/img/hub/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/img/hub/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/img/hub/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/static/img/hub/favicon-180.png">
 <script src="/static/js/hub-infraCSC.js"></script>
 <style>
 /* ── Tokens ───────────────────────────────────────────────────────────
