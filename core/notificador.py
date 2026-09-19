@@ -1,18 +1,3 @@
-"""Canal de alertas por e-mail do Portal SPARE.
-
-Envia avisos operacionais (tentativa de acesso não autorizado, falhas de
-API/integração/automação) para o e-mail do responsável pela área.
-
-Regras de projeto:
-- A configuração fica no banco ISOLADO de monitoramento e é editável em
-  Parâmetros → Monitoramento; o ambiente (.env) e o cofre servem apenas de
-  padrão inicial.
-- A senha do SMTP nunca trafega de volta para a tela: fica cifrada no banco
-  (Fernet quando a lib `cryptography` existe, XOR derivado do SESSION_SECRET
-  como alternativa) e o cofre tem prioridade sobre ela.
-- Nada aqui pode derrubar o portal: todo envio é tolerante a erro e roda em
-  thread separada quando disparado por um fluxo de requisição.
-"""
 from __future__ import annotations
 
 import base64
