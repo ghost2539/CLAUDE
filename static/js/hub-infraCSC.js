@@ -33,12 +33,12 @@ document.addEventListener("DOMContentLoaded", function () {
        grupo  operacoes | gestao
        cor    opcional; só o Spare usa, por ter identidade própria
      ------------------------------------------------------------------ */
-  var PORTAIS = [
+ var PORTAIS = [
     { marca:"spare",     nome:"Spare",
-       sub:"Portal de Operações - SPARE",
+       sub:"Portal de Operações - Spare",
        href:"https://suporte.lojasrenner.com.br/portal-spare/",
        grupo:"operacoes", cor:"spare" },
-
+ 
     { marca:"field-adm", nome:"Field ADM",
        sub:"Controle de equipamentos do Field ADM",
        href:"https://suporte.lojasrenner.com.br/controle_equipamentos/login.php",
