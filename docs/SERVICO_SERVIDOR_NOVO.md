@@ -1,9 +1,10 @@
 # Pedido à infraestrutura — servidor novo do Portal SPARE
 
 Documento para entregar a quem tem root no servidor. O portal roda como
-**serviço de usuário** (`systemd --user`), com a conta de rede de quem opera —
-não há usuário de serviço. Por isso o pedido é curto: quase tudo é feito
-depois, sem root, dentro da pasta da aplicação.
+**serviço do sistema** (`/etc/systemd/system/portal-spare.service`), sob uma
+conta de serviço própria. O pedido é curto: fora a instalação da unit e os
+caminhos que ela precisa, o resto é feito depois pela equipe do portal,
+dentro da pasta da aplicação.
 
 > **Nenhuma senha é enviada à infraestrutura.** As credenciais são gravadas
 > cifradas pela equipe do portal, no servidor, depois que a pasta existir.
@@ -34,19 +35,33 @@ O ambiente virtual é criado depois pela equipe do portal, dentro da pasta:
 que permite enxergar o módulo do cofre corporativo, instalado no Python do
 sistema.
 
-## 3. Serviço no boot — `enable-linger`
+## 3. Serviço do sistema
 
-O serviço é de usuário. Para continuar no ar depois do logout e voltar
-sozinho no boot, é preciso habilitar o *lingering* uma única vez:
+A unit versionada é `deploy/portal_spare.service`. Ela roda sob a conta de
+serviço `portalspare` (sem shell de login), não sob a conta de quem opera:
 
 ```bash
-loginctl enable-linger <conta-de-rede>
+useradd -r -s /usr/sbin/nologin portalspare
+chown -R portalspare:portalspare /var/www/vcreports/portal-spare
+
+install -d -m 750 -o root -g portalspare /etc/portal_operacoes_spare
+install -d -m 700 -o portalspare -g portalspare /etc/portal_operacoes_spare/cofre
+
+cp deploy/portal_spare.service /etc/systemd/system/portal-spare.service
+systemctl daemon-reload && systemctl enable --now portal-spare
 ```
 
-Sem isso o portal cai quando a sessão da conta encerra. **Este é o único
-comando com root de que o serviço depende no dia a dia** — a unit em si é
-instalada pela própria conta, em `~/.config/systemd/user/`, e o restart não
-pede privilégio.
+Dois caminhos fora da pasta da aplicação, e é de propósito:
+
+*   `/etc/portal_operacoes_spare/environment` — só configuração, **nenhum
+    segredo** (640 root:portalspare). É o `EnvironmentFile=` da unit.
+*   `/etc/portal_operacoes_spare/cofre` — o cofre local cifrado (700). Fica
+    fora da pasta da aplicação para que git, pacote de deploy e cópia da
+    pasta não levem o cofre junto; e fora de `/home` porque a unit usa
+    `ProtectHome=yes`, que esconderia o cofre do próprio serviço.
+
+O restart no dia a dia (`systemctl restart portal-spare`) pede root ou uma
+regra de sudo para a equipe do portal.
 
 ## 4. Acesso ao cofre corporativo
 
@@ -106,24 +121,27 @@ O TLS fica no proxy; o portal atende em HTTP na rede interna.
 
 ---
 
-## O que a equipe do portal faz depois (sem root)
+## O que a equipe do portal faz depois
 
 1. Clonar o código na pasta e criar o venv com `--system-site-packages`.
-2. Escrever `data/environment` (só configuração — o modelo está em
-   `deploy/environment.servidor-novo`) e criar `data/cofre/` em modo 700.
-3. Gravar os segredos: `python3 scripts/cofre.py definir NOME`.
+2. Preencher `/etc/portal_operacoes_spare/environment` — só configuração,
+   nenhum segredo; o modelo está em `deploy/environment.servidor-novo`.
+   Esse arquivo é 640 root:portalspare, então esta etapa pede root ou a
+   regra de sudo.
+3. Gravar os segredos: `python3 scripts/cofre.py definir NOME`. Escreve em
+   `/etc/portal_operacoes_spare/cofre`, que é de `portalspare` — rode com
+   essa conta (`sudo -u portalspare`).
 4. Conferir: `python3 scripts/cofre.py conferir` — inclusive que a cifra em
    uso é `fernet`, e não a de contingência.
-5. Instalar a unit em `~/.config/systemd/user/` e habilitar o serviço.
-6. Restaurar os dados do servidor antigo e validar as telas.
+5. Restaurar os dados do servidor antigo e validar as telas.
 
 ## Conferência final
 
 ```bash
-systemctl --user is-active portal-spare
+systemctl is-active portal-spare
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8901/
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8901/consulta-times
-journalctl --user -u portal-spare -n 30 --no-pager
+journalctl -u portal-spare -n 30 --no-pager
 
 # nenhuma senha em texto claro na configuração:
 grep -iE 'pass|senha|secret' /var/www/vcreports/portal-spare/data/environment

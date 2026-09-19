@@ -47,10 +47,11 @@ class PublicQueryIn(BaseModel):
 # ── Internal helpers ──────────────────────────────────────────────
 
 # A conta de leitura do EBS vinha de arquivo em disco, entregue pelo
-# LoadCredentialEncrypted da unit de SISTEMA. Como o portal agora roda como
-# serviço de usuário, esse mecanismo não existe mais e a consulta quebrava
-# com 500. Passa pelo cofre, como todo o resto; o diretório continua valendo
-# para não quebrar instalação antiga.
+# LoadCredentialEncrypted da unit. Passou a sair do cofre, que é o caminho
+# único dos segredos do portal: um segredo com dois caminhos é um segredo
+# que alguém vai gravar no lugar errado e só descobrir quando a tela der
+# 500. O diretório antigo continua sendo lido para não quebrar instalação
+# que ainda dependa dele.
 _CHAVES_COFRE = {
     "ebs_public_username": ("EBS_PUBLIC_USER", "EBS_PUBLIC_USERNAME"),
     "ebs_public_password": ("EBS_PUBLIC_PASS", "EBS_PUBLIC_PASSWORD"),

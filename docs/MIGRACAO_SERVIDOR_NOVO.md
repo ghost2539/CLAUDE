@@ -355,15 +355,21 @@ backup.
 
 ### Sobreviver ao logout
 
-Sem root, o processo do `deploy/portal.sh` morre quando a sessão encerra em
-servidores configurados para matar processos de usuário. Duas saídas:
+Em produção isso não é problema, porque o portal roda como **serviço do
+sistema**: `deploy/portal_spare.service` instalado em
+`/etc/systemd/system/portal-spare.service`, com root, rodando sob a conta
+`portalspare`. Ele não depende de sessão de ninguém — sobe no boot e volta
+sozinho depois de uma queda.
 
-1. **`systemctl --user`** (preferível) — `./deploy/portal.sh instalar-servico`
-   gera a unit em `~/.config/systemd/user/portal-spare.service`. Para o
-   serviço continuar depois do logout, alguém com root roda **uma vez**:
-   `sudo loginctl enable-linger SEU_USUARIO`
-2. **`nohup`** (o que o `portal.sh` já faz) — sobrevive na maioria dos casos,
-   mas não é garantido sem o lingering.
+```bash
+sudo cp deploy/portal_spare.service /etc/systemd/system/portal-spare.service
+sudo systemctl daemon-reload && sudo systemctl enable --now portal-spare
+```
+
+O `deploy/portal.sh` (nohup) é para desenvolvimento e para o ambiente de
+testes. Ali o processo morre quando a sessão encerra, em servidores
+configurados para matar processos de usuário — e tudo bem, porque não é
+onde a operação acontece.
 
 ### Backup automático
 

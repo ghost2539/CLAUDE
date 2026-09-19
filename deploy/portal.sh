@@ -4,10 +4,13 @@
 #
 #    ./deploy/portal.sh start | stop | restart | status | logs | atualizar
 #
-#  Sem systemd: o processo sobe com nohup, o PID fica em
+#  O processo sobe com nohup, o PID fica em
 #  ~/.local/state/portal-spare/portal.pid e o log em portal.log.
-#  Quem tiver `systemctl --user` disponível pode usar `instalar-servico`,
-#  que gera a unit em ~/.config/systemd/user e é mais robusta a queda.
+#
+#  Isto é para desenvolvimento e para o ambiente de testes. EM PRODUÇÃO o
+#  portal roda como serviço do SISTEMA (deploy/portal_spare.service,
+#  instalado em /etc/systemd/system com root) — lá o controle é
+#  `systemctl status|restart portal-spare`, não este script.
 # ============================================================================
 set -uo pipefail
 
@@ -120,72 +123,6 @@ status)
     echo "  python: ${PY:-nenhum}"
     echo "  env:    $ENVFILE"
     echo "  log:    $LOGFILE"
-    ;;
-
-instalar-servico|servico)
-    # Gera a unit de USUÁRIO já preenchida (caminhos e interpretador reais)
-    # e instala em ~/.config/systemd/user. Sem root.
-    [ -r "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
-    PORTA="${PORT:-8901}"
-    UNIT_DIR="$HOME/.config/systemd/user"
-    UNIT="$UNIT_DIR/portal-spare.service"
-
-    if [ ! -x "$PY" ]; then
-        echo "ERRO: nenhum Python encontrado para o ExecStart."; exit 1
-    fi
-    mkdir -p "$UNIT_DIR"
-
-    cat > "$UNIT" <<UNITEOF
-# Portal de Operacoes SPARE — servico de usuario (sem root).
-# Gerado por deploy/portal.sh instalar-servico em $(date '+%d/%m/%Y %H:%M').
-[Unit]
-Description=Portal de Operacoes SPARE
-After=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$ENVFILE
-ExecStart=$PY -m uvicorn main:app --host ${HOST:-0.0.0.0} --port $PORTA --workers ${WORKERS:-1}
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-
-[Install]
-WantedBy=default.target
-UNITEOF
-    chmod 644 "$UNIT"
-    echo "Unit criada: $UNIT"
-    echo "   python : $PY"
-    echo "   porta  : $PORTA"
-    echo
-
-    if ! systemctl --user show-environment >/dev/null 2>&1; then
-        echo "AVISO: systemd de usuario indisponivel nesta sessao."
-        echo "   Siga com o modo nohup:  $0 start"
-        exit 1
-    fi
-
-    # O nohup e o systemd brigam pela porta; para o que estiver de pe.
-    if rodando; then
-        echo "Parando a instancia em nohup antes de ativar o servico..."
-        "$0" stop >/dev/null 2>&1
-    fi
-
-    systemctl --user daemon-reload
-    systemctl --user enable --now portal-spare.service && {
-        sleep 3
-        systemctl --user --no-pager --lines=8 status portal-spare.service || true
-    }
-    echo
-    echo "Comandos do dia a dia:"
-    echo "   systemctl --user status|restart|stop portal-spare"
-    echo "   journalctl --user -u portal-spare -f"
-    echo
-    echo "IMPORTANTE: para o servico continuar no ar depois do logout, alguem"
-    echo "com root precisa habilitar UMA VEZ:"
-    echo "   sudo loginctl enable-linger \$USER"
-    echo "Sem isso, o systemd encerra o servico quando sua sessao terminar."
     ;;
 
 endereco|onde|url)
@@ -313,7 +250,7 @@ atualizar)
     ;;
 
 *)
-    echo "Uso: $0 {start|stop|restart|status|endereco|logs|erros|atualizar|instalar-servico}"
+    echo "Uso: $0 {start|stop|restart|status|endereco|logs|erros|atualizar}"
     exit 1
     ;;
 esac

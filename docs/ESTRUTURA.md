@@ -60,9 +60,9 @@ data/                    TUDO que é gravado em disco (fora do repositório)
                          logs/ (jvm-*.log, xvfb.log, javac.log), depuracao/ (HTML do SSO)
 
 deploy/                  Instalação e serviços systemd
-  portal_spare.service        serviço de sistema (com root)
-  portal.sh                   controle sem root: start/stop/status/atualizar
-                              e instalar-servico, que gera a unit de usuário
+  portal_spare.service        serviço do sistema (com root) — é o de produção
+  portal.sh                   nohup para desenvolvimento e testes:
+                              start/stop/status/atualizar
   instalar_usuario.sh         instalação sem root, direto do GitHub
   install.sh · generate-cert.sh
 

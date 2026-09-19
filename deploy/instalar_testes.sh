@@ -51,7 +51,7 @@ echo "   env teste: $TEST_ENVFILE"
 [ -n "$PROD_ENVFILE" ] && [ -r "$PROD_ENVFILE" ] || { echo "ERRO: arquivo de ambiente da produção não legível. Informe PROD_ENVFILE=..."; exit 1; }
 if [ "$TEST_DIR" = "$PROD_DIR" ]; then echo "ERRO: TEST_DIR é a própria produção."; exit 1; fi
 if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ":${TEST_PORT} "; then
-    if ! systemctl is-active --quiet "$SERVICO" 2>/dev/null && ! systemctl --user is-active --quiet "$SERVICO" 2>/dev/null; then
+    if ! systemctl is-active --quiet "$SERVICO" 2>/dev/null; then
         echo "ERRO: a porta $TEST_PORT já está em uso por outro processo."; exit 1
     fi
 fi
@@ -460,17 +460,11 @@ Group=$USUARIO}"
     fi
     COMO_VER="systemctl status $SERVICO   |   journalctl -u $SERVICO -f"
     COMO_PARAR="systemctl disable --now $SERVICO && rm /etc/systemd/system/$SERVICO.service"
-elif [ "$SYSTEMD" -eq 1 ] && systemctl --user show-environment >/dev/null 2>&1; then
-    mkdir -p "$HOME/.config/systemd/user"
-    printf '%s' "$UNIT_TXT" | sed 's/^NoNewPrivileges=yes/NoNewPrivileges=true/' > "$HOME/.config/systemd/user/$SERVICO.service"
-    systemctl --user daemon-reload
-    systemctl --user enable "$SERVICO" >/dev/null 2>&1 || true
-    systemctl --user kill -s TERM "$SERVICO" >/dev/null 2>&1 || true
-    for _ in $(seq 1 20); do systemctl --user is-active --quiet "$SERVICO" || break; sleep 1; done
-    systemctl --user start --no-block "$SERVICO"
-    COMO_VER="systemctl --user status $SERVICO   |   journalctl --user -u $SERVICO -f"
-    COMO_PARAR="systemctl --user disable --now $SERVICO"
 else
+    # Sem root, o ambiente de testes sobe em nohup pelo portal.sh. Havia aqui
+    # um caminho por `systemctl --user`; saiu junto com o serviço de usuário,
+    # que não é mais usado em lugar nenhum — em produção quem manda é a unit
+    # de sistema, instalada com root.
     PORTAL_APP_DIR="$TEST_DIR" PORTAL_ENVFILE="$TEST_ENVFILE" PORTAL_STATE_DIR="$STATE" bash "$TEST_DIR/deploy/portal.sh" restart
     COMO_VER="PORTAL_APP_DIR=$TEST_DIR PORTAL_ENVFILE=$TEST_ENVFILE PORTAL_STATE_DIR=$STATE $TEST_DIR/deploy/portal.sh status"
     COMO_PARAR="PORTAL_APP_DIR=$TEST_DIR PORTAL_ENVFILE=$TEST_ENVFILE PORTAL_STATE_DIR=$STATE $TEST_DIR/deploy/portal.sh stop"
