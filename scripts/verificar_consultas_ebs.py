@@ -232,7 +232,7 @@ checar("não encontrada" in jsx,
        "e a tela distingue chave não encontrada de PO sem NF")
 checar('import { Fragment,' in jsx,
        "Fragment é importado — <React.Fragment> sem React quebra o build")
-bundle = RAIZ / "static/controle-orcamento-exec/app.js"
+bundle = RAIZ / "bundles/controle-orcamento-exec/app.js"
 checar(bundle.is_file() and "POs do projeto (EBS)" in bundle.read_text(encoding="utf-8"),
        "e o bundle foi reconstruído com o cartão dentro")
 

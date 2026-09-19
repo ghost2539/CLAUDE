@@ -112,7 +112,8 @@ sombra só. Toda tela que veio foi reescrita nesses tokens — nenhuma cor
 fixa sobrou.
 
 **Exceção combinada:** o Controle de Orçamento InfraCSC (aplicação React
-em `static/controle-orcamento-exec/`) fica fora do padrão de design, por
+em `bundles/controle-orcamento-exec/`, fora de static/ porque lá o mount é
+público) fica fora do padrão de design, por
 decisão de quem pediu a migração.
 
 ## Dois nomes parecidos, dois produtos — resolvido

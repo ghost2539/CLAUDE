@@ -47,6 +47,7 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
@@ -68,7 +69,12 @@ from core.security import (
 )
 
 _cfg = get_settings()
-_DIR = _cfg.STATIC / "controle-orcamento-exec"
+# FORA de static/, de propósito: enquanto o bundle morava lá, o mount
+# público entregava 643 KB do módulo — todas as telas, rótulos e o caminho
+# da API — a quem nunca digitou senha. A PÁGINA já exigia sessão; o bundle
+# dela, não. Aqui a única porta são as rotas abaixo, e elas perguntam quem
+# é antes de responder, com a MESMA regra da página.
+_DIR = _cfg.STATIC.parent / "bundles" / "controle-orcamento-exec"
 _log = logging.getLogger("controle_orcamento_exec")
 
 router = APIRouter(tags=["Controle de Orçamento (Execução)"], include_in_schema=False)
@@ -225,6 +231,46 @@ def pagina_infracsc(req: Request):
 @router.get("/controle-orcamento-InfraCSC/", response_class=HTMLResponse)
 def pagina_infracsc_slash(req: Request):
     return _acesso_pagina(req)
+
+
+# ── O bundle da tela, com a MESMA permissão dela ──────────────────
+# Servido por rota, e não pelo mount de /static, porque lá é público.
+# `_exigir(req, "view")` é a mesma porta da página: quem não pode ver a
+# tela não recebe o código dela.
+_TIPOS_BUNDLE = {"app.js": "application/javascript; charset=utf-8",
+                 "app.css": "text/css; charset=utf-8"}
+
+
+@router.get("/controle-orcamento-exec/{arquivo}")
+def bundle(arquivo: str, req: Request):
+    """Entrega app.js/app.css a quem tem sessão E permissão de ver a tela.
+
+    Lista fixa de nomes, e não caminho vindo da URL: com `arquivo` virando
+    caminho, `..%2f` passearia pelo disco. Aqui um nome fora da lista nem
+    chega a virar arquivo.
+
+    A autorização vem ANTES de dizer se o arquivo existe — responder 404 só
+    a quem passou na permissão evita usar esta rota para descobrir o que o
+    módulo tem.
+    """
+    _exigir(req, "view")
+    tipo = _TIPOS_BUNDLE.get(arquivo)
+    if not tipo:
+        raise HTTPException(404, "Arquivo não encontrado.")
+    caminho = _DIR / arquivo
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado.")
+    st = caminho.stat()
+    etag = f'"{int(st.st_mtime)}-{st.st_size}-co"'
+    if req.headers.get("if-none-match") == etag:
+        return Response(status_code=304,
+                        headers={"ETag": etag, "Cache-Control": "no-cache"})
+    return Response(
+        caminho.read_bytes(), media_type=tipo,
+        # Vary: Cookie — o bundle é de quem pediu; cache compartilhado de
+        # proxy não pode guardar a resposta de um e servir a outro.
+        headers={"ETag": etag, "Cache-Control": "no-cache", "Vary": "Cookie"},
+    )
 
 
 def _redir_canonico(req: Request) -> RedirectResponse:

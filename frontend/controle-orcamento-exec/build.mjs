@@ -1,4 +1,5 @@
-// Build do módulo "Controle de Orçamento" → static/controle-orcamento/
+// Build do módulo "Controle de Orçamento" → bundles/controle-orcamento-exec/
+// (fora de static/: lá o mount é público e entregava o bundle sem sessão)
 // Uso: npm run build   (ou npm run watch para desenvolvimento)
 import { build, context } from "esbuild";
 import { execSync } from "node:child_process";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const outDir = path.resolve(here, "../../static/controle-orcamento-exec");
+const outDir = path.resolve(here, "../../bundles/controle-orcamento-exec");
 const watch = process.argv.includes("--watch");
 
 const jsOptions = {
