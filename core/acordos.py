@@ -1,9 +1,3 @@
-"""Leitura da planilha de Acordos de Compra (XLSX) para popular o catálogo.
-
-Mapeia pelas legendas do cabeçalho (robusto a mudança de ordem das colunas):
-Bandeira/BU, Acordo, Expira em, Item EBS, Descrição, NCM, Preço, Fornecedor.
-Deduplica linhas repetidas do mesmo item/BU (o item aparece várias vezes).
-"""
 from __future__ import annotations
 
 import io
