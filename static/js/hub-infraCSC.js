@@ -35,12 +35,12 @@ document.addEventListener("DOMContentLoaded", function () {
      ------------------------------------------------------------------ */
   var PORTAIS = [
     { marca:"spare",     nome:"Spare",
-       sub:"Ciclo de vida do equipamento de loja",
+       sub:"Portal de Operações - SPARE",
        href:"https://suporte.lojasrenner.com.br/portal-spare/",
        grupo:"operacoes", cor:"spare" },
 
     { marca:"field-adm", nome:"Field ADM",
-       sub:"Controle de equipamentos do administrativo",
+       sub:"Controle de equipamentos do Field ADM",
        href:"https://suporte.lojasrenner.com.br/controle_equipamentos/login.php",
        grupo:"operacoes" },
 
