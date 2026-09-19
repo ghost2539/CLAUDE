@@ -388,30 +388,20 @@ function renderNovo(c, S) {
             b.setAttribute('aria-pressed', String(ativo));
         });
 
+        var soReversa = ['session-list', 'session-count', 'btn-select-ready', 'btn-submit-base', 'btn-discard'];
+        soReversa.forEach(function (id) {
+            var n = document.getElementById(id);
+            if (!n) return;
+            var alvoEsc = (id === 'session-list') ? n.parentNode : n;
+            alvoEsc.style.display = origem === FORNECEDOR ? 'none' : '';
+        });
+        var espaco = document.getElementById('rec-espaco');
+        if (espaco && espaco.closest('.card')) espaco.closest('.card').style.display = origem === FORNECEDOR ? 'none' : '';
+
         if (origem === FORNECEDOR) {
-            nota.textContent = 'Compra nova, que ainda não existe no EBS. ' +
-                'Informe descrição, serial, PO e NF de cada item.';
-            alvo.innerHTML =
-                '<div class="card mb-3">' +
-                    '<div class="card-header">Item do fornecedor</div>' +
-                    '<div class="card-body">' +
-                        '<div class="filter-grid">' +
-                            '<div class="form-group"><label for="fo-desc">Descrição do item <span style="color:var(--sp-alerta)">*</span></label>' +
-                                '<input id="fo-desc" class="form-control" autocomplete="off"></div>' +
-                            '<div class="form-group"><label for="fo-serie">Serial Number <span style="color:var(--sp-alerta)">*</span></label>' +
-                                '<input id="fo-serie" class="form-control" autocomplete="off" spellcheck="false"></div>' +
-                            '<div class="form-group"><label for="fo-po">PO <span style="color:var(--sp-alerta)">*</span></label>' +
-                                '<input id="fo-po" class="form-control" autocomplete="off"></div>' +
-                            '<div class="form-group"><label for="fo-nf">NF <span style="color:var(--sp-alerta)">*</span></label>' +
-                                '<input id="fo-nf" class="form-control" autocomplete="off"></div>' +
-                        '</div>' +
-                        '<div class="btn-row mt-3">' +
-                            '<button id="fo-add" class="btn btn-primary" type="button">Adicionar item</button>' +
-                        '</div>' +
-                        '<div id="fo-feedback" class="mt-2"></div>' +
-                    '</div>' +
-                '</div>';
-            ligarFornecedor();
+            nota.textContent = 'Compra nova chega pelo agendamento. Confira aqui o que veio: quantidade, seriais e nota.';
+            alvo.innerHTML = '';
+            telaFornecedores(alvo, S);
         } else {
             nota.textContent = 'Devolução da loja. O ativo já existe no EBS: ' +
                 'bipe a etiqueta, a série ou o imobilizado.';
@@ -426,70 +416,8 @@ function renderNovo(c, S) {
                 '</div>';
             var campo = document.getElementById('scan');
             if (campo) { campo.onkeydown = aoBipar; campo.focus(); }
-        }
-        drawSession();
-    }
-
-    function ligarFornecedor() {
-        var desc = document.getElementById('fo-desc');
-        var serie = document.getElementById('fo-serie');
-        var po = document.getElementById('fo-po');
-        var nf = document.getElementById('fo-nf');
-        var fb = document.getElementById('fo-feedback');
-        var add = document.getElementById('fo-add');
-
-        add.onclick = async function () {
-            var valores = [['descrição do item', desc], ['serial number', serie],
-                           ['PO', po], ['NF', nf]];
-            var faltando = valores.filter(function (x) { return !x[1].value.trim(); });
-            if (faltando.length) {
-                fb.innerHTML = '<div class="alert alert-warning">Informe ' +
-                    faltando.map(function (x) { return x[0]; }).join(', ') + '.</div>';
-                faltando[0][1].focus();
-                return;
-            }
-            add.disabled = true;
-            var item = {
-                hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                empresa: '', imobilizado: '', ativo: '', asset_id: '', etiqueta: '',
-                numero_serie: serie.value.trim(),
-                descricao: desc.value.trim(),
-                po: po.value.trim(),
-                nf: nf.value.trim(),
-                categoria: 'NÃO CLASSIFICADA',
-                modelo: '',
-                fonte: FORNECEDOR,
-                destino_entrada: 'TRIAGEM',
-                subcategoria: '',
-                situacao: 'PRONTO PARA ENVIO',
-                _selected: true,
-                _fornecedor: true
-            };
-            // Série que já está na base é equipamento que o Spare já
-            // conhece: pode ser retrabalho de digitação ou nota repetida.
-            try {
-                var d = await S.api('/recebimento/check-duplicate', {
-                    method: 'POST', body: { identificador: item.numero_serie }
-                });
-                item._duplicadoLocal = d.duplicado ? d.existente : null;
-            } catch (_) { /* a conferência é um aviso, não um bloqueio */ }
-
-            sessionItems.unshift(item);
-            // PO e NF ficam: a mesma nota costuma trazer vários itens.
-            desc.value = '';
-            serie.value = '';
             drawSession();
-            fb.innerHTML = item._duplicadoLocal
-                ? '<div class="alert alert-warning">Item adicionado, mas a série <strong>' +
-                  S.esc(item.numero_serie) + '</strong> já existe na base.</div>'
-                : '<div class="alert alert-success">Item adicionado à sessão.</div>';
-            add.disabled = false;
-            desc.focus();
-        };
-
-        [desc, serie, po, nf].forEach(function (campo) {
-            campo.onkeydown = function (e) { if (e.key === 'Enter') add.click(); };
-        });
+        }
     }
 
     document.querySelectorAll('#rec-origem button').forEach(function (b) {
@@ -497,7 +425,7 @@ function renderNovo(c, S) {
             if (b.dataset.origem === origem) return;
             // Lote de compra e devolução de loja não se misturam: são notas,
             // conferências e destinos diferentes.
-            if (sessionItems.length) {
+            if (sessionItems.length && origem === REVERSA) {
                 S.toast('Envie ou descarte a sessão atual antes de trocar a origem.', 'warning');
                 return;
             }
@@ -1175,3 +1103,419 @@ async function renderModelos(c, S) {
 }
 /* As abas "Importar base histórica" e "Base local EBS" foram movidas para
    Parâmetros → Configuração Módulos (visível apenas para ADMIN). */
+
+
+/* ── Fornecedores: a chegada do agendamento ────────────────────── */
+function telaFornecedores(host, S) {
+    var e = S.esc;
+    var u = S.user() || {};
+    var pm = (u.permission_map || {}).recebimento || {};
+    var podeReceber = !!(u.is_admin || pm.can_create);
+    var B = '/recebimento/fornecedores';
+
+    host.innerHTML =
+        '<div class="card mb-3"><div class="card-header">Agendamentos de fornecedores</div><div class="card-body">' +
+            '<div class="filter-grid">' +
+                '<div class="form-group"><label for="rf-status">Situação</label>' +
+                    '<select id="rf-status" class="form-control">' +
+                    '<option value="AGENDADO">Agendados</option>' +
+                    '<option value="RECEBIDO">Recebidos</option>' +
+                    '<option value="">Todos</option></select></div>' +
+                '<div class="form-group"><label for="rf-busca">Buscar (NF, PO, fornecedor)</label>' +
+                    '<input id="rf-busca" class="form-control" placeholder="digite e Enter"></div>' +
+            '</div>' +
+            '<div id="rf-lista" class="mt-2"></div>' +
+        '</div></div>' +
+        '<div id="rf-conf" class="card mb-3" style="display:none">' +
+            '<div class="card-header" id="rf-conf-titulo">Conferência</div>' +
+            '<div class="card-body" id="rf-conf-corpo"></div>' +
+        '</div>';
+
+    var prep = null, agId = null, itens = [];
+
+    function fmtData(iso) {
+        if (!iso) return '—';
+        var p = iso.split('-');
+        return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : iso;
+    }
+
+    async function carregar() {
+        var alvo = document.getElementById('rf-lista');
+        alvo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Carregando…</div>';
+        var qs = '?status=' + encodeURIComponent(document.getElementById('rf-status').value) +
+                 '&busca=' + encodeURIComponent(document.getElementById('rf-busca').value.trim());
+        try {
+            var d = await S.api(B + qs);
+            alvo.innerHTML = '';
+            if (!d.total) { alvo.innerHTML = '<p class="text-muted">Nenhum agendamento nesta condição.</p>'; return; }
+            alvo.appendChild(S.table([
+                { key: 'pedidos', label: 'NF / PO', html: true, render: function (v) {
+                    return (v || []).map(function (p) { return '<b>' + e(p.nf || '—') + '</b> / ' + e(p.po); }).join('<br>') || '—';
+                } },
+                { key: 'bu', label: 'BU', render: function (v) { return v || '—'; } },
+                { key: 'fornecedor', label: 'Fornecedor' },
+                { key: 'estoque_destino_rotulo', label: 'Destino' },
+                { key: 'volumes', label: 'Vol.', render: function (v) { return v == null ? '—' : v; } },
+                { key: 'data_agendada', label: 'Agendada', render: fmtData },
+                { key: 'equipamentos', label: 'Equipamentos', html: true, render: function (v) {
+                    return (v || []).map(function (q) { return e(q.descricao) + ' <b>×' + e(q.quantidade) + '</b>'; }).join('<br>') || '—';
+                } },
+                { key: 'status', label: 'Situação', html: true, render: function (v, r) {
+                    var h = v === 'RECEBIDO' ? '<span class="badge badge-success">Recebido</span>' : '<span class="badge badge-warning">Agendado</span>';
+                    if (r.entrega_parcial) h += ' <span class="badge badge-warning">Entrega parcial</span>';
+                    return h;
+                } },
+                { key: 'data_recebimento', label: 'Recebimento', render: fmtData },
+                { key: 'id', label: '', html: true, render: function (v, r) {
+                    if (r.status !== 'AGENDADO' || !podeReceber) return '';
+                    return '<button class="btn btn-primary btn-sm rf-iniciar" data-id="' + e(String(v)) + '">Iniciar Recebimento</button>';
+                } }
+            ], d.itens));
+            alvo.querySelectorAll('.rf-iniciar').forEach(function (b) {
+                b.onclick = function () { iniciar(parseInt(b.dataset.id, 10)); };
+            });
+        } catch (x) {
+            alvo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>';
+        }
+    }
+
+    function fechar() {
+        document.getElementById('rf-conf').style.display = 'none';
+        document.getElementById('rf-conf-corpo').innerHTML = '';
+        prep = null; agId = null; itens = [];
+    }
+
+    async function iniciar(id) {
+        var card = document.getElementById('rf-conf');
+        var corpo = document.getElementById('rf-conf-corpo');
+        card.style.display = '';
+        corpo.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Consultando o pedido…</div>';
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+            prep = await S.api(B + '/' + id + '/preparar');
+        } catch (x) {
+            corpo.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>' +
+                '<div class="btn-row mt-2"><button type="button" class="btn btn-secondary btn-sm" id="rf-fechar-erro">Fechar</button></div>';
+            document.getElementById('rf-fechar-erro').onclick = fechar;
+            return;
+        }
+        agId = id;
+        itens = prep.itens.map(function (it) {
+            var q = it.manual ? it.quantidade_pedida : it.quantidade_pendente;
+            return Object.assign({}, it, { quantidade_recebida: q, seriais: [] });
+        });
+        montarConferencia();
+    }
+
+    function montarConferencia() {
+        var a = prep.agendamento;
+        var corpo = document.getElementById('rf-conf-corpo');
+        document.getElementById('rf-conf-titulo').textContent =
+            'Conferência — ' + (a.fornecedor || '') + ' · ' + (a.bu || 'sem BU');
+        var pos = (a.pedidos || []).map(function (p) { return 'PO ' + e(p.po) + (p.nf ? ' / NF ' + e(p.nf) : ''); }).join(' · ');
+        corpo.innerHTML =
+            '<div class="form-grid cols-3">' +
+                info('Fornecedor', a.fornecedor) + info('BU', a.bu || '—') + info('Destino', a.estoque_destino_rotulo) +
+            '</div>' +
+            '<p class="text-muted">' + pos + '</p>' +
+            '<p id="rf-etq" class="text-muted">Etiquetas disponíveis: <b>' + e(String(prep.etiquetas_disponiveis)) + '</b></p>' +
+            (prep.avisos.length ? '<div class="alert alert-warning">' + prep.avisos.map(e).join('<br>') + '</div>' : '') +
+            '<h3 class="mt-3">Notas fiscais</h3><div id="rf-notas"></div>' +
+            '<h3 class="mt-3">Itens imobilizados</h3><div id="rf-itens"></div>' +
+            (prep.tem_ebs ? '' : '<div class="btn-row mt-2"><button type="button" id="rf-add-item" class="btn btn-secondary btn-sm">+ Adicionar item</button></div>') +
+            (prep.nao_imobilizados.length ? '<h3 class="mt-3">Não imobilizados</h3><p class="text-muted">Seguem para o pagamento junto com a nota, sem etiqueta nem lançamento.</p><div id="rf-fora"></div>' : '') +
+            '<h3 class="mt-3">Resumo</h3><div id="rf-resumo"></div>' +
+            '<div class="form-group mt-2"><label for="rf-obs">Observação</label><input id="rf-obs" class="form-control"></div>' +
+            '<div class="btn-row mt-2">' +
+                '<button type="button" id="rf-confirmar" class="btn btn-primary">Confirmar recebimento e enviar ao Lançamento</button>' +
+                '<button type="button" id="rf-fechar" class="btn btn-secondary">Fechar</button>' +
+            '</div>' +
+            '<div id="rf-erro" class="alert alert-danger mt-2" hidden></div>' +
+            '<div id="rf-ok" class="mt-2"></div>';
+        montarNotas();
+        montarItens();
+        if (prep.nao_imobilizados.length) {
+            document.getElementById('rf-fora').appendChild(S.table([
+                { key: 'po', label: 'PO' }, { key: 'linha', label: 'Linha' }, { key: 'item_ebs', label: 'Item' },
+                { key: 'descricao', label: 'Descrição' }, { key: 'quantidade_pedida', label: 'Pedido' }
+            ], prep.nao_imobilizados));
+        }
+        if (!prep.tem_ebs) document.getElementById('rf-add-item').onclick = function () {
+            itens.push({ po: (a.pedidos[0] || {}).po || '', nf: (a.pedidos[0] || {}).nf || '', linha: null, item_ebs: '',
+                         descricao: '', unidade: '', quantidade_pedida: 1, quantidade_pendente: 1, quantidade_nf: null,
+                         imobilizado: true, manual: true, quantidade_recebida: 1, seriais: [] });
+            montarItens();
+        };
+        document.getElementById('rf-fechar').onclick = fechar;
+        document.getElementById('rf-confirmar').onclick = confirmar;
+        resumo();
+    }
+
+    function info(rot, val) {
+        return '<div class="form-group"><label>' + e(rot) + '</label><div style="padding:6px 0"><b>' + e(val || '—') + '</b></div></div>';
+    }
+
+    function montarNotas() {
+        var alvo = document.getElementById('rf-notas');
+        alvo.innerHTML = '';
+        if (!prep.notas.length) { alvo.innerHTML = '<p class="text-muted">O agendamento não tem NF informada.</p>'; return; }
+        prep.notas.forEach(function (n, i) {
+            var box = document.createElement('div');
+            box.className = 'mb-2';
+            box.style.cssText = 'border:1px solid var(--sp-border);border-radius:var(--sp-raio-campo);padding:10px';
+            box.innerHTML =
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label>NF</label><div style="padding:6px 0"><b>' + e(n.nf) + '</b></div></div>' +
+                    '<div class="form-group"><label>Chave de acesso (44 dígitos) <span class="text-muted rf-cont"></span></label>' +
+                        '<input class="form-control rf-chave" inputmode="numeric" maxlength="60" value="' + e(n.chave) + '"></div>' +
+                    '<div class="form-group"><label>Vencimento</label><input type="date" class="form-control rf-venc" value="' + e(n.vencimento) + '"></div>' +
+                '</div>' +
+                '<div class="btn-row" style="align-items:center;flex-wrap:wrap">' +
+                    (prep.certificado_bu ? '<button type="button" class="btn btn-primary btn-sm rf-sefaz">Buscar na SEFAZ</button>' : '') +
+                    '<button type="button" class="btn btn-secondary btn-sm rf-gravar">Gravar chave e vencimento</button>' +
+                    '<label class="btn btn-secondary btn-sm" style="margin:0">Enviar XML ou PDF<input type="file" class="rf-arquivo" accept=".xml,.pdf,application/xml,text/xml,application/pdf" style="display:none"></label>' +
+                '</div>' +
+                '<div class="rf-nota-estado mt-2"></div>';
+            alvo.appendChild(box);
+            var chave = box.querySelector('.rf-chave'), cont = box.querySelector('.rf-cont');
+            function contar() {
+                chave.value = chave.value.replace(/\D/g, '');
+                cont.textContent = chave.value.length ? '(' + chave.value.length + '/44)' : '';
+            }
+            chave.oninput = contar; contar();
+            async function gravar(buscar) {
+                var estado = box.querySelector('.rf-nota-estado');
+                estado.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> ' + (buscar ? 'Buscando na SEFAZ…' : 'Gravando…') + '</div>';
+                try {
+                    var d = await S.api(B + '/' + agId + '/nota', { method: 'POST',
+                        body: { nf: n.nf, chave: chave.value.trim(), vencimento: box.querySelector('.rf-venc').value } });
+                    prep.notas[i] = d;
+                    estadoNota(box, d);
+                    recasar();
+                } catch (x) { estado.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>'; }
+            }
+            box.querySelector('.rf-gravar').onclick = function () { gravar(false); };
+            if (prep.certificado_bu) box.querySelector('.rf-sefaz').onclick = function () {
+                if (chave.value.length !== 44) { chave.focus(); return S.toast('A chave tem 44 dígitos.', 'warning'); }
+                gravar(true);
+            };
+            box.querySelector('.rf-arquivo').onchange = async function () {
+                var f = this.files[0];
+                if (!f) return;
+                var estado = box.querySelector('.rf-nota-estado');
+                estado.innerHTML = '<div class="spinner-inline"><span class="spinner spinner-sm"></span> Lendo o arquivo…</div>';
+                var fd = new FormData();
+                fd.append('nf', n.nf);
+                fd.append('arquivo', f);
+                try {
+                    var d = await S.api(B + '/' + agId + '/nota/arquivo', { method: 'POST', body: fd });
+                    prep.notas[i] = d;
+                    if (d.chave) { chave.value = d.chave; contar(); }
+                    if (d.vencimento) box.querySelector('.rf-venc').value = d.vencimento;
+                    estadoNota(box, d);
+                    recasar();
+                } catch (x) { estado.innerHTML = '<div class="alert alert-danger">' + e(x.message) + '</div>'; }
+                this.value = '';
+            };
+            estadoNota(box, n);
+        });
+    }
+
+    function estadoNota(box, n) {
+        var estado = box.querySelector('.rf-nota-estado');
+        var partes = [];
+        if (n.origem_rotulo) partes.push('Origem: ' + e(n.origem_rotulo));
+        if (n.emitente) partes.push('Emitente: ' + e(n.emitente));
+        if (n.tem_xml) partes.push('<a href="' + S.apiUrl(B + '/' + agId + '/nota/' + encodeURIComponent(n.nf) + '/xml') + '" target="_blank">XML</a>');
+        if (n.tem_pdf) partes.push('<a href="' + S.apiUrl(B + '/' + agId + '/nota/' + encodeURIComponent(n.nf) + '/pdf') + '" target="_blank">PDF</a>');
+        var h = partes.length ? '<p class="text-muted" style="margin:0">' + partes.join(' · ') + '</p>' : '';
+        if (n.itens && n.itens.length) {
+            h += '<div class="table-wrapper mt-1"><table class="data-table"><thead><tr><th>Código</th><th>Descrição</th><th>Qtd na NF</th></tr></thead><tbody>' +
+                n.itens.map(function (it) { return '<tr><td>' + e(it.codigo) + '</td><td>' + e(it.descricao) + '</td><td>' + e(String(it.quantidade)) + '</td></tr>'; }).join('') +
+                '</tbody></table></div>';
+        }
+        if (n.erro) h += '<div class="alert alert-warning mt-1">' + e(n.erro) + '</div>';
+        estado.innerHTML = h;
+    }
+
+    function normalizar(s) { return String(s || '').replace(/^0+/, '').trim().toUpperCase(); }
+
+    function recasar() {
+        itens.forEach(function (it) {
+            var nota = prep.notas.filter(function (n) { return n.nf === it.nf; })[0];
+            it.quantidade_nf = null;
+            if (!nota || !nota.itens) return;
+            nota.itens.forEach(function (ni) {
+                if (it.quantidade_nf != null) return;
+                if (it.item_ebs && normalizar(ni.codigo) === normalizar(it.item_ebs)) it.quantidade_nf = ni.quantidade;
+            });
+            if (it.quantidade_nf == null) nota.itens.forEach(function (ni) {
+                if (it.quantidade_nf == null && it.descricao && String(ni.descricao).trim().toLowerCase() === it.descricao.trim().toLowerCase()) it.quantidade_nf = ni.quantidade;
+            });
+        });
+        montarItens();
+    }
+
+    function separar(texto) {
+        return String(texto || '').split(/[\s,;]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    }
+
+    function montarItens() {
+        var alvo = document.getElementById('rf-itens');
+        alvo.innerHTML = '';
+        if (!itens.length) { alvo.innerHTML = '<p class="text-muted">Nenhum item.</p>'; resumo(); return; }
+        itens.forEach(function (it, idx) {
+            var box = document.createElement('div');
+            box.className = 'mb-2';
+            box.style.cssText = 'border:1px solid var(--sp-border);border-radius:var(--sp-raio-campo);padding:10px';
+            var cab = it.manual
+                ? '<div class="filter-grid">' +
+                    '<div class="form-group"><label>Item EBS</label><input class="form-control rf-it-item" value="' + e(it.item_ebs) + '"></div>' +
+                    '<div class="form-group"><label>Descrição *</label><input class="form-control rf-it-desc" value="' + e(it.descricao) + '"></div>' +
+                    '<div class="form-group"><label>Pedido</label><input type="number" min="0" class="form-control rf-it-ped" value="' + e(String(it.quantidade_pedida)) + '"></div>' +
+                    '<div class="form-group"><label>Imobilizado</label><div style="padding:6px 0"><input type="checkbox" class="rf-it-imob"' + (it.imobilizado ? ' checked' : '') + '></div></div>' +
+                  '</div>'
+                : '<p style="margin:0 0 6px"><b>' + e(it.descricao) + '</b> <span class="text-muted">· item ' + e(it.item_ebs) +
+                    ' · PO ' + e(it.po) + (it.linha != null ? ' linha ' + e(String(it.linha)) : '') + (it.nf ? ' · NF ' + e(it.nf) : '') +
+                    (it.unidade ? ' · ' + e(it.unidade) : '') + '</span><br><span class="text-muted">pedido ' + e(String(it.quantidade_pedida)) +
+                    ' · já recebido no EBS ' + e(String(it.quantidade_recebida_ebs || 0)) + ' · pendente ' + e(String(it.quantidade_pendente)) +
+                    (it.quantidade_nf != null ? ' · na NF ' + e(String(it.quantidade_nf)) : '') + '</span></p>';
+            box.innerHTML = cab +
+                '<div class="rf-it-corpo">' +
+                '<div class="filter-grid">' +
+                    '<div class="form-group"><label>Quantidade recebida</label><input type="number" min="0" class="form-control rf-it-qtd" value="' + e(String(it.quantidade_recebida)) + '"></div>' +
+                    '<div class="form-group" style="grid-column:span 2"><label>Colar seriais (um por linha, ou separados por vírgula)</label>' +
+                        '<textarea class="form-control rf-it-cola" rows="2"></textarea></div>' +
+                '</div>' +
+                '<div class="rf-it-seriais"></div>' +
+                '<div class="rf-it-msg text-muted"></div>' +
+                '</div>' +
+                (it.manual ? '<div class="btn-row mt-1"><button type="button" class="btn btn-secondary btn-sm rf-it-rem">Remover item</button></div>' : '');
+            alvo.appendChild(box);
+
+            function seriais() {
+                var wrap = box.querySelector('.rf-it-seriais');
+                wrap.innerHTML = '';
+                if (!it.imobilizado) { box.querySelector('.rf-it-corpo').style.display = 'none'; return; }
+                box.querySelector('.rf-it-corpo').style.display = '';
+                var n = Math.max(0, parseInt(it.quantidade_recebida, 10) || 0);
+                it.seriais = it.seriais.slice(0, n);
+                while (it.seriais.length < n) it.seriais.push('');
+                var grade = document.createElement('div');
+                grade.className = 'form-grid cols-3';
+                it.seriais.forEach(function (s, k) {
+                    var inp = document.createElement('input');
+                    inp.className = 'form-control rf-serial';
+                    inp.placeholder = 'Serial ' + (k + 1);
+                    inp.value = s;
+                    inp.oninput = function () { it.seriais[k] = inp.value.trim(); marcarRepetidos(); resumo(); };
+                    grade.appendChild(inp);
+                });
+                wrap.appendChild(grade);
+                marcarRepetidos();
+            }
+            function marcarRepetidos() {
+                var todos = {};
+                itens.forEach(function (o) { (o.seriais || []).forEach(function (s) { if (s) todos[s.toUpperCase()] = (todos[s.toUpperCase()] || 0) + 1; }); });
+                box.querySelectorAll('.rf-serial').forEach(function (inp) {
+                    var rep = inp.value && todos[inp.value.trim().toUpperCase()] > 1;
+                    inp.style.borderColor = rep ? 'var(--sp-alerta)' : '';
+                    inp.title = rep ? 'Serial repetido' : '';
+                });
+            }
+            box.querySelector('.rf-it-qtd').onchange = function () {
+                it.quantidade_recebida = Math.max(0, parseInt(this.value, 10) || 0);
+                this.value = it.quantidade_recebida;
+                seriais(); resumo();
+            };
+            box.querySelector('.rf-it-cola').onchange = function () {
+                var lista = separar(this.value);
+                var k = 0;
+                for (var j = 0; j < it.seriais.length && k < lista.length; j++) {
+                    if (!it.seriais[j]) it.seriais[j] = lista[k++];
+                }
+                var msg = box.querySelector('.rf-it-msg');
+                var vazios = it.seriais.filter(function (s) { return !s; }).length;
+                msg.textContent = (lista.length - k > 0 ? 'Sobraram ' + (lista.length - k) + ' serial(is) além da quantidade. ' : '') +
+                                  (vazios ? 'Faltam ' + vazios + ' serial(is).' : 'Todos os seriais preenchidos.');
+                this.value = '';
+                seriais(); resumo();
+            };
+            if (it.manual) {
+                box.querySelector('.rf-it-item').oninput = function () { it.item_ebs = this.value.trim(); };
+                box.querySelector('.rf-it-desc').oninput = function () { it.descricao = this.value.trim(); };
+                box.querySelector('.rf-it-ped').onchange = function () { it.quantidade_pedida = Math.max(0, parseInt(this.value, 10) || 0); resumo(); };
+                box.querySelector('.rf-it-imob').onchange = function () { it.imobilizado = this.checked; seriais(); resumo(); };
+                box.querySelector('.rf-it-rem').onclick = function () { itens.splice(idx, 1); montarItens(); };
+            }
+            seriais();
+        });
+        resumo();
+    }
+
+    function resumo() {
+        var alvo = document.getElementById('rf-resumo');
+        if (!alvo) return;
+        var imob = itens.filter(function (i) { return i.imobilizado; });
+        var unidades = imob.reduce(function (s, i) { return s + (parseInt(i.quantidade_recebida, 10) || 0); }, 0);
+        var parcial = imob.filter(function (i) { return (parseInt(i.quantidade_recebida, 10) || 0) < (parseInt(i.quantidade_pedida, 10) || 0); });
+        var difNf = imob.filter(function (i) { return i.quantidade_nf != null && i.quantidade_nf !== (parseInt(i.quantidade_recebida, 10) || 0); });
+        var faltamSer = imob.reduce(function (s, i) { return s + (i.seriais || []).filter(function (x) { return !x; }).length; }, 0);
+        var h = '<p style="margin:0">' + unidades + ' unidade(s) imobilizada(s) × ' + e(String(prep.etiquetas_disponiveis)) + ' etiqueta(s) disponível(is).</p>';
+        if (unidades > prep.etiquetas_disponiveis) h += '<div class="alert alert-warning">Faltam ' + (unidades - prep.etiquetas_disponiveis) + ' etiqueta(s). Cadastre em Internalização → Cadastro de Etiquetas.</div>';
+        if (parcial.length) h += '<div class="alert alert-warning"><b>Entrega parcial:</b> ' + parcial.map(function (i) { return e(i.descricao || i.item_ebs) + ' (faltam ' + ((parseInt(i.quantidade_pedida, 10) || 0) - (parseInt(i.quantidade_recebida, 10) || 0)) + ')'; }).join('; ') + '.</div>';
+        if (difNf.length) h += '<div class="alert alert-warning">Recebido diferente da NF: ' + difNf.map(function (i) { return e(i.descricao || i.item_ebs) + ' (NF ' + i.quantidade_nf + ', conferido ' + i.quantidade_recebida + ')'; }).join('; ') + '.</div>';
+        if (faltamSer) h += '<p class="text-muted" style="margin:0">Faltam ' + faltamSer + ' serial(is).</p>';
+        alvo.innerHTML = h;
+    }
+
+    async function confirmar() {
+        var erro = document.getElementById('rf-erro');
+        erro.hidden = true;
+        var imob = itens.filter(function (i) { return i.imobilizado; });
+        var vistos = {};
+        for (var i = 0; i < imob.length; i++) {
+            var it = imob[i];
+            if (!it.descricao && it.manual) { erro.hidden = false; erro.textContent = 'Item sem descrição.'; return; }
+            var ser = (it.seriais || []).map(function (s) { return s.trim(); });
+            if (ser.some(function (s) { return !s; }) || ser.length !== (parseInt(it.quantidade_recebida, 10) || 0)) {
+                erro.hidden = false; erro.textContent = (it.descricao || it.item_ebs) + ': informe um serial para cada unidade recebida.';
+                var vazio = document.querySelectorAll('.rf-serial');
+                for (var k = 0; k < vazio.length; k++) if (!vazio[k].value.trim()) { vazio[k].focus(); break; }
+                return;
+            }
+            for (var j = 0; j < ser.length; j++) {
+                var chave = ser[j].toUpperCase();
+                if (vistos[chave]) { erro.hidden = false; erro.textContent = 'Serial ' + ser[j] + ' repetido.'; return; }
+                vistos[chave] = true;
+            }
+        }
+        var b = document.getElementById('rf-confirmar');
+        b.disabled = true;
+        var txt = b.textContent; b.textContent = 'Confirmando…';
+        try {
+            var d = await S.api(B + '/' + agId + '/confirmar', { method: 'POST', body: {
+                itens: itens.map(function (it) { return {
+                    po: it.po, nf: it.nf, linha: it.linha, item_ebs: it.item_ebs, descricao: it.descricao, unidade: it.unidade,
+                    quantidade_pedida: parseInt(it.quantidade_pedida, 10) || 0,
+                    quantidade_recebida: parseInt(it.quantidade_recebida, 10) || 0,
+                    imobilizado: !!it.imobilizado, seriais: it.imobilizado ? it.seriais : [] }; }),
+                observacao: document.getElementById('rf-obs').value.trim() } });
+            var h = '<div class="alert alert-' + (d.aviso ? 'warning' : 'success') + '">Recebimento confirmado. ' +
+                d.etiquetas_consumidas + ' etiqueta(s) consumida(s).' +
+                (d.entrega_parcial ? ' <b>Entrega parcial:</b> ' + d.faltantes.map(function (f) { return e(f.descricao) + ' (faltam ' + f.faltam + ')'; }).join('; ') + '.' : '') +
+                (d.aviso ? '<br>' + e(d.aviso) : '') + '</div>';
+            document.getElementById('rf-ok').innerHTML = h;
+            S.toast('Recebimento confirmado.', d.aviso ? 'warning' : 'success');
+            document.querySelectorAll('#rf-conf-corpo input, #rf-conf-corpo textarea, #rf-conf-corpo button').forEach(function (n) { if (n.id !== 'rf-fechar') n.disabled = true; });
+            carregar();
+        } catch (x) {
+            erro.hidden = false; erro.textContent = x.message;
+            b.disabled = false; b.textContent = txt;
+        }
+    }
+
+    document.getElementById('rf-status').onchange = carregar;
+    document.getElementById('rf-busca').onkeydown = function (ev) { if (ev.key === 'Enter') carregar(); };
+    carregar();
+}

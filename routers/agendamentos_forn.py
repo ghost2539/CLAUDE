@@ -1,12 +1,13 @@
 """Agendamentos de Fornecedores (menu Entrada) — API /api/agendamentos-forn.
 
-Cadastra o agendamento da entrega antes de a carga chegar e, quando ela
-chega, um botão confirma o recebimento: grava a data e passa o registro
-para a etapa de internalização (status RECEBIDO). Banco isolado em
-`db/agendamentos_forn.py`.
+Cadastra o agendamento da entrega antes de a carga chegar. A chegada em si
+é conferida em Recebimento → Fornecedores (`routers/recebimento_fornecedores.py`):
+quantidades, seriais e notas. Aquela rota grava neste banco passando por
+`registrar_recebimento` e `registrar_nota`, daqui — o botão mudou de tela,
+o dono do banco não. Banco isolado em `db/agendamentos_forn.py`.
 
 Permissão pelo módulo "agendamentos_forn": view lê, create cadastra, edit
-altera e confirma recebimento, admin exclui.
+altera, admin exclui.
 """
 from __future__ import annotations
 
@@ -216,7 +217,13 @@ def consultar_po(numero: str, req: Request, bu: str = ""):
     """
     _exigir(req, "view")
     check_rate_limit(req, "api")
+    return buscar_po_no_ebs(numero, bu)
 
+
+def buscar_po_no_ebs(numero: str, bu: str = "") -> dict:
+    """A consulta em si, sem sessão: a rota acima e o Recebimento →
+    Fornecedores usam a mesma, com os mesmos erros (404 PO não achada,
+    422 BU sem EBS, 503 sem credencial, 502 banco recusou)."""
     numero = (numero or "").strip()
     # O número da PO entra como bind variable, mas validar antes evita ida
     # ao banco por engano de digitação e dá erro melhor que o do driver.
@@ -405,24 +412,72 @@ def editar(item_id: int, body: AgendamentoIn, req: Request):
         return a.to_dict()
 
 
-@router.post("/{item_id}/receber")
-def confirmar_recebimento(item_id: int, req: Request):
-    """Confirma o recebimento: grava a data (hoje) e passa para internalização."""
-    sd = _exigir(req, "edit")
-    with db.SessionLocal.begin() as s:
-        a = s.get(db.Agendamento, item_id)
-        if not a:
-            raise HTTPException(404, "Agendamento não encontrado.")
-        if a.status == "RECEBIDO":
-            raise HTTPException(409, "Recebimento já confirmado.")
-        a.status = "RECEBIDO"
-        a.data_recebimento = date.today()
-        a.recebido_por = sd.get("username", "")
-        s.flush()
-        dado = a.to_dict()
-    _log.info("recebimento confirmado id=%s nf=%s por=%s ip=%s",
-              item_id, dado["nf"], sd.get("username", ""), client_ip(req))
-    return dado
+# A rota `POST /{id}/receber` saiu: confirmar a chegada sem conferir
+# quantidade, serial e nota era pular justamente a parte que existe para
+# pegar erro. O recebimento agora é em Recebimento → Fornecedores, e grava
+# aqui pelas funções abaixo.
+
+
+def registrar_recebimento(s, a, dados: dict, usuario: str):
+    """Grava a conferência da chegada e passa o agendamento a RECEBIDO.
+
+    `dados` já vem validado pela rota do Recebimento: `itens` (cada um com
+    `seriais`), `entrega_parcial`, `tem_nao_imobilizados`, `observacao`.
+    Roda dentro da sessão de quem chamou, para o recebimento e a mudança
+    de status entrarem na mesma transação.
+    """
+    if a.status == "RECEBIDO" or a.recebimento is not None:
+        raise HTTPException(409, "Este agendamento já foi recebido.")
+    rec = db.Recebimento(
+        recebido_por=usuario,
+        entrega_parcial=bool(dados.get("entrega_parcial")),
+        tem_nao_imobilizados=bool(dados.get("tem_nao_imobilizados")),
+        observacao=(dados.get("observacao") or "")[:500],
+    )
+    for it in dados.get("itens", []):
+        item = db.RecebimentoItem(
+            po=(it.get("po") or "")[:40], nf=(it.get("nf") or "")[:40],
+            linha=it.get("linha"), item_ebs=(it.get("item_ebs") or "")[:60],
+            descricao=(it.get("descricao") or "")[:200],
+            unidade=(it.get("unidade") or "")[:20],
+            quantidade_pedida=int(it.get("quantidade_pedida") or 0),
+            quantidade_nf=it.get("quantidade_nf"),
+            quantidade_recebida=int(it.get("quantidade_recebida") or 0),
+            imobilizado=bool(it.get("imobilizado", True)),
+        )
+        for serial in it.get("seriais", []):
+            item.unidades.append(db.RecebimentoUnidade(serial=str(serial)[:80]))
+        rec.itens.append(item)
+    a.recebimento = rec
+    a.status = "RECEBIDO"
+    a.data_recebimento = date.today()
+    a.recebido_por = usuario
+    s.flush()
+    return rec
+
+
+def registrar_nota(s, a, nf: str, usuario: str, **campos):
+    """Cria ou atualiza a nota `nf` do agendamento com o que se descobriu
+    dela (chave, vencimento, origem do XML, arquivos, itens, erro)."""
+    import json
+    nf = (nf or "").strip()[:40]
+    if not nf:
+        raise HTTPException(422, "Informe o número da NF.")
+    nota = next((n for n in a.notas if n.nf == nf), None)
+    if nota is None:
+        nota = db.Nota(nf=nf)
+        a.notas.append(nota)
+    for chave_campo in ("chave", "origem", "xml_arquivo", "pdf_arquivo", "emitente", "cstat", "erro"):
+        if chave_campo in campos and campos[chave_campo] is not None:
+            setattr(nota, chave_campo, str(campos[chave_campo]))
+    if "vencimento" in campos:
+        nota.vencimento = campos["vencimento"]
+    if "itens" in campos and campos["itens"] is not None:
+        nota.itens_json = json.dumps(campos["itens"], ensure_ascii=False)
+    nota.atualizado_em = db.utcnow()
+    nota.atualizado_por = usuario
+    s.flush()
+    return nota
 
 
 @router.delete("/{item_id}", status_code=204)

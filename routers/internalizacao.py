@@ -42,6 +42,7 @@ _XLSX_MIME = ("application/vnd.openxmlformats-officedocument."
 # ── Entrada validada ──────────────────────────────────────────────────────
 class AtivoIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    id: int | None = None
     ebs_item: str = ""
     descricao: str = ""
     plaqueta: str = ""
@@ -94,6 +95,92 @@ def _garantir_processo(s, agendamento_id: int):
     return proc
 
 
+def abrir_processo_do_recebimento(agendamento: dict, recebimento: dict,
+                                  usuario: str) -> dict:
+    """Abre o processo de lançamento a partir da conferência da chegada.
+
+    Uma linha por unidade recebida de item imobilizado, já com o que a
+    planilha do CSC Lançamentos vai pedir: item do EBS, descrição, serial,
+    PO/linha, NF — e a ETIQUETA, consumida do estoque na mesma transação
+    que cria o ativo (reservar numa e gravar noutra é como se perde
+    etiqueta quando a segunda falha).
+
+    Idempotente de propósito: a conferência grava no banco dos
+    Agendamentos e este processo no banco da Internalização, dois arquivos
+    sem transação em comum. Se o segundo passo falhar, o Lançamento chama
+    de novo ao abrir a tela — e encontra o processo pela metade ou
+    inexistente e completa, em vez de criar um segundo.
+    """
+    from sqlalchemy import select
+    db.ensure_db()
+    agendamento_id = int(agendamento["id"])
+    unidades = [
+        (it, serial)
+        for it in recebimento.get("itens", []) if it.get("imobilizado", True)
+        for serial in it.get("seriais", [])
+    ]
+    with db.SessionLocal.begin() as s:
+        proc = s.scalar(select(db.Processo).where(
+            db.Processo.agendamento_id == agendamento_id))
+        if proc and proc.ativos:
+            return proc.to_dict()
+        if proc is None:
+            proc = db.Processo(
+                agendamento_id=agendamento_id,
+                bu=agendamento.get("bu") or "",
+                fornecedor=agendamento.get("fornecedor") or "",
+                nf=agendamento.get("nf") or "",
+                estoque_destino=agendamento.get("estoque_destino") or "",
+                estoque_destino_rotulo=agendamento.get("estoque_destino_rotulo") or "",
+                data_recebimento=(date.fromisoformat(agendamento["data_recebimento"])
+                                  if agendamento.get("data_recebimento") else date.today()),
+                status="PENDENTE",
+            )
+            s.add(proc)
+            s.flush()
+        etiquetas = etiquetas_disponiveis(s, len(unidades))
+        if len(etiquetas) < len(unidades):
+            raise HTTPException(
+                409, f"Faltam {len(unidades) - len(etiquetas)} etiqueta(s) no estoque "
+                     f"para {len(unidades)} unidade(s). Cadastre em Internalização → "
+                     "Cadastro de Etiquetas e confirme de novo.")
+        agora = db.utcnow()
+        for (it, serial), etq in zip(unidades, etiquetas):
+            ativo = db.Ativo(
+                ebs_item=(it.get("item_ebs") or "")[:60],
+                descricao=(it.get("descricao") or "")[:200],
+                plaqueta=etq.codigo, numero_serie=str(serial)[:80],
+                po=(it.get("po") or "")[:40], linha=it.get("linha"),
+                nf=(it.get("nf") or "")[:40],
+                etiqueta_id=etq.id, etiqueta_local=etq.local or "",
+                item_id_recebimento=it.get("id"),
+                criado_por=usuario,
+            )
+            proc.ativos.append(ativo)
+            s.flush()
+            etq.situacao = db.ETIQUETA_CONSUMIDA
+            etq.consumida_em = agora
+            etq.ativo_id = ativo.id
+        proc.atualizado_em = agora
+        s.flush()
+        dado = proc.to_dict()
+    _log.info("processo aberto pelo recebimento agendamento=%s unidades=%s etiquetas=%s por=%s",
+              agendamento_id, len(unidades), len(etiquetas), usuario)
+    return dado
+
+
+def _devolver_etiqueta(s, ativo) -> None:
+    """A etiqueta de um ativo removido do lançamento volta ao estoque: ela
+    não foi colada em nada."""
+    if not ativo.etiqueta_id:
+        return
+    etq = s.get(db.Etiqueta, ativo.etiqueta_id)
+    if etq and etq.situacao == db.ETIQUETA_CONSUMIDA and etq.ativo_id == ativo.id:
+        etq.situacao = db.ETIQUETA_DISPONIVEL
+        etq.consumida_em = None
+        etq.ativo_id = None
+
+
 # ── Rotas ─────────────────────────────────────────────────────────────────
 @router.get("")
 @router.get("/")
@@ -128,6 +215,9 @@ def listar(req: Request, status: str = "", busca: str = ""):
                 "status": (p or {}).get("status", "PENDENTE"),
                 "status_rotulo": (p or {}).get("status_rotulo", "Pendente"),
                 "total_ativos": (p or {}).get("total_ativos", 0),
+                "entrega_parcial": bool(d.get("entrega_parcial")),
+                "sn_request_number": (p or {}).get("sn_request_number", ""),
+                "sn_pendente": bool((p or {}).get("sn_pendente")),
             })
     st = (status or "").strip().upper()
     if st in db.STATUS:
@@ -144,17 +234,27 @@ def listar(req: Request, status: str = "", busca: str = ""):
 def obter(agendamento_id: int, req: Request):
     """Abre a internalização de um agendamento (cria o processo se preciso) e
     devolve os ativos já lançados + os equipamentos esperados (para semear)."""
-    _exigir(req, "view")
+    sd = _exigir(req, "view")
     db.ensure_db()
+    # Conferência feita no Recebimento e processo ainda sem ativos: o
+    # segundo passo daquela rota não completou. Completa aqui, com a mesma
+    # função — idempotente, então abrir a tela duas vezes não duplica.
+    agf_db.ensure_db()
+    with agf_db.SessionLocal() as sa:
+        ag = sa.get(agf_db.Agendamento, agendamento_id)
+        ag_dado = ag.to_dict() if ag else None
+        rec_dado = ag.recebimento.to_dict() if ag and ag.recebimento else None
+        esperados = [e.to_dict() for e in ag.equipamentos] if ag else []
+        notas = [n.to_dict() for n in ag.notas] if ag else []
+    if ag_dado and rec_dado:
+        abrir_processo_do_recebimento(ag_dado, rec_dado, sd.get("username", ""))
     with db.SessionLocal.begin() as s:
         proc = _garantir_processo(s, agendamento_id)
         dado = proc.to_dict()
     # equipamentos esperados (do agendamento) para orientar o lançamento
-    agf_db.ensure_db()
-    with agf_db.SessionLocal() as sa:
-        ag = sa.get(agf_db.Agendamento, agendamento_id)
-        dado["equipamentos_esperados"] = (
-            [e.to_dict() for e in ag.equipamentos] if ag else [])
+    dado["equipamentos_esperados"] = esperados
+    dado["recebimento"] = rec_dado
+    dado["notas"] = notas
     return dado
 
 
@@ -166,15 +266,35 @@ def salvar(agendamento_id: int, body: SalvarIn, req: Request):
     usuario = sd.get("username", "")
     with db.SessionLocal.begin() as s:
         proc = _garantir_processo(s, agendamento_id)
-        proc.ativos.clear()
+        if proc.lancado_em:
+            raise HTTPException(409, "Este lançamento já foi enviado; os ativos não mudam mais aqui.")
+        # Linha que veio com `id` é uma que o recebimento criou: o que muda
+        # é o que a pessoa digita (item, descrição, serial). A etiqueta, a
+        # PO e a NF ficam — vieram do estoque e do pedido, não do teclado.
+        # Linha sem `id` é acréscimo manual; linha que não voltou saiu, e a
+        # etiqueta dela volta ao estoque.
+        atuais = {a.id: a for a in proc.ativos}
+        vistos = set()
         for a in body.ativos:
             if not (a.ebs_item or a.descricao or a.plaqueta or a.numero_serie):
                 continue   # linha em branco: ignora
+            existente = atuais.get(a.id) if a.id else None
+            if existente is not None:
+                existente.ebs_item, existente.descricao = a.ebs_item, a.descricao
+                existente.numero_serie = a.numero_serie
+                if not existente.etiqueta_id:
+                    existente.plaqueta = a.plaqueta
+                vistos.add(existente.id)
+                continue
             proc.ativos.append(db.Ativo(
                 ebs_item=a.ebs_item, descricao=a.descricao,
                 plaqueta=a.plaqueta, numero_serie=a.numero_serie,
                 criado_por=usuario,
             ))
+        for ativo_id, existente in atuais.items():
+            if ativo_id not in vistos:
+                _devolver_etiqueta(s, existente)
+                proc.ativos.remove(existente)
         proc.status = "CONCLUIDA" if body.concluir else "PENDENTE"
         proc.atualizado_em = db.utcnow()
         s.flush()
@@ -227,6 +347,10 @@ def excluir(agendamento_id: int, req: Request):
         nf = proc.nf or ""
         ativos = s.scalar(select(func.count(db.Ativo.id)).where(
             db.Ativo.processo_id == proc.id)) or 0
+        # As etiquetas consumidas por este processo voltam ao estoque:
+        # apagar o processo é dizer que nada disso foi colado.
+        for a in proc.ativos:
+            _devolver_etiqueta(s, a)
         s.delete(proc)
     _registrar_exclusao(sd, req, agendamento_id, nf, ativos)
     return None
@@ -643,40 +767,16 @@ def entrada_concluir(body: EntradaIn, req: Request):
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Cadastros que o lançamento consome
-#
-#  Duas listas mantidas pela área, antes de qualquer recebimento:
-#
-#  - Etiquetas de patrimônio: o estoque físico de plaquetas, com o local em
-#    que cada lote está guardado. Quando um recebimento vira lançamento, o
-#    portal pega as disponíveis na ordem de cadastro, uma por equipamento.
-#  - Itens imobilizados: o que, dentro de um pedido, É patrimônio. O resto
-#    da PO (cabo, fonte, acessório) é pago junto, mas não ganha etiqueta.
-#
-#  Caminhos de dois segmentos (`/cadastro/...`) de propósito: `/{id}` acima
-#  captura qualquer caminho de um segmento só, e `/etiquetas` viraria um
-#  422 de "id inválido" antes de chegar aqui.
-# ══════════════════════════════════════════════════════════════════════════
 
 import re as _re
 
-# Uma etiqueta é número, letra, hífen ou ponto. Espaço e vírgula separam
-# etiquetas na colagem em massa, então não podem fazer parte de uma.
 _ETIQUETA_RE = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,59}$")
 _MAX_ETIQUETAS_POR_VEZ = 5000
 
-
 def _separar_codigos(texto: str) -> list[str]:
-    """Códigos colados um por linha, ou separados por vírgula/ponto-e-vírgula/espaço."""
     return [c.strip() for c in _re.split(r"[\s,;]+", texto or "") if c.strip()]
 
-
 def _faixa(prefixo: str, de: str, ate: str) -> list[str]:
-    """Etiquetas em sequência: prefixo + números de `de` até `ate`.
-
-    A largura do número segue a digitação: de "000100" até "000250" gera
-    "000100", "000101"… — a etiqueta impressa tem os zeros, e a lista tem de
-    bater com o que está no rolo.
-    """
     de, ate = (de or "").strip(), (ate or "").strip()
     if not (de.isdigit() and ate.isdigit()):
         raise HTTPException(422, "Faixa: informe o número inicial e o final, só dígitos.")
@@ -688,9 +788,7 @@ def _faixa(prefixo: str, de: str, ate: str) -> list[str]:
     largura = len(de)
     return [f"{prefixo.upper()}{n:0{largura}d}" for n in range(ini, fim + 1)]
 
-
 class EtiquetasIn(BaseModel):
-    """Cadastro em massa: uma lista colada, uma faixa, ou os dois."""
     model_config = ConfigDict(extra="ignore")
     codigos: str = ""
     prefixo: str = ""
@@ -714,10 +812,8 @@ class EtiquetasIn(BaseModel):
             raise ValueError("Prefixo da faixa inválido (letras, números, ponto ou hífen).")
         return v
 
-
 @router.get("/cadastro/etiquetas")
 def etiquetas_listar(req: Request, situacao: str = "", busca: str = "", local: str = ""):
-    """O estoque de etiquetas, mais recentes primeiro, com os totais por situação."""
     _exigir(req, "view")
     db.ensure_db()
     from sqlalchemy import func, select
@@ -733,8 +829,6 @@ def etiquetas_listar(req: Request, situacao: str = "", busca: str = "", local: s
         if sit in db.ETIQUETA_SITUACOES:
             q = q.where(db.Etiqueta.situacao == sit)
         linhas = [e.to_dict() for e in s.scalars(q.limit(_MAX_ETIQUETAS_POR_VEZ)).all()]
-        # Os locais distintos alimentam o filtro da tela: quem procura "onde
-        # estão as etiquetas do armário 3" não deveria ter de digitar isso.
         locais = sorted({(l or "") for (l,) in s.execute(
             select(db.Etiqueta.local).distinct()).all() if l})
     if termo:
@@ -743,15 +837,8 @@ def etiquetas_listar(req: Request, situacao: str = "", busca: str = "", local: s
         linhas = [l for l in linhas if l["local"].lower() == loc]
     return {"total": len(linhas), "totais": totais, "locais": locais, "itens": linhas}
 
-
 @router.post("/cadastro/etiquetas", status_code=201)
 def etiquetas_cadastrar(body: EtiquetasIn, req: Request):
-    """Cadastra etiquetas em massa. Diz o que entrou e o que ficou de fora.
-
-    Repetida não é erro do lote inteiro: o rolo pode ter sido cadastrado
-    pela metade ontem. As novas entram; as que já existiam e as inválidas
-    voltam nomeadas para a pessoa conferir.
-    """
     sd = _exigir(req, "create")
     db.ensure_db()
     codigos = _separar_codigos(body.codigos)
@@ -763,8 +850,6 @@ def etiquetas_cadastrar(body: EtiquetasIn, req: Request):
         raise HTTPException(422, f"Máximo de {_MAX_ETIQUETAS_POR_VEZ} etiquetas por vez.")
 
     invalidas = [c for c in codigos if not _ETIQUETA_RE.match(c)]
-    # Guardada em maiúsculas: é como está impressa, e é o que faz "a-103" e
-    # "A-103" serem a mesma plaqueta no banco, não só na comparação.
     validas: list[str] = []
     vistos: set[str] = set()
     for c in codigos:
@@ -791,7 +876,6 @@ def etiquetas_cadastrar(body: EtiquetasIn, req: Request):
     return {"criadas": len(novas), "repetidas": repetidas[:200], "invalidas": invalidas[:200],
             "local": body.local}
 
-
 class EtiquetaEditIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     local: str = ""
@@ -804,10 +888,8 @@ class EtiquetaEditIn(BaseModel):
             raise ValueError("Informe o local.")
         return v
 
-
 @router.patch("/cadastro/etiquetas/{etiqueta_id}")
 def etiqueta_editar(etiqueta_id: int, body: EtiquetaEditIn, req: Request):
-    """Muda o local de uma etiqueta que ainda está no estoque."""
     _exigir(req, "edit")
     db.ensure_db()
     with db.SessionLocal.begin() as s:
@@ -819,9 +901,7 @@ def etiqueta_editar(etiqueta_id: int, body: EtiquetaEditIn, req: Request):
         e.local = body.local
         return e.to_dict()
 
-
 class EtiquetaMoverIn(BaseModel):
-    """Mudança de local em lote: o rolo inteiro foi para outro armário."""
     model_config = ConfigDict(extra="ignore")
     ids: list[int] = []
     local: str = ""
@@ -833,7 +913,6 @@ class EtiquetaMoverIn(BaseModel):
         if not v:
             raise ValueError("Informe o local.")
         return v
-
 
 @router.post("/cadastro/etiquetas/mover")
 def etiquetas_mover(body: EtiquetaMoverIn, req: Request):
@@ -850,7 +929,6 @@ def etiquetas_mover(body: EtiquetaMoverIn, req: Request):
                 movidas += 1
     return {"movidas": movidas, "local": body.local}
 
-
 class EtiquetaCancelarIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     motivo: str = ""
@@ -863,14 +941,8 @@ class EtiquetaCancelarIn(BaseModel):
             raise ValueError("Diga por que a etiqueta sai do estoque (perdida, danificada…).")
         return v
 
-
 @router.post("/cadastro/etiquetas/{etiqueta_id}/cancelar")
 def etiqueta_cancelar(etiqueta_id: int, body: EtiquetaCancelarIn, req: Request):
-    """Tira do estoque uma etiqueta que se perdeu ou estragou.
-
-    Não apaga: o número fica registrado como cancelado, para ninguém
-    cadastrá-lo de novo achando que está no rolo.
-    """
     sd = _exigir(req, "edit")
     db.ensure_db()
     with db.SessionLocal.begin() as s:
@@ -887,10 +959,8 @@ def etiqueta_cancelar(etiqueta_id: int, body: EtiquetaCancelarIn, req: Request):
               dado["codigo"], body.motivo, sd.get("username", ""), client_ip(req))
     return dado
 
-
 @router.delete("/cadastro/etiquetas/{etiqueta_id}", status_code=204)
 def etiqueta_excluir(etiqueta_id: int, req: Request):
-    """Apaga uma etiqueta cadastrada por engano. Só disponível, só admin."""
     _exigir(req, "admin")
     db.ensure_db()
     with db.SessionLocal.begin() as s:
@@ -902,15 +972,7 @@ def etiqueta_excluir(etiqueta_id: int, req: Request):
         s.delete(e)
     return None
 
-
 def etiquetas_disponiveis(s, quantidade: int) -> list:
-    """As próximas `quantidade` etiquetas do estoque, na ordem de cadastro.
-
-    É a função que o recebimento chama para consumir. Devolve os OBJETOS
-    (dentro da sessão de quem chamou), para o consumo e a gravação do ativo
-    acontecerem na mesma transação — reservar numa e gravar noutra é como
-    se perde etiqueta quando a segunda falha.
-    """
     from sqlalchemy import select
     if quantidade <= 0:
         return []
@@ -920,8 +982,6 @@ def etiquetas_disponiveis(s, quantidade: int) -> list:
         .order_by(db.Etiqueta.id.asc())
         .limit(quantidade)).all())
 
-
-# ── Itens imobilizados ────────────────────────────────────────────────────
 class ItemImobilizadoIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     item_ebs: str = ""
@@ -940,14 +1000,10 @@ class ItemImobilizadoIn(BaseModel):
     def _desc(cls, v: str) -> str:
         return " ".join((v or "").split())[:200]
 
-
 class ItensImobilizadosIn(BaseModel):
-    """Vários de uma vez: a lista estruturada, ou texto colado com
-    "código descrição" por linha (o código é o primeiro token)."""
     model_config = ConfigDict(extra="ignore")
     itens: list[ItemImobilizadoIn] = []
     texto: str = ""
-
 
 def _itens_do_texto(texto: str) -> list[ItemImobilizadoIn]:
     saida = []
@@ -964,7 +1020,6 @@ def _itens_do_texto(texto: str) -> list[ItemImobilizadoIn]:
             raise HTTPException(422, f"Linha inválida no texto colado: {linha[:80]!r}")
     return saida
 
-
 @router.get("/cadastro/itens-imobilizados")
 def imobilizados_listar(req: Request, busca: str = ""):
     _exigir(req, "view")
@@ -979,10 +1034,8 @@ def imobilizados_listar(req: Request, busca: str = ""):
                   if termo in l["item_ebs"].lower() or termo in l["descricao"].lower()]
     return {"total": len(linhas), "itens": linhas}
 
-
 @router.post("/cadastro/itens-imobilizados", status_code=201)
 def imobilizados_cadastrar(body: ItensImobilizadosIn, req: Request):
-    """Inclui itens na lista. Repetido atualiza a descrição, não duplica."""
     sd = _exigir(req, "create")
     db.ensure_db()
     itens = list(body.itens) + _itens_do_texto(body.texto)
@@ -1009,7 +1062,6 @@ def imobilizados_cadastrar(body: ItensImobilizadosIn, req: Request):
               criados, atualizados, usuario, client_ip(req))
     return {"criados": criados, "atualizados": atualizados}
 
-
 @router.patch("/cadastro/itens-imobilizados/{item_id}")
 def imobilizado_editar(item_id: int, body: ItemImobilizadoIn, req: Request):
     _exigir(req, "edit")
@@ -1026,10 +1078,8 @@ def imobilizado_editar(item_id: int, body: ItemImobilizadoIn, req: Request):
         i.item_ebs, i.descricao = body.item_ebs, body.descricao
         return i.to_dict()
 
-
 @router.delete("/cadastro/itens-imobilizados/{item_id}", status_code=204)
 def imobilizado_excluir(item_id: int, req: Request):
-    """Tira um item da lista: a partir daqui ele chega como acessório."""
     sd = _exigir(req, "admin")
     db.ensure_db()
     with db.SessionLocal.begin() as s:
@@ -1041,9 +1091,7 @@ def imobilizado_excluir(item_id: int, req: Request):
     _log.info("item imobilizado %s removido por=%s ip=%s", codigo, sd.get("username", ""), client_ip(req))
     return None
 
-
 def codigos_imobilizados(s) -> set[str]:
-    """Os códigos da lista, normalizados como a PO os traz. Para o recebimento."""
     from sqlalchemy import select
     return {db.normalizar_item_ebs(c) for (c,) in s.execute(
         select(db.ItemImobilizado.item_ebs)).all() if c}

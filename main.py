@@ -260,6 +260,17 @@ def create_app() -> FastAPI:
             exc, exc_info=True,
         )
 
+    # ── Recebimento de Fornecedores (a chegada do agendamento) ──────────
+    # Não tem banco próprio: escreve nos dois acima pelas funções deles.
+    try:
+        from routers.recebimento_fornecedores import router as recebimento_forn_router
+        app.include_router(recebimento_forn_router)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar o portal
+        logging.getLogger("recebimento_fornecedores").error(
+            "Módulo Recebimento de Fornecedores NÃO carregado (portal segue sem ele): %s",
+            exc, exc_info=True,
+        )
+
     # ── Cofre: o serviço enxerga os segredos? — só diagnóstico ──────────
     try:
         from routers.cofre import router as cofre_router

@@ -4,10 +4,12 @@
     python3 scripts/verificar_recebimento_origem.py
 
 Reversa é o que volta da loja: já existe no EBS e entra pela leitura.
-Fornecedor é compra nova, que não existe em lugar nenhum — por isso o
-operador digita descrição, série, PO e nota, e nenhum dos quatro é
-opcional: sem série o ativo é impossível de achar depois, sem nota é
-impossível de conferir com o financeiro.
+Fornecedor é compra nova — e compra nova chega pelo AGENDAMENTO: é
+conferida em Recebimento → Fornecedores (quantidade, serial, nota) e entra
+no estoque pela Internalização, já com patrimônio. A digitação solta de
+item de fornecedor no bulk-submit, que existia antes, é recusada: aceitar
+seria reabrir a porta que o agendamento fechou. O ciclo continua guardando
+a origem, a PO e a nota, porque a Entrada de Equipamento grava por lá.
 """
 from __future__ import annotations
 
@@ -77,27 +79,32 @@ def ultimo_ciclo() -> dict:
                 "fonte": c.asset.source}
 
 
-print("[1] Fornecedor exige o que o EBS não tem como dar")
+print("[1] Compra de fornecedor não entra mais digitada por aqui")
 COMPRA = {"descricao": "Coletor TC22", "numero_serie": "SN-NOVO-1", "po": "PO-900",
           "nf": "NF-77", "destino_entrada": "TRIAGEM", "subcategoria": "Coletor"}
-for campo, rotulo in (("descricao", "descrição do item"), ("numero_serie", "serial number"),
-                      ("po", "PO"), ("nf", "NF")):
-    item = dict(COMPRA)
-    item[campo] = ""
-    r = enviar("FORNECEDOR", [item])
-    checar(r.status_code == 400 and rotulo in r.json().get("detail", ""),
-           f"sem {rotulo}: recusa dizendo o que falta")
-checar(enviar("PIRATA", [dict(COMPRA)]).status_code == 422, "origem inventada é recusada")
-
-print("\n[2] Compra gravada")
 r = enviar("FORNECEDOR", [dict(COMPRA)])
-checar(r.status_code == 200 and r.json()["criados"] == 1, "com os quatro campos, grava")
+checar(r.status_code == 400 and "agendamento" in r.json().get("detail", "").lower(),
+       f"origem FORNECEDOR é recusada apontando o agendamento ({r.status_code})")
+checar(enviar("PIRATA", [dict(COMPRA)]).status_code == 422, "origem inventada é recusada")
+with SessionLocal() as s:
+    checar(s.scalar(select(ReceiptCycle)) is None, "e nada foi gravado")
+
+print("\n[2] O ciclo continua sabendo de origem, PO e nota (a Entrada de Equipamento grava por lá)")
+from db.portal import Asset, Movement  # noqa: E402
+from datetime import date as _date  # noqa: E402
+with SessionLocal.begin() as s:
+    ativo = Asset(company="Renner", tag_number="ETQ-F1", serial_number="SN-NOVO-1",
+                  description="Coletor TC22", source="FORNECEDOR")
+    s.add(ativo)
+    s.flush()
+    iso = _date.today().isocalendar()
+    s.add(ReceiptCycle(asset_id=ativo.id, cycle_number=1, received_date=_date.today(),
+                       iso_week=f"{iso.year}-S{iso.week:02d}", status="RECEBIDO",
+                       origem_entrada="FORNECEDOR", po="PO-900", nf="NF-77",
+                       created_by="admin.teste", updated_by="admin.teste"))
 ciclo = ultimo_ciclo()
-checar(ciclo["origem"] == "FORNECEDOR", "origem fica no ciclo, que é o evento de entrada")
-checar(ciclo["po"] == "PO-900" and ciclo["nf"] == "NF-77", "PO e nota ficam no ciclo")
-checar(ciclo["serie"] == "SN-NOVO-1" and ciclo["descricao"] == "Coletor TC22",
-       "série e descrição ficam no ativo")
-checar(ciclo["fonte"] == "FORNECEDOR", "a fonte do ativo é o fornecedor, não o EBS")
+checar(ciclo["origem"] == "FORNECEDOR" and ciclo["po"] == "PO-900" and ciclo["nf"] == "NF-77",
+       "origem, PO e nota ficam no ciclo, que é o evento de entrada")
 registro = c.get("/api/recebimentos", cookies=CK).json()["registros"][0]
 checar(registro["origem_entrada"] == "FORNECEDOR" and registro["po"] == "PO-900"
        and registro["nf"] == "NF-77", "a listagem devolve origem, PO e nota")
@@ -120,11 +127,9 @@ checar(enviar("REVERSA", [{"etiqueta": "ETQ-3", "numero_serie": "SN-REV-3",
 print("\n[4] A tela")
 tela = (RAIZ / "modulos/recebimento.js").read_text(encoding="utf-8")
 checar("id=\"rec-origem\"" in tela, "a tela começa pela escolha da origem")
-for campo in ("fo-desc", "fo-serie", "fo-po", "fo-nf"):
-    checar(campo in tela, f"o formulário do fornecedor tem {campo}")
-checar("Envie ou descarte a sessão atual antes de trocar a origem" in tela,
-       "não deixa misturar compra com devolução na mesma sessão")
-checar("origem: origem" in tela, "o envio leva a origem")
+for campo in ("fo-desc", "fo-serie", "fo-po", "fo-nf", "ligarFornecedor"):
+    checar(campo not in tela, f"o formulário solto do fornecedor ({campo}) não existe mais")
+checar("/recebimento/fornecedores" in tela, "a origem Fornecedores lista os agendamentos")
 menu = (RAIZ / "static/index.html").read_text(encoding="utf-8")
 entrada = menu.split('sidebar-grupo-titulo">Entrada</div>')[1].split("</div>")[0]
 checar("recebimento" in entrada and "identificacao" in entrada and "reversa" not in entrada,

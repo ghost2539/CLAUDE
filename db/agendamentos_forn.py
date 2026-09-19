@@ -10,7 +10,19 @@ Tabelas:
 - `agf_agendamento` — um agendamento (a entrega);
 - `agf_pedido` — uma linha por PO do agendamento, com a NF que a cobre
   (a mesma NF pode aparecer em várias POs);
-- `agf_equipamento` — uma linha por equipamento do agendamento (n itens).
+- `agf_equipamento` — uma linha por equipamento do agendamento (n itens);
+- `agf_recebimento` — a conferência feita na chegada (Recebimento →
+  Fornecedores): quando, quem, se foi entrega parcial;
+- `agf_recebimento_item` — cada item conferido, com o pedido, o que a NF
+  traz e o que chegou;
+- `agf_recebimento_unidade` — uma linha por unidade, com o serial;
+- `agf_nota` — cada NF do agendamento: chave de acesso, vencimento, de
+  onde veio o XML e os arquivos guardados.
+
+Quem grava o recebimento é a rota de Recebimento → Fornecedores, mas
+passando pela função deste módulo (`routers/agendamentos_forn.py::
+registrar_recebimento`): a regra de "cada módulo escreve no próprio
+banco" continua valendo — o que muda é quem aperta o botão.
 """
 from __future__ import annotations
 
@@ -19,7 +31,8 @@ import threading
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Date, DateTime, ForeignKey, Integer, String, create_engine, event,
+    Boolean, Date, DateTime, ForeignKey, Integer, String, Text, create_engine,
+    event,
 )
 from db._esquema import UtcDateTime
 from sqlalchemy.orm import (
@@ -44,8 +57,13 @@ DESTINOS = {
     "INAUGURACAO_REFORMAS": "Inauguração/Reformas",
     "REPOSICAO": "Reposição",
 }
-# Ciclo: agendado → (confirma recebimento) → recebido (segue p/ internalização).
+# Ciclo: agendado → (conferência na chegada) → recebido (segue p/ internalização).
 STATUS = {"AGENDADO": "Agendado", "RECEBIDO": "Recebido"}
+
+# De onde veio o XML da nota. SEFAZ é a busca pela chave de acesso com o
+# certificado da BU; ARQUIVO é o upload (Youcom, que não tem certificado, ou
+# qualquer BU quando a SEFAZ não responde); DIGITADA é só o número, sem XML.
+NOTA_ORIGENS = {"SEFAZ": "SEFAZ", "ARQUIVO": "Arquivo enviado", "DIGITADA": "Digitada"}
 
 _engine = None
 _factory = None
@@ -123,7 +141,18 @@ class Agendamento(Base):
         order_by="Equipamento.id",
     )
 
+    # No máximo um: a conferência da chegada. Entrega parcial não reabre o
+    # agendamento — o restante, quando vier, é outra NF e outro agendamento.
+    recebimento: Mapped["Recebimento | None"] = relationship(
+        back_populates="agendamento", cascade="all, delete-orphan", uselist=False,
+    )
+    notas: Mapped[list["Nota"]] = relationship(
+        back_populates="agendamento", cascade="all, delete-orphan",
+        order_by="Nota.id",
+    )
+
     def to_dict(self) -> dict:
+        rec = self.recebimento
         return {
             "id": self.id,
             "bu": self.bu or "",
@@ -145,6 +174,10 @@ class Agendamento(Base):
             # sumiriam na edição.
             "pedidos": [p.to_dict() for p in self.pedidos],
             "equipamentos": [e.to_dict() for e in self.equipamentos],
+            # A conferência da chegada, quando houve. A lista do Recebimento
+            # mostra "Entrega parcial" por aqui.
+            "entrega_parcial": bool(rec.entrega_parcial) if rec else False,
+            "recebimento_id": rec.id if rec else None,
         }
 
 
@@ -196,6 +229,158 @@ class Equipamento(Base):
     def to_dict(self) -> dict:
         return {"id": self.id, "descricao": self.descricao or "",
                 "quantidade": self.quantidade or 0}
+
+
+class Recebimento(Base):
+    """A conferência feita quando a carga chega.
+
+    É o que separa "o fornecedor disse que vinha" de "chegou, e isto":
+    por item, quanto o pedido pedia, quanto a nota traz e quanto veio; por
+    unidade, o serial. A entrega parcial fica marcada aqui, sem travar o
+    fluxo — o financeiro precisa saber, o estoque não precisa esperar.
+    """
+
+    __tablename__ = "agf_recebimento"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agendamento_id: Mapped[int] = mapped_column(
+        ForeignKey("agf_agendamento.id", ondelete="CASCADE"), unique=True, index=True)
+    recebido_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    recebido_por: Mapped[str] = mapped_column(String(80), default="")
+    entrega_parcial: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A PO trouxe também o que não é imobilizado (cabo, fonte): fica
+    # registrado que houve, para quem confere o pagamento.
+    tem_nao_imobilizados: Mapped[bool] = mapped_column(Boolean, default=False)
+    observacao: Mapped[str] = mapped_column(String(500), default="")
+
+    agendamento: Mapped["Agendamento"] = relationship(back_populates="recebimento")
+    itens: Mapped[list["RecebimentoItem"]] = relationship(
+        back_populates="recebimento", cascade="all, delete-orphan",
+        order_by="RecebimentoItem.id",
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "agendamento_id": self.agendamento_id,
+            "recebido_em": self.recebido_em.isoformat() if self.recebido_em else "",
+            "recebido_por": self.recebido_por or "",
+            "entrega_parcial": bool(self.entrega_parcial),
+            "tem_nao_imobilizados": bool(self.tem_nao_imobilizados),
+            "observacao": self.observacao or "",
+            "itens": [i.to_dict() for i in self.itens],
+        }
+
+
+class RecebimentoItem(Base):
+    __tablename__ = "agf_recebimento_item"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recebimento_id: Mapped[int] = mapped_column(
+        ForeignKey("agf_recebimento.id", ondelete="CASCADE"), index=True)
+    po: Mapped[str] = mapped_column(String(40), default="")
+    nf: Mapped[str] = mapped_column(String(40), default="")
+    # Linha do pedido no EBS e código do item: é o que a planilha do CSC
+    # Lançamentos chama de "Item". Youcom não tem EBS: fica o que foi digitado.
+    linha: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_ebs: Mapped[str] = mapped_column(String(60), default="")
+    descricao: Mapped[str] = mapped_column(String(200), default="")
+    unidade: Mapped[str] = mapped_column(String(20), default="")
+    quantidade_pedida: Mapped[int] = mapped_column(Integer, default=0)
+    quantidade_nf: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quantidade_recebida: Mapped[int] = mapped_column(Integer, default=0)
+    imobilizado: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    recebimento: Mapped["Recebimento"] = relationship(back_populates="itens")
+    unidades: Mapped[list["RecebimentoUnidade"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan",
+        order_by="RecebimentoUnidade.id",
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "po": self.po or "", "nf": self.nf or "",
+            "linha": self.linha, "item_ebs": self.item_ebs or "",
+            "descricao": self.descricao or "", "unidade": self.unidade or "",
+            "quantidade_pedida": self.quantidade_pedida or 0,
+            "quantidade_nf": self.quantidade_nf,
+            "quantidade_recebida": self.quantidade_recebida or 0,
+            "imobilizado": bool(self.imobilizado),
+            "seriais": [u.serial for u in self.unidades],
+        }
+
+
+class RecebimentoUnidade(Base):
+    """Uma unidade física recebida: o serial. É o elo com o ativo do
+    lançamento (que nasce com este serial e a etiqueta consumida)."""
+
+    __tablename__ = "agf_recebimento_unidade"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("agf_recebimento_item.id", ondelete="CASCADE"), index=True)
+    serial: Mapped[str] = mapped_column(String(80), index=True)
+
+    item: Mapped["RecebimentoItem"] = relationship(back_populates="unidades")
+
+
+class Nota(Base):
+    """Uma NF do agendamento e o que se sabe dela.
+
+    Nasce na conferência (o número já veio do agendamento) e ganha a chave
+    de acesso quando alguém bipa a nota. Com a chave e o certificado da BU,
+    o XML vem da SEFAZ; sem certificado (Youcom), alguém envia o arquivo.
+    Os arquivos ficam em `data/tmp/recebimento_forn/<agendamento>/` por
+    cinco dias — o caminho gravado aqui é relativo a essa pasta.
+    """
+
+    __tablename__ = "agf_nota"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agendamento_id: Mapped[int] = mapped_column(
+        ForeignKey("agf_agendamento.id", ondelete="CASCADE"), index=True)
+    nf: Mapped[str] = mapped_column(String(40), index=True)
+    chave: Mapped[str] = mapped_column(String(44), default="", index=True)
+    vencimento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    origem: Mapped[str] = mapped_column(String(20), default="")
+    xml_arquivo: Mapped[str] = mapped_column(String(200), default="")
+    pdf_arquivo: Mapped[str] = mapped_column(String(200), default="")
+    # O que o XML diz dos itens (código, descrição, quantidade), em JSON:
+    # é contra isto que a conferência compara o que chegou.
+    itens_json: Mapped[str] = mapped_column(Text, default="")
+    emitente: Mapped[str] = mapped_column(String(160), default="")
+    cstat: Mapped[str] = mapped_column(String(10), default="")
+    erro: Mapped[str] = mapped_column(String(300), default="")
+    atualizado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    atualizado_por: Mapped[str] = mapped_column(String(80), default="")
+
+    agendamento: Mapped["Agendamento"] = relationship(back_populates="notas")
+
+    def itens(self) -> list[dict]:
+        import json
+        try:
+            dados = json.loads(self.itens_json or "[]")
+        except ValueError:
+            return []
+        return dados if isinstance(dados, list) else []
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "nf": self.nf or "",
+            "chave": self.chave or "",
+            "vencimento": self.vencimento.isoformat() if self.vencimento else "",
+            "origem": self.origem or "",
+            "origem_rotulo": NOTA_ORIGENS.get(self.origem or "", ""),
+            "tem_xml": bool(self.xml_arquivo),
+            "tem_pdf": bool(self.pdf_arquivo),
+            "itens": self.itens(),
+            "emitente": self.emitente or "",
+            "cstat": self.cstat or "",
+            "erro": self.erro or "",
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else "",
+        }
 
 
 def init_db() -> None:

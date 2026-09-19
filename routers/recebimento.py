@@ -320,22 +320,15 @@ def receipt_bulk_submit(body: BulkSubmitIn, req: Request):
     if not body.items:
         raise HTTPException(400, "Nenhum ativo para enviar.")
 
-    # Compra de fornecedor não passa pelo EBS: o que identifica o
-    # equipamento é o que o operador digitou. Sem isso o ativo entraria sem
-    # série (impossível de achar depois) ou sem nota (impossível de
-    # conferir com o financeiro).
+    # Compra de fornecedor não entra mais por aqui digitada item a item:
+    # chega pelo agendamento, é conferida em Recebimento → Fornecedores
+    # (quantidade, serial e nota) e entra no estoque pela Internalização →
+    # Entrada de Equipamento, já com patrimônio. Aceitar a digitação solta
+    # de novo seria reabrir a porta que o agendamento fechou.
     if body.origem == ORIGEM_FORNECEDOR:
-        for pos, item in enumerate(body.items, start=1):
-            faltando = [rotulo for rotulo, valor in (
-                ("descrição do item", item.descricao),
-                ("serial number", item.numero_serie),
-                ("PO", item.po),
-                ("NF", item.nf),
-            ) if not (valor or "").strip()]
-            if faltando:
-                ident = (item.numero_serie or item.descricao or f"item {pos}").strip()
-                raise HTTPException(
-                    400, f"{ident}: informe {', '.join(faltando)}.")
+        raise HTTPException(
+            400, "Compra de fornecedor entra pelo agendamento: confira a chegada em "
+                 "Recebimento → Fornecedores. Aqui só a reversa.")
 
     # Destino de entrada de cada ativo, decidido aqui e não adivinhado
     # depois. Em triagem, a subcategoria tem de estar na lista: é ela que

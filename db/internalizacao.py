@@ -144,6 +144,21 @@ class Processo(Base):
     atualizado_em: Mapped[datetime | None] = mapped_column(
         UtcDateTime(), nullable=True)
 
+    # ── Lançamento: planilha e chamado ──────────────────────────────────
+    # O OK do lançamento gera a planilha do CSC Lançamentos e abre o chamado
+    # no ServiceNow. Os dois ficam registrados aqui porque a falha do segundo
+    # não desfaz o primeiro: o processo conclui, e o chamado se reenvia.
+    lancado_por: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    lancado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    planilha_arquivo: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    planilha_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    sn_request_number: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    sn_request_sys_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    sn_ritm_number: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    sn_ritm_sys_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    sn_enviado_em: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    sn_erro: Mapped[str] = mapped_column(String(300), default="", server_default="")
+
     ativos: Mapped[list["Ativo"]] = relationship(
         back_populates="processo", cascade="all, delete-orphan",
         order_by="Ativo.id",
@@ -164,6 +179,17 @@ class Processo(Base):
             "criado_em": self.criado_em.isoformat() if self.criado_em else "",
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else "",
             "total_ativos": len(self.ativos),
+            "lancado_por": self.lancado_por or "",
+            "lancado_em": self.lancado_em.isoformat() if self.lancado_em else "",
+            "planilha_arquivo": self.planilha_arquivo or "",
+            "planilha_em": self.planilha_em.isoformat() if self.planilha_em else "",
+            "sn_request_number": self.sn_request_number or "",
+            "sn_ritm_number": self.sn_ritm_number or "",
+            "sn_enviado_em": self.sn_enviado_em.isoformat() if self.sn_enviado_em else "",
+            "sn_erro": self.sn_erro or "",
+            # O chamado está pendente quando o lançamento aconteceu e o
+            # ServiceNow ainda não confirmou: é o que liga o botão de reenvio.
+            "sn_pendente": bool(self.lancado_em) and not self.sn_request_sys_id,
         }
         if com_ativos:
             d["ativos"] = [a.to_dict() for a in self.ativos]
@@ -182,6 +208,16 @@ class Ativo(Base):
     numero_serie: Mapped[str] = mapped_column(String(80), default="")
     criado_em: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     criado_por: Mapped[str] = mapped_column(String(80), default="")
+    # ── De onde veio (recebimento pelo agendamento) ─────────────────────
+    # PO e linha do pedido, a NF que cobre a unidade, e a etiqueta que o
+    # recebimento consumiu do estoque (com o local onde ela estava, que é o
+    # que quem vai colar precisa saber).
+    po: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    linha: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nf: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    etiqueta_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    etiqueta_local: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    item_id_recebimento: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # ── Depois do lançamento ────────────────────────────────────────────
     etapa: Mapped[str] = mapped_column(
@@ -215,6 +251,11 @@ class Ativo(Base):
             "descricao": self.descricao or "",
             "plaqueta": self.plaqueta or "",
             "numero_serie": self.numero_serie or "",
+            "po": self.po or "",
+            "linha": self.linha,
+            "nf": self.nf or "",
+            "etiqueta_id": self.etiqueta_id,
+            "etiqueta_local": self.etiqueta_local or "",
             "etapa": self.etapa or ETAPA_PATRIMONIO,
             "etapa_rotulo": ETAPAS.get(self.etapa or ETAPA_PATRIMONIO, ""),
             "ebs_encontrado_em": (self.ebs_encontrado_em.isoformat()

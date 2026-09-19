@@ -130,8 +130,8 @@ agrupadas pela etapa do ciclo do ativo. A rota entre crases é a que o menu usa
 ### Entrada
 | Módulo | Rota | O que faz |
 |---|---|---|
-| **Recebimento** | `#recebimento` | *Novo Recebimento* (Fornecedores ou Reversa) · *Base de Recebimentos* · *Dashboard* · *Lotes* · *Cadastro de modelos* (classificação) · *Importar base histórica* · *Base local EBS*. Cada mudança gera **Movimento** (auditoria). |
-| **Agendamentos Forn.** | `#agendamentos_forn` | Agendamento da entrega do fornecedor, com PO e liberação consultadas no EBS (a liberação é o que vem depois do hífen: `2570313-25`). |
+| **Recebimento** | `#recebimento` | *Novo Recebimento* — **Reversa** (bipe do ativo que volta da loja) ou **Fornecedores** (a chegada do agendamento: itens da PO lidos no EBS e filtrados pela lista de imobilizados, quantidade e serial por unidade, chave/arquivo da NF, entrega parcial; ao confirmar consome etiquetas e abre o Lançamento — contrato em `docs/RECEBIMENTO_FORNECEDORES.md`) · *Base de Recebimentos* · *Dashboard* · *Lotes* · *Cadastro de modelos* (classificação) · *Importar base histórica* · *Base local EBS*. Cada mudança gera **Movimento** (auditoria). |
+| **Agendamentos Forn.** | `#agendamentos_forn` | Agendamento da entrega do fornecedor, com PO e liberação consultadas no EBS (a liberação é o que vem depois do hífen: `2570313-25`). A chegada é confirmada em Recebimento → Fornecedores, não aqui. |
 | **Identificação** | `#identificacao` | *Gerar Lote* · *Identificação A4* (PDF) · *Impressão Zebra* (ZPL) · *Impressoras*. |
 
 ### Internalização

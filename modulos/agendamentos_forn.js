@@ -366,8 +366,6 @@ window.SPARE_MODULES.agendamentos_forn = {
                     '<th>Recebimento</th><th></th>' +
                     '</tr></thead><tbody>' + d.itens.map(linhaHtml).join('') + '</tbody></table></div>';
                 d.itens.forEach(function (a) {
-                    var rc = document.getElementById('agf-receber-' + a.id);
-                    if (rc) rc.onclick = function () { receber(a.id); };
                     var ed = document.getElementById('agf-editar-' + a.id);
                     if (ed) ed.onclick = function () { abrirForm(a); };
                     var ex = document.getElementById('agf-excluir-' + a.id);
@@ -387,8 +385,6 @@ window.SPARE_MODULES.agendamentos_forn = {
                 : '<span class="badge badge-warning">Agendado</span>';
             var acoes = '';
             if (a.status !== 'RECEBIDO' && podeEditar)
-                acoes += '<button id="agf-receber-' + a.id + '" class="btn btn-primary btn-sm">Confirmar recebimento</button> ';
-            if (a.status !== 'RECEBIDO' && podeEditar)
                 acoes += '<button id="agf-editar-' + a.id + '" class="btn btn-secondary btn-sm">Editar</button> ';
             if (podeExcluir)
                 acoes += '<button id="agf-excluir-' + a.id + '" class="btn btn-secondary btn-sm">Excluir</button>';
@@ -407,15 +403,6 @@ window.SPARE_MODULES.agendamentos_forn = {
             if (!iso) return '';
             var p = iso.split('-');
             return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : iso;
-        }
-
-        async function receber(id) {
-            if (!confirm('Confirmar o recebimento deste agendamento? Ele seguirá para a internalização.')) return;
-            try {
-                await S.api('/agendamentos-forn/' + id + '/receber', { method: 'POST' });
-                S.toast('Recebimento confirmado.', 'success');
-                carregar();
-            } catch (x) { S.toast(x.message, 'error'); }
         }
 
         async function excluir(id) {
