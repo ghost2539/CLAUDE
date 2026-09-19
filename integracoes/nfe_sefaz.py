@@ -166,6 +166,8 @@ def _carregar(bu: str) -> tuple[Certificado, bytes, str] | None:
     try:
         with open(caminho, "rb") as f:
             dados = f.read()
+    except FileNotFoundError:
+        return None
     except OSError as exc:
         raise NfeSemCertificado(
             f"O certificado da BU {bu} não pôde ser lido em {caminho}: "

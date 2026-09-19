@@ -258,10 +258,11 @@ class Settings:
         _sqlite("internalizacao"),
     )
 
-    # Certificado A1 da NF-e: chaves exclusivas, no data/environment (docs/NFE_CERTIFICADO.md).
-    NFE_CERT_RENNER_PFX: str = _env("NFE_CERT_RENNER_PFX", "")
+    # Certificado A1 da NF-e: .pfx em data/certificados/, senha no data/environment (docs/NFE_CERTIFICADO.md).
+    NFE_CERT_DIR: Path = _ROOT / "data" / "certificados"
+    NFE_CERT_RENNER_PFX: str = _env("NFE_CERT_RENNER_PFX", str(_ROOT / "data" / "certificados" / "renner.pfx"))
     NFE_CERT_RENNER_SENHA: str = _env("NFE_CERT_RENNER_SENHA", "")
-    NFE_CERT_CAMICADO_PFX: str = _env("NFE_CERT_CAMICADO_PFX", "")
+    NFE_CERT_CAMICADO_PFX: str = _env("NFE_CERT_CAMICADO_PFX", str(_ROOT / "data" / "certificados" / "camicado.pfx"))
     NFE_CERT_CAMICADO_SENHA: str = _env("NFE_CERT_CAMICADO_SENHA", "")
     NFE_AMBIENTE: str = _env("NFE_AMBIENTE", "producao").strip().lower()
     NFE_TIMEOUT: int = int(_env("NFE_TIMEOUT", "40") or 40)

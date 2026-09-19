@@ -44,9 +44,10 @@ está errado.
 - **Arquivos** (XML, PDF da NF, planilha) ficam em `data/tmp/<área>/<id>/`
   e são apagados **5 dias corridos** depois de gerados, sem agendador: a
   limpeza roda ao abrir as telas do fluxo.
-- **Certificado A1** por BU (Renner e Camicado), caminho e senha no
-  `data/environment` com chave própria (`NFE_CERT_<BU>_PFX/SENHA`), nunca
-  junto de Correios ou EBS. Youcom: a NF entra por upload.
+- **Certificado A1** por BU (Renner e Camicado): o `.pfx` fica em
+  `data/certificados/` (dentro da pasta do portal, nunca em `/etc`) e a
+  senha no `data/environment`, com chave própria (`NFE_CERT_<BU>_SENHA`),
+  separada de Correios e EBS. Youcom: a NF entra por upload.
 - **ServiceNow**: leitura do item de catálogo e abertura do chamado com os
   cookies SSO do usuário logado. Conta de serviço não participa.
 

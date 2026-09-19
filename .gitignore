@@ -25,3 +25,5 @@ frontend/**/node_modules/
 
 # arquivos temporários do fluxo (planilhas, notas), retenção de 5 dias
 data/tmp/
+# certificados A1 da NF-e (.pfx) — nunca no repositório
+data/certificados/
